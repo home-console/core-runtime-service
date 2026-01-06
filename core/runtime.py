@@ -18,6 +18,7 @@ from core.service_registry import ServiceRegistry
 from core.state_engine import StateEngine
 from core.storage import Storage
 from core.plugin_manager import PluginManager
+from core.http_registry import HttpRegistry
 
 
 class CoreRuntime:
@@ -41,6 +42,8 @@ class CoreRuntime:
         self.state_engine = StateEngine()
         self.storage = Storage(storage_adapter)
         self.plugin_manager = PluginManager()
+        # Регистр HTTP-интерфейсов (каталог контрактов)
+        self.http = HttpRegistry()
         
         self._running = False
 

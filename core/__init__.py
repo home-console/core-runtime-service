@@ -8,6 +8,7 @@ from .service_registry import ServiceRegistry
 from .state_engine import StateEngine
 from .storage import Storage
 from .plugin_manager import PluginManager
+from .http_registry import HttpRegistry
 
 __all__ = [
     "CoreRuntime",
@@ -16,4 +17,5 @@ __all__ = [
     "StateEngine",
     "Storage",
     "PluginManager",
+    "HttpRegistry",
 ]

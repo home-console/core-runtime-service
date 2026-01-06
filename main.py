@@ -6,11 +6,15 @@
 
 import asyncio
 import signal
+import importlib
+import inspect
+import pkgutil
 from pathlib import Path
 
 from config import Config
 from core.runtime import CoreRuntime
 from adapters.sqlite_adapter import SQLiteAdapter
+from plugins.base_plugin import BasePlugin
 
 
 async def main():
@@ -29,6 +33,30 @@ async def main():
     
     # Создать Core Runtime
     runtime = CoreRuntime(storage_adapter)
+
+    # Автозагрузка плагинов из каталога plugins/
+    plugins_dir = Path(__file__).parent / "plugins"
+    if plugins_dir.exists() and plugins_dir.is_dir():
+        for _finder, mod_name, _ispkg in pkgutil.iter_modules([str(plugins_dir)]):
+            module_name = f"plugins.{mod_name}"
+            try:
+                module = importlib.import_module(module_name)
+                for _name, obj in inspect.getmembers(module, inspect.isclass):
+                    try:
+                        if issubclass(obj, BasePlugin) and obj is not BasePlugin:
+                            plugin_instance = obj(runtime)
+                            await runtime.plugin_manager.load_plugin(plugin_instance)
+                    except Exception:
+                        # ignore non-plugin classes or instantiation errors per-class
+                        continue
+            except Exception as e:
+                print(f"[Runtime] Ошибка при импортe плагина {module_name}: {e}")
+    # Диагностика: показать, какие плагины загружены
+    try:
+        loaded = runtime.plugin_manager.list_plugins()
+        print(f"[Runtime] Плагины загружены: {loaded}")
+    except Exception:
+        print("[Runtime] Не удалось получить список загруженных плагинов")
     
     # Обработка сигналов для graceful shutdown
     shutdown_event = asyncio.Event()

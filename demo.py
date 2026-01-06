@@ -11,6 +11,15 @@ from config import Config
 from core.runtime import CoreRuntime
 from adapters.sqlite_adapter import SQLiteAdapter
 from plugins.example_plugin import ExamplePlugin
+from plugins.devices_plugin import DevicesPlugin
+try:
+    from plugins.api_gateway_plugin import ApiGatewayPlugin
+    _HAS_API_GATEWAY = True
+except Exception:
+    # Если в окружении отсутствуют зависимости fastapi/uvicorn,
+    # позволяем демо работать без запуска api_gateway.
+    ApiGatewayPlugin = None  # type: ignore
+    _HAS_API_GATEWAY = False
 
 
 async def demo():
@@ -31,16 +40,36 @@ async def demo():
     runtime = CoreRuntime(adapter)
     print("✓ Runtime создан")
     
-    # 2. Загрузка плагина
-    print("\n[2] Загрузка плагина...")
-    plugin = ExamplePlugin(runtime)
-    await runtime.plugin_manager.load_plugin(plugin)
-    print(f"✓ Плагин '{plugin.metadata.name}' загружен")
+    # 2. Загрузка плагинов
+    print("\n[2] Загрузка плагинов...")
+    devices = DevicesPlugin(runtime)
+    await runtime.plugin_manager.load_plugin(devices)
+    print(f"✓ Плагин '{devices.metadata.name}' загружен")
+
+    # Загружаем примерный плагин example, чтобы его сервисы были доступны
+    try:
+        example = ExamplePlugin(runtime)
+        await runtime.plugin_manager.load_plugin(example)
+        print(f"✓ Плагин '{example.metadata.name}' загружен")
+    except Exception:
+        print("! Не удалось загрузить 'example' плагин")
+
+    if _HAS_API_GATEWAY and ApiGatewayPlugin is not None:
+        api = ApiGatewayPlugin(runtime)
+        await runtime.plugin_manager.load_plugin(api)
+        print(f"✓ Плагин '{api.metadata.name}' загружен")
+    else:
+        print("! Плагин 'api_gateway' пропущен (fastapi/uvicorn не установлены)")
     
     # 3. Запуск Runtime
     print("\n[3] Запуск Runtime...")
     await runtime.start()
     print("✓ Runtime запущен")
+
+    # Печать зарегистрированных HTTP endpoint'ов
+    print("\n[3.1] HTTP endpoints:")
+    for ep in runtime.http.list():
+        print(f"   {ep.method} {ep.path} -> {ep.service}")
     
     # 4. Проверка Storage
     print("\n[4] Проверка Storage API...")
