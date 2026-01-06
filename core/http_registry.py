@@ -41,6 +41,8 @@ class HttpRegistry:
         """Зарегистрировать HTTP-контракт.
 
         Выполняет валидацию и предотвращает дубли по (method,path).
+        Нормализует path: удаляет завершающий '/' (кроме корня '/'),
+        чтобы устранить дублирование путей в Swagger.
         """
         if not isinstance(endpoint.method, str) or not endpoint.method:
             raise ValueError("method должен быть непустой строкой")
@@ -52,12 +54,17 @@ class HttpRegistry:
         if not isinstance(endpoint.service, str) or not endpoint.service.strip():
             raise ValueError("service должен быть непустой строкой")
 
-        key = (method, endpoint.path)
+        # Нормализуем путь: убираем завершающий '/', если это не корень '/'
+        # Причина: устранение дублирования /path и /path/ в Swagger.
+        # Делается здесь (в HttpRegistry), чтобы не изменять плагины.
+        path = endpoint.path.rstrip("/") if endpoint.path != "/" else endpoint.path
+
+        key = (method, path)
         if key in self._index:
-            raise ValueError(f"Контракт для {method} {endpoint.path} уже зарегистрирован")
+            raise ValueError(f"Контракт для {method} {path} уже зарегистрирован")
 
         # Нормализуем метод и добавляем запись
-        ep = HttpEndpoint(method=method, path=endpoint.path, service=endpoint.service, description=endpoint.description)
+        ep = HttpEndpoint(method=method, path=path, service=endpoint.service, description=endpoint.description)
         self._endpoints.append(ep)
         self._index.add(key)
 

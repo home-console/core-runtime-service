@@ -125,6 +125,37 @@ class OAuthYandexPlugin(BasePlugin):
         self.runtime.service_registry.register("oauth_yandex.get_tokens", get_tokens)
         self.runtime.service_registry.register("oauth_yandex.set_tokens", set_tokens)
 
+        # Регистрируем HTTP-контракты через runtime.http.register()
+        # Это делает сервисы OAuth доступными через HTTP API (FastAPI/Swagger).
+        from core.http_registry import HttpEndpoint
+        try:
+            # GET /oauth/yandex/authorize-url — построить URL авторизации
+            self.runtime.http.register(HttpEndpoint(
+                method="GET",
+                path="/oauth/yandex/authorize-url",
+                service="oauth_yandex.get_authorize_url",
+                description="Получить URL для авторизации пользователя в Яндексе"
+            ))
+            # POST /oauth/yandex/exchange-code — обменять код на токены
+            self.runtime.http.register(HttpEndpoint(
+                method="POST",
+                path="/oauth/yandex/exchange-code",
+                service="oauth_yandex.exchange_code",
+                description="Обменять authorization code на access_token/refresh_token"
+            ))
+            # GET /oauth/yandex/tokens — получить сохранённые токены (временная debug-ручка)
+            # Примечание: в production эту ручку следует удалить или защитить,
+            # так как она раскрывает токены доступа.
+            self.runtime.http.register(HttpEndpoint(
+                method="GET",
+                path="/oauth/yandex/tokens",
+                service="oauth_yandex.get_tokens",
+                description="[DEBUG] Получить текущие токены OAuth (только для разработки)"
+            ))
+        except Exception:
+            # Любые ошибки регистрации HTTP-контрактов не должны блокировать загрузку плагина
+            pass
+
     async def on_unload(self) -> None:
         """Удаляем сервисы и очищаем ссылку на runtime при выгрузке."""
         await super().on_unload()

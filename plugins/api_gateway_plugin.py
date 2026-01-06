@@ -108,14 +108,9 @@ class ApiGatewayPlugin(BasePlugin):
 
             handler = make_handler(ep)
             route_name = f"{ep.method}_{ep.path}"
+            # HttpRegistry теперь нормализует пути, удаляя завершающий '/'.
+            # Дублирование со слэшем и без слэша больше не нужно.
             self.app.add_api_route(ep.path, handler, methods=[ep.method], name=route_name)
-            # Поддержка варианта с завершающим слэшем — если путь не оканчивается на '/'
-            if not ep.path.endswith("/"):
-                try:
-                    self.app.add_api_route(ep.path + "/", handler, methods=[ep.method], name=route_name + "_slash")
-                except Exception:
-                    # Игнорируем возможные конфликты имён маршрутов
-                    pass
 
         config = uvicorn.Config(self.app, host="127.0.0.1", port=8000, log_level="info")
         self._server = uvicorn.Server(config)
