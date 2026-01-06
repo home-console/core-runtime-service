@@ -84,7 +84,11 @@ async def demo():
     
     for plugin_name in plugins:
         state = runtime.plugin_manager.get_plugin_state(plugin_name)
-        print(f"   - {plugin_name}: {state.value}")
+        if state is None:
+            state_repr = "None"
+        else:
+            state_repr = getattr(state, "value", str(state))
+        print(f"   - {plugin_name}: {state_repr}")
     
     # 10. Остановка Runtime
     print("\n[10] Остановка Runtime...")

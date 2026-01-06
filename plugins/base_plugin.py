@@ -5,7 +5,7 @@
 """
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -20,11 +20,7 @@ class PluginMetadata:
     version: str
     description: str = ""
     author: str = ""
-    dependencies: list[str] = None  # Список имён плагинов-зависимостей
-    
-    def __post_init__(self):
-        if self.dependencies is None:
-            self.dependencies = []
+    dependencies: list[str] = field(default_factory=list)  # Список имён плагинов-зависимостей
 
 
 class BasePlugin(ABC):
