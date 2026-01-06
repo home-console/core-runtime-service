@@ -91,6 +91,10 @@ class ApiGatewayPlugin(BasePlugin):
                 pattern = r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}"
                 names = re.findall(pattern, endpoint.path)
 
+                # Сигнатура нужна ТОЛЬКО для документирования в OpenAPI.
+                # handler на самом деле не принимает path-параметры напрямую,
+                # они идут через request.path_params.
+                # Поэтому __signature__ должна содержать только "request".
                 params_sig = [
                     inspect.Parameter(
                         "request",
@@ -98,16 +102,6 @@ class ApiGatewayPlugin(BasePlugin):
                         annotation=Request,
                     )
                 ]
-
-                for n in names:
-                    params_sig.append(
-                        inspect.Parameter(
-                            n,
-                            kind=inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                            annotation=str,
-                            default=Path(...),
-                        )
-                    )
 
                 handler.__signature__ = inspect.Signature(parameters=params_sig)
                 return handler

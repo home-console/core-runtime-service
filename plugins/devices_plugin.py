@@ -42,11 +42,13 @@ class DevicesPlugin(BasePlugin):
         # Регистрируем сервисы
         self.runtime.service_registry.register("devices.list", self.list_devices)
         self.runtime.service_registry.register("devices.get", self.get_device)
+        self.runtime.service_registry.register("devices.create", self.create_device)
         self.runtime.service_registry.register("devices.turn_on", self.turn_on)
         self.runtime.service_registry.register("devices.turn_off", self.turn_off)
         # Регистрируем HTTP-контракты через runtime.http
         try:
             self.runtime.http.register(HttpEndpoint(method="GET", path="/devices", service="devices.list"))
+            self.runtime.http.register(HttpEndpoint(method="POST", path="/devices", service="devices.create"))
             self.runtime.http.register(HttpEndpoint(method="POST", path="/devices/{device_id}/on", service="devices.turn_on"))
         except Exception:
             # любые ошибки регистрации контрактов не должны блокировать загрузку плагина
@@ -83,11 +85,40 @@ class DevicesPlugin(BasePlugin):
         # Удаляем сервисы
         self.runtime.service_registry.unregister("devices.list")
         self.runtime.service_registry.unregister("devices.get")
+        self.runtime.service_registry.unregister("devices.create")
         self.runtime.service_registry.unregister("devices.turn_on")
         self.runtime.service_registry.unregister("devices.turn_off")
 
         # Очистить ссылку на runtime
         self.runtime = None
+
+    # ----- Сервисы -----
+    async def create_device(self, device_id: str, name: str = "Unknown", device_type: str = "generic") -> Dict[str, Any]:
+        """Создать новое устройство.
+
+        Args:
+            device_id: уникальный идентификатор устройства
+            name: человеческое имя устройства
+            device_type: тип устройства
+
+        Returns:
+            Созданное устройство
+
+        Raises:
+            ValueError: если device_id не строка или пуста
+        """
+        if not isinstance(device_id, str) or not device_id:
+            raise ValueError("device_id должен быть непустой строкой")
+
+        device = {
+            "id": device_id,
+            "name": name,
+            "type": device_type,
+            "state": {"power": "off"},
+        }
+        await self.runtime.storage.set("devices", device_id, device)
+        await self.runtime.state_engine.set(f"device.{device_id}", device["state"])
+        return device
 
     # ----- Сервисы -----
     async def list_devices(self) -> List[Dict[str, Any]]:
