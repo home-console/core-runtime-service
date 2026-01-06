@@ -8,6 +8,18 @@
 адаптеры или другие плагины.
 """
 
+# Пояснение по границе ответственности:
+# - "devices" (постфикс в storage/state) — это доменные устройства, которыми
+#   управляет система (внутренние сущности). Они сохраняются в `storage`
+#   под namespace "devices" и их состояние отражается в `state_engine`
+#   по ключам вида `device.<id>`.
+# - "devices.external.*" — это сырые payload'ы внешних интеграций (например,
+#   события от провайдеров). Эти записи НЕ считаются доменными устройствами и
+#   не должны автоматически маппиться или преобразовываться. Они хранятся
+#   в `state_engine` как вспомогательные данные интеграции и отделены по
+#   пространству имён (ключи `devices.external.<external_id>`).
+
+
 from typing import Any, Dict, List, Optional
 
 from core.http_registry import HttpEndpoint
@@ -45,6 +57,28 @@ class DevicesPlugin(BasePlugin):
         self.runtime.service_registry.register("devices.create", self.create_device)
         self.runtime.service_registry.register("devices.turn_on", self.turn_on)
         self.runtime.service_registry.register("devices.turn_off", self.turn_off)
+        # Временный сервис для сопоставления внешнего устройства с внутренним id
+        # Сохраняет соответствие в runtime.state_engine по ключу
+        # "devices.mapping.<external_id>" -> internal_id
+        # Этот сервис НЕ создаёт internal устройство и НЕ копирует payload.
+        async def _map_external_device(external_id: str, internal_id: str) -> None:
+            """Сохранить mapping внешнего устройства.
+
+            Ограничения:
+            - не создавать internal device
+            - не копировать payload
+            - только сохраняет соответствие в state_engine
+            """
+            if not external_id or not internal_id:
+                raise ValueError("external_id и internal_id должны быть непустыми строками")
+
+            try:
+                await self.runtime.state_engine.set(f"devices.mapping.{external_id}", internal_id)
+            except Exception:
+                # Не мешаем основной логике плагина при ошибке записи
+                raise
+
+        self.runtime.service_registry.register("devices.map_external_device", _map_external_device)
         # Регистрируем HTTP-контракты через runtime.http
         try:
             self.runtime.http.register(HttpEndpoint(method="GET", path="/devices", service="devices.list"))
@@ -75,9 +109,53 @@ class DevicesPlugin(BasePlugin):
             state_value = device.get("state")
             await self.runtime.state_engine.set(f"device.{dev_id}", state_value)
 
+        # --- Временная поддержка внешних устройств ---
+        # Подписываемся на событие внешнего провайдера о найденном устройстве
+        # Сохраняем payload в runtime.state_engine под ключом
+        # "devices.external.<external_id>" и логируем факт приёма.
+        async def _external_device_handler(event_type: str, data: dict):
+            # Извлекаем external_id из payload
+            external_id = data.get("external_id")
+            if not external_id:
+                return
+
+            # Сохраняем payload в state_engine — без трансформаций
+            try:
+                await self.runtime.state_engine.set(f"devices.external.{external_id}", data)
+            except Exception:
+                # Не мешаем основной логике плагина
+                pass
+
+            # Логируем приём устройства через logger, если он доступен
+            try:
+                await self.runtime.service_registry.call(
+                    "logger.log",
+                    level="info",
+                    message=f"External device accepted: {external_id}",
+                    plugin=self.metadata.name,
+                    context={"payload": data},
+                )
+            except Exception:
+                pass
+
+        # Сохранить хендлер для последующей отписки
+        self._external_device_handler = _external_device_handler
+        try:
+            self.runtime.event_bus.subscribe("external.device_discovered", self._external_device_handler)
+        except Exception:
+            # Подписка вспомогательная — не должна ломать старый функционал
+            pass
+
     async def on_stop(self) -> None:
         """Остановка плагина: не удаляем данные, не очищаем storage."""
         await super().on_stop()
+        # Удаляем временную подписку на external.device_discovered
+        try:
+            handler = getattr(self, "_external_device_handler", None)
+            if handler:
+                self.runtime.event_bus.unsubscribe("external.device_discovered", handler)
+        except Exception:
+            pass
 
     async def on_unload(self) -> None:
         """Выгрузка плагина: удаляем сервисы и очищаем ссылки на runtime."""
@@ -88,6 +166,11 @@ class DevicesPlugin(BasePlugin):
         self.runtime.service_registry.unregister("devices.create")
         self.runtime.service_registry.unregister("devices.turn_on")
         self.runtime.service_registry.unregister("devices.turn_off")
+        # Удаляем временный сервис mapping
+        try:
+            self.runtime.service_registry.unregister("devices.map_external_device")
+        except Exception:
+            pass
 
         # Очистить ссылку на runtime
         self.runtime = None

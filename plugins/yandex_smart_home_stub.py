@@ -110,9 +110,45 @@ class YandexSmartHomeStubPlugin(BasePlugin):
         except Exception:
             pass
 
+        # --- Временная smoke-логика ---
+        # Подписываемся на событие external.device_discovered и логируем payload.
+        # Это простая проверка доставки событий, без бизнес-логики и без сохранения состояния.
+        async def _smoke_on_device_discovered(event_type: str, data: Dict[str, Any]):
+            """Временный обработчик для проверки интеграции внешнего источника.
+
+            Просто логирует полученный payload через сервис `logger.log`.
+            Удалите этот код после завершения smoke-теста.
+            """
+            try:
+                await self.runtime.service_registry.call(
+                    "logger.log",
+                    level="info",
+                    message=f"SMOKE: {event_type} received",
+                    plugin=self.metadata.name,
+                    context={"payload": data},
+                )
+            except Exception:
+                # Время-ограниченная логика: никаких побочных эффектов
+                pass
+
+        # Сохраняем ссылку, чтобы можно было отписаться позже
+        self._smoke_device_discovered_handler = _smoke_on_device_discovered
+        try:
+            self.runtime.event_bus.subscribe("external.device_discovered", self._smoke_device_discovered_handler)
+        except Exception:
+            # Подписка не критична для работы плагина
+            pass
+
     async def on_stop(self) -> None:
         """Остановка: ничего не делаем."""
         await super().on_stop()
+        # Удаляем временную подписку, если она была зарегистрирована
+        try:
+            handler = getattr(self, "_smoke_device_discovered_handler", None)
+            if handler:
+                self.runtime.event_bus.unsubscribe("external.device_discovered", handler)
+        except Exception:
+            pass
 
     async def on_unload(self) -> None:
         """Выгрузка: удаляем сервисы."""
