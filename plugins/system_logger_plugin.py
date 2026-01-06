@@ -50,7 +50,8 @@ class SystemLoggerPlugin(BasePlugin):
         self._runtime = self.runtime
 
         self._logger = logging.getLogger("home_console")
-        # не менять уровень логгера глобально; если уровень не установлен — пусть будет WARNING
+        # Устанавливаем уровень DEBUG, чтобы видеть все сообщения
+        self._logger.setLevel(logging.DEBUG)
         # Добавляем собственный StreamHandler на stdout
         self._handler = logging.StreamHandler(stream=sys.stdout)
         fmt = "%(message)s"
