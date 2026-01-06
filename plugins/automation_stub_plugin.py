@@ -31,6 +31,11 @@ class AutomationStubPlugin(BasePlugin):
     логирует через runtime.service_registry.
     """
 
+    def __init__(self, runtime):
+        """Инициализация плагина с сохранением обработчика события."""
+        super().__init__(runtime)
+        self._event_handler: Callable | None = None
+
     @property
     def metadata(self) -> PluginMetadata:
         return PluginMetadata(
@@ -41,10 +46,8 @@ class AutomationStubPlugin(BasePlugin):
         )
 
     async def on_load(self) -> None:
+        """Загрузка: регистрация обработчика события devices.state_changed."""
         await super().on_load()
-        # Сохраняем runtime для доступа к event_bus и service_registry
-        self._runtime = self.runtime
-        self._event_handler: Callable | None = None
 
         # Создаём обработчик события devices.state_changed
         async def _on_device_state_changed(
@@ -66,21 +69,22 @@ class AutomationStubPlugin(BasePlugin):
                         await self.runtime.service_registry.call(
                             "logger.log",
                             level="info",
-                            message="Automation: устройство включено",
+                            message="Автоматизация: устройство включено",
                             device_id=device_id,
                         )
-                    except Exception as e:
+                    except Exception:
                         # Если logger недоступен — игнорируем (ошибка не должна ломать event loop)
                         pass
 
             except Exception as e:
                 # Исключения обработчика НЕ должны падать в Core
-                # Пробуем залогировать, но не требуем успеха
+                # Пробуем залогировать ошибку, но не требуем успеха
                 try:
                     await self.runtime.service_registry.call(
                         "logger.log",
                         level="error",
-                        message=f"Automation error: {str(e)}",
+                        message=f"Ошибка в автоматизации: {str(e)}",
+                        plugin=self.metadata.name,
                     )
                 except Exception:
                     pass
@@ -96,13 +100,14 @@ class AutomationStubPlugin(BasePlugin):
             pass
 
     async def on_start(self) -> None:
+        """Запуск: логирование включения автоматизации."""
         await super().on_start()
         # Логируем запуск автоматизации
         try:
             await self.runtime.service_registry.call(
                 "logger.log",
                 level="info",
-                message="automation_stub запущен",
+                message="Автоматизация запущена",
                 plugin=self.metadata.name,
             )
         except Exception:
@@ -110,6 +115,7 @@ class AutomationStubPlugin(BasePlugin):
             pass
 
     async def on_stop(self) -> None:
+        """Остановка: отписка от событий и логирование."""
         await super().on_stop()
         # Отписываемся от события
         try:
@@ -123,18 +129,14 @@ class AutomationStubPlugin(BasePlugin):
             await self.runtime.service_registry.call(
                 "logger.log",
                 level="info",
-                message="automation_stub остановлен",
+                message="Автоматизация остановлена",
                 plugin=self.metadata.name,
             )
         except Exception:
             pass
 
     async def on_unload(self) -> None:
+        """Выгрузка: очистка ссылок."""
         await super().on_unload()
-        # Очищаем ссылки
-        try:
-            self._event_handler = None
-            self._runtime = None
-            self.runtime = None
-        except Exception:
-            pass
+        # Очищаем ссылку на обработчик
+        self._event_handler = None

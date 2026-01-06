@@ -12,6 +12,8 @@ from core.runtime import CoreRuntime
 from adapters.sqlite_adapter import SQLiteAdapter
 from plugins.example_plugin import ExamplePlugin
 from plugins.devices_plugin import DevicesPlugin
+from plugins.system_logger_plugin import SystemLoggerPlugin
+from plugins.automation_stub_plugin import AutomationStubPlugin
 try:
     from plugins.api_gateway_plugin import ApiGatewayPlugin
     _HAS_API_GATEWAY = True
@@ -42,9 +44,21 @@ async def demo():
     
     # 2. Загрузка плагинов
     print("\n[2] Загрузка плагинов...")
+    
+    # System logger — инфраструктурный плагин
+    logger = SystemLoggerPlugin(runtime)
+    await runtime.plugin_manager.load_plugin(logger)
+    print(f"✓ Плагин '{logger.metadata.name}' загружен")
+    
+    # Devices — доменный плагин
     devices = DevicesPlugin(runtime)
     await runtime.plugin_manager.load_plugin(devices)
     print(f"✓ Плагин '{devices.metadata.name}' загружен")
+    
+    # Automation stub — демонстрация event-driven архитектуры
+    automation = AutomationStubPlugin(runtime)
+    await runtime.plugin_manager.load_plugin(automation)
+    print(f"✓ Плагин '{automation.metadata.name}' загружен")
 
     # Загружаем примерный плагин example, чтобы его сервисы были доступны
     try:
@@ -88,6 +102,39 @@ async def demo():
         "timestamp": "2026-01-06"
     })
     await asyncio.sleep(0.1)  # Дать время на обработку
+    
+    # 6.1. ДЕМОНСТРАЦИЯ EVENT-DRIVEN АВТОМАТИЗАЦИИ
+    print("\n[6.1] Демонстрация Event-Driven автоматизации...")
+    print("       Создаём устройство и включаем его...")
+    
+    # Создаём устройство
+    new_device = await runtime.service_registry.call(
+        "devices.create",
+        device_id="lamp_kitchen",
+        name="Лампа на кухне",
+        device_type="light"
+    )
+    print(f"       ✓ Создано устройство: {new_device['id']}")
+    
+    # Включаем устройство — это вызовет событие devices.state_changed
+    print("       Включаем устройство...")
+    await runtime.service_registry.call("devices.turn_on", "lamp_kitchen")
+    print("       ✓ Устройство включено")
+    
+    # Даём время на обработку события и логирование
+    await asyncio.sleep(0.2)
+    
+    print("       ↓ Цепочка обработки:")
+    print("       1. devices.turn_on → изменение состояния")
+    print("       2. devices.state_changed → событие")
+    print("       3. automation_stub → подписка на событие")
+    print("       4. logger.log → сервис системного логирования")
+    print("       (см. логи выше — должна быть запись об включении)")
+    
+    # 6.2. Проверка состояния устройства
+    print("\n[6.2] Состояние устройства после автоматизации...")
+    lamp = await runtime.service_registry.call("devices.get", "lamp_kitchen")
+    print(f"       Текущее состояние: {lamp['state']}")
     
     # 7. Проверка состояния
     print("\n[7] Проверка состояния Runtime...")
