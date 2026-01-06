@@ -26,6 +26,8 @@ async def demo():
     Path(config.db_path).parent.mkdir(parents=True, exist_ok=True)
     
     adapter = SQLiteAdapter(config.db_path)
+    # Инициализация схемы для demo
+    await adapter.initialize_schema()
     runtime = CoreRuntime(adapter)
     print("✓ Runtime создан")
     

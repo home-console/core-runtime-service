@@ -32,7 +32,7 @@ class Storage:
         Получить значение.
         
         Пример:
-            value = await storage.get("devices", "lamp_kitchen")
+            value = await storage.get("<namespace>", "<key>")
         """
         return await self._adapter.get(namespace, key)
 
@@ -41,7 +41,7 @@ class Storage:
         Сохранить значение.
         
         Пример:
-            await storage.set("devices", "lamp_kitchen", {"state": "on", "brightness": 100})
+            await storage.set("<namespace>", "<key>", {"state": "on", "value": 100})
         """
         await self._adapter.set(namespace, key, value)
 
@@ -59,8 +59,8 @@ class Storage:
         Получить список всех ключей в namespace.
         
         Пример:
-            keys = await storage.list_keys("devices")
-            # ["lamp_kitchen", "sensor_bedroom", ...]
+            keys = await storage.list_keys("<namespace>")
+            # ["item_1", "item_2", ...]
         """
         return await self._adapter.list_keys(namespace)
 

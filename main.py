@@ -24,6 +24,8 @@ async def main():
     
     # Создать storage адаптер
     storage_adapter = SQLiteAdapter(config.db_path)
+    # Явная инициализация схемы (adapter не создаёт схему автоматически)
+    await storage_adapter.initialize_schema()
     
     # Создать Core Runtime
     runtime = CoreRuntime(storage_adapter)

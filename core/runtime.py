@@ -11,14 +11,13 @@ CoreRuntime - главный класс Core Runtime.
 Это kernel/runtime, а не backend-приложение.
 """
 
-from typing import Optional
+from typing import Any
 
 from core.event_bus import EventBus
 from core.service_registry import ServiceRegistry
 from core.state_engine import StateEngine
 from core.storage import Storage
 from core.plugin_manager import PluginManager
-from adapters.storage_adapter import StorageAdapter
 
 
 class CoreRuntime:
@@ -29,7 +28,7 @@ class CoreRuntime:
     Предоставляет единую точку доступа для плагинов.
     """
 
-    def __init__(self, storage_adapter: StorageAdapter):
+    def __init__(self, storage_adapter: Any):
         """
         Инициализация Core Runtime.
         
