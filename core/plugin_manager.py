@@ -4,10 +4,13 @@ PluginManager - управление lifecycle плагинов.
 Загружает, запускает, останавливает плагины.
 """
 
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 from enum import Enum
 
 from plugins.base_plugin import BasePlugin, PluginMetadata
+
+if TYPE_CHECKING:
+    from core.runtime import CoreRuntime
 
 
 class PluginState(Enum):
@@ -30,7 +33,9 @@ class PluginManager:
     - отслеживание состояния
     """
 
-    def __init__(self):
+    def __init__(self, runtime: "CoreRuntime" | None = None):
+        # Ссылка на CoreRuntime, может быть не установлена (тесты создают PluginManager() без runtime)
+        self._runtime = runtime
         # Словарь: plugin_name -> plugin_instance
         self._plugins: dict[str, BasePlugin] = {}
         # Словарь: plugin_name -> state
@@ -46,27 +51,44 @@ class PluginManager:
         Raises:
             ValueError: если плагин уже загружен
         """
+        # Получить имя плагина заранее для error handling
+        # Читаем metadata ДО on_load, чтобы иметь plugin_name в случае ошибки
         metadata = plugin.metadata
         plugin_name = metadata.name
         
-        if plugin_name in self._plugins:
-            raise ValueError(f"Плагин '{plugin_name}' уже загружен")
-        
-        # Проверить зависимости
-        for dep_name in metadata.dependencies:
-            if dep_name not in self._plugins:
-                raise ValueError(
-                    f"Плагин '{plugin_name}' требует плагин '{dep_name}', "
-                    f"но он не загружен"
-                )
-        
+        # Установим ссылку на runtime у плагина перед вызовом on_load
         try:
+            try:
+                plugin.runtime = self._runtime
+            except Exception:
+                # Установка runtime не должна ломать загрузку
+                pass
+
+            # Вызов on_load может обновить metadata (например, remote proxy)
             await plugin.on_load()
+
+            # Заново прочитаем metadata после on_load в случае, если она изменилась
+            metadata = plugin.metadata
+            plugin_name = metadata.name
+
+            if plugin_name in self._plugins:
+                raise ValueError(f"Плагин '{plugin_name}' уже загружен")
+
+            # Проверить зависимости, указанные в metadata после on_load
+            for dep_name in metadata.dependencies:
+                if dep_name not in self._plugins:
+                    raise ValueError(
+                        f"Плагин '{plugin_name}' требует плагин '{dep_name}', "
+                        f"но он не загружен"
+                    )
+
             self._plugins[plugin_name] = plugin
             self._states[plugin_name] = PluginState.LOADED
         except Exception as e:
+            # Устанавливаем состояние ERROR
             self._states[plugin_name] = PluginState.ERROR
-            raise RuntimeError(f"Ошибка загрузки плагина '{plugin_name}': {e}")
+            # Пробросываем оригинальное исключение, чтобы тесты могли его ловить
+            raise
 
     async def start_plugin(self, plugin_name: str) -> None:
         """

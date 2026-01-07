@@ -41,7 +41,7 @@ class CoreRuntime:
         self.service_registry = ServiceRegistry()
         self.state_engine = StateEngine()
         self.storage = Storage(storage_adapter)
-        self.plugin_manager = PluginManager()
+        self.plugin_manager = PluginManager(self)
         # Регистр HTTP-интерфейсов (каталог контрактов)
         self.http = HttpRegistry()
         

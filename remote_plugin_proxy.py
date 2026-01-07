@@ -35,13 +35,15 @@ class RemotePluginProxy(BasePlugin):
         self._metadata: Optional[dict] = None
         # Список сервисов, зарегистрированных через proxy
         self._registered_services: list[str] = []
+        # Таймаут для сетевых вызовов (секунды) — защищает от долгих блокировок
+        self._http_timeout = 3
 
     async def _http_call(self, endpoint: str, method: str = "GET", json_data: Optional[dict] = None) -> dict:
         """Вспомогательный метод для HTTP вызова через urllib."""
         url = f"{self.remote_url}{endpoint}"
         try:
             if method == "GET":
-                with urllib.request.urlopen(url) as resp:
+                with urllib.request.urlopen(url, timeout=self._http_timeout) as resp:
                     return json.loads(resp.read().decode())
             elif method == "POST":
                 req = urllib.request.Request(
@@ -50,7 +52,7 @@ class RemotePluginProxy(BasePlugin):
                     headers={"Content-Type": "application/json"},
                     method="POST",
                 )
-                with urllib.request.urlopen(req) as resp:
+                with urllib.request.urlopen(req, timeout=self._http_timeout) as resp:
                     return json.loads(resp.read().decode())
             else:
                 raise ValueError(f"Unsupported method: {method}")
@@ -214,16 +216,9 @@ class RemotePluginProxy(BasePlugin):
     async def on_unload(self) -> None:
         """Выгрузка: вызвать /plugin/unload на удалённом сервисе."""
         await super().on_unload()
-        
+        # Попытаться уведомить remote о выгрузке, но В ЛЮБОМ СЛУЧАЕ удалить зарегистрированные сервисы
         try:
             await self._http_call("/plugin/unload", method="POST")
-            # Отрегистировать сервисы, которые мы регистрировали при загрузке
-            for svc_name in list(self._registered_services):
-                try:
-                    self.runtime.service_registry.unregister(svc_name)
-                except Exception:
-                    pass
-            self._registered_services.clear()
         except Exception as exc:
             try:
                 await self.runtime.service_registry.call(
@@ -234,3 +229,11 @@ class RemotePluginProxy(BasePlugin):
                 )
             except Exception:
                 pass
+
+        # Отрегистировать сервисы, которые мы регистрировали при загрузке (гарантированно)
+        for svc_name in list(self._registered_services):
+            try:
+                self.runtime.service_registry.unregister(svc_name)
+            except Exception:
+                pass
+        self._registered_services.clear()

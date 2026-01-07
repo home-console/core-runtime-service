@@ -6,6 +6,7 @@ Smoke-test для интерактивного CLI.
 """
 
 import asyncio
+import pytest
 
 from config import Config
 from core.runtime import CoreRuntime
@@ -27,6 +28,7 @@ class InputSimulator:
         return ans
 
 
+@pytest.mark.asyncio
 async def test_cli_interactive():
     # Подготовка: указываем тестовую БД
     Config._overrides = {"db_path": "data/test_cli.db"}

@@ -12,6 +12,7 @@ Logger (output)
 """
 
 import asyncio
+import pytest
 from pathlib import Path
 
 from config import Config
@@ -22,6 +23,7 @@ from plugins.devices_plugin import DevicesPlugin
 from plugins.automation_stub_plugin import AutomationStubPlugin
 
 
+@pytest.mark.asyncio
 async def test_event_driven_automation():
     """Smoke-тест архитектуры event-driven автоматизации."""
 

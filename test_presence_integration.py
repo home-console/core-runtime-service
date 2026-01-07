@@ -9,6 +9,7 @@ Smoke-test для плагина `presence`.
 """
 
 import asyncio
+import pytest
 from pathlib import Path
 
 from config import Config
@@ -20,6 +21,7 @@ from plugins.automation_stub_plugin import AutomationStubPlugin
 from plugins.presence_plugin import PresencePlugin
 
 
+@pytest.mark.asyncio
 async def test_presence():
     print("\nTEST: presence plugin integration")
 

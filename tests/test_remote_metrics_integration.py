@@ -3,6 +3,7 @@ import json
 import socket
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -84,6 +85,24 @@ class MockRemoteHandler(BaseHTTPRequestHandler):
         self._set_json(404)
         self.wfile.write(json.dumps({"error": "not found"}).encode())
 
+class MockHTTPServer(HTTPServer):
+    """HTTPServer subclass with explicit attributes used by the tests/handler.
+
+    Declaring and initializing these attributes prevents static type checkers
+    (pylance/mypy) from complaining about unknown attributes on the server
+    instance (metrics, loaded, started).
+    """
+
+    def __init__(self, server_address, RequestHandlerClass):
+        super().__init__(server_address, RequestHandlerClass)
+        self.metrics = []
+        self.loaded = False
+        self.started = False
+
+
+if TYPE_CHECKING:
+    # Для статических анализаторов: у обработчика `self.server` будет наш MockHTTPServer
+    MockRemoteHandler.server: "MockHTTPServer"
 
 @pytest.fixture
 def mock_remote_server():
@@ -93,10 +112,7 @@ def mock_remote_server():
     addr, port = sock.getsockname()
     sock.close()
 
-    server = HTTPServer(("127.0.0.1", port), MockRemoteHandler)
-    server.metrics = []
-    server.loaded = False
-    server.started = False
+    server = MockHTTPServer(("127.0.0.1", port), MockRemoteHandler)
 
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()

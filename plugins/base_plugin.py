@@ -6,7 +6,7 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from core.runtime import CoreRuntime
@@ -28,21 +28,29 @@ class BasePlugin(ABC):
     Базовый класс для всех плагинов.
     
     Lifecycle методы вызываются в следующем порядке:
-    1. __init__(runtime) - конструктор
+    1. __init__() - конструктор
     2. on_load() - загрузка плагина
     3. on_start() - запуск плагина
     4. on_stop() - остановка плагина
     5. on_unload() - выгрузка плагина
     """
     
-    def __init__(self, runtime: "CoreRuntime"):
+    # Явная аннотация атрибута `runtime` для статического анализатора.
+    # Устанавливается позднее менеджером плагинов (PluginManager).
+    if TYPE_CHECKING:
+        from typing import Optional
+
+        runtime: Optional["CoreRuntime"]
+
+    def __init__(self, runtime: Optional["CoreRuntime"] = None) -> None:
         """
         Инициализация плагина.
-        
-        Args:
-            runtime: экземпляр CoreRuntime
+
+        `runtime` не передаётся в конструктор и по-умолчанию равен None.
+        PluginManager устанавливает ссылку на `runtime` перед вызовом lifecycle методов.
         """
-        self.runtime = runtime
+        # runtime будет установлен PluginManager'ом при загрузке плагина
+        self.runtime = None
         self._loaded = False
         self._started = False
 

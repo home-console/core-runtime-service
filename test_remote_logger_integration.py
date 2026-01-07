@@ -9,6 +9,7 @@ Smoke-test для архитектуры remote plugins.
 """
 
 import asyncio
+import pytest
 from pathlib import Path
 
 from config import Config
@@ -19,6 +20,7 @@ from plugins.devices_plugin import DevicesPlugin
 from remote_plugin_proxy import RemotePluginProxy
 
 
+@pytest.mark.asyncio
 async def test_remote_plugin_proxy_architecture():
     """Smoke-тест архитектуры remote plugins."""
 
