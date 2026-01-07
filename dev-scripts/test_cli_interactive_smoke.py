@@ -8,10 +8,10 @@ Smoke-test для интерактивного CLI.
 import asyncio
 import pytest
 
-from config import Config
+from core.config import Config
 from core.runtime import CoreRuntime
 from adapters.sqlite_adapter import SQLiteAdapter
-import console
+from core import console
 
 
 class InputSimulator:

@@ -248,7 +248,7 @@ python main.py
 ## Пример использования
 
 ```python
-from config import Config
+from core.config import Config
 from core.runtime import CoreRuntime
 from adapters.sqlite_adapter import SQLiteAdapter
 from plugins.example_plugin import ExamplePlugin

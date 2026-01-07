@@ -12,12 +12,12 @@ import asyncio
 import pytest
 from pathlib import Path
 
-from config import Config
+from core.config import Config
 from core.runtime import CoreRuntime
 from adapters.sqlite_adapter import SQLiteAdapter
 from plugins.system_logger_plugin import SystemLoggerPlugin
 from plugins.devices_plugin import DevicesPlugin
-from remote_plugin_proxy import RemotePluginProxy
+from plugins.remote_plugin_proxy import RemotePluginProxy
 
 
 @pytest.mark.asyncio
