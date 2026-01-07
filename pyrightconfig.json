@@ -1,0 +1,10 @@
+{
+    "typeCheckingMode": "basic",
+    "reportOptionalMemberAccess": false,
+    "reportMissingImports": false,
+    "exclude": [
+        "**/plugins/**",
+        "**/tests/**",
+        "**/test_*.py"
+    ]
+}

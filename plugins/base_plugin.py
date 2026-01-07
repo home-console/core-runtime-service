@@ -35,12 +35,22 @@ class BasePlugin(ABC):
     5. on_unload() - выгрузка плагина
     """
     
-    # Явная аннотация атрибута `runtime` для статического анализатора.
-    # Устанавливается позднее менеджером плагинов (PluginManager).
-    if TYPE_CHECKING:
-        from typing import Optional
+    # Приватное хранилище runtime; позволяет принимать Optional при записи
+    # и возвращать `CoreRuntime` при чтении (через TYPE_CHECKING контракт).
+    _runtime: Optional["CoreRuntime"] = None
 
-        runtime: Optional["CoreRuntime"]
+    # Contract: `runtime` гарантирован менеджером плагинов при вызове lifecycle-методов.
+
+    @property
+    def runtime(self) -> "CoreRuntime":
+        # Возвращаем runtime как ненулевой (контракт архитектуры).
+        assert self._runtime is not None
+        return self._runtime
+
+    @runtime.setter
+    def runtime(self, value: Optional["CoreRuntime"]) -> None:
+        # Позволяем записывать Optional для поддержки lifecycle (unload обнуляет runtime).
+        self._runtime = value
 
     def __init__(self, runtime: Optional["CoreRuntime"] = None) -> None:
         """
@@ -50,7 +60,9 @@ class BasePlugin(ABC):
         PluginManager устанавливает ссылку на `runtime` перед вызовом lifecycle методов.
         """
         # runtime будет установлен PluginManager'ом при загрузке плагина
-        self.runtime = None
+        # Записываем во внутреннее поле; используем property setter, который
+        # принимает Optional (чтобы плагины могли обнулять runtime при unload).
+        self._runtime = runtime
         self._loaded = False
         self._started = False
 
@@ -83,6 +95,9 @@ class BasePlugin(ABC):
         - регистрировать сервисы
         - подписываться на события
         """
+        # Граница типизации: в момент on_load runtime гарантирован менеджером,
+        # поэтому делаем явную проверку для pyright/pylance-сужения типов.
+        assert self.runtime is not None
         self._loaded = True
 
     async def on_start(self) -> None:

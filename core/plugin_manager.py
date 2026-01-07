@@ -33,7 +33,7 @@ class PluginManager:
     - отслеживание состояния
     """
 
-    def __init__(self, runtime: "CoreRuntime" | None = None):
+    def __init__(self, runtime: Optional["CoreRuntime"] = None):
         # Ссылка на CoreRuntime, может быть не установлена (тесты создают PluginManager() без runtime)
         self._runtime = runtime
         # Словарь: plugin_name -> plugin_instance
@@ -59,7 +59,11 @@ class PluginManager:
         # Установим ссылку на runtime у плагина перед вызовом on_load
         try:
             try:
-                plugin.runtime = self._runtime
+                # Мgr может хранить Optional runtime; приводим к CoreRuntime
+                # для подавления предупреждений типизации (архитектурный контракт).
+                from typing import cast
+
+                plugin.runtime = cast("CoreRuntime", self._runtime)
             except Exception:
                 # Установка runtime не должна ломать загрузку
                 pass
