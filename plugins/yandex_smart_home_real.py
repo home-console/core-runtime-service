@@ -63,7 +63,7 @@ class YandexSmartHomeRealPlugin(BasePlugin):
 
             Этапы:
             1. Получить токены из oauth_yandex.get_tokens()
-            2. Выполнить HTTP GET к https://api.iot.yandex.net/v1.0/user/devices
+            2. Выполнить HTTP GET к https://api.iot.yandex.net/v1.0/user/info
             3. Преобразовать каждое устройство в стандартный формат
             4. Опубликовать external.device_discovered для каждого
             5. Вернуть список преобразованных устройств
@@ -75,7 +75,27 @@ class YandexSmartHomeRealPlugin(BasePlugin):
                 ValueError: если токены недоступны
                 RuntimeError: если запрос к API не удался
             """
-            # ЭТАП 1: Получить токены из oauth_yandex
+            # Feature flag: check storage key `yandex.use_real_api`
+            try:
+                use_real = await self.runtime.storage.get("yandex", "use_real_api")
+            except Exception:
+                use_real = False
+
+            if not use_real:
+                # Not enabled — signal to caller that real API is disabled
+                raise RuntimeError("use_real_api_disabled")
+
+            # ЭТАП 1: Проверить статус OAuth через oauth_yandex.get_status()
+            try:
+                status = await self.runtime.service_registry.call("oauth_yandex.get_status")
+            except Exception as e:
+                raise RuntimeError(f"Ошибка получения статуса oauth_yandex: {e}")
+
+            if not status or not status.get("authorized"):
+                # Explicitly signal unauthorized — caller should NOT fallback
+                raise RuntimeError("yandex_not_authorized")
+
+            # Получить токены
             try:
                 tokens = await self.runtime.service_registry.call("oauth_yandex.get_tokens")
             except Exception as e:
@@ -83,10 +103,7 @@ class YandexSmartHomeRealPlugin(BasePlugin):
 
             # Проверка: есть ли токены и access_token?
             if not tokens or "access_token" not in tokens:
-                raise ValueError(
-                    "Токены не найдены или access_token отсутствует. "
-                    "Сначала авторизуйтесь через oauth_yandex."
-                )
+                raise RuntimeError("yandex_not_authorized")
 
             access_token = tokens["access_token"]
 
@@ -96,7 +113,8 @@ class YandexSmartHomeRealPlugin(BasePlugin):
             except ImportError:
                 raise RuntimeError("Требуется установить aiohttp для синхронизации устройств")
 
-            url = "https://api.iot.yandex.net/v1.0/user/devices"
+            # Real API endpoint
+            url = "https://api.iot.yandex.net/v1.0/user/info"
             headers = {
                 "Authorization": f"Bearer {access_token}",
                 "Content-Type": "application/json",
@@ -118,7 +136,13 @@ class YandexSmartHomeRealPlugin(BasePlugin):
             devices = []
 
             # Структура ответа Яндекса: {"devices": [...]}
-            yandex_devices = api_response.get("devices", [])
+            # Some versions return list directly or under 'devices'
+            if isinstance(api_response, dict) and "devices" in api_response:
+                yandex_devices = api_response.get("devices", [])
+            elif isinstance(api_response, list):
+                yandex_devices = api_response
+            else:
+                yandex_devices = []
 
             for yandex_device in yandex_devices:
                 # Преобразуем устройство в стандартный формат

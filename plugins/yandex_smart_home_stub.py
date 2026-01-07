@@ -98,7 +98,10 @@ class YandexSmartHomeStubPlugin(BasePlugin):
             })
 
         # Регистрируем сервисы
+        # Primary service name kept for backwards-compatibility
         self.runtime.service_registry.register("yandex.sync_devices", _sync_devices)
+        # New explicit sync entry requested by admin UI
+        self.runtime.service_registry.register("yandex.sync", _sync_devices)
         self.runtime.service_registry.register("yandex.set_device_state", _set_device_state)
 
     async def on_start(self) -> None:
@@ -163,6 +166,11 @@ class YandexSmartHomeStubPlugin(BasePlugin):
         # Удаляем зарегистрированные сервисы
         try:
             self.runtime.service_registry.unregister("yandex.sync_devices")
+            # unregister alias if present
+            try:
+                self.runtime.service_registry.unregister("yandex.sync")
+            except Exception:
+                pass
             self.runtime.service_registry.unregister("yandex.set_device_state")
         except Exception:
             pass

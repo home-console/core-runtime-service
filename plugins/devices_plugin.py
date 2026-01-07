@@ -55,8 +55,13 @@ class DevicesPlugin(BasePlugin):
         self.runtime.service_registry.register("devices.list", self.list_devices)
         self.runtime.service_registry.register("devices.get", self.get_device)
         self.runtime.service_registry.register("devices.create", self.create_device)
+        # Универсальное изменение состояния
+        self.runtime.service_registry.register("devices.set_state", self.set_state)
+        # Сохраним старые удобные вызовы для обратной совместимости
         self.runtime.service_registry.register("devices.turn_on", self.turn_on)
         self.runtime.service_registry.register("devices.turn_off", self.turn_off)
+        # Список внешних устройств от провайдеров
+        self.runtime.service_registry.register("devices.list_external", self.list_external)
         # Временный сервис для сопоставления внешнего устройства с внутренним id
         # Сохраняет соответствие в runtime.state_engine по ключу
         # "devices.mapping.<external_id>" -> internal_id
@@ -73,19 +78,24 @@ class DevicesPlugin(BasePlugin):
                 raise ValueError("external_id и internal_id должны быть непустыми строками")
 
             try:
+                # Сохраняем маппинг и в persistent storage для долговечности
                 await self.runtime.state_engine.set(f"devices.mapping.{external_id}", internal_id)
+                try:
+                    await self.runtime.storage.set("devices_mappings", external_id, internal_id)
+                except Exception:
+                    # Не фатально, оставляем в state_engine
+                    pass
             except Exception:
                 # Не мешаем основной логике плагина при ошибке записи
                 raise
 
         self.runtime.service_registry.register("devices.map_external_device", _map_external_device)
         # Регистрируем HTTP-контракты через runtime.http
+        # Devices plugin не регистрирует публичные admin HTTP-эндпоинты —
+        # за это отвечает admin_plugin (прокси). Оставляем регистрацию пустой.
         try:
-            self.runtime.http.register(HttpEndpoint(method="GET", path="/devices", service="devices.list"))
-            self.runtime.http.register(HttpEndpoint(method="POST", path="/devices", service="devices.create"))
-            self.runtime.http.register(HttpEndpoint(method="POST", path="/devices/{device_id}/on", service="devices.turn_on"))
+            pass
         except Exception:
-            # любые ошибки регистрации контрактов не должны блокировать загрузку плагина
             pass
 
     async def on_start(self) -> None:
@@ -109,6 +119,36 @@ class DevicesPlugin(BasePlugin):
             state_value = device.get("state")
             await self.runtime.state_engine.set(f"device.{dev_id}", state_value)
 
+        # Инициализируем external devices и mappings из storage, если есть
+        try:
+            ext_keys = await self.runtime.storage.list_keys("devices_external")
+        except Exception:
+            ext_keys = []
+
+        for ext_id in ext_keys:
+            payload = await self.runtime.storage.get("devices_external", ext_id)
+            if payload is None:
+                continue
+            # Дублируем в state_engine для быстрого доступа
+            try:
+                await self.runtime.state_engine.set(f"devices.external.{ext_id}", payload)
+            except Exception:
+                pass
+
+        # Загружаем маппинги в state_engine (если они были персистированы)
+        try:
+            map_keys = await self.runtime.storage.list_keys("devices_mappings")
+        except Exception:
+            map_keys = []
+
+        for k in map_keys:
+            try:
+                internal = await self.runtime.storage.get("devices_mappings", k)
+                if internal is not None:
+                    await self.runtime.state_engine.set(f"devices.mapping.{k}", internal)
+            except Exception:
+                pass
+
         # --- Временная поддержка внешних устройств ---
         # Подписываемся на событие внешнего провайдера о найденном устройстве
         # Сохраняем payload в runtime.state_engine под ключом
@@ -119,11 +159,16 @@ class DevicesPlugin(BasePlugin):
             if not external_id:
                 return
 
-            # Сохраняем payload в state_engine — без трансформаций
+            # Сохраняем payload и в persistent storage для внешних устройств
+            try:
+                await self.runtime.storage.set("devices_external", external_id, data)
+            except Exception:
+                pass
+
+            # Также дублируем в state_engine для быстрого доступа
             try:
                 await self.runtime.state_engine.set(f"devices.external.{external_id}", data)
             except Exception:
-                # Не мешаем основной логике плагина
                 pass
 
             # Логируем приём устройства через logger, если он доступен
@@ -179,12 +224,25 @@ class DevicesPlugin(BasePlugin):
     async def create_device(self, device_id: str, name: str = "Unknown", device_type: str = "generic") -> Dict[str, Any]:
         """Создать новое устройство.
 
-        Args:
-            device_id: уникальный идентификатор устройства
-            name: человеческое имя устройства
-            device_type: тип устройства
-
-        Returns:
+        try:
+            self.runtime.service_registry.unregister("devices.list")
+            self.runtime.service_registry.unregister("devices.get")
+            self.runtime.service_registry.unregister("devices.create")
+        except Exception:
+            pass
+        # Универсальные и совместимые сервисы
+        try:
+            self.runtime.service_registry.unregister("devices.set_state")
+        except Exception:
+            pass
+        try:
+            self.runtime.service_registry.unregister("devices.turn_on")
+        except Exception:
+            pass
+        try:
+            self.runtime.service_registry.unregister("devices.turn_off")
+        except Exception:
+            pass
             Созданное устройство
 
         Raises:
@@ -203,6 +261,17 @@ class DevicesPlugin(BasePlugin):
         await self.runtime.state_engine.set(f"device.{device_id}", device["state"])
         return device
 
+    async def set_state(self, device_id: str, state: Dict[str, Any]) -> Dict[str, Any]:
+        """Установить состояние устройства полностью или частично.
+
+        Аргументы:
+            device_id: id внутреннего устройства
+            state: частичное или полное состояние (словать)
+
+        Поведение: обновляет storage и state_engine, публикует событие.
+        """
+        return await self._change_state(device_id, state)
+
     # ----- Сервисы -----
     async def list_devices(self) -> List[Dict[str, Any]]:
         """Вернуть список всех устройств.
@@ -216,6 +285,27 @@ class DevicesPlugin(BasePlugin):
             if device is not None:
                 devices.append(device)
         return devices
+
+    async def list_external(self, provider: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Вернуть список внешних устройств, опционально фильтруя по провайдеру.
+
+        Хранение внешних устройств осуществляется в storage namespace `devices_external`.
+        """
+        try:
+            keys = await self.runtime.storage.list_keys("devices_external")
+        except Exception:
+            return []
+
+        out: List[Dict[str, Any]] = []
+        for ext_id in keys:
+            payload = await self.runtime.storage.get("devices_external", ext_id)
+            if payload is None:
+                continue
+            if provider is not None:
+                if payload.get("provider") != provider:
+                    continue
+            out.append({"external_id": ext_id, "payload": payload})
+        return out
 
     async def get_device(self, device_id: str) -> Dict[str, Any]:
         """Вернуть устройство по id.

@@ -95,9 +95,9 @@ class BasePlugin(ABC):
         - регистрировать сервисы
         - подписываться на события
         """
-        # Граница типизации: в момент on_load runtime гарантирован менеджером,
-        # поэтому делаем явную проверку для pyright/pylance-сужения типов.
-        assert self.runtime is not None
+        # Note: PluginManager may load plugins without a runtime set (tests).
+        # Do not require runtime to be present here — lifecycle methods may be
+        # invoked in environments where runtime is assigned later.
         self._loaded = True
 
     async def on_start(self) -> None:

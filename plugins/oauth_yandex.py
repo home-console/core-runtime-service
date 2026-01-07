@@ -217,6 +217,43 @@ class OAuthYandexPlugin(BasePlugin):
             """Получить сохранённые токены (debug-сервис)."""
             return await self.runtime.storage.get(self.TOKEN_NAMESPACE, self.TOKEN_KEY)
 
+        async def validate_token(token: Optional[str] = None) -> Dict[str, Any]:
+            """Проверить валидность access_token у Яндекса.
+
+            Если `token` не передан, берёт сохранённый в storage.
+
+            Возвращает словарь с полем `valid: bool` и дополнительной информацией.
+            """
+            # Получить токен из хранилища, если не передан
+            if not token:
+                tokens = await self.runtime.storage.get(self.TOKEN_NAMESPACE, self.TOKEN_KEY)
+                if not tokens or 'access_token' not in tokens:
+                    return {'valid': False, 'reason': 'no_token'}
+                token = tokens['access_token']
+
+            try:
+                import aiohttp
+            except Exception:
+                return {'valid': False, 'reason': 'aiohttp_missing'}
+
+            url = 'https://login.yandex.ru/info?format=json'
+            headers = {'Authorization': f'OAuth {token}'}
+
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url, headers=headers) as resp:
+                        text = await resp.text()
+                        if resp.status == 200:
+                            try:
+                                data = await resp.json()
+                            except Exception:
+                                data = {'raw': text}
+                            return {'valid': True, 'status': 200, 'info': data}
+                        else:
+                            return {'valid': False, 'status': resp.status, 'body': text}
+            except Exception as e:
+                return {'valid': False, 'reason': 'request_failed', 'error': str(e)}
+
         async def set_tokens(tokens: Dict[str, Any]) -> None:
             """Сохранить токены (для тестов)."""
             if not isinstance(tokens, dict):
@@ -229,6 +266,7 @@ class OAuthYandexPlugin(BasePlugin):
         self.runtime.service_registry.register("oauth_yandex.get_authorize_url", get_authorize_url)
         self.runtime.service_registry.register("oauth_yandex.exchange_code", exchange_code)
         self.runtime.service_registry.register("oauth_yandex.get_tokens", get_tokens)
+        self.runtime.service_registry.register("oauth_yandex.validate_token", validate_token)
         self.runtime.service_registry.register("oauth_yandex.set_tokens", set_tokens)
 
         # Регистрируем HTTP-контракты через runtime.http.register()
@@ -272,6 +310,13 @@ class OAuthYandexPlugin(BasePlugin):
                 service="oauth_yandex.get_tokens",
                 description="[DEBUG] Получить сохранённые токены (только для разработки)"
             ))
+            # GET /oauth/yandex/validate — проверить access_token (optional query param `token`)
+            self.runtime.http.register(HttpEndpoint(
+                method="GET",
+                path="/oauth/yandex/validate",
+                service="oauth_yandex.validate_token",
+                description="Проверить валидность access_token (если не указан, используется сохранённый)"
+            ))
         except Exception:
             # Ошибки регистрации HTTP не должны блокировать загрузку плагина
             pass
@@ -285,6 +330,7 @@ class OAuthYandexPlugin(BasePlugin):
             self.runtime.service_registry.unregister("oauth_yandex.get_authorize_url")
             self.runtime.service_registry.unregister("oauth_yandex.exchange_code")
             self.runtime.service_registry.unregister("oauth_yandex.get_tokens")
+            self.runtime.service_registry.unregister("oauth_yandex.validate_token")
             self.runtime.service_registry.unregister("oauth_yandex.set_tokens")
         except Exception:
             pass
