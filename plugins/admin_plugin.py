@@ -57,10 +57,21 @@ class AdminPlugin(BasePlugin):
         async def admin_devices_list():
             return await self.runtime.service_registry.call("devices.list")
 
-        async def admin_devices_get(device_id: str):
+        async def admin_devices_get(id: str = None, **kwargs):
+            # HTTP layer may pass path param as 'id'
+            device_id = id or kwargs.get("device_id") or kwargs.get("deviceId")
+            if not device_id:
+                raise ValueError("device id is required")
             return await self.runtime.service_registry.call("devices.get", device_id)
 
-        async def admin_devices_set_state(device_id: str, state: Dict[str, Any]):
+        async def admin_devices_set_state(id: str = None, body: Any = None, **kwargs):
+            # Accept path param 'id' and request body as 'body'
+            device_id = id or kwargs.get("device_id") or kwargs.get("deviceId")
+            state = body if isinstance(body, dict) else kwargs.get("state")
+            if not device_id:
+                raise ValueError("device id is required")
+            if state is None:
+                raise ValueError("state body is required")
             # Proxy call to devices.set_state
             return await self.runtime.service_registry.call("devices.set_state", device_id, state)
 
@@ -71,6 +82,61 @@ class AdminPlugin(BasePlugin):
         self.runtime.service_registry.register("admin.devices.get", admin_devices_get)
         self.runtime.service_registry.register("admin.devices.set_state", admin_devices_set_state)
         self.runtime.service_registry.register("admin.devices.list_external", admin_devices_list_external)
+
+        # --- Devices mapping admin proxies ---
+        async def admin_devices_list_mappings() -> Any:
+            try:
+                return await self.runtime.service_registry.call("devices.list_mappings")
+            except Exception as e:
+                try:
+                    await self.runtime.service_registry.call("logger.log", level="error", message=f"admin_devices_list_mappings error: {e}", plugin=self.metadata.name)
+                except Exception:
+                    pass
+                return {"ok": False, "error": str(e)}
+
+        async def admin_devices_create_mapping(body: Any = None) -> Dict[str, Any]:
+            # Accept either JSON body {external_id, internal_id} or raw args
+            if isinstance(body, dict):
+                ext = body.get("external_id") or body.get("externalId") or body.get("external")
+                internal = body.get("internal_id") or body.get("internalId") or body.get("internal")
+            elif isinstance(body, list) and len(body) >= 2:
+                ext, internal = body[0], body[1]
+            else:
+                # Unsupported shape
+                return {"ok": False, "error": "invalid_body"}
+            try:
+                return await self.runtime.service_registry.call("devices.create_mapping", ext, internal)
+            except Exception as e:
+                try:
+                    await self.runtime.service_registry.call("logger.log", level="error", message=f"admin_devices_create_mapping error: {e}", plugin=self.metadata.name)
+                except Exception:
+                    pass
+                return {"ok": False, "error": str(e)}
+
+        async def admin_devices_delete_mapping(external_id: str) -> Dict[str, Any]:
+            try:
+                return await self.runtime.service_registry.call("devices.delete_mapping", external_id)
+            except Exception as e:
+                try:
+                    await self.runtime.service_registry.call("logger.log", level="error", message=f"admin_devices_delete_mapping error: {e}", plugin=self.metadata.name)
+                except Exception:
+                    pass
+                return {"ok": False, "error": str(e)}
+
+        async def admin_devices_auto_map(provider: Optional[str] = None) -> Dict[str, Any]:
+            try:
+                return await self.runtime.service_registry.call("devices.auto_map_external", provider)
+            except Exception as e:
+                try:
+                    await self.runtime.service_registry.call("logger.log", level="error", message=f"admin_devices_auto_map error: {e}", plugin=self.metadata.name)
+                except Exception:
+                    pass
+                return {"ok": False, "error": str(e)}
+
+        self.runtime.service_registry.register("admin.devices.list_mappings", admin_devices_list_mappings)
+        self.runtime.service_registry.register("admin.devices.create_mapping", admin_devices_create_mapping)
+        self.runtime.service_registry.register("admin.devices.delete_mapping", admin_devices_delete_mapping)
+        self.runtime.service_registry.register("admin.devices.auto_map", admin_devices_auto_map)
 
         # --- OAuth Yandex proxy services (admin v1) ---
         async def _sanitize_oauth(data: Dict[str, Any]) -> Dict[str, Any]:
@@ -315,6 +381,31 @@ class AdminPlugin(BasePlugin):
                 service="admin.devices.list",
                 description="List internal devices"
             ))
+            # Admin endpoints for mappings (register before device id route to avoid collision)
+            self.runtime.http.register(HttpEndpoint(
+                method="GET",
+                path="/admin/v1/devices/mappings",
+                service="admin.devices.list_mappings",
+                description="List external->internal device mappings"
+            ))
+            self.runtime.http.register(HttpEndpoint(
+                method="POST",
+                path="/admin/v1/devices/mappings",
+                service="admin.devices.create_mapping",
+                description="Create mapping: body {external_id, internal_id}"
+            ))
+            self.runtime.http.register(HttpEndpoint(
+                method="DELETE",
+                path="/admin/v1/devices/mappings/{external_id}",
+                service="admin.devices.delete_mapping",
+                description="Delete mapping by external_id"
+            ))
+            self.runtime.http.register(HttpEndpoint(
+                method="POST",
+                path="/admin/v1/devices/mappings/auto-map/{provider}",
+                service="admin.devices.auto_map",
+                description="Auto-map external devices for provider to internal devices"
+            ))
             self.runtime.http.register(HttpEndpoint(
                 method="GET",
                 path="/admin/v1/devices/{id}",
@@ -351,6 +442,23 @@ class AdminPlugin(BasePlugin):
                 self.runtime.service_registry.unregister("admin.devices.get")
                 self.runtime.service_registry.unregister("admin.devices.set_state")
                 self.runtime.service_registry.unregister("admin.devices.list_external")
+                # Unregister mappings proxies
+                try:
+                    self.runtime.service_registry.unregister("admin.devices.list_mappings")
+                except Exception:
+                    pass
+                try:
+                    self.runtime.service_registry.unregister("admin.devices.create_mapping")
+                except Exception:
+                    pass
+                try:
+                    self.runtime.service_registry.unregister("admin.devices.delete_mapping")
+                except Exception:
+                    pass
+                try:
+                    self.runtime.service_registry.unregister("admin.devices.auto_map")
+                except Exception:
+                    pass
             except Exception:
                 pass
             # Unregister oauth admin services

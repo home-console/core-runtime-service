@@ -208,6 +208,9 @@ class YandexSmartHomeRealPlugin(BasePlugin):
             device_id = yandex_device.get("id")
             if not device_id:
                 return None
+            # Попробуем взять понятное имя устройства из ответа Яндекса
+            # API обычно содержит поле "name" или "title"; используем сначала его
+            name = yandex_device.get("name") or yandex_device.get("title") or device_id
 
             # Получаем тип устройства (формат: devices.types.light)
             yandex_type = yandex_device.get("type", "")
@@ -227,6 +230,7 @@ class YandexSmartHomeRealPlugin(BasePlugin):
             device = {
                 "provider": "yandex",
                 "external_id": device_id,
+                "name": name,
                 "type": device_type,
                 "capabilities": capabilities,
                 "state": device_state,

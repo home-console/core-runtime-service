@@ -90,6 +90,116 @@ class DevicesPlugin(BasePlugin):
                 raise
 
         self.runtime.service_registry.register("devices.map_external_device", _map_external_device)
+        # Backwards-compatible and clearer API for mappings
+        async def create_mapping(external_id: str, internal_id: str) -> Dict[str, Any]:
+            await _map_external_device(external_id, internal_id)
+            return {"ok": True, "external_id": external_id, "internal_id": internal_id}
+
+        async def list_mappings() -> List[Dict[str, Any]]:
+            try:
+                keys = await self.runtime.storage.list_keys("devices_mappings")
+            except Exception:
+                keys = []
+            out: List[Dict[str, Any]] = []
+            for k in keys:
+                try:
+                    v = await self.runtime.storage.get("devices_mappings", k)
+                except Exception:
+                    v = None
+                if v is None:
+                    continue
+                out.append({"external_id": k, "internal_id": v})
+            return out
+
+        async def delete_mapping(external_id: str) -> Dict[str, Any]:
+            if not external_id:
+                return {"ok": False, "error": "external_id required"}
+            try:
+                deleted = await self.runtime.storage.delete("devices_mappings", external_id)
+            except Exception:
+                deleted = False
+            try:
+                # Clear state_engine mirror
+                await self.runtime.state_engine.set(f"devices.mapping.{external_id}", None)
+            except Exception:
+                pass
+            return {"ok": bool(deleted), "external_id": external_id}
+
+        self.runtime.service_registry.register("devices.create_mapping", create_mapping)
+        self.runtime.service_registry.register("devices.list_mappings", list_mappings)
+        self.runtime.service_registry.register("devices.delete_mapping", delete_mapping)
+
+        async def auto_map_external(provider: Optional[str] = None) -> Dict[str, Any]:
+            """Automatically create internal devices for unmapped external devices from provider.
+
+            Creates internal devices with id "<provider>-<external_id>" and name from payload if available.
+            Returns summary: {created: int, skipped: int, errors: [...]}
+            """
+            created = 0
+            skipped = 0
+            errors: List[str] = []
+
+            # Get external devices
+            try:
+                externals = await self.list_external(provider)
+            except Exception as e:
+                return {"ok": False, "error": f"failed_list_external: {e}"}
+
+            for item in externals:
+                ext_id = item.get("external_id") if isinstance(item, dict) else None
+                payload = item.get("payload") if isinstance(item, dict) else item
+                if not ext_id:
+                    continue
+
+                # Check existing mapping
+                try:
+                    existing = await self.runtime.storage.get("devices_mappings", ext_id)
+                except Exception:
+                    existing = None
+                if existing:
+                    skipped += 1
+                    continue
+
+                # Prepare internal id and attributes
+                internal_id = f"{provider}-{ext_id}" if provider else f"external-{ext_id}"
+                name = None
+                try:
+                    if isinstance(payload, dict):
+                        name = payload.get("name") or payload.get("title")
+                except Exception:
+                    name = None
+                if not name:
+                    name = f"{payload.get('type','device')}-{ext_id[:6]}" if isinstance(payload, dict) else internal_id
+                device_type = payload.get("type") if isinstance(payload, dict) else "generic"
+
+                # Create internal device (skip if exists)
+                try:
+                    # Use create_device service; it will raise if id exists
+                    await self.create_device(internal_id, name, device_type)
+                except Exception:
+                    # If creation failed due to existing id or other, continue and attempt mapping if possible
+                    try:
+                        dev = await self.runtime.storage.get("devices", internal_id)
+                        if not dev:
+                            raise
+                    except Exception as ce:
+                        errors.append(f"create_failed:{ext_id}:{ce}")
+                        continue
+
+                # Create mapping
+                try:
+                    await self.runtime.storage.set("devices_mappings", ext_id, internal_id)
+                    try:
+                        await self.runtime.state_engine.set(f"devices.mapping.{ext_id}", internal_id)
+                    except Exception:
+                        pass
+                    created += 1
+                except Exception as e:
+                    errors.append(f"mapping_failed:{ext_id}:{e}")
+
+            return {"ok": True, "created": created, "skipped": skipped, "errors": errors}
+
+        self.runtime.service_registry.register("devices.auto_map_external", auto_map_external)
         # Регистрируем HTTP-контракты через runtime.http
         # Devices plugin не регистрирует публичные admin HTTP-эндпоинты —
         # за это отвечает admin_plugin (прокси). Оставляем регистрацию пустой.
@@ -97,6 +207,7 @@ class DevicesPlugin(BasePlugin):
             pass
         except Exception:
             pass
+        # Ensure new services are unregistered on unload as well
 
     async def on_start(self) -> None:
         """Инициализация runtime-state для устройств при старте.
@@ -214,6 +325,22 @@ class DevicesPlugin(BasePlugin):
         # Удаляем временный сервис mapping
         try:
             self.runtime.service_registry.unregister("devices.map_external_device")
+        except Exception:
+            pass
+        try:
+            self.runtime.service_registry.unregister("devices.create_mapping")
+        except Exception:
+            pass
+        try:
+            self.runtime.service_registry.unregister("devices.list_mappings")
+        except Exception:
+            pass
+        try:
+            self.runtime.service_registry.unregister("devices.delete_mapping")
+        except Exception:
+            pass
+        try:
+            self.runtime.service_registry.unregister("devices.auto_map_external")
         except Exception:
             pass
 
