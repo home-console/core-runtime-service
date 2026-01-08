@@ -49,6 +49,16 @@ class ApiGatewayPlugin(BasePlugin):
         await super().on_start()
         if self.app is None:
             return
+        # Делаем короткую паузу, чтобы плагины успели зарегистрировать свои
+        # HTTP-контракты в `runtime.http` до того, как мы снимем с него список.
+        # Без этой паузы api_gateway иногда стартовал раньше других плагинов
+        # и не видел зарегистрированных эндпоинтов, в результате OpenAPI
+        # возвращал 404 на незарегистрированные пути.
+        try:
+            await asyncio.sleep(0.2)
+        except Exception:
+            pass
+
         # Регистрируем маршруты на основе текущего состояния HttpRegistry.
         endpoints = self.runtime.http.list()
 
@@ -119,18 +129,18 @@ class ApiGatewayPlugin(BasePlugin):
         def run_server():
             # Запуск сервера в отдельном потоке — используем локальную переменную
             # чтобы статический анализатор не видел возможного None у `self._server`.
-                try:
-                    server.run()
-                except SystemExit:
-                    # uvicorn вызывает SystemExit(1) при ошибке привязки порта;
-                    # подавляем исключение в потоке и логируем, чтобы pytest
-                    # не регистрировал unhandled thread exception warning.
-                    print("[api_gateway] uvicorn exited during startup (port may be in use)")
-                    return
-                except Exception as e:
-                    # Общий защитный fallback — логируем и завершаем поток.
-                    print(f"[api_gateway] server run error: {e}")
-                    return
+            try:
+                server.run()
+            except SystemExit:
+                # uvicorn вызывает SystemExit(1) при ошибке привязки порта;
+                # подавляем исключение в потоке и логируем, чтобы pytest
+                # не регистрировал unhandled thread exception warning.
+                print("[api_gateway] uvicorn exited during startup (port may be in use)")
+                return
+            except Exception as e:
+                # Общий защитный fallback — логируем и завершаем поток.
+                print(f"[api_gateway] server run error: {e}")
+                return
 
         self._thread = threading.Thread(target=run_server, daemon=True)
         self._thread.start()

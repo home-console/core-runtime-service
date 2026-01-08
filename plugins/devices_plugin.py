@@ -302,14 +302,103 @@ class DevicesPlugin(BasePlugin):
             # Подписка вспомогательная — не должна ломать старый функционал
             pass
 
+        # --- State propagation from external devices ---
+        # Подписываемся на события изменения состояния внешних устройств.
+        # Находим internal device через mapping и обновляем его состояние.
+        async def _external_state_handler(event_type: str, data: dict):
+            # Извлекаем external_id и state из события
+            external_id = data.get("external_id")
+            state = data.get("state")
+            if not external_id or state is None:
+                return
+
+            # Найти internal device через mapping
+            try:
+                internal_id = await self.runtime.storage.get("devices_mappings", external_id)
+            except Exception:
+                internal_id = None
+
+            if not internal_id:
+                # Нет маппинга — игнорируем событие
+                return
+
+            # Получить internal device
+            try:
+                device = await self.runtime.storage.get("devices", internal_id)
+            except Exception:
+                device = None
+
+            if device is None:
+                # Internal device не найден
+                return
+
+            # Обновить состояние internal device
+            old_state = device.get("state", {})
+            # Merge external state into internal state
+            new_state = dict(old_state) if isinstance(old_state, dict) else {}
+            if isinstance(state, dict):
+                new_state.update(state)
+            else:
+                new_state = state  # Replace if state is not a dict
+
+            # Сохранить обновленное состояние в storage
+            device["state"] = new_state
+            try:
+                await self.runtime.storage.set("devices", internal_id, device)
+            except Exception:
+                pass
+
+            # Обновить state_engine
+            try:
+                await self.runtime.state_engine.set(f"device.{internal_id}", new_state)
+            except Exception:
+                pass
+
+            # Опубликовать событие об обновлении состояния
+            try:
+                await self.runtime.event_bus.publish("internal.device_state_updated", {
+                    "internal_id": internal_id,
+                    "external_id": external_id,
+                    "old_state": old_state,
+                    "new_state": new_state,
+                })
+            except Exception:
+                pass
+
+            # Логируем обновление состояния
+            try:
+                await self.runtime.service_registry.call(
+                    "logger.log",
+                    level="debug",
+                    message=f"State propagated: {external_id} → {internal_id}",
+                    plugin=self.metadata.name,
+                    context={"old": old_state, "new": new_state},
+                )
+            except Exception:
+                pass
+
+        # Сохранить хендлер для последующей отписки
+        self._external_state_handler = _external_state_handler
+        try:
+            self.runtime.event_bus.subscribe("external.device_state_reported", self._external_state_handler)
+        except Exception:
+            # Подписка вспомогательная — не должна ломать старый функционал
+            pass
+
     async def on_stop(self) -> None:
         """Остановка плагина: не удаляем данные, не очищаем storage."""
         await super().on_stop()
-        # Удаляем временную подписку на external.device_discovered
+        # Удаляем временные подписки
         try:
             handler = getattr(self, "_external_device_handler", None)
             if handler:
                 self.runtime.event_bus.unsubscribe("external.device_discovered", handler)
+        except Exception:
+            pass
+        try:
+            handler = getattr(self, "_external_state_handler", None)
+            if handler:
+                self.runtime.event_bus.unsubscribe("external.device_state_reported", handler)
         except Exception:
             pass
 

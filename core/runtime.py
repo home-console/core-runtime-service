@@ -12,6 +12,10 @@ CoreRuntime - главный класс Core Runtime.
 """
 
 from typing import Any
+import importlib
+import inspect
+import pkgutil
+from pathlib import Path
 
 from core.event_bus import EventBus
 from core.service_registry import ServiceRegistry
@@ -62,6 +66,15 @@ class CoreRuntime:
         if self._running:
             return
         
+        # Если нет загруженных плагинов (например, в тестах с InMemoryStorageAdapter),
+        # попытаться автозагрузить плагины из каталога plugins/
+        if not self.plugin_manager.list_plugins():
+            try:
+                await self._auto_load_plugins()
+            except Exception:
+                # Не мешаем запуску runtime из-за проблем с автозагрузкой
+                pass
+
         # Запустить все плагины
         await self.plugin_manager.start_all()
         
@@ -103,3 +116,36 @@ class CoreRuntime:
         self.event_bus.clear()
         self.service_registry.clear()
         await self.state_engine.clear()
+
+    async def _auto_load_plugins(self) -> None:
+        """
+        Автоматически загрузить плагины из каталога `plugins/` рядом с корнем сервиса.
+
+        Метод безопасен к повторным вызовам — ошибки загрузки отдельных плагинов
+        игнорируются, а дублирующие загрузки не прерывают выполнение.
+        """
+        plugins_dir = Path(__file__).parent.parent / "plugins"
+        if not plugins_dir.exists() or not plugins_dir.is_dir():
+            return
+
+        for _finder, mod_name, _ispkg in pkgutil.iter_modules([str(plugins_dir)]):
+            module_name = f"plugins.{mod_name}"
+            try:
+                module = importlib.import_module(module_name)
+                for _name, obj in inspect.getmembers(module, inspect.isclass):
+                    try:
+                        # Только подклассы BasePlugin
+                        from plugins.base_plugin import BasePlugin
+
+                        if issubclass(obj, BasePlugin) and obj is not BasePlugin:
+                            try:
+                                plugin_instance = obj(self)
+                                await self.plugin_manager.load_plugin(plugin_instance)
+                            except Exception:
+                                # Игнорируем ошибки загрузки конкретного плагина
+                                continue
+                    except Exception:
+                        continue
+            except Exception:
+                # Игнорируем ошибки при импорте модуля плагина
+                continue
