@@ -70,54 +70,8 @@ class DevicesPlugin(BasePlugin):
         self.runtime.service_registry.register("devices.auto_map_external", self.auto_map_external)
 
     async def on_start(self) -> None:
-        """Инициализация при старте: загрузка устройств и миграция состояния."""
+        """Инициализация при старте: подписка на события."""
         await super().on_start()
-        
-        try:
-            keys = await self.runtime.storage.list_keys("devices")
-        except Exception:
-            return
-
-        # Миграция legacy-состояний и восстановление read-model в state_engine
-        for dev_id in keys:
-            device = await self.runtime.storage.get("devices", dev_id)
-            if device is None:
-                continue
-            
-            state_value = device.get("state")
-            
-            # Миграция legacy-состояний → {desired, reported, pending}
-            if not isinstance(state_value, dict) or \
-               not all(k in state_value for k in ["desired", "reported", "pending"]):
-                # Конвертируем старый формат в новый
-                new_state = {
-                    "desired": {},
-                    "reported": {},
-                    "pending": False
-                }
-                
-                if isinstance(state_value, dict):
-                    # Пытаемся восстановить данные из legacy-полей
-                    if "power" in state_value:
-                        power_val = state_value.get("power")
-                        on_state = power_val in (True, "on", "true", 1, "1")
-                        new_state["desired"]["on"] = on_state
-                        new_state["reported"]["on"] = on_state
-                    elif "on" in state_value:
-                        on_state = bool(state_value.get("on"))
-                        new_state["desired"]["on"] = on_state
-                        new_state["reported"]["on"] = on_state
-                
-                # Если пусто, установим default
-                if not new_state["desired"] and not new_state["reported"]:
-                    new_state["desired"]["on"] = False
-                    new_state["reported"]["on"] = False
-                
-                device["state"] = new_state
-                try:
-                    await self.runtime.storage.set("devices", dev_id, device)
-                except Exception:
-                    pass
         
         # Подписываемся на события от внешних провайдеров
         # Синхронизируем reported-состояние, когда провайдер подтверждает команду
@@ -197,11 +151,12 @@ class DevicesPlugin(BasePlugin):
     ) -> Dict[str, Any]:
         """Создать новое устройство.
         
-        Модель состояния:
-          state:
-            desired: {}      — желаемое состояние
-            reported: {}     — подтверждённое состояние
-            pending: false   — ожидается ли подтверждение
+        Модель состояния (и есть единственный формат):
+          {
+            "desired": {...},      # желаемое состояние
+            "reported": {...},     # подтверждённое состояние
+            "pending": false       # ожидается ли подтверждение
+          }
         """
         if not isinstance(device_id, str) or not device_id:
             raise ValueError("device_id должен быть непустой строкой")
@@ -225,12 +180,17 @@ class DevicesPlugin(BasePlugin):
     async def set_state(self, device_id: str, state: Dict[str, Any]) -> Dict[str, Any]:
         """Установить желаемое состояние устройства (отправить команду).
         
-        Этот метод:
-        1. Читает устройство из storage
+        Требования к state устройства (СТРОГИЕ):
+        - Must have: {desired: dict, reported: dict, pending: bool}
+        - Нет автоматического восстановления или миграции
+        - Ошибка если формат неправильный
+        
+        Поведение:
+        1. Читает устройство из storage (STRICT validation)
         2. Обновляет state.desired
         3. Устанавливает state.pending = True
         4. Сохраняет в storage
-        5. Публикует событие internal.device_command_requested
+        5. Публикует внутреннее событие internal.device_command_requested
         
         reported-состояние меняется ТОЛЬКО когда провайдер подтверждает команду
         через событие external.device_state_reported.
@@ -243,13 +203,25 @@ class DevicesPlugin(BasePlugin):
             raise ValueError(f"device {device_id} not found")
 
         current_state = device.get("state", {})
-        if not isinstance(current_state, dict):
-            current_state = {"desired": {}, "reported": {}, "pending": False}
-
-        # Ensure all fields exist
-        for field in ["desired", "reported", "pending"]:
-            if field not in current_state:
-                current_state[field] = {} if field != "pending" else False
+        
+        # СТРОГОЕ требование: state должен иметь правильный формат
+        # Нет молчаливого восстановления из пустоты или старых форматов
+        if not isinstance(current_state, dict) or \
+           not all(k in current_state for k in ["desired", "reported", "pending"]):
+            raise ValueError(
+                f"Device {device_id} has invalid state format. "
+                f"Expected: {{desired, reported, pending}}, "
+                f"got: {current_state}"
+            )
+        
+        # Ensure all fields have correct types
+        if not isinstance(current_state["desired"], dict) or \
+           not isinstance(current_state["reported"], dict) or \
+           not isinstance(current_state["pending"], bool):
+            raise ValueError(
+                f"Device {device_id} state fields have wrong types. "
+                f"Expected: {{desired: dict, reported: dict, pending: bool}}"
+            )
 
         # Обновляем only desired (это команда)
         if isinstance(state, dict):
@@ -499,13 +471,38 @@ class DevicesPlugin(BasePlugin):
 
         # Обновляем состояние
         old_state = device.get("state", {})
-        if not isinstance(old_state, dict):
-            old_state = {"desired": {}, "reported": {}, "pending": False}
+        
+        # СТРОГОЕ требование: state должен иметь правильный формат
+        # Нет молчаливого восстановления legacy-состояний
+        if not isinstance(old_state, dict) or \
+           not all(k in old_state for k in ["desired", "reported", "pending"]):
+            # Некорректное состояние — логируем и пропускаем
+            try:
+                await self.runtime.service_registry.call(
+                    "logger.log",
+                    level="warning",
+                    message=f"Invalid device state format: {internal_id}",
+                    plugin=self.metadata.name,
+                    context={"state": old_state}
+                )
+            except Exception:
+                pass
+            return
 
-        # Ensure all fields
-        for field in ["desired", "reported", "pending"]:
-            if field not in old_state:
-                old_state[field] = {} if field != "pending" else False
+        # Ensure all fields are correct types
+        if not isinstance(old_state["desired"], dict) or \
+           not isinstance(old_state["reported"], dict) or \
+           not isinstance(old_state["pending"], bool):
+            try:
+                await self.runtime.service_registry.call(
+                    "logger.log",
+                    level="warning",
+                    message=f"Device state fields have wrong types: {internal_id}",
+                    plugin=self.metadata.name,
+                )
+            except Exception:
+                pass
+            return
 
         # Сохраняем копию для события
         prev_state = copy.deepcopy(old_state)
