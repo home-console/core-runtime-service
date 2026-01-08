@@ -11,6 +11,9 @@ Admin plugin — простые HTTP-ручки и сервисы для адм�
 только читать. В production при необходимости добавить аутентификацию.
 """
 from typing import Any, Dict, List, Optional
+import time
+import datetime
+import asyncio
 
 from plugins.base_plugin import BasePlugin, PluginMetadata
 
@@ -27,7 +30,12 @@ class AdminPlugin(BasePlugin):
 
     async def on_load(self) -> None:
         await super().on_load()
-
+        
+        # Record admin plugin load time to compute uptime (read-only, no core changes)
+        try:
+            self._admin_started_at = time.time()
+        except Exception:
+            self._admin_started_at = None
         async def list_plugins() -> List[str]:
             return self.runtime.plugin_manager.list_plugins()
 
@@ -39,6 +47,164 @@ class AdminPlugin(BasePlugin):
                 {"method": ep.method, "path": ep.path, "service": ep.service, "description": ep.description}
                 for ep in self.runtime.http.list()
             ]
+
+        # --- Admin v1 read-only inventory services ---
+        async def admin_v1_runtime() -> Dict[str, Any]:
+            """Return runtime info: uptime (sec), started_at (ISO), version"""
+            started_at_ts = getattr(self, "_admin_started_at", None)
+            if started_at_ts is None:
+                started_at_iso = None
+                uptime = None
+            else:
+                started_at_iso = datetime.datetime.fromtimestamp(started_at_ts).isoformat()
+                uptime = int(time.time() - started_at_ts)
+
+            # Try to read runtime version if present, else fallback to plugin metadata version
+            version = getattr(self.runtime, "version", None) or self.metadata.version
+            return {"uptime": uptime, "started_at": started_at_iso, "version": version}
+
+        async def admin_v1_plugins() -> List[Dict[str, Any]]:
+            res: List[Dict[str, Any]] = []
+            services = self.runtime.service_registry.list_services()
+            http_eps = self.runtime.http.list()
+            # Build mapping: plugin -> events subscribed
+            events_map: Dict[str, List[str]] = {}
+            try:
+                handlers_map = getattr(self.runtime.event_bus, "_handlers", {})
+                for ev, handlers in handlers_map.items():
+                    for h in handlers:
+                        owner = None
+                        try:
+                            # bound method? try to get plugin metadata
+                            if hasattr(h, "__self__") and hasattr(h.__self__, "metadata"):
+                                owner = h.__self__.metadata.name
+                        except Exception:
+                            owner = None
+                        if not owner:
+                            # fallback to qualname/module
+                            try:
+                                owner = getattr(h, "__qualname__", None)
+                                if owner and "." in owner:
+                                    owner = owner.split(".")[0]
+                            except Exception:
+                                owner = "unknown"
+                        events_map.setdefault(owner or "unknown", []).append(ev)
+            except Exception:
+                events_map = {}
+
+            for plugin_name in self.runtime.plugin_manager.list_plugins():
+                state = self.runtime.plugin_manager.get_plugin_state(plugin_name)
+                state_val = None
+                try:
+                    state_val = getattr(state, "value", str(state))
+                except Exception:
+                    state_val = str(state)
+                started_flag = (state_val == "started")
+
+                svc_count = 0
+                try:
+                    svc_count = len([s for s in services if s.split(".")[0] == plugin_name])
+                except Exception:
+                    svc_count = 0
+
+                http_count = 0
+                try:
+                    http_count = len([ep for ep in http_eps if ep.service and ep.service.split(".")[0] == plugin_name])
+                except Exception:
+                    http_count = 0
+
+                res.append({
+                    "name": plugin_name,
+                    "loaded": state_val in ("loaded", "started"),
+                    "started": started_flag,
+                    "services_count": svc_count,
+                    "http_count": http_count,
+                    "event_subscriptions": events_map.get(plugin_name, []),
+                })
+            return res
+
+        async def admin_v1_services() -> List[Dict[str, str]]:
+            svcs = []
+            for s in self.runtime.service_registry.list_services():
+                owner = s.split(".")[0] if s and "." in s else ""
+                svcs.append({"service_name": s, "plugin_name": owner})
+            return svcs
+
+        async def admin_v1_http() -> List[Dict[str, Any]]:
+            out: List[Dict[str, Any]] = []
+            for ep in self.runtime.http.list():
+                owner = ep.service.split(".")[0] if ep.service and "." in ep.service else ""
+                out.append({"method": ep.method, "path": ep.path, "service": ep.service, "plugin": owner})
+            return out
+
+        async def admin_v1_events() -> List[Dict[str, Any]]:
+            out: List[Dict[str, Any]] = []
+            try:
+                handlers_map = getattr(self.runtime.event_bus, "_handlers", {})
+                for ev, handlers in handlers_map.items():
+                    subs = []
+                    for h in handlers:
+                        try:
+                            plugin_name = None
+                            if hasattr(h, "__self__") and hasattr(h.__self__, "metadata"):
+                                plugin_name = h.__self__.metadata.name
+                            else:
+                                # fallback
+                                plugin_name = getattr(h, "__qualname__", None)
+                                if plugin_name and "." in plugin_name:
+                                    plugin_name = plugin_name.split(".")[0]
+                        except Exception:
+                            plugin_name = "unknown"
+
+                        handler_name = getattr(h, "__name__", None) or getattr(h, "__qualname__", repr(h))
+                        subs.append({"plugin": plugin_name, "handler": handler_name})
+                    out.append({"event_name": ev, "subscribers": subs})
+            except Exception:
+                pass
+            return out
+
+        async def admin_v1_storage() -> List[Dict[str, Any]]:
+            # Return list of namespaces with key counts. Best-effort introspection of adapter.
+            out: List[Dict[str, Any]] = []
+            adapter = getattr(self.runtime.storage, "_adapter", None)
+            if adapter is None:
+                return out
+
+            # SQLiteAdapter: query distinct namespaces
+            try:
+                if hasattr(adapter, "_get_connection"):
+                    def _query_namespaces():
+                        conn = adapter._get_connection()
+                        cur = conn.execute("SELECT DISTINCT namespace FROM storage")
+                        return [row[0] for row in cur.fetchall()]
+
+                    namespaces = await asyncio.to_thread(_query_namespaces)
+                    for ns in namespaces:
+                        try:
+                            keys = await self.runtime.storage.list_keys(ns)
+                            out.append({"namespace": ns, "keys_count": len(keys)})
+                        except Exception:
+                            out.append({"namespace": ns, "keys_count": None})
+                    return out
+            except Exception:
+                pass
+
+            # Fallback: no way to list namespaces — return empty
+            return out
+
+        async def admin_v1_state() -> Dict[str, Any]:
+            ks = []
+            try:
+                ks = await self.runtime.state_engine.keys()
+            except Exception:
+                ks = []
+            out: Dict[str, Any] = {}
+            for k in ks:
+                try:
+                    out[k] = await self.runtime.state_engine.get(k)
+                except Exception:
+                    out[k] = None
+            return out
 
         async def state_keys() -> List[str]:
             return await self.runtime.state_engine.keys()
@@ -496,6 +662,28 @@ class AdminPlugin(BasePlugin):
                 service="admin.devices.list_external",
                 description="List external devices for provider"
             ))
+            # --- Register new admin.v1 inventory services and endpoints ---
+            try:
+                # Services
+                self.runtime.service_registry.register("admin.v1.runtime", admin_v1_runtime)
+                self.runtime.service_registry.register("admin.v1.plugins", admin_v1_plugins)
+                self.runtime.service_registry.register("admin.v1.services", admin_v1_services)
+                self.runtime.service_registry.register("admin.v1.http", admin_v1_http)
+                self.runtime.service_registry.register("admin.v1.events", admin_v1_events)
+                self.runtime.service_registry.register("admin.v1.storage", admin_v1_storage)
+                self.runtime.service_registry.register("admin.v1.state", admin_v1_state)
+
+                # HTTP endpoints (read-only inventory)
+                self.runtime.http.register(HttpEndpoint(method="GET", path="/admin/v1/runtime", service="admin.v1.runtime", description="Runtime info: uptime, started_at, version"))
+                self.runtime.http.register(HttpEndpoint(method="GET", path="/admin/v1/plugins", service="admin.v1.plugins", description="List plugins with stats"))
+                self.runtime.http.register(HttpEndpoint(method="GET", path="/admin/v1/services", service="admin.v1.services", description="List services and owning plugin"))
+                self.runtime.http.register(HttpEndpoint(method="GET", path="/admin/v1/http", service="admin.v1.http", description="List HTTP contracts"))
+                self.runtime.http.register(HttpEndpoint(method="GET", path="/admin/v1/events", service="admin.v1.events", description="List events and subscribers"))
+                self.runtime.http.register(HttpEndpoint(method="GET", path="/admin/v1/storage", service="admin.v1.storage", description="List storage namespaces and key counts"))
+                self.runtime.http.register(HttpEndpoint(method="GET", path="/admin/v1/state", service="admin.v1.state", description="Read-only state engine dump"))
+            except Exception:
+                # best-effort: do not break runtime startup
+                pass
         except Exception:
             # Не критично — не блокируем загрузку
             pass
@@ -508,6 +696,17 @@ class AdminPlugin(BasePlugin):
             self.runtime.service_registry.unregister("admin.list_http")
             self.runtime.service_registry.unregister("admin.state_keys")
             self.runtime.service_registry.unregister("admin.state_get")
+            # Unregister admin.v1 inventory services
+            try:
+                self.runtime.service_registry.unregister("admin.v1.runtime")
+                self.runtime.service_registry.unregister("admin.v1.plugins")
+                self.runtime.service_registry.unregister("admin.v1.services")
+                self.runtime.service_registry.unregister("admin.v1.http")
+                self.runtime.service_registry.unregister("admin.v1.events")
+                self.runtime.service_registry.unregister("admin.v1.storage")
+                self.runtime.service_registry.unregister("admin.v1.state")
+            except Exception:
+                pass
             # Unregister devices admin proxies
             try:
                 self.runtime.service_registry.unregister("admin.devices.list")
