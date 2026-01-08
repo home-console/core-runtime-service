@@ -334,12 +334,25 @@ class DevicesPlugin(BasePlugin):
 
             # Обновить состояние internal device
             old_state = device.get("state", {})
-            # Merge external state into internal state
-            new_state = dict(old_state) if isinstance(old_state, dict) else {}
+            if not isinstance(old_state, dict):
+                old_state = {"desired": {}, "reported": {}, "pending": False}
+
+            # Обеспечить наличие всех полей
+            if "desired" not in old_state:
+                old_state["desired"] = {}
+            if "reported" not in old_state:
+                old_state["reported"] = {}
+            if "pending" not in old_state:
+                old_state["pending"] = False
+
+            # Обновить reported состояние (то что вернулось из провайдера)
             if isinstance(state, dict):
-                new_state.update(state)
-            else:
-                new_state = state  # Replace if state is not a dict
+                old_state["reported"].update(state)
+
+            # Сбросить флаг pending (команда выполнена)
+            old_state["pending"] = False
+
+            new_state = old_state
 
             # Сохранить обновленное состояние в storage
             device["state"] = new_state
@@ -436,33 +449,14 @@ class DevicesPlugin(BasePlugin):
         # Очистить ссылку на runtime
         self.runtime = None
 
-    # ----- Сервисы -----
     async def create_device(self, device_id: str, name: str = "Unknown", device_type: str = "generic") -> Dict[str, Any]:
         """Создать новое устройство.
 
-        try:
-            self.runtime.service_registry.unregister("devices.list")
-            self.runtime.service_registry.unregister("devices.get")
-            self.runtime.service_registry.unregister("devices.create")
-        except Exception:
-            pass
-        # Универсальные и совместимые сервисы
-        try:
-            self.runtime.service_registry.unregister("devices.set_state")
-        except Exception:
-            pass
-        try:
-            self.runtime.service_registry.unregister("devices.turn_on")
-        except Exception:
-            pass
-        try:
-            self.runtime.service_registry.unregister("devices.turn_off")
-        except Exception:
-            pass
-            Созданное устройство
-
-        Raises:
-            ValueError: если device_id не строка или пуста
+        Модель состояния:
+          state:
+            desired: {}      — желаемое состояние (что отправили)
+            reported: {}     — подтверждённое состояние (что вернулось)
+            pending: false   — есть ли ожидающаяся команда
         """
         if not isinstance(device_id, str) or not device_id:
             raise ValueError("device_id должен быть непустой строкой")
@@ -471,7 +465,11 @@ class DevicesPlugin(BasePlugin):
             "id": device_id,
             "name": name,
             "type": device_type,
-            "state": {"power": "off"},
+            "state": {
+                "desired": {"on": False},
+                "reported": {"on": False},
+                "pending": False,
+            },
         }
         await self.runtime.storage.set("devices", device_id, device)
         await self.runtime.state_engine.set(f"device.{device_id}", device["state"])
@@ -482,14 +480,55 @@ class DevicesPlugin(BasePlugin):
 
         Аргументы:
             device_id: id внутреннего устройства
-            state: частичное или полное состояние (словать)
+            state: желаемое состояние (словарь, например {"on": true})
 
-        Поведение: обновляет storage и state_engine, публикует событие.
+        Поведение:
+        1. Получить текущее состояние из storage
+        2. Обновить desired + установить pending=true
+        3. Сохранить в storage и state_engine
+        4. Опубликовать internal.device_command_requested
         """
-        # Вместо прямого изменения состояния публикуем запрос на команду
-        # в event_bus — чтобы внешние интеграции (например, Yandex) могли
-        # выполнить команду на физическом устройстве и затем сообщить
-        # об обновлённом состоянии через external.device_state_reported.
+        # Получить текущее состояние устройства
+        try:
+            device = await self.runtime.storage.get("devices", device_id)
+        except Exception:
+            device = None
+
+        if device is None:
+            raise ValueError(f"device {device_id} not found")
+
+        # Обновить состояние: desired + pending
+        current_state = device.get("state", {})
+        if not isinstance(current_state, dict):
+            current_state = {"desired": {}, "reported": {}, "pending": False}
+
+        # Обеспечить наличие всех полей
+        if "desired" not in current_state:
+            current_state["desired"] = {}
+        if "reported" not in current_state:
+            current_state["reported"] = {}
+        if "pending" not in current_state:
+            current_state["pending"] = False
+
+        # Обновить desired состояние (слияние нового состояния)
+        if isinstance(state, dict):
+            current_state["desired"].update(state)
+
+        # Установить флаг pending
+        current_state["pending"] = True
+
+        # Сохранить обновленное состояние
+        device["state"] = current_state
+        try:
+            await self.runtime.storage.set("devices", device_id, device)
+        except Exception as e:
+            raise ValueError(f"failed to update device state: {e}")
+
+        # Обновить state_engine
+        try:
+            await self.runtime.state_engine.set(f"device.{device_id}", current_state)
+        except Exception:
+            pass
 
         # Найти внешний id по маппингу (devices_mappings: external_id -> internal_id)
         external_id = None
@@ -543,9 +582,8 @@ class DevicesPlugin(BasePlugin):
             except Exception:
                 pass
 
-        # Возвращаем подтверждение приёма команды — окончательное состояние
-        # придёт по событию external.device_state_reported
-        return {"ok": True, "queued": True, "external_id": external_id}
+        # Возвращаем подтверждение приёма команды с текущим состоянием
+        return {"ok": True, "queued": True, "external_id": external_id, "state": current_state}
 
     # ----- Сервисы -----
     async def list_devices(self) -> List[Dict[str, Any]]:

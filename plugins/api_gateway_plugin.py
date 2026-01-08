@@ -76,11 +76,10 @@ class ApiGatewayPlugin(BasePlugin):
                     except Exception:
                         body = None
 
+                    # Передаём body отдельно от query/path params только если он не None
+                    # Не мержим body в params, чтобы сохранить структуру данных
                     if body is not None:
-                        if isinstance(body, dict):
-                            params.update(body)
-                        else:
-                            params["body"] = body
+                        params["body"] = body
 
                     if not self.runtime.service_registry.has_service(endpoint.service):
                         raise HTTPException(status_code=404, detail="service not found")
@@ -88,6 +87,9 @@ class ApiGatewayPlugin(BasePlugin):
                     try:
                         result = await self.runtime.service_registry.call(endpoint.service, **params)
                     except Exception as e:
+                        # Map ValueError from services to HTTP 400 (bad request)
+                        if isinstance(e, ValueError):
+                            raise HTTPException(status_code=400, detail=str(e))
                         raise HTTPException(status_code=500, detail=str(e))
 
                     return result

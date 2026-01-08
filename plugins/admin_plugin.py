@@ -67,16 +67,88 @@ class AdminPlugin(BasePlugin):
         async def admin_devices_set_state(id: str = None, body: Any = None, **kwargs):
             # Accept path param 'id' and request body as 'body'
             device_id = id or kwargs.get("device_id") or kwargs.get("deviceId")
-            state = body if isinstance(body, dict) else kwargs.get("state")
+
+            # Log incoming payload for debugging
+            try:
+                await self.runtime.service_registry.call(
+                    "logger.log",
+                    level="debug",
+                    message="admin_devices_set_state called",
+                    plugin=self.metadata.name,
+                    context={"id": device_id, "body": body, "kwargs": kwargs},
+                )
+            except Exception:
+                pass
+
+            # body содержит полный JSON из POST запроса
+            # Expected format: {state: {on: boolean}} или {on: boolean}
+            state = None
+            if isinstance(body, dict):
+                if "state" in body and isinstance(body["state"], dict):
+                    state = body["state"]
+                else:
+                    # treat body itself as state
+                    state = body
+            
+            if state is None or not isinstance(state, dict):
+                state = {}
+
+            # Normalize 'on' property to boolean
+            if "on" in state:
+                on_val = state["on"]
+                if isinstance(on_val, str):
+                    # Convert string "on"/"true" to boolean
+                    state["on"] = on_val.lower() in ("on", "true", "1", "yes")
+                else:
+                    state["on"] = bool(on_val)
+            
+            # Support legacy 'power' property for backwards compatibility
+            if "power" in state and "on" not in state:
+                power_val = state.pop("power")
+                if isinstance(power_val, str):
+                    state["on"] = power_val.lower() in ("on", "true", "1", "yes")
+                else:
+                    state["on"] = bool(power_val)
+
             if not device_id:
                 raise ValueError("device id is required")
-            if state is None:
-                raise ValueError("state body is required")
-            # Proxy call to devices.set_state
-            return await self.runtime.service_registry.call("devices.set_state", device_id, state)
+            if "on" not in state:
+                raise ValueError("state must contain 'on' property (boolean), e.g. {\"state\": {\"on\": true}}")
 
-        async def admin_devices_list_external(provider: Optional[str] = None):
-            return await self.runtime.service_registry.call("devices.list_external", provider)
+            # Proxy call to devices.set_state
+            try:
+                return await self.runtime.service_registry.call("devices.set_state", device_id, state)
+            except Exception as e:
+                # Log and re-raise to let api_gateway map to HTTP error
+                try:
+                    await self.runtime.service_registry.call(
+                        "logger.log",
+                        level="error",
+                        message=f"admin_devices_set_state proxy error: {e}",
+                        plugin=self.metadata.name,
+                    )
+                except Exception:
+                    pass
+                raise
+
+        async def admin_devices_list_external(provider: Optional[str] = None, **kwargs):
+            # provider может прийти из path params {provider}
+            if provider is None:
+                provider = kwargs.get("provider")
+            try:
+                return await self.runtime.service_registry.call("devices.list_external", provider)
+            except Exception as e:
+                try:
+                    await self.runtime.service_registry.call(
+                        "logger.log",
+                        level="error",
+                        message=f"admin_devices_list_external error: {e}",
+                        plugin=self.metadata.name,
+                        context={"provider": provider},
+                    )
+                except Exception:
+                    pass
+                raise
 
         self.runtime.service_registry.register("admin.devices.list", admin_devices_list)
         self.runtime.service_registry.register("admin.devices.get", admin_devices_get)

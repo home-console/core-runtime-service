@@ -26,6 +26,7 @@
 from __future__ import annotations
 
 from typing import Any, Dict, Optional
+import asyncio
 
 from plugins.base_plugin import BasePlugin, PluginMetadata
 
@@ -555,17 +556,11 @@ class YandexSmartHomeRealPlugin(BasePlugin):
 
                         # Проверяем статус ответа
                         if 200 <= resp.status < 300:
-                            # Успешный ответ — публикуем внешнее событие об обновлении состояния
+                            # Успешный ответ — не публикуем state сразу,
+                            # а запускаем background polling для получения актуального
+                            # состояния устройства через GET /v1.0/devices.
                             try:
-                                await self.runtime.event_bus.publish(
-                                    "external.device_state_reported",
-                                    {
-                                        "external_id": external_id,
-                                        "state": params,
-                                    }
-                                )
-
-                                # Сохраняем факт успешной отправки команды в лог
+                                # логируем факт успешной отправки команды
                                 try:
                                     await self.runtime.service_registry.call(
                                         "logger.log",
@@ -577,16 +572,104 @@ class YandexSmartHomeRealPlugin(BasePlugin):
                                 except Exception:
                                     pass
 
-                            except Exception as e:
-                                try:
-                                    await self.runtime.service_registry.call(
-                                        "logger.log",
-                                        level="warning",
-                                        message=f"Failed to publish external.device_state_reported: {e}",
-                                        plugin=self.metadata.name,
-                                    )
-                                except Exception:
-                                    pass
+                                async def _poll_and_publish():
+                                    await asyncio.sleep(1.5)
+                                    try:
+                                        async with aiohttp.ClientSession() as poll_sess:
+                                            poll_url = "https://api.iot.yandex.net/v1.0/devices"
+                                            try:
+                                                async with poll_sess.get(poll_url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as poll_resp:
+                                                    poll_text = await poll_resp.text()
+                                                    try:
+                                                        poll_json = await poll_resp.json()
+                                                    except Exception:
+                                                        poll_json = None
+
+                                                    # Лог ответа пуллинга
+                                                    try:
+                                                        await self.runtime.service_registry.call(
+                                                            "logger.log",
+                                                            level="debug",
+                                                            message=f"Yandex devices poll response",
+                                                            plugin=self.metadata.name,
+                                                            context={
+                                                                "url": poll_url,
+                                                                "status_code": poll_resp.status,
+                                                                "response_body": (poll_text or '')[:1000],
+                                                            }
+                                                        )
+                                                    except Exception:
+                                                        pass
+
+                                                    if 200 <= poll_resp.status < 300 and isinstance(poll_json, dict):
+                                                        devices_list = poll_json.get("devices") or []
+                                                        # Найти устройство по external_id
+                                                        target = None
+                                                        for d in devices_list:
+                                                            if d.get("id") == external_id:
+                                                                target = d
+                                                                break
+
+                                                        if target is not None:
+                                                            # Извлечь состояние через существующий helper
+                                                            caps = self._extract_capabilities(target.get("capabilities", []))
+                                                            state = self._extract_state(target.get("states", []), caps)
+                                                            reported = {"provider": "yandex", "external_id": external_id, "state": {}}
+                                                            if isinstance(state, dict) and "on" in state:
+                                                                reported["state"]["on"] = state["on"]
+
+                                                            # Публикуем, только если нашли on/off
+                                                            if reported["state"]:
+                                                                try:
+                                                                    await self.runtime.event_bus.publish("external.device_state_reported", reported)
+                                                                except Exception:
+                                                                    try:
+                                                                        await self.runtime.service_registry.call(
+                                                                            "logger.log",
+                                                                            level="warning",
+                                                                            message=f"Failed to publish external.device_state_reported after poll for {external_id}",
+                                                                            plugin=self.metadata.name,
+                                                                        )
+                                                                    except Exception:
+                                                                        pass
+                                                    else:
+                                                        # логируем неуспешный poll
+                                                        try:
+                                                            await self.runtime.service_registry.call(
+                                                                "logger.log",
+                                                                level="warning",
+                                                                message=f"Yandex poll failed for {external_id}: HTTP {poll_resp.status}",
+                                                                plugin=self.metadata.name,
+                                                            )
+                                                        except Exception:
+                                                            pass
+                                            except aiohttp.ClientError as e:
+                                                try:
+                                                    await self.runtime.service_registry.call(
+                                                        "logger.log",
+                                                        level="error",
+                                                        message=f"Network error during Yandex devices poll for {external_id}: {e}",
+                                                        plugin=self.metadata.name,
+                                                    )
+                                                except Exception:
+                                                    pass
+                                    except Exception:
+                                        # Защищаем пуллинг от падений
+                                        try:
+                                            await self.runtime.service_registry.call(
+                                                "logger.log",
+                                                level="error",
+                                                message=f"Unexpected error in poll task for {external_id}",
+                                                plugin=self.metadata.name,
+                                            )
+                                        except Exception:
+                                            pass
+
+                                # Запускаем фоновую задачу пуллинга (не ждём её)
+                                asyncio.create_task(_poll_and_publish())
+
+                            except Exception:
+                                pass
                         else:
                             # Ошибка от API — НЕ публикуем event, логируем ошибку
                             try:
