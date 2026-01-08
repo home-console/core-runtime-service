@@ -370,6 +370,271 @@ class YandexSmartHomeRealPlugin(BasePlugin):
         except Exception:
             pass
 
+        # Подписаться на внутренние запросы команд от devices_plugin
+        async def _internal_command_handler(event_type: str, data: dict):
+            # Ожидаемый формат payload'а:
+            # {
+            #   "internal_id": "...",
+            #   "external_id": "...",
+            #   "provider": "yandex",
+            #   "command": "set_state",
+            #   "params": { ... }
+            # }
+            try:
+                provider = data.get("provider")
+            except Exception:
+                return
+
+            if provider != "yandex":
+                return
+
+            external_id = data.get("external_id")
+            params = data.get("params", {}) or {}
+
+            if not external_id:
+                # Нечем управлять
+                try:
+                    await self.runtime.service_registry.call(
+                        "logger.log",
+                        level="warning",
+                        message=f"internal.device_command_requested missing external_id: {data}",
+                        plugin=self.metadata.name,
+                    )
+                except Exception:
+                    pass
+                return
+
+            # Проверить авторизацию через oauth_yandex
+            try:
+                status = await self.runtime.service_registry.call("oauth_yandex.get_status")
+            except Exception:
+                status = None
+
+            if not status or not status.get("authorized"):
+                try:
+                    await self.runtime.service_registry.call(
+                        "logger.log",
+                        level="warning",
+                        message=f"Yandex not authorized, cannot send command for {external_id}",
+                        plugin=self.metadata.name,
+                    )
+                except Exception:
+                    pass
+                return
+
+            try:
+                tokens = await self.runtime.service_registry.call("oauth_yandex.get_tokens")
+            except Exception:
+                tokens = None
+
+            if not tokens or "access_token" not in tokens:
+                try:
+                    await self.runtime.service_registry.call(
+                        "logger.log",
+                        level="warning",
+                        message=f"No access token available for sending command to {external_id}",
+                        plugin=self.metadata.name,
+                    )
+                except Exception:
+                    pass
+                return
+
+            access_token = tokens["access_token"]
+
+            # Отправляем команду в реальный API Яндекса, используя официальный формат.
+            # API Яндекса ожидает:
+            # POST https://api.iot.yandex.net/v1.0/devices/actions
+            # {
+            #   "devices": [{
+            #     "id": "<device_id>",
+            #     "actions": [{
+            #       "type": "devices.capabilities.on_off",
+            #       "state": {"instance": "on", "value": true}
+            #     }]
+            #   }]
+            # }
+
+            try:
+                import aiohttp
+            except ImportError:
+                try:
+                    await self.runtime.service_registry.call(
+                        "logger.log",
+                        level="error",
+                        message="aiohttp not installed; cannot send command to Yandex",
+                        plugin=self.metadata.name,
+                    )
+                except Exception:
+                    pass
+                return
+
+            # Конвертируем params в действия по Яндекс API (devices.capabilities.*)
+            actions = []
+            
+            # Простая конверсия: if params has "on" -> devices.capabilities.on_off
+            if "on" in params:
+                actions.append({
+                    "type": "devices.capabilities.on_off",
+                    "state": {
+                        "instance": "on",
+                        "value": params["on"]
+                    }
+                })
+
+            # Если есть яркость -> brightness capability
+            if "brightness" in params:
+                actions.append({
+                    "type": "devices.capabilities.range",
+                    "state": {
+                        "instance": "brightness",
+                        "value": params["brightness"]
+                    }
+                })
+
+            # TODO: добавить другие capabilities (temperature, color_setting, etc.)
+
+            # Формируем правильный payload по официальному формату Яндекса
+            url = "https://api.iot.yandex.net/v1.0/devices/actions"
+            headers = {
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json",
+            }
+
+            request_body = {
+                "devices": [
+                    {
+                        "id": external_id,
+                        "actions": actions
+                    }
+                ]
+            }
+
+            # Логируем исходящий запрос
+            try:
+                await self.runtime.service_registry.call(
+                    "logger.log",
+                    level="debug",
+                    message=f"Yandex command request",
+                    plugin=self.metadata.name,
+                    context={
+                        "url": url,
+                        "method": "POST",
+                        "device_id": external_id,
+                        "actions": actions,
+                        "params": params,
+                    }
+                )
+            except Exception:
+                pass
+
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        url,
+                        headers=headers,
+                        json=request_body,
+                        timeout=aiohttp.ClientTimeout(total=10)
+                    ) as resp:
+                        response_text = await resp.text()
+
+                        # Логируем ответ
+                        try:
+                            await self.runtime.service_registry.call(
+                                "logger.log",
+                                level="debug",
+                                message=f"Yandex API response",
+                                plugin=self.metadata.name,
+                                context={
+                                    "url": url,
+                                    "status_code": resp.status,
+                                    "response_body": response_text[:500],  # Первые 500 символов
+                                }
+                            )
+                        except Exception:
+                            pass
+
+                        # Проверяем статус ответа
+                        if 200 <= resp.status < 300:
+                            # Успешный ответ — публикуем внешнее событие об обновлении состояния
+                            try:
+                                await self.runtime.event_bus.publish(
+                                    "external.device_state_reported",
+                                    {
+                                        "external_id": external_id,
+                                        "state": params,
+                                    }
+                                )
+
+                                # Сохраняем факт успешной отправки команды в лог
+                                try:
+                                    await self.runtime.service_registry.call(
+                                        "logger.log",
+                                        level="info",
+                                        message=f"Command sent successfully to Yandex device {external_id}",
+                                        plugin=self.metadata.name,
+                                        context={"state": params}
+                                    )
+                                except Exception:
+                                    pass
+
+                            except Exception as e:
+                                try:
+                                    await self.runtime.service_registry.call(
+                                        "logger.log",
+                                        level="warning",
+                                        message=f"Failed to publish external.device_state_reported: {e}",
+                                        plugin=self.metadata.name,
+                                    )
+                                except Exception:
+                                    pass
+                        else:
+                            # Ошибка от API — НЕ публикуем event, логируем ошибку
+                            try:
+                                await self.runtime.service_registry.call(
+                                    "logger.log",
+                                    level="error",
+                                    message=f"Yandex API error: HTTP {resp.status}",
+                                    plugin=self.metadata.name,
+                                    context={
+                                        "device_id": external_id,
+                                        "status": resp.status,
+                                        "response": response_text[:500],
+                                    }
+                                )
+                            except Exception:
+                                pass
+
+            except aiohttp.ClientError as e:
+                # Сетевая ошибка
+                try:
+                    await self.runtime.service_registry.call(
+                        "logger.log",
+                        level="error",
+                        message=f"Network error sending command to Yandex device {external_id}: {type(e).__name__}: {e}",
+                        plugin=self.metadata.name,
+                    )
+                except Exception:
+                    pass
+
+            except Exception as e:
+                # Прочие ошибки
+                try:
+                    await self.runtime.service_registry.call(
+                        "logger.log",
+                        level="error",
+                        message=f"Error sending command to Yandex device {external_id}: {type(e).__name__}: {e}",
+                        plugin=self.metadata.name,
+                    )
+                except Exception:
+                    pass
+
+        # Сохранить хендлер и подписаться
+        self._internal_command_handler = _internal_command_handler
+        try:
+            self.runtime.event_bus.subscribe("internal.device_command_requested", self._internal_command_handler)
+        except Exception:
+            pass
+
     async def on_stop(self) -> None:
         """Остановка: логируем завершение."""
         await super().on_stop()

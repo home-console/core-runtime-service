@@ -486,7 +486,66 @@ class DevicesPlugin(BasePlugin):
 
         Поведение: обновляет storage и state_engine, публикует событие.
         """
-        return await self._change_state(device_id, state)
+        # Вместо прямого изменения состояния публикуем запрос на команду
+        # в event_bus — чтобы внешние интеграции (например, Yandex) могли
+        # выполнить команду на физическом устройстве и затем сообщить
+        # об обновлённом состоянии через external.device_state_reported.
+
+        # Найти внешний id по маппингу (devices_mappings: external_id -> internal_id)
+        external_id = None
+        try:
+            keys = await self.runtime.storage.list_keys("devices_mappings")
+        except Exception:
+            keys = []
+
+        for k in keys:
+            try:
+                v = await self.runtime.storage.get("devices_mappings", k)
+            except Exception:
+                v = None
+            if v == device_id:
+                external_id = k
+                break
+
+        # Попробуем определить провайдера из сохранённого внешнего payload, если есть
+        provider = None
+        if external_id:
+            try:
+                payload = await self.runtime.storage.get("devices_external", external_id)
+                if isinstance(payload, dict):
+                    provider = payload.get("provider")
+            except Exception:
+                provider = None
+
+        if not provider:
+            # По умолчанию считаем провайдером Yandex, но это можно расширить
+            provider = "yandex"
+
+        event_payload = {
+            "internal_id": device_id,
+            "external_id": external_id,
+            "provider": provider,
+            "command": "set_state",
+            "params": state,
+        }
+
+        try:
+            await self.runtime.event_bus.publish("internal.device_command_requested", event_payload)
+        except Exception:
+            # Ошибки публикации не должны ломать основной поток
+            try:
+                await self.runtime.service_registry.call(
+                    "logger.log",
+                    level="warning",
+                    message=f"Failed to publish internal.device_command_requested for {device_id}",
+                    plugin=self.metadata.name,
+                )
+            except Exception:
+                pass
+
+        # Возвращаем подтверждение приёма команды — окончательное состояние
+        # придёт по событию external.device_state_reported
+        return {"ok": True, "queued": True, "external_id": external_id}
 
     # ----- Сервисы -----
     async def list_devices(self) -> List[Dict[str, Any]]:
