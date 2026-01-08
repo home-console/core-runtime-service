@@ -82,14 +82,18 @@ async def test_admin_devices_end_to_end(memory_adapter):
     # Ensure current state is off
     d = await _call_http(runtime, "GET", "/admin/v1/devices/dev_integ_1")
     assert d["id"] == "dev_integ_1"
-    assert d["state"].get("power") in ("off", None)
+    # New state model: {desired, reported, pending}
+    assert d["state"]["desired"]["on"] is False
+    assert d["state"]["reported"]["on"] is False
 
     # POST to set state -> turn on
     await _call_http(runtime, "POST", "/admin/v1/devices/dev_integ_1/state", {"power": "on"})
 
     # Verify state changed
     d2 = await runtime.service_registry.call("devices.get", "dev_integ_1")
-    assert d2["state"].get("power") == "on"
+    # Check that desired state was updated and pending is set
+    assert d2["state"]["desired"]["on"] is True
+    assert d2["state"]["pending"] is True
 
     # Shutdown
     await runtime.shutdown()

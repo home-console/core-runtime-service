@@ -42,7 +42,11 @@ async def test_state_propagation_via_event_bus(memory_adapter):
             "id": internal_id,
             "name": "Test Light",
             "type": "light",
-            "state": {"on": False, "brightness": 0},
+            "state": {
+                "desired": {"on": False, "brightness": 0},
+                "reported": {"on": False, "brightness": 0},
+                "pending": False,
+            },
         }
         await runtime.storage.set("devices", internal_id, internal_device)
         await runtime.storage.set("devices_mappings", external_id, internal_id)
@@ -68,8 +72,11 @@ async def test_state_propagation_via_event_bus(memory_adapter):
         # 4. Verify internal device state was updated
         updated_device = await runtime.storage.get("devices", internal_id)
         assert updated_device is not None
-        assert updated_device["state"]["on"] is True
-        assert updated_device["state"]["brightness"] == 75
+        # New state model: {desired, reported, pending}
+        assert updated_device["state"]["reported"]["on"] is True
+        assert updated_device["state"]["reported"]["brightness"] == 75
+        # After external confirmation, pending should be False
+        assert updated_device["state"]["pending"] is False
 
         # 5. Verify internal.device_state_updated event was published
         assert len(published_events) > 0
@@ -77,8 +84,8 @@ async def test_state_propagation_via_event_bus(memory_adapter):
         assert event["type"] == "internal.device_state_updated"
         assert event["data"]["internal_id"] == internal_id
         assert event["data"]["external_id"] == external_id
-        assert event["data"]["new_state"]["on"] is True
-        assert event["data"]["new_state"]["brightness"] == 75
+        assert event["data"]["new_state"]["reported"]["on"] is True
+        assert event["data"]["new_state"]["reported"]["brightness"] == 75
 
         print("✓ State propagation test passed")
         print(f"  External state: {external_state_update['state']}")
@@ -139,10 +146,19 @@ async def test_state_propagation_merge(memory_adapter):
 
         # Create internal device with initial state
         initial_state = {
-            "on": True,
-            "mode": "cool",
-            "temperature": 20,
-            "custom_field": "should_persist",
+            "desired": {
+                "on": True,
+                "mode": "cool",
+                "temperature": 20,
+                "custom_field": "should_persist",
+            },
+            "reported": {
+                "on": True,
+                "mode": "cool",
+                "temperature": 20,
+                "custom_field": "should_persist",
+            },
+            "pending": False,
         }
         internal_device = {
             "id": internal_id,
@@ -170,12 +186,14 @@ async def test_state_propagation_merge(memory_adapter):
         updated_device = await runtime.storage.get("devices", internal_id)
         merged_state = updated_device["state"]
 
-        # Updated fields
-        assert merged_state["on"] is False
-        assert merged_state["temperature"] == 22
+        # Updated fields in reported state
+        assert merged_state["reported"]["on"] is False
+        assert merged_state["reported"]["temperature"] == 22
         # Preserved fields
-        assert merged_state["mode"] == "cool"
-        assert merged_state["custom_field"] == "should_persist"
+        assert merged_state["reported"]["mode"] == "cool"
+        assert merged_state["reported"]["custom_field"] == "should_persist"
+        # Pending should be False after external confirmation
+        assert merged_state["pending"] is False
 
         print("✓ State merge test passed")
         print(f"  Initial state: {initial_state}")

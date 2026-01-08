@@ -8,488 +8,191 @@
 адаптеры или другие плагины.
 """
 
-# Пояснение по границе ответственности:
-# - "devices" (постфикс в storage/state) — это доменные устройства, которыми
-#   управляет система (внутренние сущности). Они сохраняются в `storage`
-#   под namespace "devices" и их состояние отражается в `state_engine`
-#   по ключам вида `device.<id>`.
-# - "devices.external.*" — это сырые payload'ы внешних интеграций (например,
-#   события от провайдеров). Эти записи НЕ считаются доменными устройствами и
-#   не должны автоматически маппиться или преобразовываться. Они хранятся
-#   в `state_engine` как вспомогательные данные интеграции и отделены по
-#   пространству имён (ключи `devices.external.<external_id>`).
-
-
 from typing import Any, Dict, List, Optional
 import copy
 
-from core.http_registry import HttpEndpoint
 from plugins.base_plugin import BasePlugin, PluginMetadata
 
 
 class DevicesPlugin(BasePlugin):
     """Плагин для управления устройствами.
 
-    Модель устройства (внутренняя для плагина):
+    Модель устройства (в storage):
       - id: str
       - name: str
       - type: str
-      - state: dict
+      - state:
+          desired: dict    # желаемое состояние
+          reported: dict   # подтверждённое состояние от провайдера
+          pending: bool    # ожидается ли подтверждение
+
+    Источник истины: storage["devices"]
+    Кеш/read-model: state_engine[f"device.{id}"] = state
     """
 
     @property
     def metadata(self) -> PluginMetadata:
         return PluginMetadata(
             name="devices",
-            version="0.1.0",
+            version="1.0.0",
             description="Плагин для хранения и управления устройствами",
             author="Home Console",
         )
 
     async def on_load(self) -> None:
-        """Сохранить runtime и зарегистрировать сервисы.
-
-        Не выполнять тяжёлых операций здесь.
-        """
+        """Регистрация сервисов."""
         await super().on_load()
-        # Регистрируем сервисы
+        
+        # Основные сервисы для работы с устройствами
         self.runtime.service_registry.register("devices.list", self.list_devices)
         self.runtime.service_registry.register("devices.get", self.get_device)
         self.runtime.service_registry.register("devices.create", self.create_device)
-        # Универсальное изменение состояния
+        
+        # Единственный способ изменить состояние устройства
         self.runtime.service_registry.register("devices.set_state", self.set_state)
-        # Сохраним старые удобные вызовы для обратной совместимости
-        self.runtime.service_registry.register("devices.turn_on", self.turn_on)
-        self.runtime.service_registry.register("devices.turn_off", self.turn_off)
-        # Список внешних устройств от провайдеров
+        
+        # Список внешних устройств
         self.runtime.service_registry.register("devices.list_external", self.list_external)
-        # Временный сервис для сопоставления внешнего устройства с внутренним id
-        # Сохраняет соответствие в runtime.state_engine по ключу
-        # "devices.mapping.<external_id>" -> internal_id
-        # Этот сервис НЕ создаёт internal устройство и НЕ копирует payload.
-        async def _map_external_device(external_id: str, internal_id: str) -> None:
-            """Сохранить mapping внешнего устройства.
-
-            Ограничения:
-            - не создавать internal device
-            - не копировать payload
-            - только сохраняет соответствие в state_engine
-            """
-            if not external_id or not internal_id:
-                raise ValueError("external_id и internal_id должны быть непустыми строками")
-
-            try:
-                # Сохраняем маппинг и в persistent storage для долговечности
-                await self.runtime.state_engine.set(f"devices.mapping.{external_id}", internal_id)
-                try:
-                    await self.runtime.storage.set("devices_mappings", external_id, internal_id)
-                except Exception:
-                    # Не фатально, оставляем в state_engine
-                    pass
-            except Exception:
-                # Не мешаем основной логике плагина при ошибке записи
-                raise
-
-        self.runtime.service_registry.register("devices.map_external_device", _map_external_device)
-        # Backwards-compatible and clearer API for mappings
-        async def create_mapping(external_id: str, internal_id: str) -> Dict[str, Any]:
-            await _map_external_device(external_id, internal_id)
-            return {"ok": True, "external_id": external_id, "internal_id": internal_id}
-
-        async def list_mappings() -> List[Dict[str, Any]]:
-            try:
-                keys = await self.runtime.storage.list_keys("devices_mappings")
-            except Exception:
-                keys = []
-            out: List[Dict[str, Any]] = []
-            for k in keys:
-                try:
-                    v = await self.runtime.storage.get("devices_mappings", k)
-                except Exception:
-                    v = None
-                if v is None:
-                    continue
-                out.append({"external_id": k, "internal_id": v})
-            return out
-
-        async def delete_mapping(external_id: str) -> Dict[str, Any]:
-            if not external_id:
-                return {"ok": False, "error": "external_id required"}
-            try:
-                deleted = await self.runtime.storage.delete("devices_mappings", external_id)
-            except Exception:
-                deleted = False
-            try:
-                # Clear state_engine mirror
-                await self.runtime.state_engine.set(f"devices.mapping.{external_id}", None)
-            except Exception:
-                pass
-            return {"ok": bool(deleted), "external_id": external_id}
-
-        self.runtime.service_registry.register("devices.create_mapping", create_mapping)
-        self.runtime.service_registry.register("devices.list_mappings", list_mappings)
-        self.runtime.service_registry.register("devices.delete_mapping", delete_mapping)
-
-        async def auto_map_external(provider: Optional[str] = None) -> Dict[str, Any]:
-            """Automatically create internal devices for unmapped external devices from provider.
-
-            Creates internal devices with id "<provider>-<external_id>" and name from payload if available.
-            Returns summary: {created: int, skipped: int, errors: [...]}
-            """
-            created = 0
-            skipped = 0
-            errors: List[str] = []
-
-            # Get external devices
-            try:
-                externals = await self.list_external(provider)
-            except Exception as e:
-                return {"ok": False, "error": f"failed_list_external: {e}"}
-
-            for item in externals:
-                ext_id = item.get("external_id") if isinstance(item, dict) else None
-                payload = item.get("payload") if isinstance(item, dict) else item
-                if not ext_id:
-                    continue
-
-                # Check existing mapping
-                try:
-                    existing = await self.runtime.storage.get("devices_mappings", ext_id)
-                except Exception:
-                    existing = None
-                if existing:
-                    skipped += 1
-                    continue
-
-                # Prepare internal id and attributes
-                internal_id = f"{provider}-{ext_id}" if provider else f"external-{ext_id}"
-                name = None
-                try:
-                    if isinstance(payload, dict):
-                        name = payload.get("name") or payload.get("title")
-                except Exception:
-                    name = None
-                if not name:
-                    name = f"{payload.get('type','device')}-{ext_id[:6]}" if isinstance(payload, dict) else internal_id
-                device_type = payload.get("type") if isinstance(payload, dict) else "generic"
-
-                # Create internal device (skip if exists)
-                try:
-                    # Use create_device service; it will raise if id exists
-                    await self.create_device(internal_id, name, device_type)
-                except Exception:
-                    # If creation failed due to existing id or other, continue and attempt mapping if possible
-                    try:
-                        dev = await self.runtime.storage.get("devices", internal_id)
-                        if not dev:
-                            raise
-                    except Exception as ce:
-                        errors.append(f"create_failed:{ext_id}:{ce}")
-                        continue
-
-                # Create mapping
-                try:
-                    await self.runtime.storage.set("devices_mappings", ext_id, internal_id)
-                    try:
-                        await self.runtime.state_engine.set(f"devices.mapping.{ext_id}", internal_id)
-                    except Exception:
-                        pass
-                    created += 1
-                except Exception as e:
-                    errors.append(f"mapping_failed:{ext_id}:{e}")
-
-            return {"ok": True, "created": created, "skipped": skipped, "errors": errors}
-
-        self.runtime.service_registry.register("devices.auto_map_external", auto_map_external)
-        # Регистрируем HTTP-контракты через runtime.http
-        # Devices plugin не регистрирует публичные admin HTTP-эндпоинты —
-        # за это отвечает admin_plugin (прокси). Оставляем регистрацию пустой.
-        try:
-            pass
-        except Exception:
-            pass
-        # Ensure new services are unregistered on unload as well
+        
+        # Mapping сервисы
+        self.runtime.service_registry.register("devices.create_mapping", self.create_mapping)
+        self.runtime.service_registry.register("devices.list_mappings", self.list_mappings)
+        self.runtime.service_registry.register("devices.delete_mapping", self.delete_mapping)
+        self.runtime.service_registry.register("devices.auto_map_external", self.auto_map_external)
 
     async def on_start(self) -> None:
-        """Инициализация runtime-state для устройств при старте.
-
-        Загружает список устройств из персистентного хранилища и выставляет
-        текущее состояние в `runtime.state_engine` ключи вида `device.{id}`.
-        """
+        """Инициализация при старте: загрузка устройств и миграция состояния."""
         await super().on_start()
-        # Инициализируем состояние для всех устройств (не удаляем данные)
+        
         try:
             keys = await self.runtime.storage.list_keys("devices")
         except Exception:
-            # Если storage недоступен — ничего не делаем на старте
             return
 
+        # Миграция legacy-состояний и восстановление read-model в state_engine
         for dev_id in keys:
             device = await self.runtime.storage.get("devices", dev_id)
             if device is None:
                 continue
+            
             state_value = device.get("state")
-            # Миграция старой модели состояния в новую структуру {desired, reported, pending}
-            try:
-                if not isinstance(state_value, dict) or not ("desired" in state_value and "reported" in state_value and "pending" in state_value):
-                    # legacy formats: {"power": "off"} or arbitrary dict — приводим к новой модели
-                    desired = {}
-                    reported = {}
-                    pending = False
-                    if isinstance(state_value, dict):
-                        # Если есть ключы как on/\"power\", конвертируем
-                        if "power" in state_value and "on" not in desired:
-                            desired["on"] = True if state_value.get("power") in (True, "on", "true", 1, "1") else False
-                            reported["on"] = desired["on"]
-                        if "on" in state_value:
-                            desired["on"] = bool(state_value.get("on"))
-                            reported["on"] = desired["on"]
-                    new_state = {"desired": desired or {"on": False}, "reported": reported or {"on": False}, "pending": pending}
-                    device["state"] = new_state
-                    try:
-                        await self.runtime.storage.set("devices", dev_id, device)
-                    except Exception:
-                        pass
-                    await self.runtime.state_engine.set(f"device.{dev_id}", new_state)
-                else:
-                    await self.runtime.state_engine.set(f"device.{dev_id}", state_value)
-            except Exception:
-                # в случае ошибки миграции просто ставим текущее значение в state_engine
+            
+            # Миграция legacy-состояний → {desired, reported, pending}
+            if not isinstance(state_value, dict) or \
+               not all(k in state_value for k in ["desired", "reported", "pending"]):
+                # Конвертируем старый формат в новый
+                new_state = {
+                    "desired": {},
+                    "reported": {},
+                    "pending": False
+                }
+                
+                if isinstance(state_value, dict):
+                    # Пытаемся восстановить данные из legacy-полей
+                    if "power" in state_value:
+                        power_val = state_value.get("power")
+                        on_state = power_val in (True, "on", "true", 1, "1")
+                        new_state["desired"]["on"] = on_state
+                        new_state["reported"]["on"] = on_state
+                    elif "on" in state_value:
+                        on_state = bool(state_value.get("on"))
+                        new_state["desired"]["on"] = on_state
+                        new_state["reported"]["on"] = on_state
+                
+                # Если пусто, установим default
+                if not new_state["desired"] and not new_state["reported"]:
+                    new_state["desired"]["on"] = False
+                    new_state["reported"]["on"] = False
+                
+                device["state"] = new_state
                 try:
-                    await self.runtime.state_engine.set(f"device.{dev_id}", state_value)
+                    await self.runtime.storage.set("devices", dev_id, device)
                 except Exception:
                     pass
-
-        # Инициализируем external devices и mappings из storage, если есть
+        
+        # Подписываемся на события от внешних провайдеров
+        # Синхронизируем reported-состояние, когда провайдер подтверждает команду
+        self._external_state_handler = self._handle_external_state
         try:
-            ext_keys = await self.runtime.storage.list_keys("devices_external")
+            self.runtime.event_bus.subscribe(
+                "external.device_state_reported",
+                self._external_state_handler
+            )
         except Exception:
-            ext_keys = []
-
-        for ext_id in ext_keys:
-            payload = await self.runtime.storage.get("devices_external", ext_id)
-            if payload is None:
-                continue
-            # Дублируем в state_engine для быстрого доступа
-            try:
-                await self.runtime.state_engine.set(f"devices.external.{ext_id}", payload)
-            except Exception:
-                pass
-
-        # Загружаем маппинги в state_engine (если они были персистированы)
-        try:
-            map_keys = await self.runtime.storage.list_keys("devices_mappings")
-        except Exception:
-            map_keys = []
-
-        for k in map_keys:
-            try:
-                internal = await self.runtime.storage.get("devices_mappings", k)
-                if internal is not None:
-                    await self.runtime.state_engine.set(f"devices.mapping.{k}", internal)
-            except Exception:
-                pass
-
-        # --- Временная поддержка внешних устройств ---
-        # Подписываемся на событие внешнего провайдера о найденном устройстве
-        # Сохраняем payload в runtime.state_engine под ключом
-        # "devices.external.<external_id>" и логируем факт приёма.
-        async def _external_device_handler(event_type: str, data: dict):
-            # Извлекаем external_id из payload
-            external_id = data.get("external_id")
-            if not external_id:
-                return
-
-            # Сохраняем payload и в persistent storage для внешних устройств
-            try:
-                await self.runtime.storage.set("devices_external", external_id, data)
-            except Exception:
-                pass
-
-            # Также дублируем в state_engine для быстрого доступа
-            try:
-                await self.runtime.state_engine.set(f"devices.external.{external_id}", data)
-            except Exception:
-                pass
-
-            # Логируем приём устройства через logger, если он доступен
-            try:
-                await self.runtime.service_registry.call(
-                    "logger.log",
-                    level="info",
-                    message=f"External device accepted: {external_id}",
-                    plugin=self.metadata.name,
-                    context={"payload": data},
-                )
-            except Exception:
-                pass
-
-        # Сохранить хендлер для последующей отписки
-        self._external_device_handler = _external_device_handler
-        try:
-            self.runtime.event_bus.subscribe("external.device_discovered", self._external_device_handler)
-        except Exception:
-            # Подписка вспомогательная — не должна ломать старый функционал
             pass
 
-        # --- State propagation from external devices ---
-        # Подписываемся на события изменения состояния внешних устройств.
-        # Находим internal device через mapping и обновляем его состояние.
-        async def _external_state_handler(event_type: str, data: dict):
-            # Извлекаем external_id и state из события
-            external_id = data.get("external_id")
-            state = data.get("state")
-            if not external_id or state is None:
-                return
-
-            # Найти internal device через mapping
-            try:
-                internal_id = await self.runtime.storage.get("devices_mappings", external_id)
-            except Exception:
-                internal_id = None
-
-            if not internal_id:
-                # Нет маппинга — игнорируем событие
-                return
-
-            # Получить internal device
-            try:
-                device = await self.runtime.storage.get("devices", internal_id)
-            except Exception:
-                device = None
-
-            if device is None:
-                # Internal device не найден
-                return
-
-            # Обновить состояние internal device
-            old_state = device.get("state", {})
-            if not isinstance(old_state, dict):
-                old_state = {"desired": {}, "reported": {}, "pending": False}
-
-            # Обеспечить наличие всех полей
-            if "desired" not in old_state:
-                old_state["desired"] = {}
-            if "reported" not in old_state:
-                old_state["reported"] = {}
-            if "pending" not in old_state:
-                old_state["pending"] = False
-
-            # Сохраним копию старого состояния для публикации события
-            prev_state = copy.deepcopy(old_state)
-
-            # Обновить reported состояние (то что вернулось из провайдера)
-            if isinstance(state, dict):
-                old_state["reported"].update(state)
-
-            # Сбросить флаг pending (команда выполнена)
-            old_state["pending"] = False
-
-            new_state = old_state
-
-            # Сохранить обновленное состояние в storage
-            device["state"] = new_state
-            try:
-                await self.runtime.storage.set("devices", internal_id, device)
-            except Exception:
-                pass
-
-            # Обновить state_engine
-            try:
-                await self.runtime.state_engine.set(f"device.{internal_id}", new_state)
-            except Exception:
-                pass
-
-            # Опубликовать событие об обновлении состояния
-            try:
-                await self.runtime.event_bus.publish("internal.device_state_updated", {
-                    "internal_id": internal_id,
-                    "external_id": external_id,
-                    "old_state": prev_state,
-                    "new_state": new_state,
-                })
-            except Exception:
-                pass
-
-            # Логируем обновление состояния
-            try:
-                await self.runtime.service_registry.call(
-                    "logger.log",
-                    level="debug",
-                    message=f"State propagated: {external_id} → {internal_id}",
-                    plugin=self.metadata.name,
-                    context={"old": old_state, "new": new_state},
-                )
-            except Exception:
-                pass
-
-        # Сохранить хендлер для последующей отписки
-        self._external_state_handler = _external_state_handler
+        # Подписываемся на обнаружение новых внешних устройств
+        # Сохраняем их в storage для доступа через devices.list_external
+        self._external_device_handler = self._handle_external_device_discovered
         try:
-            self.runtime.event_bus.subscribe("external.device_state_reported", self._external_state_handler)
+            self.runtime.event_bus.subscribe(
+                "external.device_discovered",
+                self._external_device_handler
+            )
         except Exception:
-            # Подписка вспомогательная — не должна ломать старый функционал
             pass
 
     async def on_stop(self) -> None:
-        """Остановка плагина: не удаляем данные, не очищаем storage."""
+        """Остановка: отписка от событий."""
         await super().on_stop()
-        # Удаляем временные подписки
-        try:
-            handler = getattr(self, "_external_device_handler", None)
-            if handler:
-                self.runtime.event_bus.unsubscribe("external.device_discovered", handler)
-        except Exception:
-            pass
         try:
             handler = getattr(self, "_external_state_handler", None)
             if handler:
-                self.runtime.event_bus.unsubscribe("external.device_state_reported", handler)
+                self.runtime.event_bus.unsubscribe(
+                    "external.device_state_reported",
+                    handler
+                )
+        except Exception:
+            pass
+        try:
+            handler = getattr(self, "_external_device_handler", None)
+            if handler:
+                self.runtime.event_bus.unsubscribe(
+                    "external.device_discovered",
+                    handler
+                )
         except Exception:
             pass
 
     async def on_unload(self) -> None:
-        """Выгрузка плагина: удаляем сервисы и очищаем ссылки на runtime."""
+        """Выгрузка: удаление сервисов."""
         await super().on_unload()
-        # Удаляем сервисы
-        self.runtime.service_registry.unregister("devices.list")
-        self.runtime.service_registry.unregister("devices.get")
-        self.runtime.service_registry.unregister("devices.create")
-        self.runtime.service_registry.unregister("devices.turn_on")
-        self.runtime.service_registry.unregister("devices.turn_off")
-        # Удаляем временный сервис mapping
-        try:
-            self.runtime.service_registry.unregister("devices.map_external_device")
-        except Exception:
-            pass
-        try:
-            self.runtime.service_registry.unregister("devices.create_mapping")
-        except Exception:
-            pass
-        try:
-            self.runtime.service_registry.unregister("devices.list_mappings")
-        except Exception:
-            pass
-        try:
-            self.runtime.service_registry.unregister("devices.delete_mapping")
-        except Exception:
-            pass
-        try:
-            self.runtime.service_registry.unregister("devices.auto_map_external")
-        except Exception:
-            pass
-
-        # Очистить ссылку на runtime
+        
+        services = [
+            "devices.list",
+            "devices.get",
+            "devices.create",
+            "devices.set_state",
+            "devices.list_external",
+            "devices.create_mapping",
+            "devices.list_mappings",
+            "devices.delete_mapping",
+            "devices.auto_map_external",
+        ]
+        
+        for service in services:
+            try:
+                self.runtime.service_registry.unregister(service)
+            except Exception:
+                pass
+        
         self.runtime = None
 
-    async def create_device(self, device_id: str, name: str = "Unknown", device_type: str = "generic") -> Dict[str, Any]:
-        """Создать новое устройство.
+    # ========== СЕРВИСЫ ==========
 
+    async def create_device(
+        self,
+        device_id: str,
+        name: str = "Unknown",
+        device_type: str = "generic"
+    ) -> Dict[str, Any]:
+        """Создать новое устройство.
+        
         Модель состояния:
           state:
-            desired: {}      — желаемое состояние (что отправили)
-            reported: {}     — подтверждённое состояние (что вернулось)
-            pending: false   — есть ли ожидающаяся команда
+            desired: {}      — желаемое состояние
+            reported: {}     — подтверждённое состояние
+            pending: false   — ожидается ли подтверждение
         """
         if not isinstance(device_id, str) or not device_id:
             raise ValueError("device_id должен быть непустой строкой")
@@ -504,139 +207,120 @@ class DevicesPlugin(BasePlugin):
                 "pending": False,
             },
         }
+        
+        # Только пишем в storage; state_engine обновится через события
         await self.runtime.storage.set("devices", device_id, device)
-        await self.runtime.state_engine.set(f"device.{device_id}", device["state"])
+        
         return device
 
     async def set_state(self, device_id: str, state: Dict[str, Any]) -> Dict[str, Any]:
-        """Установить состояние устройства полностью или частично.
-
-        Аргументы:
-            device_id: id внутреннего устройства
-            state: желаемое состояние (словарь, например {"on": true})
-
-        Поведение:
-        1. Получить текущее состояние из storage
-        2. Обновить desired + установить pending=true
-        3. Сохранить в storage и state_engine
-        4. Опубликовать internal.device_command_requested
+        """Установить желаемое состояние устройства (отправить команду).
+        
+        Этот метод:
+        1. Читает устройство из storage
+        2. Обновляет state.desired
+        3. Устанавливает state.pending = True
+        4. Сохраняет в storage
+        5. Публикует событие internal.device_command_requested
+        
+        reported-состояние меняется ТОЛЬКО когда провайдер подтверждает команду
+        через событие external.device_state_reported.
         """
-        # Получить текущее состояние устройства
-        try:
-            device = await self.runtime.storage.get("devices", device_id)
-        except Exception:
-            device = None
-
+        if not isinstance(device_id, str) or not device_id:
+            raise ValueError("device_id должен быть непустой строкой")
+        
+        device = await self.runtime.storage.get("devices", device_id)
         if device is None:
             raise ValueError(f"device {device_id} not found")
 
-        # Обновить состояние: desired + pending
         current_state = device.get("state", {})
         if not isinstance(current_state, dict):
             current_state = {"desired": {}, "reported": {}, "pending": False}
 
-        # Обеспечить наличие всех полей
-        if "desired" not in current_state:
-            current_state["desired"] = {}
-        if "reported" not in current_state:
-            current_state["reported"] = {}
-        if "pending" not in current_state:
-            current_state["pending"] = False
+        # Ensure all fields exist
+        for field in ["desired", "reported", "pending"]:
+            if field not in current_state:
+                current_state[field] = {} if field != "pending" else False
 
-        # Обновить desired состояние (слияние нового состояния)
+        # Обновляем only desired (это команда)
         if isinstance(state, dict):
             current_state["desired"].update(state)
 
-        # Установить флаг pending
+        # Отмечаем, что команда ожидает подтверждения
         current_state["pending"] = True
 
-        # Сохранить обновленное состояние
         device["state"] = current_state
-        try:
-            await self.runtime.storage.set("devices", device_id, device)
-        except Exception as e:
-            raise ValueError(f"failed to update device state: {e}")
+        
+        # Пишем в storage; state_engine обновится через события
+        await self.runtime.storage.set("devices", device_id, device)
 
-        # Обновить state_engine
-        try:
-            await self.runtime.state_engine.set(f"device.{device_id}", current_state)
-        except Exception:
-            pass
-
-        # Найти внешний id по маппингу (devices_mappings: external_id -> internal_id)
+        # Находим external_id для события
         external_id = None
         try:
             keys = await self.runtime.storage.list_keys("devices_mappings")
-        except Exception:
-            keys = []
-
-        for k in keys:
-            try:
+            for k in keys:
                 v = await self.runtime.storage.get("devices_mappings", k)
-            except Exception:
-                v = None
-            if v == device_id:
-                external_id = k
-                break
+                if v == device_id:
+                    external_id = k
+                    break
+        except Exception:
+            pass
 
-        # Попробуем определить провайдера из сохранённого внешнего payload, если есть
-        provider = None
+        # Определяем провайдера
+        provider = "generic"
         if external_id:
             try:
                 payload = await self.runtime.storage.get("devices_external", external_id)
                 if isinstance(payload, dict):
-                    provider = payload.get("provider")
-            except Exception:
-                provider = None
-
-        if not provider:
-            # По умолчанию считаем провайдером Yandex, но это можно расширить
-            provider = "yandex"
-
-        event_payload = {
-            "internal_id": device_id,
-            "external_id": external_id,
-            "provider": provider,
-            "command": "set_state",
-            "params": state,
-        }
-
-        try:
-            await self.runtime.event_bus.publish("internal.device_command_requested", event_payload)
-        except Exception:
-            # Ошибки публикации не должны ломать основной поток
-            try:
-                await self.runtime.service_registry.call(
-                    "logger.log",
-                    level="warning",
-                    message=f"Failed to publish internal.device_command_requested for {device_id}",
-                    plugin=self.metadata.name,
-                )
+                    provider = payload.get("provider", "generic")
             except Exception:
                 pass
 
-        # Возвращаем подтверждение приёма команды с текущим состоянием
+        # Публикуем событие о команде
+        try:
+            await self.runtime.event_bus.publish(
+                "internal.device_command_requested",
+                {
+                    "internal_id": device_id,
+                    "external_id": external_id,
+                    "provider": provider,
+                    "command": "set_state",
+                    "params": state,
+                }
+            )
+        except Exception:
+            pass
+
         return {"ok": True, "queued": True, "external_id": external_id, "state": current_state}
 
-    # ----- Сервисы -----
     async def list_devices(self) -> List[Dict[str, Any]]:
-        """Вернуть список всех устройств.
+        """Получить список всех устройств."""
+        try:
+            keys = await self.runtime.storage.list_keys("devices")
+        except Exception:
+            return []
 
-        Возвращает список словарей устройств, сохранённых в storage.
-        """
-        keys = await self.runtime.storage.list_keys("devices")
         devices: List[Dict[str, Any]] = []
         for dev_id in keys:
             device = await self.runtime.storage.get("devices", dev_id)
             if device is not None:
                 devices.append(device)
+        
         return devices
 
-    async def list_external(self, provider: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Вернуть список внешних устройств, опционально фильтруя по провайдеру.
+    async def get_device(self, device_id: str) -> Dict[str, Any]:
+        """Получить устройство по id."""
+        if not isinstance(device_id, str) or not device_id:
+            raise ValueError("device_id должен быть непустой строкой")
 
-        Хранение внешних устройств осуществляется в storage namespace `devices_external`.
-        """
+        device = await self.runtime.storage.get("devices", device_id)
+        if device is None:
+            raise ValueError(f"Устройство с id='{device_id}' не найдено")
+        
+        return device
+
+    async def list_external(self, provider: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Получить список внешних устройств, опционально фильтруя по провайдеру."""
         try:
             keys = await self.runtime.storage.list_keys("devices_external")
         except Exception:
@@ -651,67 +335,206 @@ class DevicesPlugin(BasePlugin):
                 if payload.get("provider") != provider:
                     continue
             out.append({"external_id": ext_id, "payload": payload})
+        
         return out
 
-    async def get_device(self, device_id: str) -> Dict[str, Any]:
-        """Вернуть устройство по id.
+    async def create_mapping(
+        self,
+        external_id: str,
+        internal_id: str
+    ) -> Dict[str, Any]:
+        """Создать маппинг между внешним и внутренним устройством."""
+        if not external_id or not internal_id:
+            raise ValueError("external_id и internal_id должны быть непустыми")
 
-        Raises:
-            ValueError: если `device_id` не строка или устройство не найдено
+        # Пишем только в storage; state_engine обновится через события
+        await self.runtime.storage.set("devices_mappings", external_id, internal_id)
+        
+        return {"ok": True, "external_id": external_id, "internal_id": internal_id}
+
+    async def list_mappings(self) -> List[Dict[str, Any]]:
+        """Получить список всех маппингов."""
+        try:
+            keys = await self.runtime.storage.list_keys("devices_mappings")
+        except Exception:
+            return []
+
+        out: List[Dict[str, Any]] = []
+        for k in keys:
+            try:
+                v = await self.runtime.storage.get("devices_mappings", k)
+            except Exception:
+                v = None
+            if v is not None:
+                out.append({"external_id": k, "internal_id": v})
+        
+        return out
+
+    async def delete_mapping(self, external_id: str) -> Dict[str, Any]:
+        """Удалить маппинг."""
+        if not external_id:
+            return {"ok": False, "error": "external_id required"}
+
+        try:
+            deleted = await self.runtime.storage.delete("devices_mappings", external_id)
+        except Exception:
+            deleted = False
+        
+        return {"ok": bool(deleted), "external_id": external_id}
+
+    async def auto_map_external(self, provider: Optional[str] = None) -> Dict[str, Any]:
+        """Автоматически создать internal devices для unmapped external устройств."""
+        created = 0
+        skipped = 0
+        errors: List[str] = []
+
+        try:
+            externals = await self.list_external(provider)
+        except Exception as e:
+            return {"ok": False, "error": f"failed_list_external: {e}"}
+
+        for item in externals:
+            ext_id = item.get("external_id")
+            payload = item.get("payload", {})
+            
+            if not ext_id:
+                continue
+
+            # Проверяем, нет ли уже маппинга
+            try:
+                existing = await self.runtime.storage.get("devices_mappings", ext_id)
+            except Exception:
+                existing = None
+            
+            if existing:
+                skipped += 1
+                continue
+
+            # Подготавливаем данные
+            internal_id = f"{provider}-{ext_id}" if provider else f"external-{ext_id}"
+            name = None
+            
+            if isinstance(payload, dict):
+                name = payload.get("name") or payload.get("title")
+            
+            if not name:
+                device_type = payload.get("type", "device") if isinstance(payload, dict) else "device"
+                name = f"{device_type}-{ext_id[:6]}"
+            
+            device_type = payload.get("type", "generic") if isinstance(payload, dict) else "generic"
+
+            # Создаём internal device
+            try:
+                await self.create_device(internal_id, name, device_type)
+            except Exception:
+                # Попытаемся использовать существующий
+                try:
+                    dev = await self.runtime.storage.get("devices", internal_id)
+                    if not dev:
+                        raise
+                except Exception as ce:
+                    errors.append(f"create_failed:{ext_id}:{ce}")
+                    continue
+
+            # Создаём маппинг
+            try:
+                await self.runtime.storage.set("devices_mappings", ext_id, internal_id)
+                created += 1
+            except Exception as e:
+                errors.append(f"mapping_failed:{ext_id}:{e}")
+
+        return {"ok": True, "created": created, "skipped": skipped, "errors": errors}
+
+    # ========== ОБРАБОТЧИКИ СОБЫТИЙ ==========
+
+    async def _handle_external_device_discovered(self, event_type: str, data: dict) -> None:
+        """Обработчик external.device_discovered.
+        
+        Сохраняет payload внешнего устройства для доступа через devices.list_external.
         """
-        if not isinstance(device_id, str) or not device_id:
-            raise ValueError("device_id должен быть непустой строкой")
+        external_id = data.get("external_id")
+        if not external_id:
+            return
 
-        device = await self.runtime.storage.get("devices", device_id)
+        # Сохраняем payload в storage для доступа через devices.list_external
+        try:
+            await self.runtime.storage.set("devices_external", external_id, data)
+        except Exception:
+            pass
+
+    async def _handle_external_state(self, event_type: str, data: dict) -> None:
+        """Обработчик external.device_state_reported.
+        
+        Когда провайдер подтверждает изменение состояния:
+        1. Находим internal_id через маппинг
+        2. Обновляем reported-состояние
+        3. Сбрасываем pending-флаг
+        4. Сохраняем в storage
+        5. Публикуем internal.device_state_updated
+        """
+        external_id = data.get("external_id")
+        reported_state = data.get("state")
+        
+        if not external_id or reported_state is None:
+            return
+
+        # Находим internal_id через маппинг
+        try:
+            internal_id = await self.runtime.storage.get("devices_mappings", external_id)
+        except Exception:
+            internal_id = None
+
+        if not internal_id:
+            return
+
+        # Получаем device из storage
+        try:
+            device = await self.runtime.storage.get("devices", internal_id)
+        except Exception:
+            device = None
+
         if device is None:
-            raise ValueError(f"Устройство с id='{device_id}' не найдено")
-        return device
+            return
 
-    async def turn_on(self, device_id: str) -> Dict[str, Any]:
-        """Установить состояние устройства в 'on' и опубликовать событие.
-
-        Возвращает обновлённое представление устройства.
-        """
-        return await self._change_state(device_id, {"power": "on"})
-
-    async def turn_off(self, device_id: str) -> Dict[str, Any]:
-        """Установить состояние устройства в 'off' и опубликовать событие.
-
-        Возвращает обновлённое представление устройства.
-        """
-        return await self._change_state(device_id, {"power": "off"})
-
-    # ----- Внутренние методы -----
-    async def _change_state(self, device_id: str, new_state_partial: Dict[str, Any]) -> Dict[str, Any]:
-        """Внутренняя логика изменения состояния устройства.
-
-        Обновляет персистентное представление и текущее состояние в state engine,
-        публикует событие `devices.state_changed`.
-        """
-        if not isinstance(device_id, str) or not device_id:
-            raise ValueError("device_id должен быть непустой строкой")
-
-        device = await self.runtime.storage.get("devices", device_id)
-        if device is None:
-            raise ValueError(f"Устройство с id='{device_id}' не найдено")
-
+        # Обновляем состояние
         old_state = device.get("state", {})
-        # Создаём копию состояния и обновляем частично
-        new_state = dict(old_state) if isinstance(old_state, dict) else {}
-        new_state.update(new_state_partial)
+        if not isinstance(old_state, dict):
+            old_state = {"desired": {}, "reported": {}, "pending": False}
 
-        # Сохраняем в persistent storage
+        # Ensure all fields
+        for field in ["desired", "reported", "pending"]:
+            if field not in old_state:
+                old_state[field] = {} if field != "pending" else False
+
+        # Сохраняем копию для события
+        prev_state = copy.deepcopy(old_state)
+
+        # Обновляем reported (то что вернул провайдер)
+        if isinstance(reported_state, dict):
+            old_state["reported"].update(reported_state)
+
+        # Команда выполнена
+        old_state["pending"] = False
+
+        new_state = old_state
+
+        # Сохраняем в storage
         device["state"] = new_state
-        await self.runtime.storage.set("devices", device_id, device)
+        try:
+            await self.runtime.storage.set("devices", internal_id, device)
+        except Exception:
+            pass
 
-        # Обновляем runtime.state
-        await self.runtime.state_engine.set(f"device.{device_id}", new_state)
-
-        # Публикуем событие об изменении состояния
-        await self.runtime.event_bus.publish("devices.state_changed", {
-            "device_id": device_id,
-            "old_state": old_state,
-            "new_state": new_state,
-        })
-
-        return device
+        # Публикуем событие об обновлении
+        try:
+            await self.runtime.event_bus.publish(
+                "internal.device_state_updated",
+                {
+                    "internal_id": internal_id,
+                    "external_id": external_id,
+                    "old_state": prev_state,
+                    "new_state": new_state,
+                }
+            )
+        except Exception:
+            pass
