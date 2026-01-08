@@ -1,11 +1,17 @@
 """
 Плагин `devices` — эталонный доменный плагин для хранения и управления устройствами.
 
-Контракт с Core: доступ к `runtime.storage`, `runtime.state_engine`,
-`runtime.event_bus`, `runtime.service_registry` через `self.runtime`.
+Архитектурные принципы:
+- Единственный источник истины: runtime.storage
+- Плагин ТОЛЬКО пишет в storage, НИКОГДА не пишет в state_engine
+- state_engine синхронизируется автоматически CoreRuntime через события
+- Плагин НЕ знает про HTTP, UI, FastAPI, конкретные интеграции (Yandex и т.д.)
 
-Всё взаимодействие с данными идёт через эти API — плагин не знает про БД,
-адаптеры или другие плагины.
+Контракт с Core:
+- runtime.storage — для персистентности (используется)
+- runtime.event_bus — для коммуникации между плагинами (используется)
+- runtime.service_registry — для регистрации сервисов (используется)
+- runtime.state_engine — только для чтения (НЕ используется)
 """
 
 from typing import Any, Dict, List, Optional
@@ -22,12 +28,15 @@ class DevicesPlugin(BasePlugin):
       - name: str
       - type: str
       - state:
-          desired: dict    # желаемое состояние
-          reported: dict   # подтверждённое состояние от провайдера
-          pending: bool    # ожидается ли подтверждение
+          desired: dict    # желаемое состояние (что хотим)
+          reported: dict   # подтверждённое состояние от провайдера (что было)
+          pending: bool    # ожидается ли подтверждение команды
 
-    Источник истины: storage["devices"]
-    Кеш/read-model: state_engine[f"device.{id}"] = state
+    Поток данных:
+    1. Плагин пишет в storage[devices]
+    2. Storage публикует событие storage.updated
+    3. CoreRuntime зеркалирует в state_engine (автоматически)
+    4. UI/интеграции читают из state_engine
     """
 
     @property
@@ -254,7 +263,7 @@ class DevicesPlugin(BasePlugin):
         # Пишем в storage; state_engine обновится через события
         await self.runtime.storage.set("devices", device_id, device)
 
-        # Находим external_id для события
+        # Находим external_id для события (если этот device замаппирован)
         external_id = None
         try:
             keys = await self.runtime.storage.list_keys("devices_mappings")
@@ -266,24 +275,13 @@ class DevicesPlugin(BasePlugin):
         except Exception:
             pass
 
-        # Определяем провайдера
-        provider = "generic"
-        if external_id:
-            try:
-                payload = await self.runtime.storage.get("devices_external", external_id)
-                if isinstance(payload, dict):
-                    provider = payload.get("provider", "generic")
-            except Exception:
-                pass
-
-        # Публикуем событие о команде
+        # Публикуем событие о команде (не определяем provider — это ответственность интеграции)
         try:
             await self.runtime.event_bus.publish(
                 "internal.device_command_requested",
                 {
                     "internal_id": device_id,
                     "external_id": external_id,
-                    "provider": provider,
                     "command": "set_state",
                     "params": state,
                 }
@@ -383,7 +381,10 @@ class DevicesPlugin(BasePlugin):
         return {"ok": bool(deleted), "external_id": external_id}
 
     async def auto_map_external(self, provider: Optional[str] = None) -> Dict[str, Any]:
-        """Автоматически создать internal devices для unmapped external устройств."""
+        """Автоматически создать internal devices для unmapped external устройств.
+        
+        Если provider задан, фильтрует по провайдеру, но НЕ встраивает его в internal_id.
+        """
         created = 0
         skipped = 0
         errors: List[str] = []
@@ -410,8 +411,8 @@ class DevicesPlugin(BasePlugin):
                 skipped += 1
                 continue
 
-            # Подготавливаем данные
-            internal_id = f"{provider}-{ext_id}" if provider else f"external-{ext_id}"
+            # Генерируем neutral internal_id (без привязки к провайдеру)
+            internal_id = f"device-{ext_id}"
             name = None
             
             if isinstance(payload, dict):
@@ -419,7 +420,7 @@ class DevicesPlugin(BasePlugin):
             
             if not name:
                 device_type = payload.get("type", "device") if isinstance(payload, dict) else "device"
-                name = f"{device_type}-{ext_id[:6]}"
+                name = f"{device_type} ({ext_id[:8]})"
             
             device_type = payload.get("type", "generic") if isinstance(payload, dict) else "generic"
 
