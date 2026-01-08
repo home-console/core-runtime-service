@@ -21,6 +21,7 @@
 
 
 from typing import Any, Dict, List, Optional
+import copy
 
 from core.http_registry import HttpEndpoint
 from plugins.base_plugin import BasePlugin, PluginMetadata
@@ -228,7 +229,36 @@ class DevicesPlugin(BasePlugin):
             if device is None:
                 continue
             state_value = device.get("state")
-            await self.runtime.state_engine.set(f"device.{dev_id}", state_value)
+            # Миграция старой модели состояния в новую структуру {desired, reported, pending}
+            try:
+                if not isinstance(state_value, dict) or not ("desired" in state_value and "reported" in state_value and "pending" in state_value):
+                    # legacy formats: {"power": "off"} or arbitrary dict — приводим к новой модели
+                    desired = {}
+                    reported = {}
+                    pending = False
+                    if isinstance(state_value, dict):
+                        # Если есть ключы как on/\"power\", конвертируем
+                        if "power" in state_value and "on" not in desired:
+                            desired["on"] = True if state_value.get("power") in (True, "on", "true", 1, "1") else False
+                            reported["on"] = desired["on"]
+                        if "on" in state_value:
+                            desired["on"] = bool(state_value.get("on"))
+                            reported["on"] = desired["on"]
+                    new_state = {"desired": desired or {"on": False}, "reported": reported or {"on": False}, "pending": pending}
+                    device["state"] = new_state
+                    try:
+                        await self.runtime.storage.set("devices", dev_id, device)
+                    except Exception:
+                        pass
+                    await self.runtime.state_engine.set(f"device.{dev_id}", new_state)
+                else:
+                    await self.runtime.state_engine.set(f"device.{dev_id}", state_value)
+            except Exception:
+                # в случае ошибки миграции просто ставим текущее значение в state_engine
+                try:
+                    await self.runtime.state_engine.set(f"device.{dev_id}", state_value)
+                except Exception:
+                    pass
 
         # Инициализируем external devices и mappings из storage, если есть
         try:
@@ -345,6 +375,9 @@ class DevicesPlugin(BasePlugin):
             if "pending" not in old_state:
                 old_state["pending"] = False
 
+            # Сохраним копию старого состояния для публикации события
+            prev_state = copy.deepcopy(old_state)
+
             # Обновить reported состояние (то что вернулось из провайдера)
             if isinstance(state, dict):
                 old_state["reported"].update(state)
@@ -372,7 +405,7 @@ class DevicesPlugin(BasePlugin):
                 await self.runtime.event_bus.publish("internal.device_state_updated", {
                     "internal_id": internal_id,
                     "external_id": external_id,
-                    "old_state": old_state,
+                    "old_state": prev_state,
                     "new_state": new_state,
                 })
             except Exception:
