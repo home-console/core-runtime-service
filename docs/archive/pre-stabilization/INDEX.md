@@ -7,38 +7,35 @@
 ## 🚀 Начало работы
 
 ### Новичкам
-1. **[README.md](README.md)** — начните здесь! Основная документация, концепции, примеры
+1. **[00-README.md](00-README.md)** — начните здесь! Основная документация, концепции, примеры
 2. **[QUICKSTART.md](QUICKSTART.md)** — запустите за 5 минут, создайте первый плагин
 3. **[Запустить demo](demo.py)** — `python3 demo.py` — посмотрите как это работает
 
 ### Разработчикам
-4. **[ARCHITECTURE.md](ARCHITECTURE.md)** — архитектура, паттерны, решения
+4. **[01-ARCHITECTURE.md](01-ARCHITECTURE.md)** — архитектура, паттерны, решения
 5. **[FILE_STRUCTURE.md](FILE_STRUCTURE.md)** — структура файлов, соглашения
 6. **[TODO.md](TODO.md)** — roadmap, что планируется, как помочь
-
-### Обзор
-7. **[OVERVIEW.md](OVERVIEW.md)** — краткий обзор всего проекта
 
 ---
 
 ## 📖 Документация по темам
 
 ### Концепции
-- **Что такое Core Runtime?** → [README.md#основная-цель](README.md)
-- **Plugin-first архитектура** → [README.md#plugin-first-архитектура](README.md)
-- **Философия** → [README.md#философия](README.md)
-- **Архитектурные принципы** → [ARCHITECTURE.md#принципы-проектирования](ARCHITECTURE.md)
+- **Что такое Core Runtime?** → [00-README.md](00-README.md)
+- **Plugin-first архитектура** → [00-README.md](00-README.md)
+- **Философия** → [00-README.md](00-README.md)
+- **Архитектурные принципы** → [01-ARCHITECTURE.md](01-ARCHITECTURE.md)
 
 ### Компоненты
-- **EventBus** → [ARCHITECTURE.md#eventbus](ARCHITECTURE.md)
-- **ServiceRegistry** → [ARCHITECTURE.md#serviceregistry](ARCHITECTURE.md)
-- **StateEngine** → [ARCHITECTURE.md#stateengine](ARCHITECTURE.md)
-- **Storage API** → [ARCHITECTURE.md#storage-api](ARCHITECTURE.md)
-- **PluginManager** → [ARCHITECTURE.md#pluginmanager](ARCHITECTURE.md)
+- **EventBus** → [01-ARCHITECTURE.md#eventbus](01-ARCHITECTURE.md)
+- **ServiceRegistry** → [01-ARCHITECTURE.md#serviceregistry](01-ARCHITECTURE.md)
+- **StateEngine** → [01-ARCHITECTURE.md#stateengine](01-ARCHITECTURE.md)
+- **Storage API** → [01-ARCHITECTURE.md#storage-api](01-ARCHITECTURE.md)
+- **PluginManager** → [01-ARCHITECTURE.md#pluginmanager](01-ARCHITECTURE.md)
 
 ### Разработка плагинов
-- **Создание плагина** → [README.md#создание-плагина](README.md)
-- **Lifecycle плагина** → [README.md#lifecycle-плагина](README.md)
+- **Создание плагина** → [00-README.md](00-README.md)
+- **Lifecycle плагина** → [00-README.md](00-README.md)
 - **Пример плагина** → [plugins/example_plugin.py](plugins/example_plugin.py)
 - **Базовый класс** → [plugins/base_plugin.py](plugins/base_plugin.py)
 
@@ -49,9 +46,9 @@
 - **StateEngine** → [QUICKSTART.md#stateengine](QUICKSTART.md)
 
 ### Расширение
-- **Новые адаптеры** → [ARCHITECTURE.md#добавить-новый-storage-адаптер](ARCHITECTURE.md)
+- **Новые адаптеры** → [01-ARCHITECTURE.md](01-ARCHITECTURE.md)
 - **Новые компоненты** → [FILE_STRUCTURE.md#добавить-новый-компонент](FILE_STRUCTURE.md)
-- **Remote Plugins** → [ARCHITECTURE.md#remote-plugins-будущее](ARCHITECTURE.md)
+- **Remote Plugins** → [01-ARCHITECTURE.md](01-ARCHITECTURE.md)
 
 ---
 
@@ -92,10 +89,9 @@
 
 | Файл | Размер | Описание |
 |------|--------|----------|
-| [README.md](README.md) | 9.1 KB | Основная документация |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | 14 KB | Архитектура |
+| [00-README.md](00-README.md) | 9.1 KB | Основная документация |
+| [01-ARCHITECTURE.md](01-ARCHITECTURE.md) | 14 KB | Архитектура |
 | [QUICKSTART.md](QUICKSTART.md) | 5.6 KB | Быстрый старт |
-| [OVERVIEW.md](OVERVIEW.md) | 8.9 KB | Обзор проекта |
 | [FILE_STRUCTURE.md](FILE_STRUCTURE.md) | 9.2 KB | Структура файлов |
 | [TODO.md](TODO.md) | 7.0 KB | Roadmap |
 | [INDEX.md](INDEX.md) | этот файл | Навигация |
@@ -105,7 +101,7 @@
 ## 🎯 Быстрая навигация
 
 ### Хочу понять концепцию
-→ [README.md](README.md)
+→ [00-README.md](00-README.md)
 
 ### Хочу быстро начать
 → [QUICKSTART.md](QUICKSTART.md)
@@ -114,7 +110,7 @@
 → [QUICKSTART.md#создание-своего-плагина](QUICKSTART.md)
 
 ### Хочу понять архитектуру
-→ [ARCHITECTURE.md](ARCHITECTURE.md)
+→ [01-ARCHITECTURE.md](01-ARCHITECTURE.md)
 
 ### Хочу увидеть код
 → [demo.py](demo.py) или [plugins/example_plugin.py](plugins/example_plugin.py)
@@ -144,20 +140,20 @@
 
 ### A
 - **Адаптеры** → [adapters/](adapters/)
-- **Архитектура** → [ARCHITECTURE.md](ARCHITECTURE.md)
+- **Архитектура** → [01-ARCHITECTURE.md](01-ARCHITECTURE.md)
 - **Async/await** → используется везде
 
 ### E
 - **EventBus** → [core/event_bus.py](core/event_bus.py)
-- **Events (события)** → [ARCHITECTURE.md#eventbus](ARCHITECTURE.md)
+- **Events (события)** → [01-ARCHITECTURE.md#eventbus](01-ARCHITECTURE.md)
 
 ### P
 - **Плагины** → [plugins/](plugins/)
 - **PluginManager** → [core/plugin_manager.py](core/plugin_manager.py)
-- **Plugin lifecycle** → [README.md#lifecycle-плагина](README.md)
+- **Plugin lifecycle** → [00-README.md](00-README.md)
 
 ### R
-- **Remote plugins** → [ARCHITECTURE.md#remote-plugins-будущее](ARCHITECTURE.md)
+- **Remote plugins** → [01-ARCHITECTURE.md](01-ARCHITECTURE.md)
 - **RPC** → см. ServiceRegistry
 - **Runtime** → [core/runtime.py](core/runtime.py)
 
@@ -172,7 +168,7 @@
 ## 🎓 Путь обучения
 
 ### Уровень 1: Новичок (30 минут)
-1. Прочитай [README.md](README.md) — 10 мин
+1. Прочитай [00-README.md](00-README.md) — 10 мин
 2. Запусти `python3 demo.py` — 5 мин
 3. Изучи вывод demo — 5 мин
 4. Посмотри [plugins/example_plugin.py](plugins/example_plugin.py) — 10 мин
@@ -183,7 +179,7 @@
 3. Запусти и протестируй — 15 мин
 
 ### Уровень 3: Разработчик (2-3 часа)
-1. Изучи [ARCHITECTURE.md](ARCHITECTURE.md) — 45 мин
+1. Изучи [01-ARCHITECTURE.md](01-ARCHITECTURE.md) — 45 мин
 2. Изучи [FILE_STRUCTURE.md](FILE_STRUCTURE.md) — 30 мин
 3. Изучи код всех компонентов — 60 мин
 4. Напиши сложный плагин — 45 мин
@@ -216,8 +212,8 @@
 ## 📞 Получить помощь
 
 ### Порядок действий
-1. Проверь [README.md](README.md) — возможно, ответ там
-2. Проверь [ARCHITECTURE.md](ARCHITECTURE.md) — может быть там
+1. Проверь [00-README.md](00-README.md) — возможно, ответ там
+2. Проверь [01-ARCHITECTURE.md](01-ARCHITECTURE.md) — может быть там
 3. Посмотри примеры: [demo.py](demo.py), [example_plugin.py](plugins/example_plugin.py)
 4. Создай GitHub Issue с подробным описанием
 
@@ -233,10 +229,10 @@
 ## 🎯 Следующие шаги
 
 ### Для новичков
-→ Начни с [README.md](README.md), затем запусти `python3 demo.py`
+→ Начни с [00-README.md](00-README.md), затем запусти `python3 demo.py`
 
 ### Для разработчиков
-→ Изучи [ARCHITECTURE.md](ARCHITECTURE.md), создай свой плагин
+→ Изучи [01-ARCHITECTURE.md](01-ARCHITECTURE.md), создай свой плагин
 
 ### Для контрибьюторов
 → Прочитай [TODO.md](TODO.md), выбери задачу, создай PR
