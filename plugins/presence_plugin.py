@@ -21,7 +21,7 @@ runtime.service_registry и runtime.http.
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Optional
 
 from core.http_registry import HttpEndpoint
 from plugins.base_plugin import BasePlugin, PluginMetadata
@@ -58,16 +58,16 @@ class PresencePlugin(BasePlugin):
                 if not isinstance(home, bool):
                     raise ValueError("Аргумент 'home' должен быть типа bool")
 
-                # Получаем старое состояние (может быть None)
-                old = await self.runtime.state_engine.get("presence.home")
+                # Получаем старое состояние (может быть None) — читаем из storage
+                old = await self.runtime.storage.get("presence", "home")
                 old_val = bool(old) if isinstance(old, bool) else False
 
                 # Если состояние не поменялось — ничего не делаем
                 if old_val == home:
                     return old_val
 
-                # Обновляем state
-                await self.runtime.state_engine.set("presence.home", home)
+                # Обновляем state через storage — storage является SOR
+                await self.runtime.storage.set("presence", "home", home)
 
                 # Публикуем событие в зависимости от направления изменения
                 payload = {"old_state": old_val, "new_state": home}
@@ -112,10 +112,10 @@ class PresencePlugin(BasePlugin):
         """Инициализация состояния и логирование старта."""
         await super().on_start()
         try:
-            cur = await self.runtime.state_engine.get("presence.home")
+            cur = await self.runtime.storage.get("presence", "home")
             if not isinstance(cur, bool):
                 # Инициализируем в False, если отсутствует
-                await self.runtime.state_engine.set("presence.home", False)
+                await self.runtime.storage.set("presence", "home", False)
         except Exception:
             # Не мешаем старту системы, но логируем при возможности
             try:

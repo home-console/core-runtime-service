@@ -425,11 +425,7 @@ class AdminPlugin(BasePlugin):
                             await self.runtime.storage.delete("devices_external", ext_id)
                         except Exception:
                             pass
-                        try:
-                            # Clear the duplicate in state engine
-                            await self.runtime.state_engine.set(f"devices.external.{ext_id}", None)
-                        except Exception:
-                            pass
+                        # NOTE: Do NOT write to state_engine from plugins. CoreRuntime mirrors storage → state_engine.
 
                 # Prefer the stub plugin if it's loaded (dev-safe)
                 try:

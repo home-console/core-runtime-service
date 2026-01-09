@@ -19,49 +19,23 @@ class Storage:
     """
 
     def __init__(self, adapter: StorageAdapter):
-        """
-        Инициализация Storage.
-        
-        Args:
-            adapter: адаптер для работы с хранилищем
-        """
+        """ Инициализация Storage. adapter: адаптер для работы с хранилищем """
         self._adapter = adapter
 
     async def get(self, namespace: str, key: str) -> Optional[dict[str, Any]]:
-        """
-        Получить значение.
-        
-        Пример:
-            value = await storage.get("<namespace>", "<key>")
-        """
+        """ Получить значение. value = await storage.get(" < namespace > ", " < key > ") """
         return await self._adapter.get(namespace, key)
 
     async def set(self, namespace: str, key: str, value: dict[str, Any]) -> None:
-        """
-        Сохранить значение.
-        
-        Пример:
-            await storage.set("<namespace>", "<key>", {"state": "on", "value": 100})
-        """
+        """ Сохранить значение. await storage.set("<namespace>", "<key>", {"state": "on", "value": 100}) """
         await self._adapter.set(namespace, key, value)
 
     async def delete(self, namespace: str, key: str) -> bool:
-        """
-        Удалить значение.
-        
-        Returns:
-            True если запись была удалена
-        """
+        """ Удалить значение. Returns: True если запись была удалена """
         return await self._adapter.delete(namespace, key)
 
     async def list_keys(self, namespace: str) -> list[str]:
-        """
-        Получить список всех ключей в namespace.
-        
-        Пример:
-            keys = await storage.list_keys("<namespace>")
-            # ["item_1", "item_2", ...]
-        """
+        """ Получить список всех ключей в namespace. keys = await storage.list_keys("<namespace>") """
         return await self._adapter.list_keys(namespace)
 
     async def clear_namespace(self, namespace: str) -> None:

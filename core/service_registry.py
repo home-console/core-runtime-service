@@ -5,7 +5,7 @@ ServiceRegistry - реестр сервисов для вызова методо
 Другие плагины вызывают эти сервисы через registry.
 """
 
-from typing import Any, Callable, Awaitable, Optional
+from typing import Any, Callable, Awaitable
 
 
 # Тип для сервисной функции
@@ -14,7 +14,7 @@ ServiceFunc = Callable[..., Awaitable[Any]]
 
 class ServiceRegistry:
     """
-    Реестр сервисов для межплагинного взаимодействия.
+    Реестр сервисов для между плагинов взаимодействия.
     
     Принцип работы:
     - плагины регистрируют сервисы (методы)

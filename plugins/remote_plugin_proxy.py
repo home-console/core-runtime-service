@@ -9,9 +9,12 @@
 
 import asyncio
 import json
-import urllib.request
-import urllib.error
 from typing import Any, Optional
+
+try:
+	import aiohttp
+except Exception:
+	aiohttp = None
 
 from .base_plugin import BasePlugin, PluginMetadata
 
@@ -39,25 +42,60 @@ class RemotePluginProxy(BasePlugin):
 		self._http_timeout = 3
 
 	async def _http_call(self, endpoint: str, method: str = "GET", json_data: Optional[dict] = None) -> dict:
-		"""Вспомогательный метод для HTTP вызова через urllib."""
+		"""Async HTTP вызов через aiohttp (не блокирует event loop).
+
+		Falls back to running sync code in executor if `aiohttp` not available.
+		"""
 		url = f"{self.remote_url}{endpoint}"
+
+		if aiohttp is None:
+			# aiohttp not installed — run blocking urllib in executor to avoid blocking loop
+			def _sync_call():
+				import urllib.request
+				req_url = url
+				if method == "GET":
+					with urllib.request.urlopen(req_url, timeout=self._http_timeout) as resp:
+						return json.loads(resp.read().decode())
+				elif method == "POST":
+					req = urllib.request.Request(
+						req_url,
+						data=json.dumps(json_data or {}).encode(),
+						headers={"Content-Type": "application/json"},
+						method="POST",
+					)
+					with urllib.request.urlopen(req, timeout=self._http_timeout) as resp:
+						return json.loads(resp.read().decode())
+				else:
+					raise ValueError(f"Unsupported method: {method}")
+
+			try:
+				return await asyncio.get_event_loop().run_in_executor(None, _sync_call)
+			except Exception as exc:
+				try:
+					await self.runtime.service_registry.call(
+						"logger.log",
+						level="error",
+						message=f"RemotePluginProxy: {endpoint} failed: {str(exc)}",
+					)
+				except Exception:
+					pass
+				raise
+
+		# Prefer aiohttp path
 		try:
-			if method == "GET":
-				with urllib.request.urlopen(url, timeout=self._http_timeout) as resp:
-					return json.loads(resp.read().decode())
-			elif method == "POST":
-				req = urllib.request.Request(
-					url,
-					data=json.dumps(json_data or {}).encode(),
-					headers={"Content-Type": "application/json"},
-					method="POST",
-				)
-				with urllib.request.urlopen(req, timeout=self._http_timeout) as resp:
-					return json.loads(resp.read().decode())
-			else:
-				raise ValueError(f"Unsupported method: {method}")
+			timeout = aiohttp.ClientTimeout(total=self._http_timeout)
+			async with aiohttp.ClientSession(timeout=timeout) as session:
+				if method == "GET":
+					async with session.get(url) as resp:
+						text = await resp.text()
+						return json.loads(text)
+				elif method == "POST":
+					async with session.post(url, json=json_data or {}) as resp:
+						text = await resp.text()
+						return json.loads(text)
+				else:
+					raise ValueError(f"Unsupported method: {method}")
 		except Exception as exc:
-			# Логируем ошибку при возможности
 			try:
 				await self.runtime.service_registry.call(
 					"logger.log",

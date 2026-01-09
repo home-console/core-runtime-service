@@ -21,7 +21,7 @@ from core.http_registry import HttpEndpoint
 
 
 async def _auto_load_plugins(runtime: CoreRuntime) -> None:
-    """Автоскан каталога `plugins/` в корне проекта и загрузка классов-наследников BasePlugin."""
+    """Авто сканирование каталога `plugins/` в корне проекта и загрузка классов-наследников BasePlugin."""
     # plugins находится в корне проекта: два уровня выше этого файла
     plugins_dir = Path(__file__).parent.parent / "plugins"
     if not plugins_dir.exists() or not plugins_dir.is_dir():

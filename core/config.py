@@ -14,7 +14,7 @@ class Config:
     # Путь к файлу БД
     db_path: str = "data/runtime.db"
 
-    # Таймаут для shutdown (секунды)
+    # Тайм-аут для shutdown (секунды)
     shutdown_timeout: int = 10
 
     @classmethod

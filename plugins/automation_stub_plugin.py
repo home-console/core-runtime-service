@@ -46,39 +46,30 @@ class AutomationStubPlugin(BasePlugin):
         )
 
     async def on_load(self) -> None:
-        """Загрузка: регистрация обработчика события devices.state_changed."""
+        """Загрузка: регистрация обработчика на `internal.device_command_requested`.
+
+        В новой модели автоматизация реагирует на внутренние события команд.
+        Правило (stub): если параметры команды содержат `on=True` — логируем.
+        """
         await super().on_load()
 
-        # Создаём обработчик события devices.state_changed
-        async def _on_device_state_changed(
-            event_type: str, data: dict[str, Any]
-        ) -> None:
-            """Обработчик события изменения состояния устройства.
-
-            Простое правило:
-            ЕСЛИ new_state.power == "on" → залогировать через logger.log
-            """
+        async def _on_device_command_requested(data: dict[str, Any]) -> None:
             try:
-                device_id = data.get("device_id")
-                new_state = data.get("new_state", {})
+                internal_id = data.get("internal_id")
+                params = data.get("params", {}) or {}
 
-                # Простая проверка: если state содержит power="on"
-                if isinstance(new_state, dict) and new_state.get("power") == "on":
-                    # Вызываем logger.log через service registry
+                if isinstance(params, dict) and params.get("on") is True:
                     try:
                         await self.runtime.service_registry.call(
                             "logger.log",
                             level="info",
                             message="Автоматизация: устройство включено",
-                            device_id=device_id,
+                            device_id=internal_id,
                         )
                     except Exception:
-                        # Если logger недоступен — игнорируем (ошибка не должна ломать event loop)
                         pass
 
             except Exception as e:
-                # Исключения обработчика НЕ должны падать в Core
-                # Пробуем залогировать ошибку, но не требуем успеха
                 try:
                     await self.runtime.service_registry.call(
                         "logger.log",
@@ -89,14 +80,10 @@ class AutomationStubPlugin(BasePlugin):
                 except Exception:
                     pass
 
-        # Сохраняем обработчик, чтобы можно было отписаться позже
-        self._event_handler = _on_device_state_changed
-
-        # Подписываемся на событие devices.state_changed
+        self._event_handler = _on_device_command_requested
         try:
-            self.runtime.event_bus.subscribe("devices.state_changed", self._event_handler)
+            self.runtime.event_bus.subscribe("internal.device_command_requested", self._event_handler)
         except Exception:
-            # Если подписка не удалась — это не должно ломать загрузку плагина
             pass
 
     async def on_start(self) -> None:
@@ -120,7 +107,8 @@ class AutomationStubPlugin(BasePlugin):
         # Отписываемся от события
         try:
             if self._event_handler is not None:
-                self.runtime.event_bus.unsubscribe("devices.state_changed", self._event_handler)
+                # unsubscribe from the same event we subscribed to in on_load
+                self.runtime.event_bus.unsubscribe("internal.device_command_requested", self._event_handler)
         except Exception:
             pass
 

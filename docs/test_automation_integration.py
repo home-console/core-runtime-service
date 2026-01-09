@@ -84,14 +84,14 @@ async def test_event_driven_automation():
     
     assert "logger.log" in services, "logger.log сервис должен быть зарегистрирован"
     assert "devices.create" in services, "devices.create сервис должен быть зарегистрирован"
-    assert "devices.turn_on" in services, "devices.turn_on сервис должен быть зарегистрирован"
+    assert "devices.set_state" in services, "devices.set_state сервис должен быть зарегистрирован"
     print("    ✓ Все необходимые сервисы зарегистрированы")
 
     # 6. Проверка подписки на события
     print("\n[6] Проверка подписи на события...")
-    subscribers_count = runtime.event_bus.get_subscribers_count("devices.state_changed")
-    print(f"    Подписчиков на 'devices.state_changed': {subscribers_count}")
-    assert subscribers_count > 0, "automation_stub должен быть подписан на devices.state_changed"
+    subscribers_count = runtime.event_bus.get_subscribers_count("internal.device_command_requested")
+    print(f"    Подписчиков на 'internal.device_command_requested': {subscribers_count}")
+    assert subscribers_count > 0, "automation_stub должен быть подписан на internal.device_command_requested"
     print("    ✓ Подписка на события подтверждена")
 
     # 7. Проверка цепочки: Event → Automation → Service → Logger
@@ -107,13 +107,14 @@ async def test_event_driven_automation():
     )
     print(f"    ✓ Устройство создано: {device['id']}")
     
-    # Включаем устройство (это вызовет событие)
-    print("    Включаем устройство...")
-    turned_on = await runtime.service_registry.call(
-        "devices.turn_on",
-        "test_light_1"
+    # Устанавливаем желаемое состояние (отправляем команду)
+    print("    Устанавливаем желаемое состояние (set_state)...")
+    result = await runtime.service_registry.call(
+        "devices.set_state",
+        "test_light_1",
+        {"on": True}
     )
-    print(f"    ✓ Устройство включено, состояние: {turned_on['state']}")
+    print(f"    ✓ Команда отправлена: {result}")
     
     # Даём время на обработку события
     await asyncio.sleep(0.2)
