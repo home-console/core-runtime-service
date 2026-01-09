@@ -79,7 +79,8 @@ class RemotePluginProxy(BasePlugin):
 					)
 				except Exception:
 					pass
-				raise
+				# Normalize network errors to RuntimeError for callers
+				raise RuntimeError(f"RemotePluginProxy sync http error: {exc}")
 
 		# Prefer aiohttp path
 		try:
@@ -104,7 +105,8 @@ class RemotePluginProxy(BasePlugin):
 				)
 			except Exception:
 				pass
-			raise
+			# Normalize network errors to RuntimeError for callers
+			raise RuntimeError(f"RemotePluginProxy http error: {exc}")
 
 	async def _fetch_metadata(self) -> dict:
 		"""Получить метаданные удалённого плагина."""
@@ -115,89 +117,118 @@ class RemotePluginProxy(BasePlugin):
 		"""Вернуть метаданные (блокирующий вызов для property)."""
 		# Это не идеально, но BasePlugin требует синхронный property
 		# В реальности это заполняется асинхронно в on_load
-		if self._metadata is None:
+		try:
+			if not isinstance(self._metadata, dict):
+				return PluginMetadata(
+					name="remote_plugin",
+					version="0.0.0",
+					description="Remote plugin proxy",
+					author="Home Console",
+				)
 			return PluginMetadata(
-				name="remote_plugin",
-				version="0.0.0",
-				description="Remote plugin proxy",
-				author="Home Console",
+				name=self._metadata.get("name", "remote_plugin"),
+				version=self._metadata.get("version", "0.0.0"),
+				description=self._metadata.get("description", ""),
+				author=self._metadata.get("author", ""),
 			)
-		return PluginMetadata(
-			name=self._metadata.get("name", "remote_plugin"),
-			version=self._metadata.get("version", "0.0.0"),
-			description=self._metadata.get("description", ""),
-			author=self._metadata.get("author", ""),
-		)
+		except Exception:
+			# On any unexpected metadata shape, return a safe default
+			return PluginMetadata(name="remote_plugin", version="0.0.0", description="Remote plugin proxy", author="Home Console")
 
 	async def on_load(self) -> None:
 		"""Загрузка: получить метаданные и вызвать /plugin/load на удалённом сервисе."""
 		await super().on_load()
-        
+		# Mark plugin as not ready by default; on success set to True
+		self._ready = False
+		# Try to fetch metadata and register services, but do NOT raise on network errors
 		try:
-			# Получаем метаданные удалённого плагина
 			self._metadata = await self._fetch_metadata()
+		except Exception as exc:
+			try:
+				await self.runtime.service_registry.call(
+					"logger.log",
+					level="warning",
+					message=f"RemotePluginProxy: failed to fetch metadata: {exc}",
+				)
+			except Exception:
+				pass
+			# leave _metadata as None and return early (plugin loaded but not ready)
+			return
 
-			# Вызываем load на удалённом сервисе
+		# Attempt to call remote load; non-fatal
+		try:
 			await self._http_call("/plugin/load", method="POST")
+		except Exception as exc:
+			try:
+				await self.runtime.service_registry.call(
+					"logger.log",
+					level="warning",
+					message=f"RemotePluginProxy: /plugin/load failed: {exc}",
+				)
+			except Exception:
+				pass
 
-			# Зарегистрировать сервисы, описанные в метаданных
-			services = self._metadata.get("services", []) if isinstance(self._metadata, dict) else []
-			for svc in services:
-				svc_name = svc.get("name")
-				endpoint = svc.get("endpoint")
-				method = svc.get("method", "POST").upper()
-				if not svc_name or not endpoint:
-					continue
+		# Register services declared in metadata (if present)
+		services = self._metadata.get("services", []) if isinstance(self._metadata, dict) else []
+		for svc in services:
+			svc_name = svc.get("name")
+			endpoint = svc.get("endpoint")
+			method = svc.get("method", "POST").upper()
+			if not svc_name or not endpoint:
+				continue
 
-				# Создать форвардер вызова на удалённый endpoint
-				async def _make_forwarder(_endpoint=endpoint, _method=method):
-					async def _forward(*args, **kwargs):
-						payload = {"args": args, "kwargs": kwargs}
+			# Создать форвардер вызова на удалённый endpoint
+			async def _make_forwarder(_endpoint=endpoint, _method=method):
+				async def _forward(*args, **kwargs):
+					payload = {"args": args, "kwargs": kwargs}
+					try:
 						# Прямой POST/GET к удалённому плагину
 						if _method == "GET":
 							return await self._http_call(_endpoint, method="GET")
 						else:
 							return await self._http_call(_endpoint, method="POST", json_data=payload)
-					return _forward
+					except Exception as exc:
+						# Normalize network errors and log
+						try:
+							await self.runtime.service_registry.call(
+								"logger.log",
+								level="error",
+								message=f"RemotePluginProxy forwarder error for {_endpoint}: {exc}",
+							)
+						except Exception:
+							pass
+						raise RuntimeError(f"remote forwarder error: {exc}")
+				return _forward
 
-				forwarder = await _make_forwarder()
+			forwarder = await _make_forwarder()
+			try:
+				# Регистрируем сервис в runtime
+				self.runtime.service_registry.register(svc_name, forwarder)
+				self._registered_services.append(svc_name)
+			except Exception:
+				# Не ломаем загрузку, логируем и продолжаем
 				try:
-					# Регистрируем сервис в runtime
-					self.runtime.service_registry.register(svc_name, forwarder)
-					self._registered_services.append(svc_name)
+					await self.runtime.service_registry.call(
+						"logger.log",
+						level="warning",
+						message=f"RemotePluginProxy: не удалось зарегистрировать сервис {svc_name}",
+					)
 				except Exception:
-					# Не ломаем загрузку, логируем и продолжаем
-					try:
-						await self.runtime.service_registry.call(
-							"logger.log",
-							level="warning",
-							message=f"RemotePluginProxy: не удалось зарегистрировать сервис {svc_name}",
-						)
-					except Exception:
-						pass
+					pass
 
-			# Логируем загрузку
-			try:
-				await self.runtime.service_registry.call(
-					"logger.log",
-					level="info",
-					message=f"Remote plugin '{self._metadata.get('name')}' loaded",
-					plugin="RemotePluginProxy",
-				)
-			except Exception:
-				pass
-		except Exception as exc:
-			# Не ломаем загрузку Core, но логируем ошибку
-			try:
-				await self.runtime.service_registry.call(
-					"logger.log",
-					level="error",
-					message=f"Failed to load remote plugin: {str(exc)}",
-					plugin="RemotePluginProxy",
-				)
-			except Exception:
-				pass
-			raise
+		# Mark ready
+		self._ready = True
+
+		# Log successful load
+		try:
+			await self.runtime.service_registry.call(
+				"logger.log",
+				level="info",
+				message=f"Remote plugin '{self.metadata.name}' loaded (ready={self._ready})",
+				plugin="RemotePluginProxy",
+			)
+		except Exception:
+			pass
 
 	async def on_start(self) -> None:
 		"""Запуск: вызвать /plugin/start на удалённом сервисе."""

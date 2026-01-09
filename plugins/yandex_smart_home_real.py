@@ -59,6 +59,10 @@ class YandexSmartHomeRealPlugin(BasePlugin):
         """Загрузка: регистрируем сервис yandex.sync_devices()."""
         await super().on_load()
 
+        # Track background tasks started by this plugin so they can be
+        # cancelled on unload to avoid leaked asyncio tasks.
+        self._tasks: set = set()
+
         async def _sync_devices() -> list[Dict[str, Any]]:
             """Синхронизировать устройства из реального API Яндекса.
 
@@ -666,7 +670,13 @@ class YandexSmartHomeRealPlugin(BasePlugin):
                                             pass
 
                                 # Запускаем фоновую задачу пуллинга (не ждём её)
-                                asyncio.create_task(_poll_and_publish())
+                                task = asyncio.create_task(_poll_and_publish())
+                                # Track and auto-remove completed tasks
+                                try:
+                                    self._tasks.add(task)
+                                    task.add_done_callback(lambda t, tasks=self._tasks: tasks.discard(t))
+                                except Exception:
+                                    pass
 
                             except Exception:
                                 pass
@@ -735,6 +745,42 @@ class YandexSmartHomeRealPlugin(BasePlugin):
     async def on_unload(self) -> None:
         """Выгрузка: удаляем сервис."""
         await super().on_unload()
+
+        # Cancel background tasks started by this plugin
+        try:
+            tasks = getattr(self, "_tasks", None)
+            if tasks:
+                # cancel
+                for t in list(tasks):
+                    try:
+                        t.cancel()
+                    except Exception:
+                        pass
+
+                # wait for completion with timeout
+                try:
+                    await asyncio.wait_for(asyncio.gather(*list(tasks), return_exceptions=True), timeout=2.0)
+                except asyncio.TimeoutError:
+                    # timed out waiting — tasks may still be running, but we've attempted cancel
+                    pass
+                except Exception:
+                    # ignore other errors from tasks
+                    pass
+
+                # suppress CancelledError and clear tracking
+                for t in list(tasks):
+                    try:
+                        if not t.done():
+                            t.cancel()
+                    except Exception:
+                        pass
+                try:
+                    tasks.clear()
+                except Exception:
+                    pass
+
+        except Exception:
+            pass
 
         try:
             self.runtime.service_registry.unregister("yandex.sync_devices")

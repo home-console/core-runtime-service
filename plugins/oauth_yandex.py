@@ -95,7 +95,11 @@ class OAuthYandexPlugin(BasePlugin):
             }
             
             await self.runtime.storage.set(self.TOKEN_NAMESPACE, self.CONFIG_KEY, config)
-            return config
+            # Do not return client_secret in responses — mask it
+            safe = dict(config)
+            if "client_secret" in safe:
+                safe["client_secret"] = "****"
+            return safe
 
         async def get_status() -> Dict[str, Any]:
             """Получить статус OAuth авторизации.
@@ -208,13 +212,20 @@ class OAuthYandexPlugin(BasePlugin):
                         json_data = await resp.json()
                     except Exception:
                         raise RuntimeError(f"Ошибка получения токенов: HTTP {resp.status} — {text}")
-            
-            # Сохраняем токены
+
+            # Сохраняем токены в storage (single source of truth)
             await self.runtime.storage.set(self.TOKEN_NAMESPACE, self.TOKEN_KEY, json_data)
-            return json_data
+
+            # Do NOT return raw tokens to caller. Return minimal status only.
+            return {"ok": True, "authorized": True, "expires_in": json_data.get("expires_in")}
 
         async def get_tokens() -> Optional[Dict[str, Any]]:
-            """Получить сохранённые токены (debug-сервис)."""
+            """Получить сохранённые токены (internal service).
+
+            Этот сервис предназначен только для внутреннего использования другими
+            плагинами через `runtime.service_registry.call("oauth_yandex.get_tokens")`.
+            Ни при каких условиях токены не регистрируются как публичный HTTP-эндпоинт.
+            """
             return await self.runtime.storage.get(self.TOKEN_NAMESPACE, self.TOKEN_KEY)
 
         async def validate_token(token: Optional[str] = None) -> Dict[str, Any]:
@@ -255,7 +266,7 @@ class OAuthYandexPlugin(BasePlugin):
                 return {'valid': False, 'reason': 'request_failed', 'error': str(e)}
 
         async def set_tokens(tokens: Dict[str, Any]) -> None:
-            """Сохранить токены (для тестов)."""
+            """Сохранить токены (internal/test service)."""
             if not isinstance(tokens, dict):
                 raise ValueError("tokens должен быть словарём")
             await self.runtime.storage.set(self.TOKEN_NAMESPACE, self.TOKEN_KEY, tokens)
@@ -281,7 +292,7 @@ class OAuthYandexPlugin(BasePlugin):
                 service="oauth_yandex.configure",
                 description="Настроить OAuth параметры (client_id, client_secret, redirect_uri)"
             ))
-            # GET /oauth/yandex/status — получить статус авторизации
+            # GET /oauth/yandex/status — получить статус авторизации (не возвращает токены)
             self.runtime.http.register(HttpEndpoint(
                 method="GET",
                 path="/oauth/yandex/status",
@@ -296,19 +307,12 @@ class OAuthYandexPlugin(BasePlugin):
                 description="Получить URL авторизации (использует сохранённую конфигурацию)"
             ))
             # POST /oauth/yandex/exchange-code — обменять код на токены
+            # Этот HTTP-эндпоинт сохраняет токены в storage, но не возвращает их клиенту.
             self.runtime.http.register(HttpEndpoint(
                 method="POST",
                 path="/oauth/yandex/exchange-code",
                 service="oauth_yandex.exchange_code",
                 description="Обменять code на токены (использует сохранённую конфигурацию)"
-            ))
-            # GET /oauth/yandex/tokens — получить токены (debug)
-            # Примечание: в production удалить или защитить эту ручку
-            self.runtime.http.register(HttpEndpoint(
-                method="GET",
-                path="/oauth/yandex/tokens",
-                service="oauth_yandex.get_tokens",
-                description="[DEBUG] Получить сохранённые токены (только для разработки)"
             ))
             # GET /oauth/yandex/validate — проверить access_token (optional query param `token`)
             self.runtime.http.register(HttpEndpoint(

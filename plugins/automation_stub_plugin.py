@@ -53,7 +53,7 @@ class AutomationStubPlugin(BasePlugin):
         """
         await super().on_load()
 
-        async def _on_device_command_requested(data: dict[str, Any]) -> None:
+        async def _on_device_command_requested(event_type: str, data: dict[str, Any]) -> None:
             try:
                 internal_id = data.get("internal_id")
                 params = data.get("params", {}) or {}
