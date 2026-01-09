@@ -34,10 +34,34 @@ async def main():
     # Создать Core Runtime
     runtime = CoreRuntime(storage_adapter)
 
+    # Зарегистрировать встроенные модули (built-in domains) при старте.
+    try:
+        # Импорт делается в runtime контексте; если модули отсутствуют, не ломаем запуск.
+        from modules.devices import register_devices  # type: ignore
+
+        try:
+            register_devices(runtime)
+            print("[Runtime] Built-in module 'devices' registered")
+        except Exception as e:
+            print(f"[Runtime] Не удалось зарегистрировать модуль devices: {e}")
+    except Exception:
+        # modules не обязательны — оставляем совместимость с текущей структурой
+        pass
+
     # Автозагрузка плагинов из каталога plugins/
     plugins_dir = Path(__file__).parent / "plugins"
     if plugins_dir.exists() and plugins_dir.is_dir():
         for _finder, mod_name, _ispkg in pkgutil.iter_modules([str(plugins_dir)]):
+            # Если модуль devices реализован как built-in module, не автозагружаем devices_plugin
+            if mod_name == "devices_plugin":
+                try:
+                    # use top-level importlib (avoid local import which shadows the name)
+                    if importlib.util.find_spec("modules.devices") is not None:
+                        # Пропускаем плагин-адаптер, так как домен уже зарегистрирован
+                        print("[Runtime] Пропущен plugins.devices_plugin — devices реализован в modules")
+                        continue
+                except Exception:
+                    pass
             module_name = f"plugins.{mod_name}"
             try:
                 module = importlib.import_module(module_name)

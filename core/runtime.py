@@ -90,6 +90,26 @@ class CoreRuntime:
         self.plugin_manager = PluginManager(self)
         # Регистр HTTP-интерфейсов (каталог контрактов)
         self.http = HttpRegistry()
+        # container for unregister callables returned by built-in modules
+        self._module_unregistrars: dict[str, callable] = {}
+
+        # Attempt to register built-in modules (e.g., modules.devices)
+        try:
+            spec = importlib.util.find_spec("modules.devices")
+            if spec is not None:
+                try:
+                    from modules.devices import register_devices  # type: ignore
+
+                    res = register_devices(self)
+                    if isinstance(res, dict):
+                        unregister = res.get("unregister")
+                        if callable(unregister):
+                            self._module_unregistrars["devices"] = unregister
+                except Exception:
+                    # Do not fail runtime init if module registration fails
+                    pass
+        except Exception:
+            pass
         
         self._running = False
 
@@ -170,7 +190,17 @@ class CoreRuntime:
         - очищает все компоненты
         """
         await self.stop()
-        
+        # Unregister built-in modules if they provided unregister callables
+        try:
+            for key, unreg in list(getattr(self, "_module_unregistrars", {}).items()):
+                try:
+                    if callable(unreg):
+                        unreg()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
         # Очистить компоненты
         self.event_bus.clear()
         self.service_registry.clear()
