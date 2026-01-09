@@ -16,7 +16,7 @@ from core.config import Config
 from core.runtime import CoreRuntime
 from adapters.sqlite_adapter import SQLiteAdapter
 from plugins.system_logger_plugin import SystemLoggerPlugin
-from plugins.devices_plugin import DevicesPlugin
+from modules.devices import register_devices
 from plugins.automation_stub_plugin import AutomationStubPlugin
 from plugins.presence_plugin import PresencePlugin
 
@@ -32,11 +32,12 @@ async def test_presence():
     await adapter.initialize_schema()
     runtime = CoreRuntime(adapter)
 
+
     logger = SystemLoggerPlugin(runtime)
     await runtime.plugin_manager.load_plugin(logger)
 
-    devices = DevicesPlugin(runtime)
-    await runtime.plugin_manager.load_plugin(devices)
+    # register devices module instead of loading plugin
+    register_devices(runtime)
 
     automation = AutomationStubPlugin(runtime)
     await runtime.plugin_manager.load_plugin(automation)

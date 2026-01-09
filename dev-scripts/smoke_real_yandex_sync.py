@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from core.runtime import CoreRuntime
 from plugins.yandex_smart_home_real import YandexSmartHomeRealPlugin
-from plugins.devices_plugin import DevicesPlugin
+from modules.devices import register_devices
 from plugins.system_logger_plugin import SystemLoggerPlugin
 
 
@@ -186,11 +186,9 @@ async def main():
     await runtime.plugin_manager.load_plugin(logger_plugin)
     await runtime.plugin_manager.start_plugin(logger_plugin.metadata.name)
 
-    # Загрузить devices
-    devices_plugin = DevicesPlugin(runtime)
-    print("Loading devices plugin...")
-    await runtime.plugin_manager.load_plugin(devices_plugin)
-    await runtime.plugin_manager.start_plugin(devices_plugin.metadata.name)
+    # Register devices module instead of loading plugin
+    print("Registering devices module...")
+    register_devices(runtime)
 
     # Регистрируем mock oauth_yandex.get_tokens
     async def mock_get_tokens():
@@ -286,8 +284,7 @@ async def main():
     await runtime.plugin_manager.stop_plugin(real_plugin.metadata.name)
     await runtime.plugin_manager.unload_plugin(real_plugin.metadata.name)
 
-    await runtime.plugin_manager.stop_plugin(devices_plugin.metadata.name)
-    await runtime.plugin_manager.unload_plugin(devices_plugin.metadata.name)
+    # devices module is built-in; no plugin stop/unload required
 
     await runtime.plugin_manager.stop_plugin(logger_plugin.metadata.name)
     await runtime.plugin_manager.unload_plugin(logger_plugin.metadata.name)

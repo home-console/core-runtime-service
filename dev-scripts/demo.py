@@ -11,7 +11,7 @@ from core.config import Config
 from core.runtime import CoreRuntime
 from adapters.sqlite_adapter import SQLiteAdapter
 from plugins.example_plugin import ExamplePlugin
-from plugins.devices_plugin import DevicesPlugin
+from modules.devices import register_devices
 from plugins.system_logger_plugin import SystemLoggerPlugin
 from plugins.automation_stub_plugin import AutomationStubPlugin
 try:
@@ -50,10 +50,9 @@ async def demo():
     await runtime.plugin_manager.load_plugin(logger)
     print(f"✓ Плагин '{logger.metadata.name}' загружен")
     
-    # Devices — доменный плагин
-    devices = DevicesPlugin(runtime)
-    await runtime.plugin_manager.load_plugin(devices)
-    print(f"✓ Плагин '{devices.metadata.name}' загружен")
+    # Devices — доменный модуль
+    register_devices(runtime)
+    print("✓ devices module зарегистрирован")
     
     # Automation stub — демонстрация event-driven архитектуры
     automation = AutomationStubPlugin(runtime)

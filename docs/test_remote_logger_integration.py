@@ -16,7 +16,7 @@ from core.config import Config
 from core.runtime import CoreRuntime
 from adapters.sqlite_adapter import SQLiteAdapter
 from plugins.system_logger_plugin import SystemLoggerPlugin
-from plugins.devices_plugin import DevicesPlugin
+from modules.devices import register_devices
 from plugins.remote_plugin_proxy import RemotePluginProxy
 
 
@@ -44,9 +44,8 @@ async def test_remote_plugin_proxy_architecture():
     await runtime.plugin_manager.load_plugin(logger)
     print("    ✓ system_logger загружен")
 
-    devices = DevicesPlugin(runtime)
-    await runtime.plugin_manager.load_plugin(devices)
-    print("    ✓ devices загружен")
+    register_devices(runtime)
+    print("    ✓ devices module зарегистрирован")
 
     # 3. Запуск runtime
     print("\n[3] Запуск Core Runtime...")
@@ -95,7 +94,7 @@ async def test_remote_plugin_proxy_architecture():
     plugins = runtime.plugin_manager.list_plugins()
     print(f"    Загруженные плагины: {plugins}")
     assert "system_logger" in plugins
-    assert "devices" in plugins
+    # devices is a built-in module now (not a plugin)
     print("    ✓ Core plugins живы и функциональны")
 
     # 6. Проверка, что Core по-прежнему работает с обычными плагинами

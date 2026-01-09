@@ -3,7 +3,7 @@ import pytest
 
 from core.runtime import CoreRuntime
 from plugins.system_logger_plugin import SystemLoggerPlugin
-from plugins.devices_plugin import DevicesPlugin
+from modules.devices import register_devices
 from plugins.admin_plugin import AdminPlugin
 
 
@@ -53,11 +53,11 @@ async def test_admin_devices_end_to_end(memory_adapter):
 
     # Load necessary plugins
     logger = SystemLoggerPlugin(runtime)
-    devices = DevicesPlugin(runtime)
     admin = AdminPlugin(runtime)
 
     await runtime.plugin_manager.load_plugin(logger)
-    await runtime.plugin_manager.load_plugin(devices)
+    # register built-in devices module instead of loading plugin
+    register_devices(runtime)
     await runtime.plugin_manager.load_plugin(admin)
 
     # Start runtime (invokes on_start of plugins)

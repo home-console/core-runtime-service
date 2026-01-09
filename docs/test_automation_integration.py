@@ -19,7 +19,7 @@ from core.config import Config
 from core.runtime import CoreRuntime
 from adapters.sqlite_adapter import SQLiteAdapter
 from plugins.system_logger_plugin import SystemLoggerPlugin
-from plugins.devices_plugin import DevicesPlugin
+from modules.devices import register_devices
 from plugins.automation_stub_plugin import AutomationStubPlugin
 
 
@@ -49,10 +49,9 @@ async def test_event_driven_automation():
     await runtime.plugin_manager.load_plugin(logger)
     print("    ✓ system_logger загружен")
     
-    # Devices — должен быть до automation
-    devices = DevicesPlugin(runtime)
-    await runtime.plugin_manager.load_plugin(devices)
-    print("    ✓ devices загружен")
+    # Devices domain — регистрируем как встроенный модуль
+    register_devices(runtime)
+    print("    ✓ devices module зарегистрирован")
     
     # Automation — подписывается на события devices
     automation = AutomationStubPlugin(runtime)
@@ -73,7 +72,6 @@ async def test_event_driven_automation():
         print(f"    - {plugin_name}: {state_value}")
     
     assert "system_logger" in plugins, "system_logger должен быть загружен"
-    assert "devices" in plugins, "devices должен быть загружен"
     assert "automation_stub" in plugins, "automation_stub должен быть загружен"
     print("    ✓ Все плагины загружены корректно")
 

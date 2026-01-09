@@ -8,7 +8,7 @@ from typing import Any, Dict, Optional
 
 from core.runtime import CoreRuntime
 from plugins.yandex_smart_home_stub import YandexSmartHomeStubPlugin
-from plugins.devices_plugin import DevicesPlugin
+from modules.devices import register_devices
 
 
 class SimpleMemoryStorage:
@@ -48,12 +48,9 @@ async def main():
 
     runtime.event_bus.subscribe("external.device_discovered", _print_event)
 
-    # Создать и загрузить плагины: devices (domain) и yandex (external)
-    devices_plugin = DevicesPlugin(runtime)
-    print("Loading devices plugin...")
-    await runtime.plugin_manager.load_plugin(devices_plugin)
-    print("Starting devices plugin...")
-    await runtime.plugin_manager.start_plugin(devices_plugin.metadata.name)
+    # Регистрируем встроенный модуль devices
+    print("Registering devices module...")
+    register_devices(runtime)
 
     plugin = YandexSmartHomeStubPlugin(runtime)
     print("Loading yandex plugin...")
@@ -90,10 +87,7 @@ async def main():
     print("Unloading yandex plugin...")
     await runtime.plugin_manager.unload_plugin(plugin.metadata.name)
 
-    print("Stopping devices plugin...")
-    await runtime.plugin_manager.stop_plugin(devices_plugin.metadata.name)
-    print("Unloading devices plugin...")
-    await runtime.plugin_manager.unload_plugin(devices_plugin.metadata.name)
+    # devices module is built-in; no plugin stop/unload required
 
     # Закрыть storage
     await runtime.storage.close()
