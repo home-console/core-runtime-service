@@ -82,11 +82,22 @@ class EventBus:
             # Игнорируем ошибки в обработчиках, чтобы не падать
             results = await asyncio.gather(*tasks, return_exceptions=True)
             
-            # Логируем ошибки (если нужно)
-            for result in results:
+            # Логируем ошибки в обработчиках
+            for i, result in enumerate(results):
                 if isinstance(result, Exception):
-                    # TODO: добавить логирование
-                    pass
+                    # Пытаемся залогировать через service_registry, если доступен
+                    # Это best-effort, не должно ломать публикацию событий
+                    try:
+                        # EventBus не имеет прямого доступа к runtime,
+                        # поэтому логируем только в stderr для отладки
+                        import sys
+                        print(
+                            f"[EventBus] Ошибка в обработчике события '{event_type}': {result}",
+                            file=sys.stderr
+                        )
+                    except Exception:
+                        # Игнорируем ошибки логирования
+                        pass
 
     def get_subscribers_count(self, event_type: str) -> int:
         """

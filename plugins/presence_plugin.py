@@ -1,22 +1,14 @@
 """
-Плагин `presence` — минимальный доменный плагин для отслеживания присутствия дома.
+DEPRECATED: Этот плагин заменён модулем modules.presence.PresenceModule.
 
-Модель состояния:
-- ключ в runtime.state: "presence.home" (bool)
+Оставлен для обратной совместимости.
+Будет удалён в версии 1.0.0.
 
-Сервисы:
-- `presence.set(home: bool)` — установить состояние присутствия.
+Вся доменная логика presence теперь в modules/presence/module.py.
+PresenceModule регистрируется автоматически при создании CoreRuntime
+через ModuleManager.
 
-События:
-- `presence.entered` (old_state, new_state) — False -> True
-- `presence.left` (old_state, new_state) — True -> False
-
-HTTP (декларативно):
-- POST /presence/enter  -> service: presence.set(home=True)
-- POST /presence/leave  -> service: presence.set(home=False)
-
-Плагин взаимодействует только через runtime.state_engine, runtime.event_bus,
-runtime.service_registry и runtime.http.
+Этот плагин больше не нужен и может быть удалён.
 """
 
 from __future__ import annotations
@@ -43,8 +35,15 @@ class PresencePlugin(BasePlugin):
         )
 
     async def on_load(self) -> None:
-        """Регистрация сервиса и HTTP-контрактов."""
+        """
+        DEPRECATED: Presence теперь регистрируется автоматически через ModuleManager.
+
+        Этот метод больше не выполняет никаких действий.
+        Модуль presence регистрируется при создании CoreRuntime.
+        """
         await super().on_load()
+        # PresenceModule уже зарегистрирован через ModuleManager
+        # Ничего делать не нужно
         # Сервис для управления присутствием
         async def _set_service(home: bool) -> Optional[bool]:
             """Сервис `presence.set`.

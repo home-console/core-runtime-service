@@ -6,15 +6,11 @@
 
 import asyncio
 import signal
-import importlib
-import inspect
-import pkgutil
 from pathlib import Path
 
 from core.config import Config
 from core.runtime import CoreRuntime
 from adapters.sqlite_adapter import SQLiteAdapter
-from plugins.base_plugin import BasePlugin
 
 
 async def main():
@@ -32,55 +28,16 @@ async def main():
     await storage_adapter.initialize_schema()
     
     # Создать Core Runtime
+    # Модули (devices, automation, presence) регистрируются автоматически в CoreRuntime.__init__
     runtime = CoreRuntime(storage_adapter)
-
-    # Зарегистрировать встроенные модули (built-in domains) при старте.
+    
+    # Диагностика: показать, какие модули и плагины зарегистрированы
     try:
-        # Импорт делается в runtime контексте; если модули отсутствуют, не ломаем запуск.
-        from modules.devices import register_devices  # type: ignore
-
-        try:
-            register_devices(runtime)
-            print("[Runtime] Built-in module 'devices' registered")
-        except Exception as e:
-            print(f"[Runtime] Не удалось зарегистрировать модуль devices: {e}")
+        modules = runtime.module_manager.list_modules()
+        if modules:
+            print(f"[Runtime] Модули зарегистрированы: {modules}")
     except Exception:
-        # modules не обязательны — оставляем совместимость с текущей структурой
         pass
-
-    # Автозагрузка плагинов из каталога plugins/
-    plugins_dir = Path(__file__).parent / "plugins"
-    if plugins_dir.exists() and plugins_dir.is_dir():
-        for _finder, mod_name, _ispkg in pkgutil.iter_modules([str(plugins_dir)]):
-            # Если модуль devices реализован как built-in module, не автозагружаем devices_plugin
-            if mod_name == "devices_plugin":
-                try:
-                    # use top-level importlib (avoid local import which shadows the name)
-                    if importlib.util.find_spec("modules.devices") is not None:
-                        # Пропускаем плагин-адаптер, так как домен уже зарегистрирован
-                        print("[Runtime] Пропущен plugins.devices_plugin — devices реализован в modules")
-                        continue
-                except Exception:
-                    pass
-            module_name = f"plugins.{mod_name}"
-            try:
-                module = importlib.import_module(module_name)
-                for _name, obj in inspect.getmembers(module, inspect.isclass):
-                    try:
-                        if issubclass(obj, BasePlugin) and obj is not BasePlugin:
-                            plugin_instance = obj(runtime)
-                            await runtime.plugin_manager.load_plugin(plugin_instance)
-                    except Exception:
-                        # ignore non-plugin classes or instantiation errors per-class
-                        continue
-            except Exception as e:
-                print(f"[Runtime] Ошибка при импортe плагина {module_name}: {e}")
-    # Диагностика: показать, какие плагины загружены
-    try:
-        loaded = runtime.plugin_manager.list_plugins()
-        print(f"[Runtime] Плагины загружены: {loaded}")
-    except Exception:
-        print("[Runtime] Не удалось получить список загруженных плагинов")
     
     # Обработка сигналов для graceful shutdown
     shutdown_event = asyncio.Event()

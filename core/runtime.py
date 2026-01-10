@@ -13,6 +13,7 @@ CoreRuntime - главный класс Core Runtime.
 
 from typing import Any
 import importlib
+import importlib.util
 import inspect
 import pkgutil
 from pathlib import Path
@@ -22,6 +23,7 @@ from core.service_registry import ServiceRegistry
 from core.state_engine import StateEngine
 from core.storage import Storage
 from core.plugin_manager import PluginManager
+from core.module_manager import ModuleManager
 from core.http_registry import HttpRegistry
 from plugins import BasePlugin
 
@@ -59,22 +61,46 @@ class CoreRuntime:
                 return await self._storage.get(namespace, key)
 
             async def set(self, namespace: str, key: str, value):
-                # Persist to underlying storage
-                await self._storage.set(namespace, key, value)
-                await self._state_engine.set(f"{namespace}.{key}", value)
-
-                # Best-effort logging for debugging mirror operations (no-raise)
-                # service_registry may not be available at early init; guard access
-                _sr = getattr(self, '_state_engine', None)
-                # Attempt to call logger if available
-                if hasattr(self, '_state_engine'):
-                    # runtime reference not available here; try to find a global logger via import
-                    from plugins.system_logger_plugin import SystemLoggerPlugin  # type: ignore
+                """
+                Сохранить значение в storage и синхронизировать с state_engine.
+                
+                Гарантирует консистентность: если storage.set() падает,
+                state_engine не обновляется.
+                """
+                state_key = f"{namespace}.{key}"
+                try:
+                    # Сначала сохраняем в storage (source of truth)
+                    await self._storage.set(namespace, key, value)
+                    # Только после успешного сохранения обновляем state_engine
+                    await self._state_engine.set(state_key, value)
+                except Exception:
+                    # Если storage.set() упал, откатываем state_engine (если был обновлён)
+                    try:
+                        await self._state_engine.delete(state_key)
+                    except Exception:
+                        pass
+                    # Пробрасываем оригинальную ошибку
+                    raise
 
             async def delete(self, namespace: str, key: str):
-                res = await self._storage.delete(namespace, key)
-                await self._state_engine.delete(f"{namespace}.{key}")
-                return res
+                """
+                Удалить значение из storage и state_engine.
+                
+                Гарантирует консистентность: если storage.delete() падает,
+                state_engine не обновляется.
+                """
+                state_key = f"{namespace}.{key}"
+                try:
+                    # Сначала удаляем из storage
+                    res = await self._storage.delete(namespace, key)
+                    # Только после успешного удаления обновляем state_engine
+                    if res:
+                        await self._state_engine.delete(state_key)
+                    return res
+                except Exception:
+                    # Если storage.delete() упал, state_engine остаётся без изменений
+                    # Пробрасываем оригинальную ошибку
+                    raise
 
             async def list_keys(self, namespace: str):
                 return await self._storage.list_keys(namespace)
@@ -88,29 +114,10 @@ class CoreRuntime:
         # Replace storage with wrapper that mirrors changes to state_engine
         self.storage = StorageWithStateMirror(base_storage, self.state_engine)
         self.plugin_manager = PluginManager(self)
+        self.module_manager = ModuleManager()
         # Регистр HTTP-интерфейсов (каталог контрактов)
         self.http = HttpRegistry()
-        # container for unregister callables returned by built-in modules
-        self._module_unregistrars: dict[str, callable] = {}
 
-        # Attempt to register built-in modules (e.g., modules.devices)
-        try:
-            spec = importlib.util.find_spec("modules.devices")
-            if spec is not None:
-                try:
-                    from modules.devices import register_devices  # type: ignore
-
-                    res = register_devices(self)
-                    if isinstance(res, dict):
-                        unregister = res.get("unregister")
-                        if callable(unregister):
-                            self._module_unregistrars["devices"] = unregister
-                except Exception:
-                    # Do not fail runtime init if module registration fails
-                    pass
-        except Exception:
-            pass
-        
         self._running = False
 
     @property
@@ -137,25 +144,14 @@ class CoreRuntime:
                 # Не мешаем запуску runtime из-за проблем с автозагрузкой
                 pass
 
+        # Регистрация встроенных модулей (обязательные домены)
+        self.module_manager.register_builtin_modules(self)
+
+        # Запустить все модули (обязательные домены)
+        await self.module_manager.start_all()
+        
         # Запустить все плагины
         await self.plugin_manager.start_all()
-        # После старта плагинов: минимальная синхронизация важных namespace -> state_engine.
-        # Это гарантирует, что начальные значения, записанные плагинами в storage
-        # во время on_start будут отражены в state_engine перед возвратом из start().
-        try:
-            try:
-                keys = await self.storage.list_keys("presence")
-            except Exception:
-                keys = []
-            for k in keys:
-                try:
-                    v = await self.storage.get("presence", k)
-                    await self.state_engine.set(f"presence.{k}", v)
-                except Exception:
-                    pass
-        except Exception:
-            # Не мешаем старту при ошибках синхронизации
-            pass
         
         # Установить состояние runtime
         await self.state_engine.set("runtime.status", "running")
@@ -175,6 +171,9 @@ class CoreRuntime:
         # Остановить все плагины
         await self.plugin_manager.stop_all()
         
+        # Остановить все модули
+        await self.module_manager.stop_all()
+        
         # Закрыть storage
         await self.storage.close()
         
@@ -190,16 +189,9 @@ class CoreRuntime:
         - очищает все компоненты
         """
         await self.stop()
-        # Unregister built-in modules if they provided unregister callables
-        try:
-            for key, unreg in list(getattr(self, "_module_unregistrars", {}).items()):
-                try:
-                    if callable(unreg):
-                        unreg()
-                except Exception:
-                    pass
-        except Exception:
-            pass
+        
+        # Очистить модули
+        self.module_manager.clear()
 
         # Очистить компоненты
         self.event_bus.clear()
