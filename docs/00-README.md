@@ -43,6 +43,7 @@ Core Runtime — это **инфраструктурный kernel**, а не bac
 | [01-ARCHITECTURE.md](01-ARCHITECTURE.md) | Инварианты, контракты, boundaries | Maintainers, архитекторы |
 | [02-MODULES-AND-PLUGINS.md](02-MODULES-AND-PLUGINS.md) | Когда module vs plugin, migration guide | Разработчики плагинов |
 | [04-CORE-RUNTIME-CONTRACT.md](04-CORE-RUNTIME-CONTRACT.md) | Гарантии Core, semantics, limitations | Разработчики Core и плагинов |
+| [07-RUNTIME-MODULE-CONTRACT.md](07-RUNTIME-MODULE-CONTRACT.md) | Строгий контракт RuntimeModule и ModuleManager | Разработчики модулей |
 
 ### Практическое использование
 | Документ | Назначение | Аудитория |
@@ -50,8 +51,10 @@ Core Runtime — это **инфраструктурный kernel**, а не bac
 | [03-QUICKSTART.md](03-QUICKSTART.md) | Запуск за 5 минут, первый плагин | Новички |
 | [05-REMOTE-PLUGIN-CONTRACT.md](05-REMOTE-PLUGIN-CONTRACT.md) | Контракт для remote plugins (HTTP) | Разработчики remote plugins |
 | [06-CONTRACTS.md](06-CONTRACTS.md) | Реестр сервисов и событий | Разработчики плагинов (в разработке) |
-| [07-OPERATIONS.md](07-OPERATIONS.md) | Запуск, environment, deployment | DevOps, SRE (в разработке) |
-| [08-TESTING.md](08-TESTING.md) | Как запускать тесты, smoke scripts | QA, разработчики (в разработке) |
+| [07-RUNTIME-MODULE-CONTRACT.md](07-RUNTIME-MODULE-CONTRACT.md) | Строгий контракт RuntimeModule и ModuleManager | Разработчики модулей |
+| [08-PLUGIN-CONTRACT.md](08-PLUGIN-CONTRACT.md) | Контракт Plugin и Manifest | Разработчики плагинов |
+| [09-OPERATIONS.md](09-OPERATIONS.md) | Запуск, environment, deployment | DevOps, SRE (в разработке) |
+| [10-TESTING.md](10-TESTING.md) | Как запускать тесты, smoke scripts | QA, разработчики (в разработке) |
 
 ### Интеграции
 | Документ | Назначение |

@@ -24,6 +24,9 @@ ModuleManager — менеджер встроенных модулей Runtime.
 АРХИТЕКТУРА ДЛЯ БУДУЩЕГО:
 - _discover_module() и _create_module_instance() изолированы для будущего RemoteModuleManager
 - Точки расширения явно помечены комментариями
+- Контракт RuntimeModule стабилен для proxy-based remote execution
+
+Подробный контракт RuntimeModule: docs/07-RUNTIME-MODULE-CONTRACT.md
 """
 
 from typing import Any, Dict, List, Optional
