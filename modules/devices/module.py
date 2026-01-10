@@ -22,7 +22,7 @@ class DevicesModule(RuntimeModule):
         """Уникальное имя модуля."""
         return "devices"
 
-    def register(self) -> None:
+    async def register(self) -> None:
         """
         Регистрация модуля в CoreRuntime.
 
@@ -46,7 +46,7 @@ class DevicesModule(RuntimeModule):
         for name, func in service_names:
             # Skip services that are already registered (idempotent)
             try:
-                if self.runtime.service_registry.has_service(name):
+                if await self.runtime.service_registry.has_service(name):
                     continue
             except Exception:
                 # If service_registry doesn't implement has_service for some reason,
@@ -57,18 +57,18 @@ class DevicesModule(RuntimeModule):
                 return await _func(self.runtime, *args, **kwargs)
 
             try:
-                self.runtime.service_registry.register(name, _wrapper)
+                await self.runtime.service_registry.register(name, _wrapper)
                 self._registered_services.append(name)
             except ValueError:
                 # already registered concurrently — skip
                 continue
 
         # Подписка на события
-        self.runtime.event_bus.subscribe(
+        await self.runtime.event_bus.subscribe(
             "external.device_state_reported",
             self._handle_external_state
         )
-        self.runtime.event_bus.subscribe(
+        await self.runtime.event_bus.subscribe(
             "external.device_discovered",
             self._handle_external_device_discovered
         )
@@ -89,7 +89,7 @@ class DevicesModule(RuntimeModule):
         """
         # Отписка от событий
         try:
-            self.runtime.event_bus.unsubscribe(
+            await self.runtime.event_bus.unsubscribe(
                 "external.device_state_reported",
                 self._handle_external_state
             )
@@ -97,7 +97,7 @@ class DevicesModule(RuntimeModule):
             pass
 
         try:
-            self.runtime.event_bus.unsubscribe(
+            await self.runtime.event_bus.unsubscribe(
                 "external.device_discovered",
                 self._handle_external_device_discovered
             )
@@ -107,7 +107,7 @@ class DevicesModule(RuntimeModule):
         # Отмена регистрации сервисов
         for service_name in getattr(self, "_registered_services", []):
             try:
-                self.runtime.service_registry.unregister(service_name)
+                await self.runtime.service_registry.unregister(service_name)
             except Exception:
                 pass
 

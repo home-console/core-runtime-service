@@ -178,7 +178,7 @@ async def main():
         print(f"  state: {data.get('state')}\n")
         events_received.append(data)
 
-    runtime.event_bus.subscribe("external.device_discovered", _on_device_discovered)
+    await runtime.event_bus.subscribe("external.device_discovered", _on_device_discovered)
 
     # Загрузить logger
     logger_plugin = SystemLoggerPlugin(runtime)
@@ -199,7 +199,7 @@ async def main():
             "expires_in": 3600,
         }
 
-    runtime.service_registry.register("oauth_yandex.get_tokens", mock_get_tokens)
+    await runtime.service_registry.register("oauth_yandex.get_tokens", mock_get_tokens)
 
     # Загрузить real plugin
     real_plugin = YandexSmartHomeRealPlugin(runtime)

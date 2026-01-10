@@ -22,14 +22,14 @@ class AutomationModule(RuntimeModule):
         """Уникальное имя модуля."""
         return "automation"
 
-    def register(self) -> None:
+    async def register(self) -> None:
         """
         Регистрация модуля в CoreRuntime.
 
         Подписывается на событие external.device_state_reported.
         """
         # Подписываем обработчик события
-        self.runtime.event_bus.subscribe(
+        await self.runtime.event_bus.subscribe(
             "external.device_state_reported",
             self._handle_external_state
         )
@@ -51,7 +51,7 @@ class AutomationModule(RuntimeModule):
         Отписывается от событий при остановке.
         """
         try:
-            self.runtime.event_bus.unsubscribe(
+            await self.runtime.event_bus.unsubscribe(
                 "external.device_state_reported",
                 self._handle_external_state
             )

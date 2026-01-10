@@ -272,13 +272,13 @@ class OAuthYandexPlugin(BasePlugin):
             await self.runtime.storage.set(self.TOKEN_NAMESPACE, self.TOKEN_KEY, tokens)
 
         # Регистрируем сервисы
-        self.runtime.service_registry.register("oauth_yandex.configure", configure)
-        self.runtime.service_registry.register("oauth_yandex.get_status", get_status)
-        self.runtime.service_registry.register("oauth_yandex.get_authorize_url", get_authorize_url)
-        self.runtime.service_registry.register("oauth_yandex.exchange_code", exchange_code)
-        self.runtime.service_registry.register("oauth_yandex.get_tokens", get_tokens)
-        self.runtime.service_registry.register("oauth_yandex.validate_token", validate_token)
-        self.runtime.service_registry.register("oauth_yandex.set_tokens", set_tokens)
+        await self.runtime.service_registry.register("oauth_yandex.configure", configure)
+        await self.runtime.service_registry.register("oauth_yandex.get_status", get_status)
+        await self.runtime.service_registry.register("oauth_yandex.get_authorize_url", get_authorize_url)
+        await self.runtime.service_registry.register("oauth_yandex.exchange_code", exchange_code)
+        await self.runtime.service_registry.register("oauth_yandex.get_tokens", get_tokens)
+        await self.runtime.service_registry.register("oauth_yandex.validate_token", validate_token)
+        await self.runtime.service_registry.register("oauth_yandex.set_tokens", set_tokens)
 
         # Регистрируем HTTP-контракты через runtime.http.register()
         # UI НЕ должен передавать OAuth параметры после configure —
@@ -329,13 +329,13 @@ class OAuthYandexPlugin(BasePlugin):
         """Удаляем сервисы и очищаем ссылку на runtime при выгрузке."""
         await super().on_unload()
         try:
-            self.runtime.service_registry.unregister("oauth_yandex.configure")
-            self.runtime.service_registry.unregister("oauth_yandex.get_status")
-            self.runtime.service_registry.unregister("oauth_yandex.get_authorize_url")
-            self.runtime.service_registry.unregister("oauth_yandex.exchange_code")
-            self.runtime.service_registry.unregister("oauth_yandex.get_tokens")
-            self.runtime.service_registry.unregister("oauth_yandex.validate_token")
-            self.runtime.service_registry.unregister("oauth_yandex.set_tokens")
+            await self.runtime.service_registry.unregister("oauth_yandex.configure")
+            await self.runtime.service_registry.unregister("oauth_yandex.get_status")
+            await self.runtime.service_registry.unregister("oauth_yandex.get_authorize_url")
+            await self.runtime.service_registry.unregister("oauth_yandex.exchange_code")
+            await self.runtime.service_registry.unregister("oauth_yandex.get_tokens")
+            await self.runtime.service_registry.unregister("oauth_yandex.validate_token")
+            await self.runtime.service_registry.unregister("oauth_yandex.set_tokens")
         except Exception:
             pass
 

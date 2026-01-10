@@ -5,6 +5,7 @@ ServiceRegistry - реестр сервисов для вызова методо
 Другие плагины вызывают эти сервисы через registry.
 """
 
+import asyncio
 from typing import Any, Callable, Awaitable
 
 
@@ -25,8 +26,10 @@ class ServiceRegistry:
     def __init__(self):
         # Словарь: service_name -> function
         self._services: dict[str, ServiceFunc] = {}
+        # Lock для thread-safety операций с _services
+        self._lock = asyncio.Lock()
 
-    def register(self, service_name: str, func: ServiceFunc) -> None:
+    async def register(self, service_name: str, func: ServiceFunc) -> None:
         """
         Зарегистрировать сервис.
         
@@ -39,20 +42,22 @@ class ServiceRegistry:
                 # логика включения устройства
                 pass
             
-            service_registry.register("devices.turn_on", turn_on_device)
+            await service_registry.register("devices.turn_on", turn_on_device)
         """
-        if service_name in self._services:
-            raise ValueError(f"Сервис '{service_name}' уже зарегистрирован")
-        self._services[service_name] = func
+        async with self._lock:
+            if service_name in self._services:
+                raise ValueError(f"Сервис '{service_name}' уже зарегистрирован")
+            self._services[service_name] = func
 
-    def unregister(self, service_name: str) -> None:
+    async def unregister(self, service_name: str) -> None:
         """
         Удалить сервис из реестра.
         
         Args:
             service_name: имя сервиса
         """
-        self._services.pop(service_name, None)
+        async with self._lock:
+            self._services.pop(service_name, None)
 
     async def call(self, service_name: str, *args, **kwargs) -> Any:
         """
@@ -71,13 +76,16 @@ class ServiceRegistry:
         Пример:
             result = await service_registry.call("devices.turn_on", "lamp_kitchen")
         """
-        func = self._services.get(service_name)
-        if func is None:
-            raise ValueError(f"Сервис '{service_name}' не найден")
+        # Получаем функцию под lock для thread-safety
+        async with self._lock:
+            func = self._services.get(service_name)
+            if func is None:
+                raise ValueError(f"Сервис '{service_name}' не найден")
         
+        # Вызываем функцию вне lock, чтобы не блокировать другие вызовы
         return await func(*args, **kwargs)
 
-    def has_service(self, service_name: str) -> bool:
+    async def has_service(self, service_name: str) -> bool:
         """
         Проверить, существует ли сервис.
         
@@ -87,17 +95,20 @@ class ServiceRegistry:
         Returns:
             True если сервис зарегистрирован
         """
-        return service_name in self._services
+        async with self._lock:
+            return service_name in self._services
 
-    def list_services(self) -> list[str]:
+    async def list_services(self) -> list[str]:
         """
         Получить список всех зарегистрированных сервисов.
         
         Returns:
             Список имён сервисов
         """
-        return list(self._services.keys())
+        async with self._lock:
+            return list(self._services.keys())
 
-    def clear(self) -> None:
+    async def clear(self) -> None:
         """Очистить все сервисы."""
-        self._services.clear()
+        async with self._lock:
+            self._services.clear()

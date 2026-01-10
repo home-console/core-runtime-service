@@ -91,7 +91,7 @@ class SystemLoggerPlugin(BasePlugin):
                 self._logger.info(line)
 
         # Регистрируем сервис в runtime
-        self.runtime.service_registry.register("logger.log", _log_service)
+        await self.runtime.service_registry.register("logger.log", _log_service)
 
     async def on_start(self) -> None:
         await super().on_start()
@@ -117,7 +117,7 @@ class SystemLoggerPlugin(BasePlugin):
         await super().on_unload()
         # Удаляем сервис и обнуляем ссылки. Не трогаем глобальный root logger.
         try:
-            self.runtime.service_registry.unregister("logger.log")
+            await self.runtime.service_registry.unregister("logger.log")
         except Exception:
             pass
 

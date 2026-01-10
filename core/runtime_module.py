@@ -39,7 +39,7 @@ class RuntimeModule(ABC):
         """
         pass
 
-    def register(self) -> None:
+    async def register(self) -> None:
         """
         Регистрация модуля в CoreRuntime.
 

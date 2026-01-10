@@ -46,7 +46,7 @@ async def main():
     async def _print_event(event_type: str, data: dict):
         print(f"[EVENT] {event_type}: {data}")
 
-    runtime.event_bus.subscribe("external.device_discovered", _print_event)
+    await runtime.event_bus.subscribe("external.device_discovered", _print_event)
 
     # Регистрируем встроенный модуль devices
     print("Registering devices module...")

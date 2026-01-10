@@ -92,7 +92,7 @@ class PresencePlugin(BasePlugin):
 
         # Регистрируем сервис
         try:
-            self.runtime.service_registry.register("presence.set", _set_service)
+            await self.runtime.service_registry.register("presence.set", _set_service)
         except Exception:
             # Если регистрация не удалась — не ломаем загрузку
             pass
@@ -156,7 +156,7 @@ class PresencePlugin(BasePlugin):
         await super().on_unload()
         try:
             # Удаляем сервис
-            self.runtime.service_registry.unregister("presence.set")
+            await self.runtime.service_registry.unregister("presence.set")
         except Exception:
             pass
 

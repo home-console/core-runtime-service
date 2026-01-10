@@ -40,7 +40,7 @@ class AdminPlugin(BasePlugin):
             return self.runtime.plugin_manager.list_plugins()
 
         async def list_services() -> List[str]:
-            return self.runtime.service_registry.list_services()
+            return await self.runtime.service_registry.list_services()
 
         async def list_http() -> List[Dict[str, Any]]:
             return [
@@ -65,7 +65,7 @@ class AdminPlugin(BasePlugin):
 
         async def admin_v1_plugins() -> List[Dict[str, Any]]:
             res: List[Dict[str, Any]] = []
-            services = self.runtime.service_registry.list_services()
+            services = await self.runtime.service_registry.list_services()
             http_eps = self.runtime.http.list()
             # Build mapping: plugin -> events subscribed
             events_map: Dict[str, List[str]] = {}
@@ -125,7 +125,8 @@ class AdminPlugin(BasePlugin):
 
         async def admin_v1_services() -> List[Dict[str, str]]:
             svcs = []
-            for s in self.runtime.service_registry.list_services():
+            all_services = await self.runtime.service_registry.list_services()
+            for s in all_services:
                 owner = s.split(".")[0] if s and "." in s else ""
                 svcs.append({"service_name": s, "plugin_name": owner})
             return svcs
@@ -213,11 +214,11 @@ class AdminPlugin(BasePlugin):
             return await self.runtime.state_engine.get(key)
 
         # Register services
-        self.runtime.service_registry.register("admin.list_plugins", list_plugins)
-        self.runtime.service_registry.register("admin.list_services", list_services)
-        self.runtime.service_registry.register("admin.list_http", list_http)
-        self.runtime.service_registry.register("admin.state_keys", state_keys)
-        self.runtime.service_registry.register("admin.state_get", state_get)
+        await self.runtime.service_registry.register("admin.list_plugins", list_plugins)
+        await self.runtime.service_registry.register("admin.list_services", list_services)
+        await self.runtime.service_registry.register("admin.list_http", list_http)
+        await self.runtime.service_registry.register("admin.state_keys", state_keys)
+        await self.runtime.service_registry.register("admin.state_get", state_get)
 
         # --- Devices proxy services (admin v1) ---
         async def admin_devices_list():
@@ -316,10 +317,10 @@ class AdminPlugin(BasePlugin):
                     pass
                 raise
 
-        self.runtime.service_registry.register("admin.devices.list", admin_devices_list)
-        self.runtime.service_registry.register("admin.devices.get", admin_devices_get)
-        self.runtime.service_registry.register("admin.devices.set_state", admin_devices_set_state)
-        self.runtime.service_registry.register("admin.devices.list_external", admin_devices_list_external)
+        await self.runtime.service_registry.register("admin.devices.list", admin_devices_list)
+        await self.runtime.service_registry.register("admin.devices.get", admin_devices_get)
+        await self.runtime.service_registry.register("admin.devices.set_state", admin_devices_set_state)
+        await self.runtime.service_registry.register("admin.devices.list_external", admin_devices_list_external)
 
         # --- Devices mapping admin proxies ---
         async def admin_devices_list_mappings() -> Any:
@@ -371,10 +372,10 @@ class AdminPlugin(BasePlugin):
                     pass
                 return {"ok": False, "error": str(e)}
 
-        self.runtime.service_registry.register("admin.devices.list_mappings", admin_devices_list_mappings)
-        self.runtime.service_registry.register("admin.devices.create_mapping", admin_devices_create_mapping)
-        self.runtime.service_registry.register("admin.devices.delete_mapping", admin_devices_delete_mapping)
-        self.runtime.service_registry.register("admin.devices.auto_map", admin_devices_auto_map)
+        await self.runtime.service_registry.register("admin.devices.list_mappings", admin_devices_list_mappings)
+        await self.runtime.service_registry.register("admin.devices.create_mapping", admin_devices_create_mapping)
+        await self.runtime.service_registry.register("admin.devices.delete_mapping", admin_devices_delete_mapping)
+        await self.runtime.service_registry.register("admin.devices.auto_map", admin_devices_auto_map)
 
         # --- OAuth Yandex proxy services (admin v1) ---
         async def _sanitize_oauth(data: Dict[str, Any]) -> Dict[str, Any]:
@@ -483,7 +484,7 @@ class AdminPlugin(BasePlugin):
                     return {"ok": False, "error": f"sync_failed: {err} / fallback_failed: {ee}"}
 
         # Register admin yandex sync service
-        self.runtime.service_registry.register("admin.yandex.sync", admin_yandex_sync)
+        await self.runtime.service_registry.register("admin.yandex.sync", admin_yandex_sync)
 
         # --- Admin endpoints to read/set yandex feature flag (use real API) ---
         async def admin_yandex_get_config() -> Dict[str, Any]:
@@ -520,14 +521,14 @@ class AdminPlugin(BasePlugin):
             except Exception as e:
                 return {"ok": False, "error": str(e)}
 
-        self.runtime.service_registry.register("admin.yandex.get_config", admin_yandex_get_config)
-        self.runtime.service_registry.register("admin.yandex.set_use_real", admin_yandex_set_use_real)
+        await self.runtime.service_registry.register("admin.yandex.get_config", admin_yandex_get_config)
+        await self.runtime.service_registry.register("admin.yandex.set_use_real", admin_yandex_set_use_real)
 
         # Register admin oauth services
-        self.runtime.service_registry.register("admin.oauth.yandex.status", oauth_status)
-        self.runtime.service_registry.register("admin.oauth.yandex.configure", oauth_configure)
-        self.runtime.service_registry.register("admin.oauth.yandex.authorize", oauth_authorize)
-        self.runtime.service_registry.register("admin.oauth.yandex.exchange", oauth_exchange_code)
+        await self.runtime.service_registry.register("admin.oauth.yandex.status", oauth_status)
+        await self.runtime.service_registry.register("admin.oauth.yandex.configure", oauth_configure)
+        await self.runtime.service_registry.register("admin.oauth.yandex.authorize", oauth_authorize)
+        await self.runtime.service_registry.register("admin.oauth.yandex.exchange", oauth_exchange_code)
 
         # Register HTTP endpoints
         from core.http_registry import HttpEndpoint
@@ -661,13 +662,13 @@ class AdminPlugin(BasePlugin):
             # --- Register new admin.v1 inventory services and endpoints ---
             try:
                 # Services
-                self.runtime.service_registry.register("admin.v1.runtime", admin_v1_runtime)
-                self.runtime.service_registry.register("admin.v1.plugins", admin_v1_plugins)
-                self.runtime.service_registry.register("admin.v1.services", admin_v1_services)
-                self.runtime.service_registry.register("admin.v1.http", admin_v1_http)
-                self.runtime.service_registry.register("admin.v1.events", admin_v1_events)
-                self.runtime.service_registry.register("admin.v1.storage", admin_v1_storage)
-                self.runtime.service_registry.register("admin.v1.state", admin_v1_state)
+                await self.runtime.service_registry.register("admin.v1.runtime", admin_v1_runtime)
+                await self.runtime.service_registry.register("admin.v1.plugins", admin_v1_plugins)
+                await self.runtime.service_registry.register("admin.v1.services", admin_v1_services)
+                await self.runtime.service_registry.register("admin.v1.http", admin_v1_http)
+                await self.runtime.service_registry.register("admin.v1.events", admin_v1_events)
+                await self.runtime.service_registry.register("admin.v1.storage", admin_v1_storage)
+                await self.runtime.service_registry.register("admin.v1.state", admin_v1_state)
 
                 # HTTP endpoints (read-only inventory)
                 self.runtime.http.register(HttpEndpoint(method="GET", path="/admin/v1/runtime", service="admin.v1.runtime", description="Runtime info: uptime, started_at, version"))
@@ -687,62 +688,62 @@ class AdminPlugin(BasePlugin):
     async def on_unload(self) -> None:
         await super().on_unload()
         try:
-            self.runtime.service_registry.unregister("admin.list_plugins")
-            self.runtime.service_registry.unregister("admin.list_services")
-            self.runtime.service_registry.unregister("admin.list_http")
-            self.runtime.service_registry.unregister("admin.state_keys")
-            self.runtime.service_registry.unregister("admin.state_get")
+            await self.runtime.service_registry.unregister("admin.list_plugins")
+            await self.runtime.service_registry.unregister("admin.list_services")
+            await self.runtime.service_registry.unregister("admin.list_http")
+            await self.runtime.service_registry.unregister("admin.state_keys")
+            await self.runtime.service_registry.unregister("admin.state_get")
             # Unregister admin.v1 inventory services
             try:
-                self.runtime.service_registry.unregister("admin.v1.runtime")
-                self.runtime.service_registry.unregister("admin.v1.plugins")
-                self.runtime.service_registry.unregister("admin.v1.services")
-                self.runtime.service_registry.unregister("admin.v1.http")
-                self.runtime.service_registry.unregister("admin.v1.events")
-                self.runtime.service_registry.unregister("admin.v1.storage")
-                self.runtime.service_registry.unregister("admin.v1.state")
+                await self.runtime.service_registry.unregister("admin.v1.runtime")
+                await self.runtime.service_registry.unregister("admin.v1.plugins")
+                await self.runtime.service_registry.unregister("admin.v1.services")
+                await self.runtime.service_registry.unregister("admin.v1.http")
+                await self.runtime.service_registry.unregister("admin.v1.events")
+                await self.runtime.service_registry.unregister("admin.v1.storage")
+                await self.runtime.service_registry.unregister("admin.v1.state")
             except Exception:
                 pass
             # Unregister devices admin proxies
             try:
-                self.runtime.service_registry.unregister("admin.devices.list")
-                self.runtime.service_registry.unregister("admin.devices.get")
-                self.runtime.service_registry.unregister("admin.devices.set_state")
-                self.runtime.service_registry.unregister("admin.devices.list_external")
+                await self.runtime.service_registry.unregister("admin.devices.list")
+                await self.runtime.service_registry.unregister("admin.devices.get")
+                await self.runtime.service_registry.unregister("admin.devices.set_state")
+                await self.runtime.service_registry.unregister("admin.devices.list_external")
                 # Unregister mappings proxies
                 try:
-                    self.runtime.service_registry.unregister("admin.devices.list_mappings")
+                    await self.runtime.service_registry.unregister("admin.devices.list_mappings")
                 except Exception:
                     pass
                 try:
-                    self.runtime.service_registry.unregister("admin.devices.create_mapping")
+                    await self.runtime.service_registry.unregister("admin.devices.create_mapping")
                 except Exception:
                     pass
                 try:
-                    self.runtime.service_registry.unregister("admin.devices.delete_mapping")
+                    await self.runtime.service_registry.unregister("admin.devices.delete_mapping")
                 except Exception:
                     pass
                 try:
-                    self.runtime.service_registry.unregister("admin.devices.auto_map")
+                    await self.runtime.service_registry.unregister("admin.devices.auto_map")
                 except Exception:
                     pass
             except Exception:
                 pass
             # Unregister oauth admin services
             try:
-                self.runtime.service_registry.unregister("admin.oauth.yandex.status")
-                self.runtime.service_registry.unregister("admin.oauth.yandex.configure")
-                self.runtime.service_registry.unregister("admin.oauth.yandex.authorize")
-                self.runtime.service_registry.unregister("admin.oauth.yandex.exchange")
+                await self.runtime.service_registry.unregister("admin.oauth.yandex.status")
+                await self.runtime.service_registry.unregister("admin.oauth.yandex.configure")
+                await self.runtime.service_registry.unregister("admin.oauth.yandex.authorize")
+                await self.runtime.service_registry.unregister("admin.oauth.yandex.exchange")
                 # unregister admin yandex sync
                 try:
-                    self.runtime.service_registry.unregister("admin.yandex.sync")
+                    await self.runtime.service_registry.unregister("admin.yandex.sync")
                     try:
-                        self.runtime.service_registry.unregister("admin.yandex.get_config")
+                        await self.runtime.service_registry.unregister("admin.yandex.get_config")
                     except Exception:
                         pass
                     try:
-                        self.runtime.service_registry.unregister("admin.yandex.set_use_real")
+                        await self.runtime.service_registry.unregister("admin.yandex.set_use_real")
                     except Exception:
                         pass
                 except Exception:

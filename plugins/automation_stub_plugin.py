@@ -82,7 +82,7 @@ class AutomationStubPlugin(BasePlugin):
 
         self._event_handler = _on_device_command_requested
         try:
-            self.runtime.event_bus.subscribe("internal.device_command_requested", self._event_handler)
+            await self.runtime.event_bus.subscribe("internal.device_command_requested", self._event_handler)
         except Exception:
             pass
 
@@ -108,7 +108,7 @@ class AutomationStubPlugin(BasePlugin):
         try:
             if self._event_handler is not None:
                 # unsubscribe from the same event we subscribed to in on_load
-                self.runtime.event_bus.unsubscribe("internal.device_command_requested", self._event_handler)
+                await self.runtime.event_bus.unsubscribe("internal.device_command_requested", self._event_handler)
         except Exception:
             pass
 

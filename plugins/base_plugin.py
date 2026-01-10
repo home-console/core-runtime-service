@@ -20,7 +20,7 @@ class PluginMetadata:
     version: str
     description: str = ""
     author: str = ""
-    dependencies: list[str] = field(default_factory=list)  # Список имён плагинов-зависимостей
+    dependencies: list[str] | None = field(default_factory=list)  # Список имён плагинов-зависимостей
 
 
 class BasePlugin(ABC):

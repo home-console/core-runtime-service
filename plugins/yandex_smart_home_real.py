@@ -178,7 +178,7 @@ class YandexSmartHomeRealPlugin(BasePlugin):
             return devices
 
         # Регистрируем сервис
-        self.runtime.service_registry.register("yandex.sync_devices", _sync_devices)
+        await self.runtime.service_registry.register("yandex.sync_devices", _sync_devices)
 
     async def _transform_device(self, yandex_device: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Преобразовать устройство из API Яндекса в стандартный формат.
@@ -724,7 +724,7 @@ class YandexSmartHomeRealPlugin(BasePlugin):
         # Сохранить хендлер и подписаться
         self._internal_command_handler = _internal_command_handler
         try:
-            self.runtime.event_bus.subscribe("internal.device_command_requested", self._internal_command_handler)
+            await self.runtime.event_bus.subscribe("internal.device_command_requested", self._internal_command_handler)
         except Exception:
             pass
 
@@ -783,6 +783,6 @@ class YandexSmartHomeRealPlugin(BasePlugin):
             pass
 
         try:
-            self.runtime.service_registry.unregister("yandex.sync_devices")
+            await self.runtime.service_registry.unregister("yandex.sync_devices")
         except Exception:
             pass

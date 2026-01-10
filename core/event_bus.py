@@ -29,8 +29,10 @@ class EventBus:
     def __init__(self):
         # Словарь: event_type -> list[handler]
         self._handlers: dict[str, list[EventHandler]] = defaultdict(list)
+        # Lock для thread-safety операций с _handlers
+        self._lock = asyncio.Lock()
 
-    def subscribe(self, event_type: str, handler: EventHandler) -> None:
+    async def subscribe(self, event_type: str, handler: EventHandler) -> None:
         """
         Подписаться на событие.
         
@@ -42,11 +44,12 @@ class EventBus:
             async def on_state_changed(event_type: str, data: dict):
                 print(f"Device changed: {data}")
             
-            event_bus.subscribe("device.state_changed", on_state_changed)
+            await event_bus.subscribe("device.state_changed", on_state_changed)
         """
-        self._handlers[event_type].append(handler)
+        async with self._lock:
+            self._handlers[event_type].append(handler)
 
-    def unsubscribe(self, event_type: str, handler: EventHandler) -> None:
+    async def unsubscribe(self, event_type: str, handler: EventHandler) -> None:
         """
         Отписаться от события.
         
@@ -54,11 +57,12 @@ class EventBus:
             event_type: тип события
             handler: обработчик для удаления
         """
-        if event_type in self._handlers:
-            try:
-                self._handlers[event_type].remove(handler)
-            except ValueError:
-                pass
+        async with self._lock:
+            if event_type in self._handlers:
+                try:
+                    self._handlers[event_type].remove(handler)
+                except ValueError:
+                    pass
 
     async def publish(self, event_type: str, data: dict[str, Any]) -> None:
         """
@@ -74,7 +78,9 @@ class EventBus:
                 "state": "on"
             })
         """
-        handlers = self._handlers.get(event_type, [])
+        # Получаем копию списка обработчиков под lock для thread-safety
+        async with self._lock:
+            handlers = list(self._handlers.get(event_type, []))
         
         # Запускаем все обработчики параллельно
         if handlers:
@@ -99,7 +105,7 @@ class EventBus:
                         # Игнорируем ошибки логирования
                         pass
 
-    def get_subscribers_count(self, event_type: str) -> int:
+    async def get_subscribers_count(self, event_type: str) -> int:
         """
         Получить количество подписчиков на событие.
         
@@ -109,8 +115,10 @@ class EventBus:
         Returns:
             Количество подписчиков
         """
-        return len(self._handlers.get(event_type, []))
+        async with self._lock:
+            return len(self._handlers.get(event_type, []))
 
-    def clear(self) -> None:
+    async def clear(self) -> None:
         """Очистить все подписки."""
-        self._handlers.clear()
+        async with self._lock:
+            self._handlers.clear()

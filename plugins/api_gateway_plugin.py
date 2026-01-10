@@ -81,7 +81,7 @@ class ApiGatewayPlugin(BasePlugin):
                     if body is not None:
                         params["body"] = body
 
-                    if not self.runtime.service_registry.has_service(endpoint.service):
+                    if not await self.runtime.service_registry.has_service(endpoint.service):
                         raise HTTPException(status_code=404, detail="service not found")
 
                     try:

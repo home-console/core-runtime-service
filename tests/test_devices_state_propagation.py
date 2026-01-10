@@ -57,7 +57,7 @@ async def test_state_propagation_via_event_bus(memory_adapter):
         async def track_events(event_type, data):
             published_events.append({"type": event_type, "data": data})
 
-        runtime.event_bus.subscribe("internal.device_state_updated", track_events)
+        await runtime.event_bus.subscribe("internal.device_state_updated", track_events)
 
         # 3. Publish external state change event
         external_state_update = {
@@ -113,7 +113,7 @@ async def test_state_propagation_no_mapping(memory_adapter):
         async def track_events(event_type, data):
             published_events.append({"type": event_type, "data": data})
 
-        runtime.event_bus.subscribe("internal.device_state_updated", track_events)
+        await runtime.event_bus.subscribe("internal.device_state_updated", track_events)
 
         # Publish state for unmapped device
         await runtime.event_bus.publish("external.device_state_reported", {

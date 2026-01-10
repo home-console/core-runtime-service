@@ -14,7 +14,7 @@ async def test_subscribe_and_publish():
         received['type'] = event_type
         received['data'] = data
 
-    bus.subscribe('test.event', handler)
+    await bus.subscribe('test.event', handler)
     await bus.publish('test.event', {'x': 1})
 
     # allow tasks to run
@@ -31,8 +31,8 @@ async def test_unsubscribe():
     async def handler(event_type, data):
         raise RuntimeError('should not be called')
 
-    bus.subscribe('a', handler)
-    bus.unsubscribe('a', handler)
+    await bus.subscribe('a', handler)
+    await bus.unsubscribe('a', handler)
     await bus.publish('a', {})
 
 
@@ -48,22 +48,23 @@ async def test_publish_handler_exception_ignored():
         nonlocal called
         called = True
 
-    bus.subscribe('e', bad)
-    bus.subscribe('e', good)
+    await bus.subscribe('e', bad)
+    await bus.subscribe('e', good)
 
     await bus.publish('e', {})
     await asyncio.sleep(0)
     assert called is True
 
 
-def test_subscribers_count_and_clear():
+@pytest.mark.asyncio
+async def test_subscribers_count_and_clear():
     bus = EventBus()
 
     async def h(e, d):
         pass
 
-    bus.subscribe('x', h)
-    bus.subscribe('x', h)
-    assert bus.get_subscribers_count('x') == 2
-    bus.clear()
-    assert bus.get_subscribers_count('x') == 0
+    await bus.subscribe('x', h)
+    await bus.subscribe('x', h)
+    assert await bus.get_subscribers_count('x') == 2
+    await bus.clear()
+    assert await bus.get_subscribers_count('x') == 0

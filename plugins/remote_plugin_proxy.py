@@ -203,7 +203,7 @@ class RemotePluginProxy(BasePlugin):
 			forwarder = await _make_forwarder()
 			try:
 				# Регистрируем сервис в runtime
-				self.runtime.service_registry.register(svc_name, forwarder)
+				await self.runtime.service_registry.register(svc_name, forwarder)
 				self._registered_services.append(svc_name)
 			except Exception:
 				# Не ломаем загрузку, логируем и продолжаем
@@ -302,7 +302,7 @@ class RemotePluginProxy(BasePlugin):
 		# Отрегистировать сервисы, которые мы регистрировали при загрузке (гарантированно)
 		for svc_name in list(self._registered_services):
 			try:
-				self.runtime.service_registry.unregister(svc_name)
+				await self.runtime.service_registry.unregister(svc_name)
 			except Exception:
 				pass
 		self._registered_services.clear()

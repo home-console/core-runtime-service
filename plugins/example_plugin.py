@@ -32,13 +32,13 @@ class ExamplePlugin(BasePlugin):
         await super().on_load()
         
         # Регистрируем сервис
-        self.runtime.service_registry.register(
+        await self.runtime.service_registry.register(
             "example.hello",
             self._hello_service
         )
         
         # Подписываемся на событие
-        self.runtime.event_bus.subscribe(
+        await self.runtime.event_bus.subscribe(
             "example.test",
             self._on_test_event
         )
@@ -70,10 +70,10 @@ class ExamplePlugin(BasePlugin):
         await super().on_unload()
         
         # Удаляем сервис
-        self.runtime.service_registry.unregister("example.hello")
+        await self.runtime.service_registry.unregister("example.hello")
         
         # Отписываемся от событий
-        self.runtime.event_bus.unsubscribe(
+        await self.runtime.event_bus.unsubscribe(
             "example.test",
             self._on_test_event
         )

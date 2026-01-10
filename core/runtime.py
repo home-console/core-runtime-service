@@ -145,13 +145,23 @@ class CoreRuntime:
                 pass
 
         # Регистрация встроенных модулей (обязательные домены)
-        self.module_manager.register_builtin_modules(self)
+        await self.module_manager.register_builtin_modules(self)
+        
+        # Логирование зарегистрированных модулей
+        modules = self.module_manager.list_modules()
+        if modules:
+            print(f"[Runtime] Модули зарегистрированы: {modules}")
 
         # Запустить все модули (обязательные домены)
         await self.module_manager.start_all()
+        if modules:
+            print(f"[Runtime] Модули запущены: {modules}")
         
         # Запустить все плагины
+        plugins = self.plugin_manager.list_plugins()
         await self.plugin_manager.start_all()
+        if plugins:
+            print(f"[Runtime] Плагины запущены: {plugins}")
         
         # Установить состояние runtime
         await self.state_engine.set("runtime.status", "running")
@@ -194,8 +204,8 @@ class CoreRuntime:
         self.module_manager.clear()
 
         # Очистить компоненты
-        self.event_bus.clear()
-        self.service_registry.clear()
+        await self.event_bus.clear()
+        await self.service_registry.clear()
         await self.state_engine.clear()
 
     async def _auto_load_plugins(self) -> None:

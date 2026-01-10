@@ -24,14 +24,14 @@ class PresenceModule(RuntimeModule):
         """Уникальное имя модуля."""
         return "presence"
 
-    def register(self) -> None:
+    async def register(self) -> None:
         """
         Регистрация модуля в CoreRuntime.
 
         Регистрирует сервис presence.set и HTTP endpoints.
         """
         # Регистрация сервиса
-        self.runtime.service_registry.register("presence.set", self._set_service)
+        await self.runtime.service_registry.register("presence.set", self._set_service)
 
         # Регистрация HTTP контрактов
         try:
@@ -76,7 +76,7 @@ class PresenceModule(RuntimeModule):
         """
         # Отмена регистрации сервиса
         try:
-            self.runtime.service_registry.unregister("presence.set")
+            await self.runtime.service_registry.unregister("presence.set")
         except Exception:
             pass
 

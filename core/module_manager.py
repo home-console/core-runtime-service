@@ -35,7 +35,7 @@ class ModuleManager:
         """Инициализация менеджера модулей."""
         self._modules: Dict[str, RuntimeModule] = {}
 
-    def register(self, module: RuntimeModule) -> None:
+    async def register(self, module: RuntimeModule) -> None:
         """
         Регистрирует модуль в менеджере.
 
@@ -62,7 +62,7 @@ class ModuleManager:
         self._modules[module_name] = module
 
         # Вызываем register() модуля для регистрации в CoreRuntime
-        module.register()
+        await module.register()
 
     def unregister(self, module_name: str) -> None:
         """
@@ -139,7 +139,7 @@ class ModuleManager:
         """Очищает все зарегистрированные модули."""
         self._modules.clear()
 
-    def register_builtin_modules(self, runtime: Any) -> None:
+    async def register_builtin_modules(self, runtime: Any) -> None:
         """
         Регистрирует все встроенные модули из BUILTIN_MODULES.
 
@@ -148,12 +148,12 @@ class ModuleManager:
         """
         for module_name in BUILTIN_MODULES:
             try:
-                self._register_module_by_name(runtime, module_name)
+                await self._register_module_by_name(runtime, module_name)
             except Exception:
                 # Не ломаем инициализацию при ошибках регистрации модуля
                 pass
 
-    def _register_module_by_name(self, runtime: Any, module_name: str) -> None:
+    async def _register_module_by_name(self, runtime: Any, module_name: str) -> None:
         """
         Регистрирует модуль по имени (обнаружение и создание экземпляра).
 
@@ -179,7 +179,7 @@ class ModuleManager:
 
             # Создаём экземпляр и регистрируем
             module_instance = module_class(runtime)
-            self.register(module_instance)
+            await self.register(module_instance)
 
         except Exception:
             # Ошибка импорта или регистрации - игнорируем
