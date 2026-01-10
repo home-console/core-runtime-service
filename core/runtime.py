@@ -12,10 +12,6 @@ CoreRuntime - главный класс Core Runtime.
 """
 
 from typing import Any
-import importlib
-import inspect
-import pkgutil
-from pathlib import Path
 
 from core.event_bus import EventBus
 from core.service_registry import ServiceRegistry
@@ -25,6 +21,7 @@ from core.storage_mirror import StorageWithStateMirror
 from core.plugin_manager import PluginManager
 from core.module_manager import ModuleManager
 from core.http_registry import HttpRegistry
+from core.logger_helper import info, warning
 from plugins import BasePlugin
 
 
@@ -54,7 +51,7 @@ class CoreRuntime:
         # Обёртка для синхронизации storage и state_engine
         self.storage = StorageWithStateMirror(base_storage, self.state_engine)
         self.plugin_manager = PluginManager(self)
-        self.module_manager = ModuleManager()
+        self.module_manager = ModuleManager(self)
         # Регистр HTTP-интерфейсов (каталог контрактов)
         self.http = HttpRegistry()
 
@@ -79,11 +76,11 @@ class CoreRuntime:
         # попытаться автоматически загрузить плагины из каталога plugins/
         if not self.plugin_manager.list_plugins():
             try:
-                await self._auto_load_plugins()
+                await self.plugin_manager.auto_load_plugins()
             except Exception as e:
                 # Не мешаем запуску runtime из-за проблем с автозагрузкой
                 # Логируем ошибку для отладки
-                print(f"[Runtime] Предупреждение: ошибка автозагрузки плагинов: {e}", file=__import__('sys').stderr)
+                await warning(self, f"Ошибка автозагрузки плагинов: {e}", component="runtime")
 
         # Регистрация встроенных модулей (обязательные домены)
         await self.module_manager.register_builtin_modules(self)
@@ -91,18 +88,18 @@ class CoreRuntime:
         # Логирование зарегистрированных модулей
         modules = self.module_manager.list_modules()
         if modules:
-            print(f"[Runtime] Модули зарегистрированы: {modules}")
+            await info(self, f"Модули зарегистрированы: {modules}", component="runtime")
 
         # Запустить все модули (обязательные домены)
         await self.module_manager.start_all()
         if modules:
-            print(f"[Runtime] Модули запущены: {modules}")
+            await info(self, f"Модули запущены: {modules}", component="runtime")
         
         # Запустить все плагины
         plugins = self.plugin_manager.list_plugins()
         await self.plugin_manager.start_all()
         if plugins:
-            print(f"[Runtime] Плагины запущены: {plugins}")
+            await info(self, f"Плагины запущены: {plugins}", component="runtime")
         
         # Установить состояние runtime
         await self.state_engine.set("runtime.status", "running")
@@ -148,43 +145,3 @@ class CoreRuntime:
         await self.event_bus.clear()
         await self.service_registry.clear()
         await self.state_engine.clear()
-
-    async def _auto_load_plugins(self) -> None:
-        """
-        Автоматически загрузить плагины из каталога `plugins/` рядом с корнем сервиса.
-
-        Метод безопасен к повторным вызовам — ошибки загрузки отдельных плагинов
-        игнорируются, а дублирующие загрузки не прерывают выполнение.
-        """
-        plugins_dir = Path(__file__).parent.parent / "plugins"
-        if not plugins_dir.exists() or not plugins_dir.is_dir():
-            return
-
-        for _finder, mod_name, _pkg in pkgutil.iter_modules([str(plugins_dir)]):
-            module_name = f"plugins.{mod_name}"
-            try:
-                module = importlib.import_module(module_name)
-            except Exception as e:
-                # Игнорируем ошибки импорта отдельных модулей
-                print(f"[Runtime] Предупреждение: не удалось импортировать модуль '{module_name}': {e}", file=__import__('sys').stderr)
-                continue
-
-            for _, obj in inspect.getmembers(module, inspect.isclass):
-                if obj is BasePlugin:
-                    continue
-
-                try:
-                    if not issubclass(obj, BasePlugin):
-                        continue
-                except TypeError:
-                    # Не класс или не BasePlugin - пропускаем
-                    continue
-
-                try:
-                    plugin_instance = obj(self)
-                    await self.plugin_manager.load_plugin(plugin_instance)
-                except Exception as e:
-                    # Игнорируем ошибки загрузки отдельных плагинов
-                    plugin_name = getattr(obj, '__name__', 'unknown')
-                    print(f"[Runtime] Предупреждение: не удалось загрузить плагин '{plugin_name}': {e}", file=__import__('sys').stderr)
-                    continue

@@ -26,14 +26,32 @@ class RemotePluginProxy(BasePlugin):
 	как обычный плагин через наследование от BasePlugin.
 	"""
 
-	def __init__(self, runtime: Any, remote_url: str):
+	def __init__(self, runtime: Any, remote_url: Optional[str] = None):
 		"""Инициализация прокси.
         
 		Args:
 			runtime: экземпляр CoreRuntime
-			remote_url: базовый URL удалённого плагина (например, http://127.0.0.1:8001)
+			remote_url: базовый URL удалённого плагина (например, http://127.0.0.1:8001).
+			           Если None, пытается получить из переменных окружения через get_env_config().
+			           Ищет: REMOTE_PLUGIN_PROXY_REMOTE_URL, затем REMOTE_PLUGIN_URL, затем REMOTE_URL.
+			           Если и там нет - плагин не может работать.
 		"""
 		super().__init__(runtime)
+		# Если remote_url не указан, пытаемся получить из переменных окружения
+		if remote_url is None:
+			# Используем метод базового класса для получения конфигурации
+			remote_url = self.get_env_config("REMOTE_URL", prefix="REMOTE_PLUGIN")
+			# Если не нашли с префиксом, пробуем без префикса
+			if not remote_url:
+				remote_url = self.get_env_config("REMOTE_PLUGIN_URL")
+		
+		if not remote_url:
+			raise ValueError(
+				"remote_url обязателен для RemotePluginProxy. "
+				"Укажите при создании или установите переменную окружения "
+				"REMOTE_PLUGIN_PROXY_REMOTE_URL, REMOTE_PLUGIN_URL или REMOTE_URL"
+			)
+		
 		self.remote_url = remote_url
 		self._metadata: Optional[dict] = None
 		# Список сервисов, зарегистрированных через proxy

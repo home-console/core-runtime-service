@@ -26,10 +26,16 @@ async def handle_external_state_reported(runtime, data: Dict[str, Any]) -> None:
     # Получаем mapping из storage (devices_mappings namespace)
     # Используем storage напрямую, как в devices модуле
     try:
-        internal_id = await runtime.storage.get("devices_mappings", external_id)
+        mapping = await runtime.storage.get("devices_mappings", external_id)
     except Exception:
         # Если storage недоступен — ничего не делаем
         return
+
+    # mapping теперь dict с ключом "internal_id"
+    if mapping and isinstance(mapping, dict):
+        internal_id = mapping.get("internal_id")
+    else:
+        internal_id = None
 
     # Если соответствие найдено — логируем факт получения изменения состояния
     if internal_id:

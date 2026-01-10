@@ -4,10 +4,15 @@ PluginManager - управление lifecycle плагинов.
 Загружает, запускает, останавливает плагины.
 """
 
-from typing import Optional, TYPE_CHECKING
+import importlib
+import inspect
+import pkgutil
+from pathlib import Path
+from typing import Optional, TYPE_CHECKING, Callable, Awaitable
 from enum import Enum
 
 from plugins.base_plugin import BasePlugin, PluginMetadata
+from core.logger_helper import warning
 
 if TYPE_CHECKING:
     from core.runtime import CoreRuntime
@@ -79,12 +84,13 @@ class PluginManager:
                 raise ValueError(f"Плагин '{plugin_name}' уже загружен")
 
             # Проверить зависимости, указанные в metadata после on_load
-            for dep_name in metadata.dependencies:
-                if dep_name not in self._plugins:
-                    raise ValueError(
-                        f"Плагин '{plugin_name}' требует плагин '{dep_name}', "
-                        f"но он не загружен"
-                    )
+            if metadata.dependencies:
+                for dep_name in metadata.dependencies:
+                    if dep_name not in self._plugins:
+                        raise ValueError(
+                            f"Плагин '{plugin_name}' требует плагин '{dep_name}', "
+                            f"но он не загружен"
+                        )
 
             self._plugins[plugin_name] = plugin
             self._states[plugin_name] = PluginState.LOADED
@@ -212,3 +218,183 @@ class PluginManager:
         for plugin_name in self._plugins.keys():
             if self._states[plugin_name] == PluginState.STARTED:
                 await self.stop_plugin(plugin_name)
+
+    async def auto_load_plugins(
+        self,
+        plugins_dir: Optional[Path] = None,
+        logger_func: Optional[Callable[..., Awaitable[None]]] = None
+    ) -> None:
+        """
+        Автоматически загрузить плагины из каталога `plugins/`.
+        
+        Метод безопасен к повторным вызовам — ошибки загрузки отдельных плагинов
+        игнорируются, а дублирующие загрузки не прерывают выполнение.
+        
+        Args:
+            plugins_dir: путь к каталогу с плагинами (если None, определяется автоматически)
+            logger_func: функция для логирования (если None, используется warning из logger_helper)
+        """
+        if plugins_dir is None:
+            # Определяем каталог plugins относительно корня проекта
+            # core/plugin_manager.py -> core/ -> корень проекта -> plugins/
+            plugins_dir = Path(__file__).parent.parent / "plugins"
+        
+        if not plugins_dir.exists() or not plugins_dir.is_dir():
+            return
+        
+        # Устанавливаем logger_func по умолчанию если не указан
+        actual_logger_func: Callable[..., Awaitable[None]] = logger_func if logger_func is not None else warning
+        
+        for _finder, mod_name, _pkg in pkgutil.iter_modules([str(plugins_dir)]):
+            module_name = f"plugins.{mod_name}"
+            try:
+                module = importlib.import_module(module_name)
+            except Exception as e:
+                # Игнорируем ошибки импорта отдельных модулей
+                try:
+                    await actual_logger_func(
+                        self._runtime,
+                        f"Не удалось импортировать модуль '{module_name}': {e}",
+                        component="plugin_manager"
+                    )
+                except Exception:
+                    # Fallback если logger недоступен
+                    pass
+                continue
+            
+            for _, obj in inspect.getmembers(module, inspect.isclass):
+                if obj is BasePlugin:
+                    continue
+                
+                # Проверяем, что это класс и он наследуется от BasePlugin
+                if not isinstance(obj, type):
+                    continue
+                
+                try:
+                    if not issubclass(obj, BasePlugin):
+                        continue
+                except TypeError:
+                    # Не класс или не BasePlugin - пропускаем
+                    continue
+                
+                # Пропускаем YandexSmartHomeStubPlugin при автозагрузке
+                # Он конфликтует с YandexSmartHomeRealPlugin (оба регистрируют yandex.sync_devices)
+                # Stub должен загружаться явно только для тестов
+                class_name = getattr(obj, '__name__', '')
+                if class_name == 'YandexSmartHomeStubPlugin':
+                    # Пропускаем Yandex stub плагин при автозагрузке
+                    continue
+                
+                # Специальная обработка для RemotePluginProxy
+                # Загружается только если есть переменная окружения (проверяется внутри __init__)
+                if class_name == 'RemotePluginProxy':
+                    try:
+                        # Создаём экземпляр без remote_url - он сам получит из переменных окружения
+                        plugin_instance = obj(self._runtime)
+                        await self.load_plugin(plugin_instance)
+                    except ValueError as e:
+                        # ValueError означает, что нет remote_url - это нормально, пропускаем тихо
+                        if "remote_url обязателен" in str(e):
+                            # Нет URL - пропускаем тихо (это нормально)
+                            continue
+                        # Другие ValueError - логируем
+                        try:
+                            await actual_logger_func(
+                                self._runtime,
+                                f"Не удалось загрузить RemotePluginProxy: {e}",
+                                component="plugin_manager"
+                            )
+                        except Exception:
+                            pass
+                    except Exception as e:
+                        # Другие ошибки - логируем
+                        try:
+                            await actual_logger_func(
+                                self._runtime,
+                                f"Не удалось загрузить RemotePluginProxy: {e}",
+                                component="plugin_manager"
+                            )
+                        except Exception:
+                            pass
+                    continue
+                
+                # Проверяем сигнатуру конструктора
+                # Пропускаем плагины, которые требуют дополнительные параметры
+                try:
+                    sig = inspect.signature(obj.__init__)
+                    # Считаем параметры кроме self и runtime
+                    params = list(sig.parameters.keys())
+                    # Убираем 'self'
+                    if 'self' in params:
+                        params.remove('self')
+                    # Убираем 'runtime' если есть
+                    if 'runtime' in params:
+                        params.remove('runtime')
+                    
+                    # Если остались обязательные параметры (без значений по умолчанию),
+                    # пропускаем этот плагин при автозагрузке
+                    required_params = []
+                    for param_name in params:
+                        param = sig.parameters[param_name]
+                        # Проверяем, есть ли значение по умолчанию
+                        if param.default is inspect.Parameter.empty:
+                            required_params.append(param_name)
+                    
+                    if required_params:
+                        # Плагин требует дополнительные параметры - пропускаем
+                        plugin_name = getattr(obj, '__name__', 'unknown')
+                        try:
+                            await actual_logger_func(
+                                self._runtime,
+                                f"Пропущен плагин '{plugin_name}' при автозагрузке: требуется параметр(ы) {required_params}",
+                                component="plugin_manager"
+                            )
+                        except Exception:
+                            pass
+                        continue
+                except Exception:
+                    # Если не удалось проверить сигнатуру, пробуем загрузить
+                    pass
+                
+                try:
+                    plugin_instance = obj(self._runtime)
+                    await self.load_plugin(plugin_instance)
+                except ValueError as e:
+                    # ValueError при load_plugin обычно означает конфликт (дубликат или зависимость)
+                    # Это нормально - просто логируем и продолжаем
+                    plugin_name = getattr(obj, '__name__', 'unknown')
+                    error_msg = str(e)
+                    # Не логируем как WARNING, если это просто конфликт сервисов
+                    if "уже зарегистрирован" in error_msg or "уже загружен" in error_msg:
+                        # Это нормальная ситуация - плагин уже загружен или сервис занят
+                        try:
+                            await actual_logger_func(
+                                self._runtime,
+                                f"Пропущен плагин '{plugin_name}': {error_msg}",
+                                component="plugin_manager"
+                            )
+                        except Exception:
+                            pass
+                    else:
+                        # Другие ValueError - логируем как предупреждение
+                        try:
+                            await actual_logger_func(
+                                self._runtime,
+                                f"Не удалось загрузить плагин '{plugin_name}': {error_msg}",
+                                component="plugin_manager"
+                            )
+                        except Exception:
+                            pass
+                except Exception as e:
+                    # Игнорируем другие ошибки загрузки отдельных плагинов
+                    plugin_name = getattr(obj, '__name__', 'unknown')
+                    try:
+                        await actual_logger_func(
+                            self._runtime,
+                            f"Не удалось загрузить плагин '{plugin_name}': {e}",
+                            component="plugin_manager"
+                        )
+                    except Exception:
+                        # Fallback если logger недоступен
+                        pass
+                    continue

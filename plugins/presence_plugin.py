@@ -59,14 +59,21 @@ class PresencePlugin(BasePlugin):
 
                 # Получаем старое состояние (может быть None) — читаем из storage
                 old = await self.runtime.storage.get("presence", "home")
-                old_val = bool(old) if isinstance(old, bool) else False
+                # Извлекаем значение из dict, если это dict, иначе считаем False
+                if isinstance(old, dict):
+                    old_val = old.get("value", False)
+                    if not isinstance(old_val, bool):
+                        old_val = False
+                else:
+                    old_val = False
 
                 # Если состояние не поменялось — ничего не делаем
                 if old_val == home:
                     return old_val
 
                 # Обновляем state через storage — storage является SOR
-                await self.runtime.storage.set("presence", "home", home)
+                # Storage требует dict, поэтому оборачиваем bool в dict
+                await self.runtime.storage.set("presence", "home", {"value": home})
 
                 # Публикуем событие в зависимости от направления изменения
                 payload = {"old_state": old_val, "new_state": home}
@@ -112,9 +119,9 @@ class PresencePlugin(BasePlugin):
         await super().on_start()
         try:
             cur = await self.runtime.storage.get("presence", "home")
-            if not isinstance(cur, bool):
+            if cur is None or not isinstance(cur, dict) or cur.get("value") is None:
                 # Инициализируем в False, если отсутствует
-                await self.runtime.storage.set("presence", "home", False)
+                await self.runtime.storage.set("presence", "home", {"value": False})
         except Exception:
             # Не мешаем старту системы, но логируем при возможности
             try:

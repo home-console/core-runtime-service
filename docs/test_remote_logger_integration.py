@@ -16,7 +16,7 @@ from core.config import Config
 from core.runtime import CoreRuntime
 from adapters.sqlite_adapter import SQLiteAdapter
 from plugins.system_logger_plugin import SystemLoggerPlugin
-from modules.devices import register_devices
+from modules import DevicesModule
 from plugins.remote_plugin_proxy import RemotePluginProxy
 
 
@@ -44,8 +44,9 @@ async def test_remote_plugin_proxy_architecture():
     await runtime.plugin_manager.load_plugin(logger)
     print("    ✓ system_logger загружен")
 
-    register_devices(runtime)
-    print("    ✓ devices module зарегистрирован")
+    devices_module = DevicesModule(runtime)
+    await runtime.module_manager.register(devices_module)
+    print("    ✓ devices module зарегистрирован и запущен")
 
     # 3. Запуск runtime
     print("\n[3] Запуск Core Runtime...")

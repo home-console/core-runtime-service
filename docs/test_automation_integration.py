@@ -19,7 +19,7 @@ from core.config import Config
 from core.runtime import CoreRuntime
 from adapters.sqlite_adapter import SQLiteAdapter
 from plugins.system_logger_plugin import SystemLoggerPlugin
-from modules.devices import register_devices
+from modules import DevicesModule
 from plugins.automation_stub_plugin import AutomationStubPlugin
 
 
@@ -50,7 +50,8 @@ async def test_event_driven_automation():
     print("    ✓ system_logger загружен")
     
     # Devices domain — регистрируем как встроенный модуль
-    register_devices(runtime)
+    devices_module = DevicesModule(runtime)
+    await runtime.module_manager.register(devices_module)
     print("    ✓ devices module зарегистрирован")
     
     # Automation — подписывается на события devices
@@ -77,7 +78,7 @@ async def test_event_driven_automation():
 
     # 5. Проверка регистрации сервисов
     print("\n[5] Проверка регистрации сервисов...")
-    services = runtime.service_registry.list_services()
+    services = await runtime.service_registry.list_services()
     print(f"    Доступные сервисы: {services}")
     
     assert "logger.log" in services, "logger.log сервис должен быть зарегистрирован"
@@ -87,7 +88,7 @@ async def test_event_driven_automation():
 
     # 6. Проверка подписки на события
     print("\n[6] Проверка подписи на события...")
-    subscribers_count = runtime.event_bus.get_subscribers_count("internal.device_command_requested")
+    subscribers_count = await runtime.event_bus.get_subscribers_count("internal.device_command_requested")
     print(f"    Подписчиков на 'internal.device_command_requested': {subscribers_count}")
     assert subscribers_count > 0, "automation_stub должен быть подписан на internal.device_command_requested"
     print("    ✓ Подписка на события подтверждена")

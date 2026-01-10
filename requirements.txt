@@ -12,3 +12,6 @@ pytest-asyncio>=0.21.0
 # HTTP adapter dependencies (для плагина api_gateway)
 fastapi>=0.95.0
 uvicorn>=0.22.0
+
+# PostgreSQL adapter (опционально)
+asyncpg>=0.28.0

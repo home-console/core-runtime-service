@@ -1,17 +1,14 @@
 """
-Системный плагин `system_logger` — инфраструктурный in-process плагин.
+DEPRECATED: Этот плагин заменён модулем modules.logger.LoggerModule.
 
-Назначение:
-- предоставляет сервис `logger.log` для централизованного логирования
-- использует стандартный модуль `logging`, выводит в stdout
-- формат логов — простая JSON-подобная строка (через `json.dumps`)
+Оставлен для обратной совместимости.
+Будет удалён в версии 1.0.0.
 
-Контракт с Core: работает только через `runtime.service_registry` и опционально
-может слушать/публиковать события через `runtime.event_bus` (необязательно).
+Вся логика логирования теперь в modules/logger/module.py.
+LoggerModule регистрируется автоматически при создании CoreRuntime
+через ModuleManager (первым в списке BUILTIN_MODULES).
 
-Ограничения:
-- не меняет глобальное состояние logging (не трогает root logger)
-- не хранит состояние, не знает доменов и не зависит от адаптеров
+Этот плагин больше не нужен и может быть удалён.
 """
 
 from __future__ import annotations
@@ -43,96 +40,28 @@ class SystemLoggerPlugin(BasePlugin):
         )
 
     async def on_load(self) -> None:
+        """
+        DEPRECATED: LoggerModule теперь регистрируется автоматически через ModuleManager.
+        
+        Этот метод больше не выполняет никаких действий.
+        Модуль logger регистрируется при создании CoreRuntime.
+        """
         await super().on_load()
-        # Сохраняем runtime для доступа к service_registry и event_bus
-        # Не импортируем или используем другие плагины
-        # Создаём выделенный логгер, выводящий JSON в stdout
-        self._runtime = self.runtime
-
-        self._logger = logging.getLogger("home_console")
-        # Устанавливаем уровень DEBUG, чтобы видеть все сообщения
-        self._logger.setLevel(logging.DEBUG)
-        # Добавляем собственный StreamHandler на stdout
-        self._handler = logging.StreamHandler(stream=sys.stdout)
-        fmt = "%(message)s"
-        self._handler.setFormatter(logging.Formatter(fmt))
-        # Регистрируем только наш handler у логгера home_console
-        self._logger.addHandler(self._handler)
-
-        # Зарегистрируем сервис logger.log
-        async def _log_service(level: str, message: str, **context: Any) -> None:
-            # Простая валидация уровня
-            lvl = (level or "").lower()
-            if lvl not in ("debug", "info", "warning", "error"):
-                lvl = "info"
-
-            record = {
-                "level": lvl,
-                "message": message,
-                # Если плагин передаёт имя плагина — оно попадёт в context
-                "context": context or {},
-            }
-
-            try:
-                # Сериализуем и отправляем как единую строку — формат JSON-подобный
-                line = json.dumps(record, ensure_ascii=False)
-            except Exception:
-                # В крайне редком случае — fallback на простую строку
-                line = json.dumps({"level": lvl, "message": str(message)}, ensure_ascii=False)
-
-            if lvl == "debug":
-                self._logger.debug(line)
-            elif lvl == "warning":
-                self._logger.warning(line)
-            elif lvl == "error":
-                self._logger.error(line)
-            else:
-                # default: info
-                self._logger.info(line)
-
-        # Регистрируем сервис в runtime
-        await self.runtime.service_registry.register("logger.log", _log_service)
+        # LoggerModule уже зарегистрирован через ModuleManager
+        # Ничего делать не нужно
 
     async def on_start(self) -> None:
+        """Запуск плагина - модуль уже зарегистрирован в on_load."""
         await super().on_start()
-        # Сообщаем, что логгер активирован
-        try:
-            await self.runtime.service_registry.call(
-                "logger.log", level="info", message="system_logger запущен", plugin=self.metadata.name
-            )
-        except Exception:
-            # Не мешаем запуску системы при ошибках логирования
-            pass
+        # LoggerModule уже запущен через ModuleManager
 
     async def on_stop(self) -> None:
+        """Остановка плагина - модуль управляет своей остановкой самостоятельно."""
         await super().on_stop()
-        try:
-            await self.runtime.service_registry.call(
-                "logger.log", level="info", message="system_logger остановлен", plugin=self.metadata.name
-            )
-        except Exception:
-            pass
+        # LoggerModule управляет своей остановкой через ModuleManager
 
     async def on_unload(self) -> None:
+        """Выгрузка плагина - очистка ссылок."""
         await super().on_unload()
-        # Удаляем сервис и обнуляем ссылки. Не трогаем глобальный root logger.
-        try:
-            await self.runtime.service_registry.unregister("logger.log")
-        except Exception:
-            pass
-
-        # Удаляем наш handler из логгера, чтобы не менять глобальное состояние
-        try:
-            if hasattr(self, "_logger") and hasattr(self, "_handler"):
-                self._logger.removeHandler(self._handler)
-        except Exception:
-            pass
-
-        # Очистить ссылки
-        try:
-            self._handler = None
-            self._logger = None
-            self._runtime = None
-            self.runtime = None
-        except Exception:
-            pass
+        # LoggerModule управляет своей выгрузкой через ModuleManager
+        self.runtime = None

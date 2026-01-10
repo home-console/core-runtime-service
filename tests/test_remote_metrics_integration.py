@@ -137,7 +137,7 @@ async def test_remote_metrics_proxy_lifecycle_and_service(mock_remote_server):
     await runtime.plugin_manager.load_plugin(proxy)
 
     # Убедиться, что сервис зарегистрирован
-    assert runtime.service_registry.has_service("metrics.report")
+    assert await runtime.service_registry.has_service("metrics.report")
 
     # Запуск плагина — вызывает /plugin/start
     await runtime.plugin_manager.start_plugin(proxy.metadata.name)
@@ -161,4 +161,4 @@ async def test_remote_metrics_proxy_lifecycle_and_service(mock_remote_server):
 
     # Выгрузка плагина через менеджер — должна отрегистировать сервисы
     await runtime.plugin_manager.unload_plugin(proxy.metadata.name)
-    assert not runtime.service_registry.has_service("metrics.report")
+    assert not await runtime.service_registry.has_service("metrics.report")

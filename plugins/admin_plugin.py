@@ -224,14 +224,14 @@ class AdminPlugin(BasePlugin):
         async def admin_devices_list():
             return await self.runtime.service_registry.call("devices.list")
 
-        async def admin_devices_get(id: str = None, **kwargs):
+        async def admin_devices_get(id: Optional[str] = None, **kwargs):
             # HTTP layer may pass path param as 'id'
             device_id = id or kwargs.get("device_id") or kwargs.get("deviceId")
             if not device_id:
                 raise ValueError("device id is required")
             return await self.runtime.service_registry.call("devices.get", device_id)
 
-        async def admin_devices_set_state(id: str = None, body: Any = None, **kwargs):
+        async def admin_devices_set_state(id: Optional[str] = None, body: Any = None, **kwargs):
             # Accept path param 'id' and request body as 'body'
             device_id = id or kwargs.get("device_id") or kwargs.get("deviceId")
 
@@ -516,7 +516,7 @@ class AdminPlugin(BasePlugin):
                     else:
                         use_real = bool(body)
 
-                await self.runtime.storage.set("yandex", "use_real_api", bool(use_real))
+                await self.runtime.storage.set("yandex", "use_real_api", {"use_real_api": bool(use_real)})
                 return {"ok": True, "use_real_api": bool(use_real)}
             except Exception as e:
                 return {"ok": False, "error": str(e)}

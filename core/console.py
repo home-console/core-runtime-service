@@ -7,39 +7,18 @@
 from __future__ import annotations
 
 import asyncio
-import importlib
-import inspect
-import pkgutil
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from core.config import Config
 from core.runtime import CoreRuntime
-from adapters.sqlite_adapter import SQLiteAdapter
-from plugins.base_plugin import BasePlugin
+from core.storage_factory import create_storage_adapter
 from core.http_registry import HttpEndpoint
 
 
 async def _auto_load_plugins(runtime: CoreRuntime) -> None:
     """Авто сканирование каталога `plugins/` в корне проекта и загрузка классов-наследников BasePlugin."""
-    # plugins находится в корне проекта: два уровня выше этого файла
-    plugins_dir = Path(__file__).parent.parent / "plugins"
-    if not plugins_dir.exists() or not plugins_dir.is_dir():
-        return
-
-    for _finder, mod_name, _ispkg in pkgutil.iter_modules([str(plugins_dir)]):
-        module_name = f"plugins.{mod_name}"
-        try:
-            module = importlib.import_module(module_name)
-            for _name, obj in inspect.getmembers(module, inspect.isclass):
-                try:
-                    if issubclass(obj, BasePlugin) and obj is not BasePlugin:
-                        plugin_instance = obj(runtime)
-                        await runtime.plugin_manager.load_plugin(plugin_instance)
-                except Exception:
-                    continue
-        except Exception:
-            continue
+    await runtime.plugin_manager.auto_load_plugins()
 
 
 def _match_endpoint(path: str, endpoints: List[HttpEndpoint]) -> Optional[Tuple[HttpEndpoint, Dict[str, str]]]:
@@ -98,9 +77,10 @@ async def _call_service(runtime: CoreRuntime, endpoint: HttpEndpoint, path_param
 
 async def run_cli(argv: Optional[List[str]] = None, input_func: Callable[[str], str] = input, shutdown_on_exit: bool = True) -> CoreRuntime:
     config = Config.from_env()
-    Path(config.db_path).parent.mkdir(parents=True, exist_ok=True)
-    adapter = SQLiteAdapter(config.db_path)
-    await adapter.initialize_schema()
+    # Создать директорию для БД, если нужно (только для SQLite)
+    if config.storage_type == "sqlite":
+        Path(config.db_path).parent.mkdir(parents=True, exist_ok=True)
+    adapter = await create_storage_adapter(config)
     runtime = CoreRuntime(adapter)
 
     await _auto_load_plugins(runtime)
@@ -113,13 +93,22 @@ async def run_cli(argv: Optional[List[str]] = None, input_func: Callable[[str], 
         requested = "/" + "/".join(argv)
         match = _match_endpoint(requested, endpoints)
         if match is None:
-            print(f"Не найден endpoint для пути: {requested}")
+            try:
+                await runtime.service_registry.call(
+                    "logger.log",
+                    level="warning",
+                    message=f"Не найден endpoint для пути: {requested}",
+                    component="console"
+                )
+            except Exception:
+                print(f"Не найден endpoint для пути: {requested}")
             if shutdown_on_exit:
                 await runtime.shutdown()
             return runtime
         endpoint, params = match
         try:
             result = await _call_service(runtime, endpoint, params)
+            # Для CLI выводим результат пользователю
             print("Результат:", result)
         except Exception as exc:
             try:
@@ -150,7 +139,16 @@ async def run_cli(argv: Optional[List[str]] = None, input_func: Callable[[str], 
                 selected = (ep, {})
                 break
     if selected is None:
-        print("Не удалось распознать выбор")
+        try:
+            await runtime.service_registry.call(
+                "logger.log",
+                level="warning",
+                message="Не удалось распознать выбор",
+                component="console",
+                choice=choice
+            )
+        except Exception:
+            print("Не удалось распознать выбор")
         if shutdown_on_exit:
             await runtime.shutdown()
         return runtime
@@ -168,6 +166,7 @@ async def run_cli(argv: Optional[List[str]] = None, input_func: Callable[[str], 
 
     confirm = input_func(f"Подтвердить вызов {endpoint.service} (y/N)? ").strip().lower()
     if confirm not in ("y", "yes"):
+        # Для CLI выводим сообщение пользователю
         print("Отменено")
         if shutdown_on_exit:
             await runtime.shutdown()
@@ -175,12 +174,20 @@ async def run_cli(argv: Optional[List[str]] = None, input_func: Callable[[str], 
 
     try:
         result = await _call_service(runtime, endpoint, params)
+        # Для CLI выводим результат пользователю
         print("Результат:", result)
     except Exception as exc:
         try:
-            await runtime.service_registry.call("logger.log", level="error", message=f"CLI call error: {exc}")
+            await runtime.service_registry.call(
+                "logger.log",
+                level="error",
+                message=f"CLI call error: {exc}",
+                component="console",
+                endpoint=endpoint.service
+            )
         except Exception:
             pass
+        # Для CLI выводим ошибку пользователю
         print("Ошибка при вызове сервиса:", exc)
 
     if shutdown_on_exit:

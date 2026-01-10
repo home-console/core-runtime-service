@@ -16,8 +16,12 @@ async def handle_external_state(runtime, data: dict) -> None:
     if not external_id or reported_state is None:
         return
 
-    internal_id = await runtime.storage.get("devices_mappings", external_id)
+    mapping = await runtime.storage.get("devices_mappings", external_id)
 
+    if not mapping or not isinstance(mapping, dict):
+        return
+
+    internal_id = mapping.get("internal_id")
     if not internal_id:
         return
 

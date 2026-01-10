@@ -10,7 +10,7 @@ from pathlib import Path
 
 from core.config import Config
 from core.runtime import CoreRuntime
-from adapters.sqlite_adapter import SQLiteAdapter
+from core.storage_factory import create_storage_adapter
 
 
 async def main():
@@ -19,13 +19,12 @@ async def main():
     # Загрузить конфигурацию
     config = Config.from_env()
     
-    # Создать директорию для БД, если нужно
-    Path(config.db_path).parent.mkdir(parents=True, exist_ok=True)
+    # Создать директорию для БД, если нужно (только для SQLite)
+    if config.storage_type == "sqlite":
+        Path(config.db_path).parent.mkdir(parents=True, exist_ok=True)
     
-    # Создать storage адаптер
-    storage_adapter = SQLiteAdapter(config.db_path)
-    # Явная инициализация схемы (adapter не создаёт схему автоматически)
-    await storage_adapter.initialize_schema()
+    # Создать storage адаптер на основе конфигурации
+    storage_adapter = await create_storage_adapter(config)
     
     # Создать Core Runtime
     # Модули (devices, automation, presence) регистрируются автоматически в CoreRuntime.__init__

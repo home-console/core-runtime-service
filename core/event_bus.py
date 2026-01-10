@@ -42,7 +42,8 @@ class EventBus:
             
         Пример:
             async def on_state_changed(event_type: str, data: dict):
-                print(f"Device changed: {data}")
+                # Обработка события
+                pass
             
             await event_bus.subscribe("device.state_changed", on_state_changed)
         """

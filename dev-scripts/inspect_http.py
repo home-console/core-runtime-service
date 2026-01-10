@@ -40,7 +40,7 @@ async def main():
 
     print("Registered services (sample):")
     for name in ["oauth_yandex.get_status", "oauth_yandex.get_authorize_url", "oauth_yandex.exchange_code"]:
-        print(name, runtime.service_registry.has_service(name))
+        print(name, await runtime.service_registry.has_service(name))
 
 if __name__ == '__main__':
     asyncio.run(main())

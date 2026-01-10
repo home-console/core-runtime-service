@@ -46,7 +46,7 @@ class StorageWithStateMirror:
         """
         return await self._storage.get(namespace, key)
 
-    async def set(self, namespace: str, key: str, value: Any) -> None:
+    async def set(self, namespace: str, key: str, value: dict[str, Any]) -> None:
         """
         Сохранить значение в storage и синхронизировать с state_engine.
         
@@ -56,7 +56,11 @@ class StorageWithStateMirror:
         Args:
             namespace: пространство имён
             key: ключ
-            value: значение для сохранения
+            value: значение для сохранения (должен быть dict)
+            
+        Raises:
+            TypeError: если value не является dict (пробрасывается из Storage.set)
+            ValueError: если namespace или key невалидны (пробрасывается из Storage.set)
         """
         state_key = f"{namespace}.{key}"
         try:

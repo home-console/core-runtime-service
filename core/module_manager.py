@@ -13,10 +13,13 @@ import importlib
 import importlib.util
 
 from core.runtime_module import RuntimeModule
+from core.logger_helper import error as log_error
 
 
 # Список обязательных модулей (встроенных доменов)
+# ВАЖНО: logger должен быть первым, так как он нужен для логирования других модулей!
 BUILTIN_MODULES = [
+    "logger",      # LoggerModule (инфраструктурный, должен быть первым)
     "devices",     # DevicesModule
     "automation",  # AutomationModule
     "presence",    # PresenceModule
@@ -31,9 +34,15 @@ class ModuleManager:
     обеспечивает идемпотентность регистрации.
     """
 
-    def __init__(self):
-        """Инициализация менеджера модулей."""
+    def __init__(self, runtime: Optional[Any] = None):
+        """
+        Инициализация менеджера модулей.
+        
+        Args:
+            runtime: опциональный экземпляр CoreRuntime для логирования
+        """
         self._modules: Dict[str, RuntimeModule] = {}
+        self._runtime = runtime
 
     async def register(self, module: RuntimeModule) -> None:
         """
@@ -108,12 +117,15 @@ class ModuleManager:
                 # Не ломаем запуск других модулей при ошибке одного
                 # Логируем ошибку для отладки
                 try:
-                    print(
-                        f"[ModuleManager] Ошибка при запуске модуля '{module.name}': {e}",
-                        file=sys.stderr
+                    await log_error(
+                        self._runtime,
+                        f"Ошибка при запуске модуля '{module.name}': {e}",
+                        component="module_manager",
+                        module=module.name
                     )
                 except Exception:
-                    pass
+                    # Fallback на print если logger недоступен
+                    print(f"[ModuleManager] Ошибка при запуске модуля '{module.name}': {e}", file=sys.stderr)
 
     async def stop_all(self) -> None:
         """
@@ -128,12 +140,15 @@ class ModuleManager:
                 # Не ломаем остановку других модулей при ошибке одного
                 # Логируем ошибку для отладки
                 try:
-                    print(
-                        f"[ModuleManager] Ошибка при остановке модуля '{module.name}': {e}",
-                        file=sys.stderr
+                    await log_error(
+                        self._runtime,
+                        f"Ошибка при остановке модуля '{module.name}': {e}",
+                        component="module_manager",
+                        module=module.name
                     )
                 except Exception:
-                    pass
+                    # Fallback на print если logger недоступен
+                    print(f"[ModuleManager] Ошибка при остановке модуля '{module.name}': {e}", file=sys.stderr)
 
     def clear(self) -> None:
         """Очищает все зарегистрированные модули."""

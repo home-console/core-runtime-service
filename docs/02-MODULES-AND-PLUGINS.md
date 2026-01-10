@@ -40,6 +40,19 @@
 
 **Пример:** `plugins/yandex_smart_home_real.py` — интеграция с Яндекс API
 
+**Логирование в плагинах:**
+Плагины должны использовать `service_registry.call("logger.log")` напрямую:
+```python
+await self.runtime.service_registry.call(
+    "logger.log",
+    level="info",
+    message="Плагин запущен",
+    plugin=self.metadata.name
+)
+```
+Это работает для встроенных плагинов, внешних плагинов через SDK и remote plugins.
+НЕ используйте `logger_helper` в плагинах — это только для core компонентов.
+
 ---
 
 ## Критерии выбора: module или plugin?

@@ -137,11 +137,38 @@ class ApiGatewayPlugin(BasePlugin):
                 # uvicorn вызывает SystemExit(1) при ошибке привязки порта;
                 # подавляем исключение в потоке и логируем, чтобы pytest
                 # не регистрировал unhandled thread exception warning.
-                print("[api_gateway] uvicorn exited during startup (port may be in use)")
+                # В потоке используем новый event loop для async вызова
+                try:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    loop.run_until_complete(
+                        self.runtime.service_registry.call(
+                            "logger.log",
+                            level="warning",
+                            message="uvicorn exited during startup (port may be in use)",
+                            plugin="api_gateway"
+                        )
+                    )
+                    loop.close()
+                except Exception:
+                    pass
                 return
             except Exception as e:
                 # Общий защитный fallback — логируем и завершаем поток.
-                print(f"[api_gateway] server run error: {e}")
+                try:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    loop.run_until_complete(
+                        self.runtime.service_registry.call(
+                            "logger.log",
+                            level="error",
+                            message=f"server run error: {e}",
+                            plugin="api_gateway"
+                        )
+                    )
+                    loop.close()
+                except Exception:
+                    pass
                 return
 
         self._thread = threading.Thread(target=run_server, daemon=True)

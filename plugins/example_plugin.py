@@ -98,4 +98,14 @@ class ExamplePlugin(BasePlugin):
             event_type: тип события
             data: данные события
         """
-        print(f"[ExamplePlugin] Получено событие {event_type}: {data}")
+        try:
+            await self.runtime.service_registry.call(
+                "logger.log",
+                level="info",
+                message=f"Получено событие {event_type}",
+                plugin="example",
+                event_data=data
+            )
+        except Exception:
+            # Не ломаем обработку события при ошибках логирования
+            pass

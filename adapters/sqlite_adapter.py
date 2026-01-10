@@ -9,14 +9,6 @@ import json
 import sqlite3
 from pathlib import Path
 from typing import Any, Optional
-
-from .storage_adapter import StorageAdapter
-
-
-import json
-import sqlite3
-from pathlib import Path
-from typing import Any, Optional
 import asyncio
 
 from .storage_adapter import StorageAdapter
@@ -72,7 +64,7 @@ class SQLiteAdapter(StorageAdapter):
         создаёт таблицу в in-memory БД.
         """
         # Создать директорию только если это не :memory:
-        if self.db_path != ":memory":
+        if self.db_path != ":memory:":
             Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
 
         await asyncio.to_thread(self._create_schema_sync)
@@ -87,7 +79,19 @@ class SQLiteAdapter(StorageAdapter):
                 (ns, k),
             )
             row = cursor.fetchone()
-            return None if row is None else json.loads(row[0])
+            if row is None:
+                return None
+            try:
+                return json.loads(row[0])
+            except (json.JSONDecodeError, ValueError) as e:
+                # Логируем ошибку парсинга, но не падаем
+                # Возвращаем None, чтобы система могла продолжить работу
+                import sys
+                print(
+                    f"[SQLiteAdapter] Ошибка парсинга JSON для {ns}.{k}: {e}",
+                    file=sys.stderr
+                )
+                return None
 
         return await asyncio.to_thread(_get_sync, namespace, key)
 
@@ -149,7 +153,3 @@ class SQLiteAdapter(StorageAdapter):
                     self._conn = None
 
         await asyncio.to_thread(_close_sync)
-        """Закрыть соединение с БД."""
-        if self._conn:
-            self._conn.close()
-            self._conn = None

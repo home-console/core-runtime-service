@@ -60,7 +60,8 @@ async def set_state(runtime, device_id: str, state: Dict[str, Any]) -> Dict[str,
     keys = await runtime.storage.list_keys("devices_mappings")
     for k in keys:
         v = await runtime.storage.get("devices_mappings", k)
-        if v == device_id:
+        # v теперь dict с ключом "internal_id"
+        if isinstance(v, dict) and v.get("internal_id") == device_id:
             external_id = k
             break
 
@@ -120,7 +121,8 @@ async def create_mapping(runtime, external_id: str, internal_id: str) -> Dict[st
     if not external_id or not internal_id:
         raise ValueError("external_id и internal_id должны быть непустыми")
 
-    await runtime.storage.set("devices_mappings", external_id, internal_id)
+    # Сохраняем dict согласно контракту Storage API
+    await runtime.storage.set("devices_mappings", external_id, {"internal_id": internal_id})
 
     return {"ok": True, "external_id": external_id, "internal_id": internal_id}
 
@@ -131,8 +133,9 @@ async def list_mappings(runtime) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     for k in keys:
         v = await runtime.storage.get("devices_mappings", k)
-        if v is not None:
-            out.append({"external_id": k, "internal_id": v})
+        # v теперь dict с ключом "internal_id"
+        if isinstance(v, dict) and "internal_id" in v:
+            out.append({"external_id": k, "internal_id": v["internal_id"]})
 
     return out
 
@@ -162,7 +165,8 @@ async def auto_map_external(runtime, provider: Optional[str] = None) -> Dict[str
 
         existing = await runtime.storage.get("devices_mappings", ext_id)
 
-        if existing:
+        # existing теперь dict или None
+        if existing is not None:
             skipped += 1
             continue
 
@@ -188,7 +192,8 @@ async def auto_map_external(runtime, provider: Optional[str] = None) -> Dict[str
             errors.append(f"create_failed:{ext_id}:{ce}")
             continue
 
-        await runtime.storage.set("devices_mappings", ext_id, internal_id)
+        # Сохраняем dict согласно контракту Storage API
+        await runtime.storage.set("devices_mappings", ext_id, {"internal_id": internal_id})
         created += 1
 
     return {"ok": True, "created": created, "skipped": skipped, "errors": errors}

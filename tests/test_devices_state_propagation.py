@@ -49,7 +49,7 @@ async def test_state_propagation_via_event_bus(memory_adapter):
             },
         }
         await runtime.storage.set("devices", internal_id, internal_device)
-        await runtime.storage.set("devices_mappings", external_id, internal_id)
+        await runtime.storage.set("devices_mappings", external_id, {"internal_id": internal_id})
 
         # Track events published
         published_events = []
@@ -167,7 +167,7 @@ async def test_state_propagation_merge(memory_adapter):
             "state": initial_state,
         }
         await runtime.storage.set("devices", internal_id, internal_device)
-        await runtime.storage.set("devices_mappings", external_id, internal_id)
+        await runtime.storage.set("devices_mappings", external_id, {"internal_id": internal_id})
 
         # Publish partial state update from external
         partial_update = {
