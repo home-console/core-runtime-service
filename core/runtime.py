@@ -13,7 +13,6 @@ CoreRuntime - главный класс Core Runtime.
 
 from typing import Any
 import importlib
-import importlib.util
 import inspect
 import pkgutil
 from pathlib import Path
@@ -22,6 +21,7 @@ from core.event_bus import EventBus
 from core.service_registry import ServiceRegistry
 from core.state_engine import StateEngine
 from core.storage import Storage
+from core.storage_mirror import StorageWithStateMirror
 from core.plugin_manager import PluginManager
 from core.module_manager import ModuleManager
 from core.http_registry import HttpRegistry
@@ -47,71 +47,11 @@ class CoreRuntime:
         self.event_bus = EventBus()
         self.service_registry = ServiceRegistry()
         self.state_engine = StateEngine()
+        
         # Base storage adapter instance
         base_storage = Storage(storage_adapter)
-
-        # Lightweight wrapper that mirrors storage namespace/key → state_engine keys
-        # Format: state_key = f"{namespace}.{key}"
-        class StorageWithStateMirror:
-            def __init__(self, storage_obj: Storage, state_engine_obj: StateEngine):
-                self._storage = storage_obj
-                self._state_engine = state_engine_obj
-
-            async def get(self, namespace: str, key: str):
-                return await self._storage.get(namespace, key)
-
-            async def set(self, namespace: str, key: str, value):
-                """
-                Сохранить значение в storage и синхронизировать с state_engine.
-                
-                Гарантирует консистентность: если storage.set() падает,
-                state_engine не обновляется.
-                """
-                state_key = f"{namespace}.{key}"
-                try:
-                    # Сначала сохраняем в storage (source of truth)
-                    await self._storage.set(namespace, key, value)
-                    # Только после успешного сохранения обновляем state_engine
-                    await self._state_engine.set(state_key, value)
-                except Exception:
-                    # Если storage.set() упал, откатываем state_engine (если был обновлён)
-                    try:
-                        await self._state_engine.delete(state_key)
-                    except Exception:
-                        pass
-                    # Пробрасываем оригинальную ошибку
-                    raise
-
-            async def delete(self, namespace: str, key: str):
-                """
-                Удалить значение из storage и state_engine.
-                
-                Гарантирует консистентность: если storage.delete() падает,
-                state_engine не обновляется.
-                """
-                state_key = f"{namespace}.{key}"
-                try:
-                    # Сначала удаляем из storage
-                    res = await self._storage.delete(namespace, key)
-                    # Только после успешного удаления обновляем state_engine
-                    if res:
-                        await self._state_engine.delete(state_key)
-                    return res
-                except Exception:
-                    # Если storage.delete() упал, state_engine остаётся без изменений
-                    # Пробрасываем оригинальную ошибку
-                    raise
-
-            async def list_keys(self, namespace: str):
-                return await self._storage.list_keys(namespace)
-
-            async def clear_namespace(self, namespace: str):
-                return await self._storage.clear_namespace(namespace)
-
-            async def close(self):
-                return await self._storage.close()
-
-        # Replace storage with wrapper that mirrors changes to state_engine
+        
+        # Обёртка для синхронизации storage и state_engine
         self.storage = StorageWithStateMirror(base_storage, self.state_engine)
         self.plugin_manager = PluginManager(self)
         self.module_manager = ModuleManager()
@@ -140,9 +80,10 @@ class CoreRuntime:
         if not self.plugin_manager.list_plugins():
             try:
                 await self._auto_load_plugins()
-            except:
+            except Exception as e:
                 # Не мешаем запуску runtime из-за проблем с автозагрузкой
-                pass
+                # Логируем ошибку для отладки
+                print(f"[Runtime] Предупреждение: ошибка автозагрузки плагинов: {e}", file=__import__('sys').stderr)
 
         # Регистрация встроенных модулей (обязательные домены)
         await self.module_manager.register_builtin_modules(self)
@@ -223,7 +164,9 @@ class CoreRuntime:
             module_name = f"plugins.{mod_name}"
             try:
                 module = importlib.import_module(module_name)
-            except Exception:
+            except Exception as e:
+                # Игнорируем ошибки импорта отдельных модулей
+                print(f"[Runtime] Предупреждение: не удалось импортировать модуль '{module_name}': {e}", file=__import__('sys').stderr)
                 continue
 
             for _, obj in inspect.getmembers(module, inspect.isclass):
@@ -234,10 +177,14 @@ class CoreRuntime:
                     if not issubclass(obj, BasePlugin):
                         continue
                 except TypeError:
+                    # Не класс или не BasePlugin - пропускаем
                     continue
 
                 try:
                     plugin_instance = obj(self)
                     await self.plugin_manager.load_plugin(plugin_instance)
-                except Exception:
+                except Exception as e:
+                    # Игнорируем ошибки загрузки отдельных плагинов
+                    plugin_name = getattr(obj, '__name__', 'unknown')
+                    print(f"[Runtime] Предупреждение: не удалось загрузить плагин '{plugin_name}': {e}", file=__import__('sys').stderr)
                     continue
