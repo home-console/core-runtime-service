@@ -15,9 +15,9 @@ from typing import Any, Dict, Optional
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from core.runtime import CoreRuntime
-from plugins.yandex_smart_home_real import YandexSmartHomeRealPlugin
-from modules.devices import register_devices
-from plugins.system_logger_plugin import SystemLoggerPlugin
+from plugins.yandex_smart_home import YandexSmartHomeRealPlugin
+from modules import DevicesModule
+from plugins.test import SystemLoggerPlugin
 
 
 class SimpleMemoryStorage:
@@ -188,7 +188,8 @@ async def main():
 
     # Register devices module instead of loading plugin
     print("Registering devices module...")
-    register_devices(runtime)
+    devices_module = DevicesModule(runtime)
+    await runtime.module_manager.register(devices_module)
 
     # Регистрируем mock oauth_yandex.get_tokens
     async def mock_get_tokens():

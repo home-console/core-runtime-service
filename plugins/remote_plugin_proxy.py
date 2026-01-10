@@ -16,7 +16,7 @@ try:
 except Exception:
 	aiohttp = None
 
-from .base_plugin import BasePlugin, PluginMetadata
+from core.base_plugin import BasePlugin, PluginMetadata
 
 
 class RemotePluginProxy(BasePlugin):

@@ -18,7 +18,7 @@ import json
 import logging
 from typing import Any
 
-from plugins.base_plugin import BasePlugin, PluginMetadata
+from core.base_plugin import BasePlugin, PluginMetadata
 
 
 class SystemLoggerPlugin(BasePlugin):

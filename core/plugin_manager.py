@@ -5,14 +5,14 @@ PluginManager - управление lifecycle плагинов.
 """
 
 import importlib
-import inspect
-import pkgutil
+import json
 from pathlib import Path
-from typing import Optional, TYPE_CHECKING, Callable, Awaitable
+from typing import Optional, TYPE_CHECKING, Callable, Awaitable, Dict, Any, List
 from enum import Enum
 
-from plugins.base_plugin import BasePlugin, PluginMetadata
-from core.logger_helper import warning
+from core.base_plugin import BasePlugin, PluginMetadata
+from core.logger_helper import warning, info
+from dataclasses import replace
 
 if TYPE_CHECKING:
     from core.runtime import CoreRuntime
@@ -219,13 +219,242 @@ class PluginManager:
             if self._states[plugin_name] == PluginState.STARTED:
                 await self.stop_plugin(plugin_name)
 
+    def _load_plugin_manifest(self, plugin_path: Path) -> Optional[Dict[str, Any]]:
+        """
+        Загрузить манифест плагина из файла plugin.json или manifest.json.
+        
+        Args:
+            plugin_path: путь к директории плагина или файлу плагина
+            
+        Returns:
+            Словарь с данными манифеста или None если манифест не найден
+        """
+        # Если передан файл, используем его директорию
+        if plugin_path.is_file():
+            plugin_dir = plugin_path.parent
+        else:
+            plugin_dir = plugin_path
+        
+        # Пробуем найти манифест в разных форматах
+        manifest_files = ["plugin.json", "manifest.json"]
+        for manifest_file in manifest_files:
+            manifest_path = plugin_dir / manifest_file
+            if manifest_path.exists() and manifest_path.is_file():
+                try:
+                    with open(manifest_path, "r", encoding="utf-8") as f:
+                        manifest_data = json.load(f)
+                        return manifest_data
+                except (json.JSONDecodeError, IOError) as e:
+                    # Ошибка чтения манифеста - пропускаем
+                    continue
+        
+        return None
+
+    async def _load_plugin_from_manifest(
+        self,
+        manifest: Dict[str, Any],
+        plugin_dir: Path,
+        actual_logger_func: Callable[..., Awaitable[None]]
+    ) -> bool:
+        """
+        Загрузить плагин используя данные из манифеста.
+        
+        Args:
+            manifest: данные манифеста
+            plugin_dir: директория плагина
+            actual_logger_func: функция для логирования
+            
+        Returns:
+            True если плагин успешно загружен, False иначе
+        """
+        try:
+            # Получаем путь к классу плагина
+            class_path = manifest.get("class_path")
+            plugin_name = manifest.get("name", "unknown")
+            
+            if not class_path:
+                await actual_logger_func(
+                    self._runtime,
+                    f"Манифест плагина '{plugin_name}' не содержит 'class_path'",
+                    component="plugin_manager"
+                )
+                return False
+            
+            # Логируем обнаружение манифеста
+            try:
+                await info(
+                    self._runtime,
+                    f"Найден манифест для плагина '{plugin_name}' (class_path: {class_path})",
+                    component="plugin_manager"
+                )
+            except Exception:
+                pass
+            
+            # Импортируем класс плагина
+            module_path, class_name = class_path.rsplit(".", 1)
+            try:
+                module = importlib.import_module(module_path)
+                plugin_class = getattr(module, class_name)
+            except (ImportError, AttributeError) as e:
+                await actual_logger_func(
+                    self._runtime,
+                    f"Не удалось импортировать класс '{class_path}' из манифеста плагина '{plugin_name}': {e}",
+                    component="plugin_manager"
+                )
+                return False
+            
+            # Проверяем, что это класс BasePlugin
+            if not isinstance(plugin_class, type) or not issubclass(plugin_class, BasePlugin):
+                await actual_logger_func(
+                    self._runtime,
+                    f"Класс '{class_path}' из манифеста плагина '{plugin_name}' не является подклассом BasePlugin",
+                    component="plugin_manager"
+                )
+                return False
+            
+            # Создаём экземпляр плагина
+            try:
+                plugin_instance = plugin_class(self._runtime)
+                
+                # Обновляем metadata плагина зависимостями из манифеста
+                # Это нужно, чтобы проверка зависимостей в load_plugin() работала корректно
+                manifest_dependencies = manifest.get("dependencies", [])
+                if manifest_dependencies:
+                    # Получаем текущий metadata
+                    current_metadata = plugin_instance.metadata
+                    # Обновляем metadata с зависимостями из манифеста
+                    updated_metadata = replace(
+                        current_metadata,
+                        dependencies=manifest_dependencies if isinstance(manifest_dependencies, list) else []
+                    )
+                    # Сохраняем обновлённый metadata в приватном атрибуте через setattr
+                    setattr(plugin_instance, '_manifest_metadata', updated_metadata)
+                    # Временно переопределяем property metadata для этого экземпляра
+                    # Используем type() для установки property на уровне класса экземпляра
+                    original_metadata = type(plugin_instance).metadata
+                    # Создаём новый property, который возвращает обновлённый metadata
+                    def get_updated_metadata(self):
+                        if hasattr(self, '_manifest_metadata'):
+                            return getattr(self, '_manifest_metadata')
+                        return original_metadata.__get__(self, type(self))
+                    
+                    # Устанавливаем property на уровне класса экземпляра
+                    setattr(type(plugin_instance), 'metadata', property(get_updated_metadata))
+                
+                await self.load_plugin(plugin_instance)
+                
+                # Логируем успешную загрузку из манифеста
+                try:
+                    await info(
+                        self._runtime,
+                        f"Плагин '{plugin_name}' успешно загружен из манифеста",
+                        component="plugin_manager"
+                    )
+                except Exception:
+                    pass
+                
+                return True
+            except ValueError as e:
+                # Конфликт при загрузке (дубликат или зависимость)
+                error_msg = str(e)
+                if "уже зарегистрирован" in error_msg or "уже загружен" in error_msg:
+                    # Это нормальная ситуация
+                    await actual_logger_func(
+                        self._runtime,
+                        f"Пропущен плагин из манифеста: {error_msg}",
+                        component="plugin_manager"
+                    )
+                else:
+                    await actual_logger_func(
+                        self._runtime,
+                        f"Не удалось загрузить плагин из манифеста: {error_msg}",
+                        component="plugin_manager"
+                    )
+                return False
+            except Exception as e:
+                await actual_logger_func(
+                    self._runtime,
+                    f"Ошибка при создании плагина из манифеста: {e}",
+                    component="plugin_manager"
+                )
+                return False
+                
+        except Exception as e:
+            await actual_logger_func(
+                self._runtime,
+                f"Ошибка при обработке манифеста плагина: {e}",
+                component="plugin_manager"
+            )
+            return False
+
+    def _topological_sort_manifests(self, manifests: Dict[str, Dict[str, Any]]) -> List[str]:
+        """
+        Топологическая сортировка плагинов по зависимостям.
+        
+        Args:
+            manifests: словарь {plugin_name: manifest_data}
+            
+        Returns:
+            Список имён плагинов в порядке загрузки (сначала без зависимостей)
+        """
+        # Граф зависимостей: plugin_name -> список зависимостей
+        graph: Dict[str, List[str]] = {}
+        for plugin_name, manifest in manifests.items():
+            deps = manifest.get("dependencies", [])
+            graph[plugin_name] = deps if isinstance(deps, list) else []
+        
+        # Топологическая сортировка (Kahn's algorithm)
+        in_degree: Dict[str, int] = {name: 0 for name in manifests.keys()}
+        for plugin_name, deps in graph.items():
+            for dep in deps:
+                if dep in in_degree:
+                    in_degree[plugin_name] += 1
+        
+        # Очередь плагинов без зависимостей
+        queue: List[str] = [name for name, degree in in_degree.items() if degree == 0]
+        result: List[str] = []
+        
+        while queue:
+            plugin_name = queue.pop(0)
+            result.append(plugin_name)
+            
+            # Уменьшаем in_degree для всех плагинов, зависящих от этого
+            for other_name, deps in graph.items():
+                if plugin_name in deps:
+                    in_degree[other_name] -= 1
+                    if in_degree[other_name] == 0:
+                        queue.append(other_name)
+        
+        # Если остались плагины с ненулевым in_degree - есть циклические зависимости
+        remaining = [name for name, degree in in_degree.items() if degree > 0]
+        if remaining:
+            # Логируем предупреждение, но продолжаем загрузку
+            try:
+                import asyncio
+                asyncio.create_task(warning(
+                    self._runtime,
+                    f"Обнаружены возможные циклические зависимости между плагинами: {remaining}",
+                    component="plugin_manager"
+                ))
+            except Exception:
+                pass
+        
+        return result
+
     async def auto_load_plugins(
         self,
         plugins_dir: Optional[Path] = None,
         logger_func: Optional[Callable[..., Awaitable[None]]] = None
     ) -> None:
         """
-        Автоматически загрузить плагины из каталога `plugins/`.
+        Автоматически загрузить плагины из каталога `plugins/` ТОЛЬКО через манифесты.
+        
+        КРИТИЧЕСКИЕ ПРАВИЛА:
+        - Плагины загружаются ТОЛЬКО если найден манифест (plugin.json или manifest.json)
+        - Без манифеста плагин НЕ загружается
+        - НЕ сканирует Python файлы напрямую
+        - НЕ импортирует модули для поиска классов
+        - Загружает плагины в правильном порядке с учётом зависимостей
         
         Метод безопасен к повторным вызовам — ошибки загрузки отдельных плагинов
         игнорируются, а дублирующие загрузки не прерывают выполнение.
@@ -245,156 +474,51 @@ class PluginManager:
         # Устанавливаем logger_func по умолчанию если не указан
         actual_logger_func: Callable[..., Awaitable[None]] = logger_func if logger_func is not None else warning
         
-        for _finder, mod_name, _pkg in pkgutil.iter_modules([str(plugins_dir)]):
-            module_name = f"plugins.{mod_name}"
-            try:
-                module = importlib.import_module(module_name)
-            except Exception as e:
-                # Игнорируем ошибки импорта отдельных модулей
-                try:
-                    await actual_logger_func(
-                        self._runtime,
-                        f"Не удалось импортировать модуль '{module_name}': {e}",
-                        component="plugin_manager"
-                    )
-                except Exception:
-                    # Fallback если logger недоступен
-                    pass
+        # Шаг 1: Собираем все манифесты
+        manifests: Dict[str, Dict[str, Any]] = {}  # plugin_name -> (manifest, plugin_dir)
+        plugin_dirs: Dict[str, Path] = {}  # plugin_name -> plugin_dir
+        
+        for item in plugins_dir.iterdir():
+            # Пропускаем тестовые плагины
+            if item.name == "test":
                 continue
             
-            for _, obj in inspect.getmembers(module, inspect.isclass):
-                if obj is BasePlugin:
-                    continue
-                
-                # Проверяем, что это класс и он наследуется от BasePlugin
-                if not isinstance(obj, type):
-                    continue
-                
-                try:
-                    if not issubclass(obj, BasePlugin):
-                        continue
-                except TypeError:
-                    # Не класс или не BasePlugin - пропускаем
-                    continue
-                
-                # Пропускаем YandexSmartHomeStubPlugin при автозагрузке
-                # Он конфликтует с YandexSmartHomeRealPlugin (оба регистрируют yandex.sync_devices)
-                # Stub должен загружаться явно только для тестов
-                class_name = getattr(obj, '__name__', '')
-                if class_name == 'YandexSmartHomeStubPlugin':
-                    # Пропускаем Yandex stub плагин при автозагрузке
-                    continue
-                
-                # Специальная обработка для RemotePluginProxy
-                # Загружается только если есть переменная окружения (проверяется внутри __init__)
-                if class_name == 'RemotePluginProxy':
-                    try:
-                        # Создаём экземпляр без remote_url - он сам получит из переменных окружения
-                        plugin_instance = obj(self._runtime)
-                        await self.load_plugin(plugin_instance)
-                    except ValueError as e:
-                        # ValueError означает, что нет remote_url - это нормально, пропускаем тихо
-                        if "remote_url обязателен" in str(e):
-                            # Нет URL - пропускаем тихо (это нормально)
-                            continue
-                        # Другие ValueError - логируем
-                        try:
-                            await actual_logger_func(
-                                self._runtime,
-                                f"Не удалось загрузить RemotePluginProxy: {e}",
-                                component="plugin_manager"
-                            )
-                        except Exception:
-                            pass
-                    except Exception as e:
-                        # Другие ошибки - логируем
-                        try:
-                            await actual_logger_func(
-                                self._runtime,
-                                f"Не удалось загрузить RemotePluginProxy: {e}",
-                                component="plugin_manager"
-                            )
-                        except Exception:
-                            pass
-                    continue
-                
-                # Проверяем сигнатуру конструктора
-                # Пропускаем плагины, которые требуют дополнительные параметры
-                try:
-                    sig = inspect.signature(obj.__init__)
-                    # Считаем параметры кроме self и runtime
-                    params = list(sig.parameters.keys())
-                    # Убираем 'self'
-                    if 'self' in params:
-                        params.remove('self')
-                    # Убираем 'runtime' если есть
-                    if 'runtime' in params:
-                        params.remove('runtime')
-                    
-                    # Если остались обязательные параметры (без значений по умолчанию),
-                    # пропускаем этот плагин при автозагрузке
-                    required_params = []
-                    for param_name in params:
-                        param = sig.parameters[param_name]
-                        # Проверяем, есть ли значение по умолчанию
-                        if param.default is inspect.Parameter.empty:
-                            required_params.append(param_name)
-                    
-                    if required_params:
-                        # Плагин требует дополнительные параметры - пропускаем
-                        plugin_name = getattr(obj, '__name__', 'unknown')
-                        try:
-                            await actual_logger_func(
-                                self._runtime,
-                                f"Пропущен плагин '{plugin_name}' при автозагрузке: требуется параметр(ы) {required_params}",
-                                component="plugin_manager"
-                            )
-                        except Exception:
-                            pass
-                        continue
-                except Exception:
-                    # Если не удалось проверить сигнатуру, пробуем загрузить
-                    pass
-                
-                try:
-                    plugin_instance = obj(self._runtime)
-                    await self.load_plugin(plugin_instance)
-                except ValueError as e:
-                    # ValueError при load_plugin обычно означает конфликт (дубликат или зависимость)
-                    # Это нормально - просто логируем и продолжаем
-                    plugin_name = getattr(obj, '__name__', 'unknown')
-                    error_msg = str(e)
-                    # Не логируем как WARNING, если это просто конфликт сервисов
-                    if "уже зарегистрирован" in error_msg or "уже загружен" in error_msg:
-                        # Это нормальная ситуация - плагин уже загружен или сервис занят
-                        try:
-                            await actual_logger_func(
-                                self._runtime,
-                                f"Пропущен плагин '{plugin_name}': {error_msg}",
-                                component="plugin_manager"
-                            )
-                        except Exception:
-                            pass
-                    else:
-                        # Другие ValueError - логируем как предупреждение
-                        try:
-                            await actual_logger_func(
-                                self._runtime,
-                                f"Не удалось загрузить плагин '{plugin_name}': {error_msg}",
-                                component="plugin_manager"
-                            )
-                        except Exception:
-                            pass
-                except Exception as e:
-                    # Игнорируем другие ошибки загрузки отдельных плагинов
-                    plugin_name = getattr(obj, '__name__', 'unknown')
-                    try:
-                        await actual_logger_func(
-                            self._runtime,
-                            f"Не удалось загрузить плагин '{plugin_name}': {e}",
-                            component="plugin_manager"
-                        )
-                    except Exception:
-                        # Fallback если logger недоступен
-                        pass
-                    continue
+            # Пропускаем файлы, которые не являются директориями
+            if not item.is_dir():
+                continue
+            
+            # Проверяем наличие манифеста в директории плагина
+            manifest = self._load_plugin_manifest(item)
+            
+            if manifest:
+                plugin_name = manifest.get("name")
+                if plugin_name:
+                    manifests[plugin_name] = manifest
+                    plugin_dirs[plugin_name] = item
+        
+        # Шаг 2: Топологическая сортировка по зависимостям
+        load_order = self._topological_sort_manifests(manifests)
+        
+        # Шаг 3: Загружаем плагины в правильном порядке
+        for plugin_name in load_order:
+            if plugin_name not in manifests:
+                continue
+            
+            manifest = manifests[plugin_name]
+            plugin_dir = plugin_dirs[plugin_name]
+            
+            # Проверяем, что все зависимости уже загружены
+            dependencies = manifest.get("dependencies", [])
+            missing_deps = [dep for dep in dependencies if dep not in self._plugins]
+            
+            if missing_deps:
+                await actual_logger_func(
+                    self._runtime,
+                    f"Пропущен плагин '{plugin_name}': отсутствуют зависимости {missing_deps}",
+                    component="plugin_manager"
+                )
+                continue
+            
+            # Загружаем плагин из манифеста
+            # Логирование происходит внутри _load_plugin_from_manifest
+            await self._load_plugin_from_manifest(manifest, plugin_dir, actual_logger_func)

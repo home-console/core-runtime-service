@@ -1,8 +1,8 @@
 """
-Smoke-test для плагина `presence`.
+Smoke-test для модуля `presence`.
 
 Проверяет:
-- регистрация сервиса `presence.set`
+- регистрация сервиса `presence.set` через PresenceModule
 - изменение состояния runtime.state (presence.home)
 - публикацию событий `presence.entered` и `presence.left`
 - регистрацию HTTP контрактов
@@ -15,15 +15,12 @@ from pathlib import Path
 from core.config import Config
 from core.runtime import CoreRuntime
 from adapters.sqlite_adapter import SQLiteAdapter
-from plugins.system_logger_plugin import SystemLoggerPlugin
-from modules import DevicesModule
-from plugins.automation_stub_plugin import AutomationStubPlugin
-from plugins.presence_plugin import PresencePlugin
+from plugins.test import SystemLoggerPlugin, AutomationStubPlugin
 
 
 @pytest.mark.asyncio
 async def test_presence():
-    print("\nTEST: presence plugin integration")
+    print("\nTEST: presence module integration")
 
     config = Config(db_path="data/test_presence.db")
     Path(config.db_path).parent.mkdir(parents=True, exist_ok=True)
@@ -32,20 +29,13 @@ async def test_presence():
     await adapter.initialize_schema()
     runtime = CoreRuntime(adapter)
 
-
     logger = SystemLoggerPlugin(runtime)
     await runtime.plugin_manager.load_plugin(logger)
-
-    # register devices module instead of loading plugin
-    devices_module = DevicesModule(runtime)
-    await runtime.module_manager.register(devices_module)
 
     automation = AutomationStubPlugin(runtime)
     await runtime.plugin_manager.load_plugin(automation)
 
-    presence = PresencePlugin(runtime)
-    await runtime.plugin_manager.load_plugin(presence)
-
+    # PresenceModule регистрируется автоматически при runtime.start()
     await runtime.start()
     
     # Даём время на инициализацию модулей

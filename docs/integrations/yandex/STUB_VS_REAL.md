@@ -45,8 +45,8 @@ Home Console поддерживает два варианта интеграци
 │  └──────────────────────────────┘  │
 │            ↓ (события)              │
 │  ┌──────────────────────────────┐  │
-│  │ devices_plugin               │  │
-│  │ automation_plugin            │  │
+│  │ DevicesModule                │  │
+│  │ AutomationModule             │  │
 │  └──────────────────────────────┘  │
 └─────────────────────────────────────┘
 ```
@@ -79,8 +79,8 @@ Home Console поддерживает два варианта интеграци
 │  └────────────────────────────────────────┘ │
 │            ↓ (события)                      │
 │  ┌────────────────────────────────────────┐ │
-│  │ devices_plugin                         │ │
-│  │ automation_plugin                      │ │
+│  │ DevicesModule                          │ │
+│  │ AutomationModule                       │ │
 │  └────────────────────────────────────────┘ │
 └──────────────────────────────────────────────┘
 ```
@@ -126,7 +126,7 @@ await runtime.event_bus.publish("external.device_discovered", {
     "state": {...},
 })
 
-# Подписчик (devices_plugin)
+# Подписчик (DevicesModule)
 async def on_device_discovered(event_type: str, data: dict):
     # НЕ интересует, stub это или real
     # Просто регистрирует устройство
@@ -188,14 +188,14 @@ devices = [
 
 **Было:**
 ```python
-from plugins.yandex_smart_home_stub import YandexSmartHomeStubPlugin
+from plugins.test import YandexSmartHomeStubPlugin
 
 plugin = YandexSmartHomeStubPlugin(runtime)
 ```
 
 **Стало:**
 ```python
-from plugins.yandex_smart_home_real import YandexSmartHomeRealPlugin
+from plugins.yandex_smart_home import YandexSmartHomeRealPlugin
 
 plugin = YandexSmartHomeRealPlugin(runtime)
 ```
@@ -204,8 +204,8 @@ plugin = YandexSmartHomeRealPlugin(runtime)
 
 ```python
 import os
-from plugins.yandex_smart_home_stub import YandexSmartHomeStubPlugin
-from plugins.yandex_smart_home_real import YandexSmartHomeRealPlugin
+from plugins.test import YandexSmartHomeStubPlugin
+from plugins.yandex_smart_home import YandexSmartHomeRealPlugin
 
 YANDEX_MODE = os.getenv("YANDEX_MODE", "stub")  # stub или real
 

@@ -7,8 +7,7 @@ from pathlib import Path
 from core.config import Config
 from core.runtime import CoreRuntime
 from adapters.sqlite_adapter import SQLiteAdapter
-from plugins.system_logger_plugin import SystemLoggerPlugin
-from plugins.automation_plugin import AutomationPlugin
+from plugins.test import SystemLoggerPlugin
 
 
 @pytest.mark.asyncio
@@ -18,20 +17,17 @@ async def test():
     await adapter.initialize_schema()
     
     runtime = CoreRuntime(adapter)
-    logger = SystemLoggerPlugin()
-    automation = AutomationPlugin()
+    logger = SystemLoggerPlugin(runtime)
     
     # Загружаем плагины
     await runtime.plugin_manager.load_plugin(logger)
     print('✓ Logger plugin loaded successfully')
     print(f'  logger.runtime type: {type(logger.runtime).__name__}')
     
-    await runtime.plugin_manager.load_plugin(automation)
-    print('✓ Automation plugin loaded successfully')
-    print(f'  automation.runtime type: {type(automation.runtime).__name__}')
-    
+    # AutomationModule регистрируется автоматически при runtime.start()
     await runtime.start()
     print('✓ Runtime started')
+    print('✓ AutomationModule registered automatically')
     
     # Пытаемся использовать runtime через плагины
     try:

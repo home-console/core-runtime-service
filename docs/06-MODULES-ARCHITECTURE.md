@@ -235,12 +235,10 @@ core-runtime-service/
 │
 ├── plugins/                 # Опциональные адаптеры (Plugins)
 │   ├── base_plugin.py
-│   ├── yandex_smart_home_real.py
+│   └── yandex_smart_home/
 │   ├── oauth_yandex.py
 │   ├── api_gateway_plugin.py
-│   ├── admin_plugin.py
-│   ├── presence_plugin.py  # DEPRECATED (shim)
-│   └── automation_plugin.py # DEPRECATED (shim)
+│   └── admin_plugin.py
 │
 └── adapters/                # Адаптеры storage
     └── sqlite_adapter.py

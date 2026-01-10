@@ -24,7 +24,7 @@
 from typing import Any, Dict, Optional
 from urllib.parse import urlencode
 
-from plugins.base_plugin import BasePlugin, PluginMetadata
+from core.base_plugin import BasePlugin, PluginMetadata
 
 
 class OAuthYandexPlugin(BasePlugin):

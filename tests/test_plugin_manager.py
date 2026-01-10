@@ -1,6 +1,6 @@
 import pytest
 
-from plugins.base_plugin import BasePlugin, PluginMetadata
+from core.base_plugin import BasePlugin, PluginMetadata
 from core.plugin_manager import PluginManager, PluginState
 
 

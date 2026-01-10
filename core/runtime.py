@@ -22,7 +22,7 @@ from core.plugin_manager import PluginManager
 from core.module_manager import ModuleManager
 from core.http_registry import HttpRegistry
 from core.logger_helper import info, warning
-from plugins import BasePlugin
+from core.base_plugin import BasePlugin
 
 
 class CoreRuntime:
@@ -66,44 +66,73 @@ class CoreRuntime:
         """
         Запустить Core Runtime.
         
-        - запускает все загруженные плагины
-        - устанавливает флаг running
+        Runtime НЕ стартует, если хоть один REQUIRED RuntimeModule:
+        - не зарегистрировался
+        - не смог выполниться register()
+        - упал в start()
+        
+        Гарантии:
+        - Все REQUIRED модули должны быть зарегистрированы и запущены
+        - При ошибке старта REQUIRED модуля runtime останавливается
+        - stop_all() вызывается даже при частичном старте
+        
+        Raises:
+            RuntimeError: если REQUIRED модуль не зарегистрирован или не запустился
         """
         if self._running:
             return
         
-        # Если нет загруженных плагинов (например, в тестах с InMemoryStorageAdapter),
-        # попытаться автоматически загрузить плагины из каталога plugins/
-        if not self.plugin_manager.list_plugins():
+        try:
+            # Если нет загруженных плагинов (например, в тестах с InMemoryStorageAdapter),
+            # попытаться автоматически загрузить плагины из каталога plugins/
+            if not self.plugin_manager.list_plugins():
+                try:
+                    await self.plugin_manager.auto_load_plugins()
+                except Exception as e:
+                    # Не мешаем запуску runtime из-за проблем с автозагрузкой
+                    # Логируем ошибку для отладки
+                    await warning(self, f"Ошибка автозагрузки плагинов: {e}", component="runtime")
+
+            # Регистрация встроенных модулей (обязательные домены)
+            # register_builtin_modules() выбросит RuntimeError если REQUIRED модуль не зарегистрировался
+            await self.module_manager.register_builtin_modules(self)
+            
+            # Проверка, что все REQUIRED модули зарегистрированы
+            # Это дополнительная проверка на случай, если register_builtin_modules() не выбросил ошибку
+            self.module_manager.check_required_modules_registered()
+            
+            # Логирование зарегистрированных модулей
+            modules = self.module_manager.list_modules()
+            if modules:
+                await info(self, f"Модули зарегистрированы: {modules}", component="runtime")
+
+            # Запустить все модули (обязательные домены)
+            # start_all() выбросит RuntimeError если REQUIRED модуль упал в start()
+            await self.module_manager.start_all()
+            if modules:
+                await info(self, f"Модули запущены: {modules}", component="runtime")
+            
+            # Запустить все плагины
+            plugins = self.plugin_manager.list_plugins()
+            await self.plugin_manager.start_all()
+            if plugins:
+                await info(self, f"Плагины запущены: {plugins}", component="runtime")
+            
+            # Установить состояние runtime
+            await self.state_engine.set("runtime.status", "running")
+            self._running = True
+            
+        except Exception as e:
+            # При любой ошибке старта останавливаем все модули
+            # Гарантия: stop_all вызывается даже при частичном старте
             try:
-                await self.plugin_manager.auto_load_plugins()
-            except Exception as e:
-                # Не мешаем запуску runtime из-за проблем с автозагрузкой
-                # Логируем ошибку для отладки
-                await warning(self, f"Ошибка автозагрузки плагинов: {e}", component="runtime")
-
-        # Регистрация встроенных модулей (обязательные домены)
-        await self.module_manager.register_builtin_modules(self)
-        
-        # Логирование зарегистрированных модулей
-        modules = self.module_manager.list_modules()
-        if modules:
-            await info(self, f"Модули зарегистрированы: {modules}", component="runtime")
-
-        # Запустить все модули (обязательные домены)
-        await self.module_manager.start_all()
-        if modules:
-            await info(self, f"Модули запущены: {modules}", component="runtime")
-        
-        # Запустить все плагины
-        plugins = self.plugin_manager.list_plugins()
-        await self.plugin_manager.start_all()
-        if plugins:
-            await info(self, f"Плагины запущены: {plugins}", component="runtime")
-        
-        # Установить состояние runtime
-        await self.state_engine.set("runtime.status", "running")
-        self._running = True
+                await self.module_manager.stop_all()
+            except Exception as stop_error:
+                # Логируем ошибку остановки, но не маскируем исходную ошибку
+                await warning(self, f"Ошибка при остановке модулей после ошибки старта: {stop_error}", component="runtime")
+            
+            # Пробрасываем исходную ошибку
+            raise
 
     async def stop(self) -> None:
         """

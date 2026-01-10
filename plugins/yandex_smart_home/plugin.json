@@ -1,0 +1,8 @@
+{
+  "class_path": "plugins.yandex_smart_home.plugin.YandexSmartHomeRealPlugin",
+  "name": "yandex_smart_home",
+  "version": "0.1.0",
+  "description": "Интеграция с Яндекс Умным Домом - синхронизация реальных устройств",
+  "author": "Home Console",
+  "dependencies": ["oauth_yandex"]
+}

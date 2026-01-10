@@ -11,7 +11,7 @@ from typing import Any, Dict, Optional
 ROOT = __file__
 
 from core.runtime import CoreRuntime
-from plugins.yandex_smart_home_stub import YandexSmartHomeStubPlugin
+from plugins.test import YandexSmartHomeStubPlugin
 
 
 class SimpleMemoryStorage:

@@ -2,8 +2,7 @@ import asyncio
 import pytest
 
 from core.runtime import CoreRuntime
-from plugins.system_logger_plugin import SystemLoggerPlugin
-from plugins.admin_plugin import AdminPlugin
+from plugins.test import SystemLoggerPlugin
 
 
 async def _call_http(runtime: CoreRuntime, method: str, path: str, body=None):
@@ -52,12 +51,10 @@ async def test_admin_devices_end_to_end(memory_adapter):
 
     # Load necessary plugins
     logger = SystemLoggerPlugin(runtime)
-    admin = AdminPlugin(runtime)
-
     await runtime.plugin_manager.load_plugin(logger)
-    await runtime.plugin_manager.load_plugin(admin)
 
-    # Start runtime (invokes on_start of plugins)
+    # Admin module is loaded automatically via ModuleManager
+    # Start runtime (invokes on_start of modules and plugins)
     await runtime.start()
 
     # 1. GET /admin/v1/devices -> initially empty list

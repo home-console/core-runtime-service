@@ -4,7 +4,7 @@
 Этот плагин показывает, как создавать свои плагины.
 """
 
-from plugins.base_plugin import BasePlugin, PluginMetadata
+from core.base_plugin import BasePlugin, PluginMetadata
 
 
 class ExamplePlugin(BasePlugin):

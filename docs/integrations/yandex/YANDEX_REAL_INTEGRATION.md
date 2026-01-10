@@ -38,9 +38,9 @@
 
 ```python
 from core.runtime import CoreRuntime
-from plugins.system_logger_plugin import SystemLoggerPlugin
+from plugins.test import SystemLoggerPlugin
 from plugins.oauth_yandex import OAuthYandexPlugin
-from plugins.yandex_smart_home_real import YandexSmartHomeRealPlugin
+from plugins.yandex_smart_home import YandexSmartHomeRealPlugin
 from plugins.devices_plugin import DevicesPlugin
 
 async def main():

@@ -15,7 +15,7 @@ from pathlib import Path
 from core.config import Config
 from core.runtime import CoreRuntime
 from adapters.sqlite_adapter import SQLiteAdapter
-from plugins.system_logger_plugin import SystemLoggerPlugin
+from plugins.test import SystemLoggerPlugin
 from modules import DevicesModule
 from plugins.remote_plugin_proxy import RemotePluginProxy
 

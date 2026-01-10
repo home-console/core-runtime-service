@@ -66,8 +66,8 @@ devices = await runtime.service_registry.call("yandex.sync_devices")
 
 **Подписчики:**
 
-- `devices_plugin` — регистрирует внешние устройства
-- `automation_plugin` — может использовать для автоматизации
+- `DevicesModule` — регистрирует внешние устройства
+- `AutomationModule` — может использовать для автоматизации
 
 ## Требования
 
@@ -90,7 +90,7 @@ devices = await runtime.service_registry.call("yandex.sync_devices")
 ### Пример 1: Загрузка плагина и синхронизация
 
 ```python
-from plugins.yandex_smart_home_real import YandexSmartHomeRealPlugin
+from plugins.yandex_smart_home import YandexSmartHomeRealPlugin
 from core.runtime import CoreRuntime
 
 async def main():
@@ -164,9 +164,9 @@ RuntimeError: Сетевая ошибка при запросе к Яндекс 
    - Оба используют один и тот же формат payload
    - Можно заменить stub на real без изменения других плагинов
 
-3. **Взаимодействие с другими плагинами:**
-   - `devices_plugin` не отличает stub от real
-   - `automation_plugin` не отличает stub от real
+3. **Взаимодействие с другими модулями:**
+   - `DevicesModule` не отличает stub от real
+   - `AutomationModule` не отличает stub от real
 
 ## Ограничения
 

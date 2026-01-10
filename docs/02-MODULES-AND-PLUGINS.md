@@ -38,7 +38,7 @@
 
 **Расположение:** `plugins/`
 
-**Пример:** `plugins/yandex_smart_home_real.py` — интеграция с Яндекс API
+**Пример:** `plugins/yandex_smart_home/` — интеграция с Яндекс API
 
 **Логирование в плагинах:**
 Плагины должны использовать `service_registry.call("logger.log")` напрямую:
@@ -78,11 +78,11 @@ await self.runtime.service_registry.call(
 | Компонент | Тип | Причина |
 |-----------|-----|---------|
 | `modules/devices/` | Module | Доменная логика, критична для system |
-| `plugins/yandex_smart_home_real.py` | Plugin | Интеграция, опциональна |
+| `plugins/yandex_smart_home/` | Plugin | Интеграция, опциональна |
 | `plugins/api_gateway_plugin.py` | Plugin | HTTP адаптер, опциональный |
 | `plugins/oauth_yandex.py` | Plugin | Интеграция OAuth, опциональна |
-| `plugins/system_logger_plugin.py` | Plugin | Инфраструктура, но опциональна |
-| `plugins/automation_stub_plugin.py` | Plugin | Демонстрация, не критична |
+| `plugins/test/system_logger_plugin.py` | Plugin | Тестовый, DEPRECATED |
+| `plugins/test/automation_stub_plugin.py` | Plugin | Тестовый, для демонстрации |
 
 **Будущее:** `modules/automation/` — когда automation станет stable, переместим в modules.
 
@@ -151,7 +151,7 @@ class CoreRuntime:
 ### Структура
 
 ```python
-plugins/yandex_smart_home_real.py  # единственный файл или пакет
+plugins/yandex_smart_home/  # пакет с plugin.py
 
 class YandexSmartHomeRealPlugin(BasePlugin):
     def __init__(self, runtime):
@@ -256,7 +256,7 @@ except ImportError:
 
 ```python
 # plugins/my_plugin.py
-from plugins.base_plugin import BasePlugin, PluginMetadata
+from core.base_plugin import BasePlugin, PluginMetadata
 from modules.my_domain import register_my_domain
 
 class MyPlugin(BasePlugin):

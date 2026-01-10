@@ -7,7 +7,7 @@ import asyncio
 from typing import Any, Dict, Optional
 
 from core.runtime import CoreRuntime
-from plugins.yandex_smart_home_stub import YandexSmartHomeStubPlugin
+from plugins.test import YandexSmartHomeStubPlugin
 from modules.devices import register_devices
 
 

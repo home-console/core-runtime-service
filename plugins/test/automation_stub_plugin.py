@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from plugins.base_plugin import BasePlugin, PluginMetadata
+from core.base_plugin import BasePlugin, PluginMetadata
 
 
 class AutomationStubPlugin(BasePlugin):

@@ -22,9 +22,9 @@ import asyncio
 from pathlib import Path
 from core.runtime import CoreRuntime
 from adapters.sqlite_adapter import AsyncSqliteStorage
-from plugins.system_logger_plugin import SystemLoggerPlugin
+from plugins.test import SystemLoggerPlugin
 from plugins.oauth_yandex import OAuthYandexPlugin
-from plugins.yandex_smart_home_real import YandexSmartHomeRealPlugin
+from plugins.yandex_smart_home import YandexSmartHomeRealPlugin
 from plugins.devices_plugin import DevicesPlugin
 
 async def initialize_runtime():
@@ -94,11 +94,11 @@ async def initialize_yandex_plugin(runtime):
     """Загрузить Яндекс плагин в зависимости от режима."""
     
     if YANDEX_MODE == YandexMode.REAL:
-        from plugins.yandex_smart_home_real import YandexSmartHomeRealPlugin
+        from plugins.yandex_smart_home import YandexSmartHomeRealPlugin
         plugin = YandexSmartHomeRealPlugin(runtime)
         print("Loading REAL Yandex plugin")
     else:
-        from plugins.yandex_smart_home_stub import YandexSmartHomeStubPlugin
+        from plugins.test import YandexSmartHomeStubPlugin
         plugin = YandexSmartHomeStubPlugin(runtime)
         print("Loading STUB Yandex plugin")
     
@@ -549,9 +549,9 @@ import signal
 from pathlib import Path
 from core.runtime import CoreRuntime
 from adapters.sqlite_adapter import AsyncSqliteStorage
-from plugins.system_logger_plugin import SystemLoggerPlugin
+from plugins.test import SystemLoggerPlugin
 from plugins.oauth_yandex import OAuthYandexPlugin
-from plugins.yandex_smart_home_real import YandexSmartHomeRealPlugin
+from plugins.yandex_smart_home import YandexSmartHomeRealPlugin
 from plugins.devices_plugin import DevicesPlugin
 from plugins.api_gateway_plugin import ApiGatewayPlugin
 

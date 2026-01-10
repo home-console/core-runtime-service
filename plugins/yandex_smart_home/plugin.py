@@ -1,5 +1,5 @@
 """
-Плагин `yandex_smart_home_real_v0` — синхронизация реальных устройств Яндекса.
+Плагин `yandex_smart_home` — синхронизация реальных устройств Яндекса.
 
 Назначение:
 - получить устройства из реального API Яндекса
@@ -28,7 +28,7 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 import asyncio
 
-from plugins.base_plugin import BasePlugin, PluginMetadata
+from core.base_plugin import BasePlugin, PluginMetadata
 
 
 class YandexSmartHomeRealPlugin(BasePlugin):
@@ -49,7 +49,7 @@ class YandexSmartHomeRealPlugin(BasePlugin):
     @property
     def metadata(self) -> PluginMetadata:
         return PluginMetadata(
-            name="yandex_smart_home_real",
+            name="yandex_smart_home",
             version="0.1.0",
             description="Синхронизация реальных устройств из API Яндекса",
             author="Home Console",
@@ -369,13 +369,13 @@ class YandexSmartHomeRealPlugin(BasePlugin):
             await self.runtime.service_registry.call(
                 "logger.log",
                 level="info",
-                message="yandex_smart_home_real_v0 запущен",
+                message="yandex_smart_home запущен",
                 plugin=self.metadata.name,
             )
         except Exception:
             pass
 
-        # Подписаться на внутренние запросы команд от devices_plugin
+        # Подписаться на внутренние запросы команд от DevicesModule
         async def _internal_command_handler(event_type: str, data: dict):
             # Ожидаемый формат payload'а:
             # {
@@ -736,7 +736,7 @@ class YandexSmartHomeRealPlugin(BasePlugin):
             await self.runtime.service_registry.call(
                 "logger.log",
                 level="info",
-                message="yandex_smart_home_real_v0 остановлен",
+                message="yandex_smart_home остановлен",
                 plugin=self.metadata.name,
             )
         except Exception:

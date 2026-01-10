@@ -1,41 +1,53 @@
 """
-Admin plugin — простые HTTP-ручки и сервисы для администрирования/отладки.
+AdminModule — встроенный модуль административных endpoints.
 
-Экспонирует:
-- сервисы: `admin.list_plugins`, `admin.list_services`, `admin.list_http`,
-  `admin.state_keys`, `admin.state_get`
-- HTTP: GET /admin/plugins, GET /admin/services, GET /admin/http,
-  GET /admin/state/keys, GET /admin/state/{key}
-
-Этот плагин безопасен для dev окружения — не даёт возможности менять состояние,
-только читать. В production при необходимости добавить аутентификацию.
+Предоставляет read-only административные сервисы и HTTP endpoints
+для инспекции runtime состояния.
 """
+
 from typing import Any, Dict, List, Optional
 import time
 import datetime
 import asyncio
 
-from plugins.base_plugin import BasePlugin, PluginMetadata
+from core.runtime_module import RuntimeModule
+from core.http_registry import HttpEndpoint
 
 
-class AdminPlugin(BasePlugin):
+class AdminModule(RuntimeModule):
+    """
+    Модуль административных endpoints.
+    
+    Предоставляет read-only доступ к информации о runtime:
+    - список плагинов, сервисов, HTTP endpoints
+    - состояние state_engine и storage
+    - proxy-сервисы для devices, oauth, yandex
+    """
+
     @property
-    def metadata(self) -> PluginMetadata:
-        return PluginMetadata(
-            name="admin",
-            version="0.1.0",
-            description="Admin endpoints for runtime inspection",
-            author="Home Console",
-        )
+    def name(self) -> str:
+        """Уникальное имя модуля."""
+        return "admin"
 
-    async def on_load(self) -> None:
-        await super().on_load()
+    def __init__(self, runtime: Any):
+        """Инициализация модуля."""
+        super().__init__(runtime)
+        self._admin_started_at: Optional[float] = None
+        self._registered_services: List[str] = []
+
+    async def register(self) -> None:
+        """
+        Регистрация модуля в CoreRuntime.
         
-        # Record admin plugin load time to compute uptime (read-only, no core changes)
+        Регистрирует все административные сервисы и HTTP endpoints.
+        """
+        # Record admin module start time
         try:
             self._admin_started_at = time.time()
         except Exception:
             self._admin_started_at = None
+
+        # --- Basic admin services ---
         async def list_plugins() -> List[str]:
             return self.runtime.plugin_manager.list_plugins()
 
@@ -48,10 +60,16 @@ class AdminPlugin(BasePlugin):
                 for ep in self.runtime.http.list()
             ]
 
+        async def state_keys() -> List[str]:
+            return await self.runtime.state_engine.keys()
+
+        async def state_get(key: str) -> Optional[Any]:
+            return await self.runtime.state_engine.get(key)
+
         # --- Admin v1 read-only inventory services ---
         async def admin_v1_runtime() -> Dict[str, Any]:
             """Return runtime info: uptime (sec), started_at (ISO), version"""
-            started_at_ts = getattr(self, "_admin_started_at", None)
+            started_at_ts = self._admin_started_at
             if started_at_ts is None:
                 started_at_iso = None
                 uptime = None
@@ -59,8 +77,7 @@ class AdminPlugin(BasePlugin):
                 started_at_iso = datetime.datetime.fromtimestamp(started_at_ts).isoformat()
                 uptime = int(time.time() - started_at_ts)
 
-            # Try to read runtime version if present, else fallback to plugin metadata version
-            version = getattr(self.runtime, "version", None) or self.metadata.version
+            version = getattr(self.runtime, "version", None) or "0.1.0"
             return {"uptime": uptime, "started_at": started_at_iso, "version": version}
 
         async def admin_v1_plugins() -> List[Dict[str, Any]]:
@@ -207,19 +224,6 @@ class AdminPlugin(BasePlugin):
                     out[k] = None
             return out
 
-        async def state_keys() -> List[str]:
-            return await self.runtime.state_engine.keys()
-
-        async def state_get(key: str) -> Optional[Any]:
-            return await self.runtime.state_engine.get(key)
-
-        # Register services
-        await self.runtime.service_registry.register("admin.list_plugins", list_plugins)
-        await self.runtime.service_registry.register("admin.list_services", list_services)
-        await self.runtime.service_registry.register("admin.list_http", list_http)
-        await self.runtime.service_registry.register("admin.state_keys", state_keys)
-        await self.runtime.service_registry.register("admin.state_get", state_get)
-
         # --- Devices proxy services (admin v1) ---
         async def admin_devices_list():
             return await self.runtime.service_registry.call("devices.list")
@@ -234,18 +238,6 @@ class AdminPlugin(BasePlugin):
         async def admin_devices_set_state(id: Optional[str] = None, body: Any = None, **kwargs):
             # Accept path param 'id' and request body as 'body'
             device_id = id or kwargs.get("device_id") or kwargs.get("deviceId")
-
-            # Log incoming payload for debugging
-            try:
-                await self.runtime.service_registry.call(
-                    "logger.log",
-                    level="debug",
-                    message="admin_devices_set_state called",
-                    plugin=self.metadata.name,
-                    context={"id": device_id, "body": body, "kwargs": kwargs},
-                )
-            except Exception:
-                pass
 
             # body содержит полный JSON из POST запроса
             # Expected format: {state: {on: boolean}} или {on: boolean}
@@ -283,54 +275,19 @@ class AdminPlugin(BasePlugin):
                 raise ValueError("state must contain 'on' property (boolean), e.g. {\"state\": {\"on\": true}}")
 
             # Proxy call to devices.set_state
-            try:
-                return await self.runtime.service_registry.call("devices.set_state", device_id, state)
-            except Exception as e:
-                # Log and re-raise to let api_gateway map to HTTP error
-                try:
-                    await self.runtime.service_registry.call(
-                        "logger.log",
-                        level="error",
-                        message=f"admin_devices_set_state proxy error: {e}",
-                        plugin=self.metadata.name,
-                    )
-                except Exception:
-                    pass
-                raise
+            return await self.runtime.service_registry.call("devices.set_state", device_id, state)
 
         async def admin_devices_list_external(provider: Optional[str] = None, **kwargs):
             # provider может прийти из path params {provider}
             if provider is None:
                 provider = kwargs.get("provider")
-            try:
-                return await self.runtime.service_registry.call("devices.list_external", provider)
-            except Exception as e:
-                try:
-                    await self.runtime.service_registry.call(
-                        "logger.log",
-                        level="error",
-                        message=f"admin_devices_list_external error: {e}",
-                        plugin=self.metadata.name,
-                        context={"provider": provider},
-                    )
-                except Exception:
-                    pass
-                raise
-
-        await self.runtime.service_registry.register("admin.devices.list", admin_devices_list)
-        await self.runtime.service_registry.register("admin.devices.get", admin_devices_get)
-        await self.runtime.service_registry.register("admin.devices.set_state", admin_devices_set_state)
-        await self.runtime.service_registry.register("admin.devices.list_external", admin_devices_list_external)
+            return await self.runtime.service_registry.call("devices.list_external", provider)
 
         # --- Devices mapping admin proxies ---
         async def admin_devices_list_mappings() -> Any:
             try:
                 return await self.runtime.service_registry.call("devices.list_mappings")
             except Exception as e:
-                try:
-                    await self.runtime.service_registry.call("logger.log", level="error", message=f"admin_devices_list_mappings error: {e}", plugin=self.metadata.name)
-                except Exception:
-                    pass
                 return {"ok": False, "error": str(e)}
 
         async def admin_devices_create_mapping(body: Any = None) -> Dict[str, Any]:
@@ -346,36 +303,19 @@ class AdminPlugin(BasePlugin):
             try:
                 return await self.runtime.service_registry.call("devices.create_mapping", ext, internal)
             except Exception as e:
-                try:
-                    await self.runtime.service_registry.call("logger.log", level="error", message=f"admin_devices_create_mapping error: {e}", plugin=self.metadata.name)
-                except Exception:
-                    pass
                 return {"ok": False, "error": str(e)}
 
         async def admin_devices_delete_mapping(external_id: str) -> Dict[str, Any]:
             try:
                 return await self.runtime.service_registry.call("devices.delete_mapping", external_id)
             except Exception as e:
-                try:
-                    await self.runtime.service_registry.call("logger.log", level="error", message=f"admin_devices_delete_mapping error: {e}", plugin=self.metadata.name)
-                except Exception:
-                    pass
                 return {"ok": False, "error": str(e)}
 
         async def admin_devices_auto_map(provider: Optional[str] = None) -> Dict[str, Any]:
             try:
                 return await self.runtime.service_registry.call("devices.auto_map_external", provider)
             except Exception as e:
-                try:
-                    await self.runtime.service_registry.call("logger.log", level="error", message=f"admin_devices_auto_map error: {e}", plugin=self.metadata.name)
-                except Exception:
-                    pass
                 return {"ok": False, "error": str(e)}
-
-        await self.runtime.service_registry.register("admin.devices.list_mappings", admin_devices_list_mappings)
-        await self.runtime.service_registry.register("admin.devices.create_mapping", admin_devices_create_mapping)
-        await self.runtime.service_registry.register("admin.devices.delete_mapping", admin_devices_delete_mapping)
-        await self.runtime.service_registry.register("admin.devices.auto_map", admin_devices_auto_map)
 
         # --- OAuth Yandex proxy services (admin v1) ---
         async def _sanitize_oauth(data: Dict[str, Any]) -> Dict[str, Any]:
@@ -403,10 +343,7 @@ class AdminPlugin(BasePlugin):
 
         # --- Admin trigger for Yandex sync ---
         async def admin_yandex_sync() -> Dict[str, Any]:
-            """Trigger Yandex Smart Home sync from admin.
-
-            Calls the yandex.sync service and returns a summary.
-            """
+            """Trigger Yandex Smart Home sync from admin."""
             try:
                 # Before syncing, remove previous external devices from provider 'yandex'
                 try:
@@ -426,7 +363,6 @@ class AdminPlugin(BasePlugin):
                             await self.runtime.storage.delete("devices_external", ext_id)
                         except Exception:
                             pass
-                        # NOTE: Do NOT write to state_engine from plugins. CoreRuntime mirrors storage → state_engine.
 
                 # Prefer the stub plugin if it's loaded (dev-safe)
                 try:
@@ -483,9 +419,6 @@ class AdminPlugin(BasePlugin):
                 except Exception as ee:
                     return {"ok": False, "error": f"sync_failed: {err} / fallback_failed: {ee}"}
 
-        # Register admin yandex sync service
-        await self.runtime.service_registry.register("admin.yandex.sync", admin_yandex_sync)
-
         # --- Admin endpoints to read/set yandex feature flag (use real API) ---
         async def admin_yandex_get_config() -> Dict[str, Any]:
             try:
@@ -521,234 +454,100 @@ class AdminPlugin(BasePlugin):
             except Exception as e:
                 return {"ok": False, "error": str(e)}
 
-        await self.runtime.service_registry.register("admin.yandex.get_config", admin_yandex_get_config)
-        await self.runtime.service_registry.register("admin.yandex.set_use_real", admin_yandex_set_use_real)
+        # Register all services
+        service_registrations = [
+            ("admin.list_plugins", list_plugins),
+            ("admin.list_services", list_services),
+            ("admin.list_http", list_http),
+            ("admin.state_keys", state_keys),
+            ("admin.state_get", state_get),
+            ("admin.v1.runtime", admin_v1_runtime),
+            ("admin.v1.plugins", admin_v1_plugins),
+            ("admin.v1.services", admin_v1_services),
+            ("admin.v1.http", admin_v1_http),
+            ("admin.v1.events", admin_v1_events),
+            ("admin.v1.storage", admin_v1_storage),
+            ("admin.v1.state", admin_v1_state),
+            ("admin.devices.list", admin_devices_list),
+            ("admin.devices.get", admin_devices_get),
+            ("admin.devices.set_state", admin_devices_set_state),
+            ("admin.devices.list_external", admin_devices_list_external),
+            ("admin.devices.list_mappings", admin_devices_list_mappings),
+            ("admin.devices.create_mapping", admin_devices_create_mapping),
+            ("admin.devices.delete_mapping", admin_devices_delete_mapping),
+            ("admin.devices.auto_map", admin_devices_auto_map),
+            ("admin.oauth.yandex.status", oauth_status),
+            ("admin.oauth.yandex.configure", oauth_configure),
+            ("admin.oauth.yandex.authorize", oauth_authorize),
+            ("admin.oauth.yandex.exchange", oauth_exchange_code),
+            ("admin.yandex.sync", admin_yandex_sync),
+            ("admin.yandex.get_config", admin_yandex_get_config),
+            ("admin.yandex.set_use_real", admin_yandex_set_use_real),
+        ]
 
-        # Register admin oauth services
-        await self.runtime.service_registry.register("admin.oauth.yandex.status", oauth_status)
-        await self.runtime.service_registry.register("admin.oauth.yandex.configure", oauth_configure)
-        await self.runtime.service_registry.register("admin.oauth.yandex.authorize", oauth_authorize)
-        await self.runtime.service_registry.register("admin.oauth.yandex.exchange", oauth_exchange_code)
+        for name, func in service_registrations:
+            try:
+                await self.runtime.service_registry.register(name, func)
+                self._registered_services.append(name)
+            except ValueError:
+                # Already registered - skip
+                continue
 
         # Register HTTP endpoints
-        from core.http_registry import HttpEndpoint
+        http_endpoints = [
+            HttpEndpoint(method="GET", path="/admin/plugins", service="admin.list_plugins", description="List loaded plugins"),
+            HttpEndpoint(method="GET", path="/admin/services", service="admin.list_services", description="List registered services"),
+            HttpEndpoint(method="GET", path="/admin/http", service="admin.list_http", description="List HTTP endpoints"),
+            HttpEndpoint(method="GET", path="/admin/state/keys", service="admin.state_keys", description="List state keys"),
+            HttpEndpoint(method="GET", path="/admin/state/{key}", service="admin.state_get", description="Get state value by key"),
+            HttpEndpoint(method="GET", path="/admin/v1/runtime", service="admin.v1.runtime", description="Runtime info: uptime, started_at, version"),
+            HttpEndpoint(method="GET", path="/admin/v1/plugins", service="admin.v1.plugins", description="List plugins with stats"),
+            HttpEndpoint(method="GET", path="/admin/v1/services", service="admin.v1.services", description="List services and owning plugin"),
+            HttpEndpoint(method="GET", path="/admin/v1/http", service="admin.v1.http", description="List HTTP contracts"),
+            HttpEndpoint(method="GET", path="/admin/v1/events", service="admin.v1.events", description="List events and subscribers"),
+            HttpEndpoint(method="GET", path="/admin/v1/storage", service="admin.v1.storage", description="List storage namespaces and key counts"),
+            HttpEndpoint(method="GET", path="/admin/v1/state", service="admin.v1.state", description="Read-only state engine dump"),
+            HttpEndpoint(method="GET", path="/admin/v1/oauth/yandex/status", service="admin.oauth.yandex.status", description="Get OAuth Yandex connection status (no secrets returned)"),
+            HttpEndpoint(method="POST", path="/admin/v1/oauth/yandex/configure", service="admin.oauth.yandex.configure", description="Configure OAuth Yandex client (do not return secrets)"),
+            HttpEndpoint(method="POST", path="/admin/v1/oauth/yandex/authorize", service="admin.oauth.yandex.authorize", description="Get authorize URL for Yandex OAuth (open in UI)"),
+            HttpEndpoint(method="POST", path="/admin/v1/oauth/yandex/exchange-code", service="admin.oauth.yandex.exchange", description="Exchange authorization code for tokens (admin will not return secrets)"),
+            HttpEndpoint(method="POST", path="/admin/v1/yandex/sync", service="admin.yandex.sync", description="Trigger Yandex Smart Home devices sync"),
+            HttpEndpoint(method="GET", path="/admin/v1/yandex/config", service="admin.yandex.get_config", description="Get Yandex admin config (use_real_api)"),
+            HttpEndpoint(method="POST", path="/admin/v1/yandex/config/use-real", service="admin.yandex.set_use_real", description="Set Yandex admin config flag use_real_api (body: true/false)"),
+            HttpEndpoint(method="GET", path="/admin/v1/devices", service="admin.devices.list", description="List internal devices"),
+            HttpEndpoint(method="GET", path="/admin/v1/devices/mappings", service="admin.devices.list_mappings", description="List external->internal device mappings"),
+            HttpEndpoint(method="POST", path="/admin/v1/devices/mappings", service="admin.devices.create_mapping", description="Create mapping: body {external_id, internal_id}"),
+            HttpEndpoint(method="DELETE", path="/admin/v1/devices/mappings/{external_id}", service="admin.devices.delete_mapping", description="Delete mapping by external_id"),
+            HttpEndpoint(method="POST", path="/admin/v1/devices/mappings/auto-map/{provider}", service="admin.devices.auto_map", description="Auto-map external devices for provider to internal devices"),
+            HttpEndpoint(method="GET", path="/admin/v1/devices/{id}", service="admin.devices.get", description="Get internal device by id"),
+            HttpEndpoint(method="POST", path="/admin/v1/devices/{id}/state", service="admin.devices.set_state", description="Set state for internal device"),
+            HttpEndpoint(method="GET", path="/admin/v1/devices/external/{provider}", service="admin.devices.list_external", description="List external devices for provider"),
+        ]
 
-        try:
-            self.runtime.http.register(HttpEndpoint(
-                method="GET",
-                path="/admin/plugins",
-                service="admin.list_plugins",
-                description="List loaded plugins"
-            ))
-            self.runtime.http.register(HttpEndpoint(
-                method="GET",
-                path="/admin/services",
-                service="admin.list_services",
-                description="List registered services"
-            ))
-            self.runtime.http.register(HttpEndpoint(
-                method="GET",
-                path="/admin/http",
-                service="admin.list_http",
-                description="List HTTP endpoints"
-            ))
-            self.runtime.http.register(HttpEndpoint(
-                method="GET",
-                path="/admin/state/keys",
-                service="admin.state_keys",
-                description="List state keys"
-            ))
-            self.runtime.http.register(HttpEndpoint(
-                method="GET",
-                path="/admin/state/{key}",
-                service="admin.state_get",
-                description="Get state value by key"
-            ))
-            # OAuth Yandex admin v1 endpoints (proxy only)
-            self.runtime.http.register(HttpEndpoint(
-                method="GET",
-                path="/admin/v1/oauth/yandex/status",
-                service="admin.oauth.yandex.status",
-                description="Get OAuth Yandex connection status (no secrets returned)"
-            ))
-            self.runtime.http.register(HttpEndpoint(
-                method="POST",
-                path="/admin/v1/oauth/yandex/configure",
-                service="admin.oauth.yandex.configure",
-                description="Configure OAuth Yandex client (do not return secrets)"
-            ))
-            self.runtime.http.register(HttpEndpoint(
-                method="POST",
-                path="/admin/v1/oauth/yandex/authorize",
-                service="admin.oauth.yandex.authorize",
-                description="Get authorize URL for Yandex OAuth (open in UI)"
-            ))
-            self.runtime.http.register(HttpEndpoint(
-                method="POST",
-                path="/admin/v1/oauth/yandex/exchange-code",
-                service="admin.oauth.yandex.exchange",
-                description="Exchange authorization code for tokens (admin_plugin will not return secrets)"
-            ))
-            # Admin trigger for Yandex devices sync (dev-only)
-            self.runtime.http.register(HttpEndpoint(
-                method="POST",
-                path="/admin/v1/yandex/sync",
-                service="admin.yandex.sync",
-                description="Trigger Yandex Smart Home devices sync"
-            ))
-            # Yandex config endpoints: read / set use_real_api flag
-            self.runtime.http.register(HttpEndpoint(
-                method="GET",
-                path="/admin/v1/yandex/config",
-                service="admin.yandex.get_config",
-                description="Get Yandex admin config (use_real_api)"
-            ))
-            self.runtime.http.register(HttpEndpoint(
-                method="POST",
-                path="/admin/v1/yandex/config/use-real",
-                service="admin.yandex.set_use_real",
-                description="Set Yandex admin config flag use_real_api (body: true/false)"
-            ))
-            # Devices admin v1 endpoints (proxy to devices plugin)
-            self.runtime.http.register(HttpEndpoint(
-                method="GET",
-                path="/admin/v1/devices",
-                service="admin.devices.list",
-                description="List internal devices"
-            ))
-            # Admin endpoints for mappings (register before device id route to avoid collision)
-            self.runtime.http.register(HttpEndpoint(
-                method="GET",
-                path="/admin/v1/devices/mappings",
-                service="admin.devices.list_mappings",
-                description="List external->internal device mappings"
-            ))
-            self.runtime.http.register(HttpEndpoint(
-                method="POST",
-                path="/admin/v1/devices/mappings",
-                service="admin.devices.create_mapping",
-                description="Create mapping: body {external_id, internal_id}"
-            ))
-            self.runtime.http.register(HttpEndpoint(
-                method="DELETE",
-                path="/admin/v1/devices/mappings/{external_id}",
-                service="admin.devices.delete_mapping",
-                description="Delete mapping by external_id"
-            ))
-            self.runtime.http.register(HttpEndpoint(
-                method="POST",
-                path="/admin/v1/devices/mappings/auto-map/{provider}",
-                service="admin.devices.auto_map",
-                description="Auto-map external devices for provider to internal devices"
-            ))
-            self.runtime.http.register(HttpEndpoint(
-                method="GET",
-                path="/admin/v1/devices/{id}",
-                service="admin.devices.get",
-                description="Get internal device by id"
-            ))
-            self.runtime.http.register(HttpEndpoint(
-                method="POST",
-                path="/admin/v1/devices/{id}/state",
-                service="admin.devices.set_state",
-                description="Set state for internal device"
-            ))
-            self.runtime.http.register(HttpEndpoint(
-                method="GET",
-                path="/admin/v1/devices/external/{provider}",
-                service="admin.devices.list_external",
-                description="List external devices for provider"
-            ))
-            # --- Register new admin.v1 inventory services and endpoints ---
+        for ep in http_endpoints:
             try:
-                # Services
-                await self.runtime.service_registry.register("admin.v1.runtime", admin_v1_runtime)
-                await self.runtime.service_registry.register("admin.v1.plugins", admin_v1_plugins)
-                await self.runtime.service_registry.register("admin.v1.services", admin_v1_services)
-                await self.runtime.service_registry.register("admin.v1.http", admin_v1_http)
-                await self.runtime.service_registry.register("admin.v1.events", admin_v1_events)
-                await self.runtime.service_registry.register("admin.v1.storage", admin_v1_storage)
-                await self.runtime.service_registry.register("admin.v1.state", admin_v1_state)
+                self.runtime.http.register(ep)
+            except Exception:
+                # Best-effort: не блокируем загрузку
+                pass
 
-                # HTTP endpoints (read-only inventory)
-                self.runtime.http.register(HttpEndpoint(method="GET", path="/admin/v1/runtime", service="admin.v1.runtime", description="Runtime info: uptime, started_at, version"))
-                self.runtime.http.register(HttpEndpoint(method="GET", path="/admin/v1/plugins", service="admin.v1.plugins", description="List plugins with stats"))
-                self.runtime.http.register(HttpEndpoint(method="GET", path="/admin/v1/services", service="admin.v1.services", description="List services and owning plugin"))
-                self.runtime.http.register(HttpEndpoint(method="GET", path="/admin/v1/http", service="admin.v1.http", description="List HTTP contracts"))
-                self.runtime.http.register(HttpEndpoint(method="GET", path="/admin/v1/events", service="admin.v1.events", description="List events and subscribers"))
-                self.runtime.http.register(HttpEndpoint(method="GET", path="/admin/v1/storage", service="admin.v1.storage", description="List storage namespaces and key counts"))
-                self.runtime.http.register(HttpEndpoint(method="GET", path="/admin/v1/state", service="admin.v1.state", description="Read-only state engine dump"))
-            except Exception:
-                # best-effort: do not break runtime startup
-                pass
-        except Exception:
-            # Не критично — не блокируем загрузку
-            pass
+    async def start(self) -> None:
+        """
+        Запуск модуля.
+        
+        В текущей реализации admin не требует инициализации при старте.
+        """
+        pass
 
-    async def on_unload(self) -> None:
-        await super().on_unload()
-        try:
-            await self.runtime.service_registry.unregister("admin.list_plugins")
-            await self.runtime.service_registry.unregister("admin.list_services")
-            await self.runtime.service_registry.unregister("admin.list_http")
-            await self.runtime.service_registry.unregister("admin.state_keys")
-            await self.runtime.service_registry.unregister("admin.state_get")
-            # Unregister admin.v1 inventory services
+    async def stop(self) -> None:
+        """
+        Остановка модуля.
+        
+        Отменяет регистрацию всех сервисов.
+        """
+        for service_name in self._registered_services:
             try:
-                await self.runtime.service_registry.unregister("admin.v1.runtime")
-                await self.runtime.service_registry.unregister("admin.v1.plugins")
-                await self.runtime.service_registry.unregister("admin.v1.services")
-                await self.runtime.service_registry.unregister("admin.v1.http")
-                await self.runtime.service_registry.unregister("admin.v1.events")
-                await self.runtime.service_registry.unregister("admin.v1.storage")
-                await self.runtime.service_registry.unregister("admin.v1.state")
+                await self.runtime.service_registry.unregister(service_name)
             except Exception:
                 pass
-            # Unregister devices admin proxies
-            try:
-                await self.runtime.service_registry.unregister("admin.devices.list")
-                await self.runtime.service_registry.unregister("admin.devices.get")
-                await self.runtime.service_registry.unregister("admin.devices.set_state")
-                await self.runtime.service_registry.unregister("admin.devices.list_external")
-                # Unregister mappings proxies
-                try:
-                    await self.runtime.service_registry.unregister("admin.devices.list_mappings")
-                except Exception:
-                    pass
-                try:
-                    await self.runtime.service_registry.unregister("admin.devices.create_mapping")
-                except Exception:
-                    pass
-                try:
-                    await self.runtime.service_registry.unregister("admin.devices.delete_mapping")
-                except Exception:
-                    pass
-                try:
-                    await self.runtime.service_registry.unregister("admin.devices.auto_map")
-                except Exception:
-                    pass
-            except Exception:
-                pass
-            # Unregister oauth admin services
-            try:
-                await self.runtime.service_registry.unregister("admin.oauth.yandex.status")
-                await self.runtime.service_registry.unregister("admin.oauth.yandex.configure")
-                await self.runtime.service_registry.unregister("admin.oauth.yandex.authorize")
-                await self.runtime.service_registry.unregister("admin.oauth.yandex.exchange")
-                # unregister admin yandex sync
-                try:
-                    await self.runtime.service_registry.unregister("admin.yandex.sync")
-                    try:
-                        await self.runtime.service_registry.unregister("admin.yandex.get_config")
-                    except Exception:
-                        pass
-                    try:
-                        await self.runtime.service_registry.unregister("admin.yandex.set_use_real")
-                    except Exception:
-                        pass
-                except Exception:
-                    pass
-            except Exception:
-                pass
-        except Exception:
-            pass
+        self._registered_services.clear()

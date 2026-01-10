@@ -46,7 +46,7 @@ Runtime запустится и будет ждать остановки (Ctrl+C
 Создайте `plugins/my_plugin.py`:
 
 ```python
-from plugins.base_plugin import BasePlugin, PluginMetadata
+from core.base_plugin import BasePlugin, PluginMetadata
 
 class MyPlugin(BasePlugin):
     @property
@@ -181,14 +181,15 @@ core-runtime-service/
 ├── adapters/            # Адаптеры (Storage)
 └── plugins/             # Плагины
     ├── base_plugin.py   # Базовый класс
-    └── example_plugin.py # Пример
+    └── test/            # Тестовые плагины
+        └── example_plugin.py # Пример
 ```
 
 ## Дальнейшие шаги
 
 1. Изучите [00-README.md](00-README.md) для понимания концепций
 2. Изучите [01-ARCHITECTURE.md](01-ARCHITECTURE.md) для деталей архитектуры
-3. Посмотрите `plugins/example_plugin.py` для примера плагина
+3. Посмотрите `plugins/test/example_plugin.py` для примера плагина
 4. Создайте свой плагин для вашего домена
 
 ## Помощь

@@ -10,18 +10,10 @@ from pathlib import Path
 from core.config import Config
 from core.runtime import CoreRuntime
 from adapters.sqlite_adapter import SQLiteAdapter
-from plugins.example_plugin import ExamplePlugin
-from modules.devices import register_devices
-from plugins.system_logger_plugin import SystemLoggerPlugin
-from plugins.automation_stub_plugin import AutomationStubPlugin
-try:
-    from plugins.api_gateway_plugin import ApiGatewayPlugin
-    _HAS_API_GATEWAY = True
-except Exception:
-    # Если в окружении отсутствуют зависимости fastapi/uvicorn,
-    # позволяем демо работать без запуска api_gateway.
-    ApiGatewayPlugin = None  # type: ignore
-    _HAS_API_GATEWAY = False
+from plugins.test import ExamplePlugin
+from modules import DevicesModule
+from plugins.test import SystemLoggerPlugin, AutomationStubPlugin
+# API module is loaded automatically via ModuleManager
 
 
 async def demo():
@@ -51,7 +43,8 @@ async def demo():
     print(f"✓ Плагин '{logger.metadata.name}' загружен")
     
     # Devices — доменный модуль
-    register_devices(runtime)
+    devices_module = DevicesModule(runtime)
+    await runtime.module_manager.register(devices_module)
     print("✓ devices module зарегистрирован")
     
     # Automation stub — демонстрация event-driven архитектуры
@@ -67,12 +60,8 @@ async def demo():
     except Exception:
         print("! Не удалось загрузить 'example' плагин")
 
-    if _HAS_API_GATEWAY and ApiGatewayPlugin is not None:
-        api = ApiGatewayPlugin(runtime)
-        await runtime.plugin_manager.load_plugin(api)
-        print(f"✓ Плагин '{api.metadata.name}' загружен")
-    else:
-        print("! Плагин 'api_gateway' пропущен (fastapi/uvicorn не установлены)")
+    # API module is loaded automatically via ModuleManager
+    print("✓ API module загружен автоматически (через ModuleManager)")
     
     # 3. Запуск Runtime
     print("\n[3] Запуск Runtime...")

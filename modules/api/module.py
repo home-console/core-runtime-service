@@ -1,59 +1,62 @@
 """
-Плагин `api_gateway` — адаптер, автоматически проксирующий HTTP на runtime-сервисы.
+ApiModule — встроенный модуль HTTP API Gateway.
 
-Особенности:
-- НЕ содержит бизнес-логики
-- НЕ хранит список роутов — строит их на основе `runtime.http.list()`
-- Использует один универсальный handler, который собирает параметры
-  и вызывает `runtime.service_registry.call`
-
-Примечание: этот плагин зависит от `fastapi` и `uvicorn` и должен запускаться
-в соответствующем окружении. Плагин сам по себе не выполняет I/O при регистрации.
+Автоматически проксирует HTTP-запросы на runtime-сервисы на основе HttpRegistry.
 """
 
 from typing import Any, Dict
 import threading
 import asyncio
+import re
+import inspect
 
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, Path
 import uvicorn
 
-from plugins.base_plugin import BasePlugin, PluginMetadata
+from core.runtime_module import RuntimeModule
 
 
-class ApiGatewayPlugin(BasePlugin):
-    """FastAPI-адаптер, проксирующий HTTP-запросы в runtime-сервисы."""
+class ApiModule(RuntimeModule):
+    """
+    Модуль HTTP API Gateway.
+    
+    Автоматически создаёт HTTP endpoints на основе зарегистрированных
+    контрактов в runtime.http и проксирует запросы в runtime-сервисы.
+    """
+
+    @property
+    def name(self) -> str:
+        """Уникальное имя модуля."""
+        return "api"
 
     def __init__(self, runtime: Any):
+        """Инициализация модуля."""
         super().__init__(runtime)
         self.app: FastAPI | None = None
         self._server: uvicorn.Server | None = None
         self._thread: threading.Thread | None = None
 
-    @property
-    def metadata(self) -> PluginMetadata:
-        return PluginMetadata(
-            name="api_gateway",
-            version="0.1.0",
-            description="Автоматический HTTP-прокси на основе runtime.http",
-            author="Home Console",
-        )
+    async def register(self) -> None:
+        """
+        Регистрация модуля в CoreRuntime.
+        
+        Создаёт FastAPI приложение. Маршруты регистрируются при старте,
+        чтобы все модули и плагины успели внести свои контракты в runtime.http.
+        """
+        self.app = FastAPI(title="Home Console API", version="0.1.0")
 
-    async def on_load(self) -> None:
-        await super().on_load()
-        # Создаём FastAPI приложение. Маршруты регистрируем при старте,
-        # чтобы все плагины успели внести свои контракты в runtime.http
-        self.app = FastAPI()
-
-    async def on_start(self) -> None:
-        await super().on_start()
+    async def start(self) -> None:
+        """
+        Запуск модуля.
+        
+        Регистрирует HTTP маршруты на основе текущего состояния HttpRegistry
+        и запускает HTTP сервер.
+        """
         if self.app is None:
             return
-        # Делаем короткую паузу, чтобы плагины успели зарегистрировать свои
+        
+        # Делаем короткую паузу, чтобы модули и плагины успели зарегистрировать свои
         # HTTP-контракты в `runtime.http` до того, как мы снимем с него список.
-        # Без этой паузы api_gateway иногда стартовал раньше других плагинов
-        # и не видел зарегистрированных эндпоинтов, в результате OpenAPI
-        # возвращал 404 на незарегистрированные пути.
         try:
             await asyncio.sleep(0.2)
         except Exception:
@@ -94,19 +97,9 @@ class ApiGatewayPlugin(BasePlugin):
 
                     return result
 
-                # Построим корректную сигнатуру для FastAPI/OpenAPI.
-                # Извлечём имена path-параметров из шаблона пути {param}
-                import re
-                from fastapi import Path
-                import inspect
-
-                pattern = r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}"
-                names = re.findall(pattern, endpoint.path)
-
                 # Сигнатура нужна ТОЛЬКО для документирования в OpenAPI.
                 # handler на самом деле не принимает path-параметры напрямую,
                 # они идут через request.path_params.
-                # Поэтому __signature__ должна содержать только "request".
                 params_sig = [
                     inspect.Parameter(
                         "request",
@@ -129,15 +122,12 @@ class ApiGatewayPlugin(BasePlugin):
         self._server = server
 
         def run_server():
-            # Запуск сервера в отдельном потоке — используем локальную переменную
-            # чтобы статический анализатор не видел возможного None у `self._server`.
+            # Запуск сервера в отдельном потоке
             try:
                 server.run()
             except SystemExit:
                 # uvicorn вызывает SystemExit(1) при ошибке привязки порта;
-                # подавляем исключение в потоке и логируем, чтобы pytest
-                # не регистрировал unhandled thread exception warning.
-                # В потоке используем новый event loop для async вызова
+                # подавляем исключение в потоке и логируем
                 try:
                     loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(loop)
@@ -146,7 +136,7 @@ class ApiGatewayPlugin(BasePlugin):
                             "logger.log",
                             level="warning",
                             message="uvicorn exited during startup (port may be in use)",
-                            plugin="api_gateway"
+                            module="api"
                         )
                     )
                     loop.close()
@@ -163,7 +153,7 @@ class ApiGatewayPlugin(BasePlugin):
                             "logger.log",
                             level="error",
                             message=f"server run error: {e}",
-                            plugin="api_gateway"
+                            module="api"
                         )
                     )
                     loop.close()
@@ -174,18 +164,15 @@ class ApiGatewayPlugin(BasePlugin):
         self._thread = threading.Thread(target=run_server, daemon=True)
         self._thread.start()
 
-    async def on_stop(self) -> None:
-        await super().on_stop()
+    async def stop(self) -> None:
+        """
+        Остановка модуля.
+        
+        Останавливает HTTP сервер.
+        """
         # Останавливаем сервер, не блокируя event loop
         if self._server is not None:
             self._server.should_exit = True
         if self._thread is not None:
             # join в отдельном потоке, чтобы не блокировать async loop
             await asyncio.to_thread(self._thread.join, timeout=1)
-
-    async def on_unload(self) -> None:
-        await super().on_unload()
-        # Очистить ссылки
-        self.app = None
-        self._server = None
-        self._thread = None
