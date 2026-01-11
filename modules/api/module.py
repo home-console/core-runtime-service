@@ -2,6 +2,12 @@
 ApiModule — встроенный модуль HTTP API Gateway.
 
 Автоматически проксирует HTTP-запросы на runtime-сервисы на основе HttpRegistry.
+
+API Key Authentication:
+- Проверка авторизации выполняется на boundary-layer (HTTP)
+- RequestContext передаётся через request.state
+- Проверка scopes перед вызовом service_registry.call()
+- CoreRuntime и доменные модули НЕ знают про auth
 """
 
 from typing import Any, Dict
@@ -14,6 +20,11 @@ from fastapi import FastAPI, Request, HTTPException, Path
 import uvicorn
 
 from core.runtime_module import RuntimeModule
+from modules.api.auth import (
+    require_auth_middleware,
+    get_request_context,
+    check_service_scope,
+)
 
 
 class ApiModule(RuntimeModule):
@@ -44,6 +55,12 @@ class ApiModule(RuntimeModule):
         чтобы все модули и плагины успели внести свои контракты в runtime.http.
         """
         self.app = FastAPI(title="Home Console API", version="0.1.0")
+        
+        # Сохраняем runtime в app.state для доступа из middleware
+        self.app.state.runtime = self.runtime
+        
+        # Добавляем auth middleware (boundary-layer)
+        self.app.middleware("http")(require_auth_middleware)
 
     async def start(self) -> None:
         """
@@ -68,6 +85,16 @@ class ApiModule(RuntimeModule):
         for ep in endpoints:
             def make_handler(endpoint):
                 async def handler(request: Request):
+                    # Получаем RequestContext из middleware (boundary-layer)
+                    context = await get_request_context(request)
+                    
+                    # Проверяем права на вызов сервиса (boundary-layer проверка)
+                    if not check_service_scope(context, endpoint.service):
+                        raise HTTPException(
+                            status_code=401 if context is None else 403,
+                            detail="Unauthorized" if context is None else "Forbidden: insufficient permissions"
+                        )
+                    
                     params: Dict[str, Any] = {}
                     # path params доступны через request.path_params
                     params.update(request.path_params)
@@ -88,6 +115,7 @@ class ApiModule(RuntimeModule):
                         raise HTTPException(status_code=404, detail="service not found")
 
                     try:
+                        # Вызов сервиса - CoreRuntime и доменные модули НЕ знают про auth
                         result = await self.runtime.service_registry.call(endpoint.service, **params)
                     except Exception as e:
                         # Map ValueError from services to HTTP 400 (bad request)
