@@ -21,8 +21,10 @@ from core.storage_mirror import StorageWithStateMirror
 from core.plugin_manager import PluginManager
 from core.module_manager import ModuleManager
 from core.http_registry import HttpRegistry
+from core.integration_registry import IntegrationRegistry
 from core.logger_helper import info, warning
 from core.base_plugin import BasePlugin
+
 
 
 class CoreRuntime:
@@ -54,6 +56,8 @@ class CoreRuntime:
         self.module_manager = ModuleManager(self)
         # Регистр HTTP-интерфейсов (каталог контрактов)
         self.http = HttpRegistry()
+        # Реестр интеграций (минимальный каталог для admin API)
+        self.integrations = IntegrationRegistry()
 
         self._running = False
 

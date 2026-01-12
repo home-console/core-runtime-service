@@ -23,8 +23,8 @@ from core.runtime_module import RuntimeModule
 from modules.api.auth import (
     require_auth_middleware,
     get_request_context,
-    check_service_scope,
 )
+from modules.api.authz import require as authz_require, AuthorizationError
 
 
 class ApiModule(RuntimeModule):
@@ -88,8 +88,11 @@ class ApiModule(RuntimeModule):
                     # Получаем RequestContext из middleware (boundary-layer)
                     context = await get_request_context(request)
                     
-                    # Проверяем права на вызов сервиса (boundary-layer проверка)
-                    if not check_service_scope(context, endpoint.service):
+                    # Authorization Policy Layer - единая точка проверок
+                    try:
+                        # Используем service_name как action (например, "devices.list")
+                        authz_require(context, endpoint.service)
+                    except AuthorizationError:
                         raise HTTPException(
                             status_code=401 if context is None else 403,
                             detail="Unauthorized" if context is None else "Forbidden: insufficient permissions"

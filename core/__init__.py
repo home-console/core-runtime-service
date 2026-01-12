@@ -14,6 +14,10 @@ from .service_registry import ServiceRegistry
 from .storage_factory import create_storage_adapter
 from .state_engine import StateEngine
 from .storage import Storage
+from .storage_mirror import StorageWithStateMirror
+from .integration_registry import IntegrationRegistry
+from .logger_helper import info, warning, error
+from .base_plugin import BasePlugin
 
 __all__ = [
     "Config",
@@ -22,6 +26,11 @@ __all__ = [
     "ServiceRegistry",
     "StateEngine",
     "Storage",
+    "StorageWithStateMirror",
+    "IntegrationRegistry",
+    "info",
+    "warning",
+    "error",
     "PluginManager",
     "HttpRegistry",
     "ModuleManager",

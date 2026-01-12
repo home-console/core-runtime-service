@@ -19,6 +19,7 @@ from enum import Enum
 
 from core.base_plugin import BasePlugin, PluginMetadata
 from core.logger_helper import warning, info
+from core.integration_registry import IntegrationRegistry, IntegrationFlag
 from dataclasses import replace
 
 if TYPE_CHECKING:
@@ -177,6 +178,10 @@ class PluginManager:
             await plugin.on_unload()
             del self._plugins[plugin_name]
             self._states[plugin_name] = PluginState.UNLOADED
+            
+            # Удаляем интеграцию из реестра (если была зарегистрирована)
+            if self._runtime is not None:
+                self._runtime.integrations.unregister(plugin_name)
         except Exception as e:
             self._states[plugin_name] = PluginState.ERROR
             raise RuntimeError(f"Ошибка выгрузки плагина '{plugin_name}': {e}")
@@ -349,6 +354,10 @@ class PluginManager:
                     setattr(type(plugin_instance), 'metadata', property(get_updated_metadata))
                 
                 await self.load_plugin(plugin_instance)
+                
+                # Автоопределение интеграций (если runtime доступен)
+                if self._runtime is not None:
+                    self._detect_and_register_integration(plugin_instance, manifest)
                 
                 # Логируем успешную загрузку из манифеста
                 try:
@@ -529,3 +538,98 @@ class PluginManager:
             # Загружаем плагин из манифеста
             # Логирование происходит внутри _load_plugin_from_manifest
             await self._load_plugin_from_manifest(manifest, plugin_dir, actual_logger_func)
+    
+    def _detect_and_register_integration(
+        self,
+        plugin_instance: BasePlugin,
+        manifest: Dict[str, Any]
+    ) -> None:
+        """
+        Определить, является ли плагин интеграцией, и зарегистрировать в IntegrationRegistry.
+        
+        Критерии определения интеграции:
+        1. Явная пометка в manifest: "is_integration": true
+        2. Автоматически: плагин публикует события "external.*" (проверяется по коду)
+        3. По паттернам: имя/описание содержат ключевые слова
+        
+        Args:
+            plugin_instance: экземпляр загруженного плагина
+            manifest: данные манифеста плагина
+        """
+        if self._runtime is None:
+            return
+        
+        plugin_name = manifest.get("name", "unknown")
+        plugin_description = manifest.get("description", "")
+        metadata = plugin_instance.metadata
+        
+        # Критерий 1: Явная пометка в manifest
+        is_integration_explicit = manifest.get("is_integration", False)
+        
+        # Критерий 2: Автоматическое определение по паттернам
+        # Проверяем имя и описание на ключевые слова интеграций
+        integration_keywords = [
+            "integration", "oauth", "yandex", "alexa", "google", "homekit",
+            "webhook", "api", "external", "vendor", "sdk", "smart home"
+        ]
+        name_lower = plugin_name.lower()
+        desc_lower = (plugin_description + " " + metadata.description).lower()
+        is_integration_by_pattern = any(
+            keyword in name_lower or keyword in desc_lower
+            for keyword in integration_keywords
+        )
+        
+        # Критерий 3: Проверка кода на наличие "external.*" событий
+        # Это упрощённая проверка - ищем строки "external." в исходном коде
+        is_integration_by_code = False
+        try:
+            import inspect
+            source = inspect.getsource(plugin_instance.__class__)
+            if "external." in source or '"external.' in source or "'external." in source:
+                is_integration_by_code = True
+        except Exception:
+            # Если не удалось получить исходный код, пропускаем эту проверку
+            pass
+        
+        # Определяем, является ли плагин интеграцией
+        is_integration = is_integration_explicit or is_integration_by_pattern or is_integration_by_code
+        
+        if not is_integration:
+            return
+        
+        # Определяем флаги интеграции
+        flags = set()
+        
+        # REQUIRES_OAUTH: если имя содержит "oauth" или есть зависимость на oauth плагин
+        if "oauth" in name_lower or "oauth" in desc_lower:
+            flags.add(IntegrationFlag.REQUIRES_OAUTH)
+        
+        # Проверяем зависимости на oauth плагины
+        dependencies = manifest.get("dependencies", [])
+        if any("oauth" in dep.lower() for dep in dependencies):
+            flags.add(IntegrationFlag.REQUIRES_OAUTH)
+        
+        # REQUIRES_CONFIG: если в описании упоминается конфигурация
+        if "config" in desc_lower or "configure" in desc_lower or "settings" in desc_lower:
+            flags.add(IntegrationFlag.REQUIRES_CONFIG)
+        
+        # BETA/EXPERIMENTAL: если явно указано в manifest
+        if manifest.get("beta", False):
+            flags.add(IntegrationFlag.BETA)
+        if manifest.get("experimental", False):
+            flags.add(IntegrationFlag.EXPERIMENTAL)
+        
+        # Регистрируем интеграцию
+        integration_name = manifest.get("integration_name") or plugin_name.replace("_", " ").title()
+        
+        try:
+            self._runtime.integrations.register(
+                integration_id=plugin_name,
+                name=integration_name,
+                plugin_name=plugin_name,
+                flags=flags,
+                description=plugin_description or metadata.description
+            )
+        except Exception:
+            # Игнорируем ошибки регистрации интеграций (не критично)
+            pass

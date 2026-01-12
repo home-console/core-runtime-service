@@ -454,6 +454,32 @@ class AdminModule(RuntimeModule):
             except Exception as e:
                 return {"ok": False, "error": str(e)}
 
+        # --- Integrations admin service ---
+        async def admin_v1_integrations() -> List[Dict[str, Any]]:
+            """Return list of registered integrations."""
+            integrations = self.runtime.integrations.list()
+            result = []
+            for integration in integrations:
+                # Get plugin state
+                plugin_state = self.runtime.plugin_manager.get_plugin_state(integration.plugin_name)
+                state_val = None
+                try:
+                    state_val = getattr(plugin_state, "value", str(plugin_state)) if plugin_state else None
+                except Exception:
+                    state_val = str(plugin_state) if plugin_state else None
+                
+                result.append({
+                    "id": integration.id,
+                    "name": integration.name,
+                    "plugin_name": integration.plugin_name,
+                    "description": integration.description,
+                    "flags": [flag.value for flag in integration.flags],
+                    "plugin_state": state_val,
+                    "plugin_loaded": state_val in ("loaded", "started") if state_val else False,
+                    "plugin_started": state_val == "started" if state_val else False,
+                })
+            return result
+
         # Register all services
         service_registrations = [
             ("admin.list_plugins", list_plugins),
@@ -483,6 +509,7 @@ class AdminModule(RuntimeModule):
             ("admin.yandex.sync", admin_yandex_sync),
             ("admin.yandex.get_config", admin_yandex_get_config),
             ("admin.yandex.set_use_real", admin_yandex_set_use_real),
+            ("admin.v1.integrations", admin_v1_integrations),
         ]
 
         for name, func in service_registrations:
@@ -522,6 +549,7 @@ class AdminModule(RuntimeModule):
             HttpEndpoint(method="GET", path="/admin/v1/devices/{id}", service="admin.devices.get", description="Get internal device by id"),
             HttpEndpoint(method="POST", path="/admin/v1/devices/{id}/state", service="admin.devices.set_state", description="Set state for internal device"),
             HttpEndpoint(method="GET", path="/admin/v1/devices/external/{provider}", service="admin.devices.list_external", description="List external devices for provider"),
+            HttpEndpoint(method="GET", path="/admin/v1/integrations", service="admin.v1.integrations", description="List registered integrations"),
         ]
 
         for ep in http_endpoints:
