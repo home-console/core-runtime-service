@@ -16,7 +16,9 @@ import asyncio
 import re
 import inspect
 
-from fastapi import FastAPI, Request, HTTPException, Path
+from fastapi import FastAPI, Request, HTTPException, Path, Body, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.openapi.utils import get_openapi
 import uvicorn
 
 from core.runtime_module import RuntimeModule
@@ -54,7 +56,11 @@ class ApiModule(RuntimeModule):
         Создаёт FastAPI приложение. Маршруты регистрируются при старте,
         чтобы все модули и плагины успели внести свои контракты в runtime.http.
         """
-        self.app = FastAPI(title="Home Console API", version="0.1.0")
+        self.app = FastAPI(
+            title="Home Console API",
+            version="0.1.0",
+            openapi_url="/openapi.json"
+        )
         
         # Сохраняем runtime в app.state для доступа из middleware
         self.app.state.runtime = self.runtime
@@ -84,14 +90,64 @@ class ApiModule(RuntimeModule):
 
         for ep in endpoints:
             def make_handler(endpoint):
-                async def handler(request: Request):
+                async def handler(
+                    request: Request,
+                    body: Dict[str, Any] | None = Body(None) if ep.method in ["POST", "PUT", "PATCH"] else None
+                ):
                     # Получаем RequestContext из middleware (boundary-layer)
                     context = await get_request_context(request)
+                    
+                    # Подготавливаем resource для Resource-Based Authorization
+                    resource = None
+                    
+                    # Специальный случай: разрешаем создание первого API key без авторизации
+                    if endpoint.service == "admin.auth.create_api_key" and context is None:
+                        # Проверяем, есть ли уже API keys
+                        try:
+                            keys = await self.runtime.storage.list_keys("auth_api_keys")
+                            if len(keys) == 0:
+                                # Нет ключей - разрешаем создание первого
+                                resource = {"allow_first_key": True}
+                        except Exception:
+                            pass
+                    
+                    # Resource-Based Authorization: подготавливаем resource для проверки ACL
+                    # Для devices.get и devices.set_state - получаем device и проверяем ownership/shared
+                    if endpoint.service in ["devices.get", "devices.set_state"]:
+                        device_id = request.path_params.get("id") or request.path_params.get("device_id")
+                        if device_id:
+                            try:
+                                device = await self.runtime.service_registry.call("devices.get", device_id)
+                                if isinstance(device, dict):
+                                    resource = {}
+                                    if "owner_id" in device:
+                                        resource["owner_id"] = device["owner_id"]
+                                    if "shared_with" in device:
+                                        resource["shared_with"] = device["shared_with"]
+                            except Exception:
+                                # Если device не найден, resource останется None
+                                # Проверка прав произойдёт позже при вызове сервиса
+                                pass
+                    
+                    # Для auth операций - передаём user_id из body или path
+                    if endpoint.service in ["admin.auth.change_password", "admin.auth.set_password", 
+                                           "admin.auth.revoke_all_sessions", "admin.auth.list_sessions"]:
+                        # Получаем body, если ещё не получен
+                        if body is None and endpoint.method in ["POST", "PUT", "PATCH"]:
+                            try:
+                                body = await request.json()
+                            except Exception:
+                                body = None
+                        
+                        if isinstance(body, dict):
+                            user_id = body.get("user_id")
+                            if user_id:
+                                resource = {"user_id": user_id}
                     
                     # Authorization Policy Layer - единая точка проверок
                     try:
                         # Используем service_name как action (например, "devices.list")
-                        authz_require(context, endpoint.service)
+                        authz_require(context, endpoint.service, resource)
                     except AuthorizationError:
                         raise HTTPException(
                             status_code=401 if context is None else 403,
@@ -103,11 +159,15 @@ class ApiModule(RuntimeModule):
                     params.update(request.path_params)
                     for k, v in request.query_params.multi_items():
                         params[k] = v
-                    body = None
-                    try:
-                        body = await request.json()
-                    except Exception:
-                        body = None
+                    
+                    # Используем body из параметра, если он есть, иначе пытаемся получить из request
+                    # (для Swagger UI body будет в параметре, для прямых запросов - в request)
+                    # Но только если body ещё не был получен выше (для auth операций)
+                    if body is None and endpoint.method in ["POST", "PUT", "PATCH"]:
+                        try:
+                            body = await request.json()
+                        except Exception:
+                            body = None
 
                     # Передаём body отдельно от query/path params только если он не None
                     # Не мержим body в params, чтобы сохранить структуру данных
@@ -128,16 +188,43 @@ class ApiModule(RuntimeModule):
 
                     return result
 
-                # Сигнатура нужна ТОЛЬКО для документирования в OpenAPI.
-                # handler на самом деле не принимает path-параметры напрямую,
-                # они идут через request.path_params.
-                params_sig = [
+                # Сигнатура для правильной документации в OpenAPI
+                # Извлекаем path параметры из endpoint.path
+                params_sig = []
+                
+                # Добавляем request
+                params_sig.append(
                     inspect.Parameter(
                         "request",
                         kind=inspect.Parameter.POSITIONAL_OR_KEYWORD,
                         annotation=Request,
                     )
-                ]
+                )
+                
+                # Добавляем body для POST/PUT/PATCH методов (для Swagger UI)
+                # Используем Any вместо Dict, чтобы Swagger показывал JSON editor
+                if endpoint.method in ["POST", "PUT", "PATCH"]:
+                    params_sig.append(
+                        inspect.Parameter(
+                            "body",
+                            kind=inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                            annotation=Any,
+                            default=Body(None, description="Request body (JSON)"),
+                        )
+                    )
+                
+                # Извлекаем path параметры из пути (например, {id} из /admin/v1/devices/{id})
+                import re
+                path_params = re.findall(r'\{(\w+)\}', ep.path)
+                for param_name in path_params:
+                    params_sig.append(
+                        inspect.Parameter(
+                            param_name,
+                            kind=inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                            annotation=str,
+                            default=Path(..., description=f"Path parameter: {param_name}"),
+                        )
+                    )
 
                 handler.__signature__ = inspect.Signature(parameters=params_sig)
                 return handler
@@ -147,6 +234,39 @@ class ApiModule(RuntimeModule):
             # HttpRegistry теперь нормализует пути, удаляя завершающий '/'.
             # Дублирование со слэшем и без слэша больше не нужно.
             self.app.add_api_route(ep.path, handler, methods=[ep.method], name=route_name)
+
+        # Настраиваем OpenAPI схему ПОСЛЕ регистрации всех routes
+        def custom_openapi():
+            if self.app.openapi_schema:
+                return self.app.openapi_schema
+            openapi_schema = get_openapi(
+                title="Home Console API",
+                version="0.1.0",
+                description="Home Console Core Runtime API",
+                routes=self.app.routes,
+            )
+            # Добавляем Security схему для Bearer token
+            if "components" not in openapi_schema:
+                openapi_schema["components"] = {}
+            openapi_schema["components"]["securitySchemes"] = {
+                "BearerAuth": {
+                    "type": "http",
+                    "scheme": "bearer",
+                    "bearerFormat": "API Key",
+                    "description": "Enter your API key (without 'Bearer' prefix)"
+                }
+            }
+            # Применяем security ко всем endpoints
+            for path, path_item in openapi_schema.get("paths", {}).items():
+                for method in path_item.keys():
+                    if method.lower() in ["get", "post", "put", "delete", "patch"]:
+                        if "security" not in path_item[method]:
+                            path_item[method]["security"] = [{"BearerAuth": []}]
+            self.app.openapi_schema = openapi_schema
+            return openapi_schema
+        
+        # Переопределяем openapi для добавления security
+        self.app.openapi = custom_openapi
 
         config = uvicorn.Config(self.app, host="127.0.0.1", port=8000, log_level="info")
         server = uvicorn.Server(config)

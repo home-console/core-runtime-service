@@ -21,7 +21,7 @@ class AdminModule(RuntimeModule):
     Предоставляет read-only доступ к информации о runtime:
     - список плагинов, сервисов, HTTP endpoints
     - состояние state_engine и storage
-    - proxy-сервисы для devices, oauth, yandex
+    - proxy-сервисы для devices
     """
 
     @property
@@ -317,142 +317,6 @@ class AdminModule(RuntimeModule):
             except Exception as e:
                 return {"ok": False, "error": str(e)}
 
-        # --- OAuth Yandex proxy services (admin v1) ---
-        async def _sanitize_oauth(data: Dict[str, Any]) -> Dict[str, Any]:
-            if not isinstance(data, dict):
-                return {}
-            forbidden = {"client_secret", "access_token", "refresh_token", "raw_token"}
-            return {k: v for k, v in data.items() if k not in forbidden}
-
-        async def oauth_status() -> Dict[str, Any]:
-            res = await self.runtime.service_registry.call("oauth_yandex.get_status")
-            return await _sanitize_oauth(res or {})
-
-        async def oauth_configure(cfg: Dict[str, Any]) -> Dict[str, Any]:
-            # Pass configuration to oauth_yandex but do not echo secrets
-            await self.runtime.service_registry.call("oauth_yandex.set_config", cfg)
-            return {"ok": True}
-
-        async def oauth_authorize(scopes: Optional[List[str]] = None) -> Dict[str, Any]:
-            url = await self.runtime.service_registry.call("oauth_yandex.get_authorize_url", scopes or [])
-            return {"url": url}
-
-        async def oauth_exchange_code(code: str) -> Dict[str, Any]:
-            res = await self.runtime.service_registry.call("oauth_yandex.exchange_code", code)
-            return await _sanitize_oauth(res or {})
-
-        # --- Admin trigger for Yandex sync ---
-        async def admin_yandex_sync() -> Dict[str, Any]:
-            """Trigger Yandex Smart Home sync from admin."""
-            try:
-                # Before syncing, remove previous external devices from provider 'yandex'
-                try:
-                    ext_keys = await self.runtime.storage.list_keys("devices_external")
-                except Exception:
-                    ext_keys = []
-
-                for ext_id in ext_keys:
-                    try:
-                        payload = await self.runtime.storage.get("devices_external", ext_id)
-                    except Exception:
-                        payload = None
-                    if not payload:
-                        continue
-                    if payload.get("provider") == "yandex":
-                        try:
-                            await self.runtime.storage.delete("devices_external", ext_id)
-                        except Exception:
-                            pass
-
-                # Prefer the stub plugin if it's loaded (dev-safe)
-                try:
-                    plugins = self.runtime.plugin_manager.list_plugins()
-                except Exception:
-                    plugins = []
-
-                # If the 'yandex_smart_home' stub is present, prefer its sync service
-                if 'yandex_smart_home' in plugins:
-                    # stub registers 'yandex.sync' and 'yandex.sync_devices'
-                    try:
-                        devices = await self.runtime.service_registry.call("yandex.sync")
-                    except Exception:
-                        devices = await self.runtime.service_registry.call("yandex.sync_devices")
-                else:
-                    # Otherwise call whichever is available (real plugin exposes sync_devices)
-                    try:
-                        devices = await self.runtime.service_registry.call("yandex.sync")
-                    except Exception:
-                        devices = await self.runtime.service_registry.call("yandex.sync_devices")
-                return {"ok": True, "count": len(devices) if isinstance(devices, list) else 0}
-            except Exception as e:
-                err = str(e or "")
-                # If the real plugin explicitly says the Yandex account is not authorized,
-                # return an error and DO NOT run the fallback (per requirements).
-                if "yandex_not_authorized" in err:
-                    return {"ok": False, "error": "yandex_not_authorized", "message": "Yandex OAuth not authorized"}
-
-                # If the real plugin indicates the real-API flag is disabled, fall through
-                # to dev-friendly fallback behavior.
-                try:
-                    fake_devices = [
-                        {
-                            "provider": "yandex",
-                            "external_id": "yandex-fallback-light-1",
-                            "type": "light",
-                            "capabilities": ["on_off", "brightness"],
-                            "state": {"on": False, "brightness": 50},
-                        },
-                        {
-                            "provider": "yandex",
-                            "external_id": "yandex-fallback-sensor-1",
-                            "type": "temperature_sensor",
-                            "capabilities": ["temperature"],
-                            "state": {"temperature": 21.0},
-                        },
-                    ]
-                    for d in fake_devices:
-                        try:
-                            await self.runtime.event_bus.publish("external.device_discovered", d)
-                        except Exception:
-                            pass
-                    return {"ok": True, "count": len(fake_devices), "note": "fallback_generated", "error": err}
-                except Exception as ee:
-                    return {"ok": False, "error": f"sync_failed: {err} / fallback_failed: {ee}"}
-
-        # --- Admin endpoints to read/set yandex feature flag (use real API) ---
-        async def admin_yandex_get_config() -> Dict[str, Any]:
-            try:
-                val = await self.runtime.storage.get("yandex", "use_real_api")
-            except Exception:
-                val = False
-            return {"use_real_api": bool(val)}
-
-        async def admin_yandex_set_use_real(body: Any = None) -> Dict[str, Any]:
-            try:
-                # Support different shapes: raw boolean, string, or JSON object
-                if isinstance(body, dict):
-                    if "use_real_api" in body:
-                        use_real = bool(body["use_real_api"])
-                    elif "value" in body:
-                        use_real = bool(body["value"])
-                    else:
-                        # fallback: try to interpret first value
-                        vals = list(body.values())
-                        use_real = bool(vals[0]) if vals else False
-                else:
-                    if isinstance(body, bool):
-                        use_real = body
-                    elif isinstance(body, str):
-                        use_real = body.lower() in ("1", "true", "yes")
-                    elif body is None:
-                        use_real = False
-                    else:
-                        use_real = bool(body)
-
-                await self.runtime.storage.set("yandex", "use_real_api", {"use_real_api": bool(use_real)})
-                return {"ok": True, "use_real_api": bool(use_real)}
-            except Exception as e:
-                return {"ok": False, "error": str(e)}
 
         # --- Integrations admin service ---
         async def admin_v1_integrations() -> List[Dict[str, Any]]:
@@ -480,6 +344,332 @@ class AdminModule(RuntimeModule):
                 })
             return result
 
+        # --- Auth management services ---
+        from modules.api.auth import (
+            create_api_key,
+            create_user,
+            create_session,
+            validate_user_exists,
+            verify_user_password,
+            set_password,
+            change_password,
+            list_sessions,
+            revoke_session,
+            revoke_all_sessions,
+            revoke_api_key,
+            rotate_api_key,
+            generate_access_token,
+            create_refresh_token,
+            get_or_create_jwt_secret,
+            refresh_access_token,
+            AUTH_API_KEYS_NAMESPACE,
+            AUTH_USERS_NAMESPACE,
+            AUTH_SESSIONS_NAMESPACE,
+        )
+
+        async def admin_auth_create_api_key(body: Any = None) -> Dict[str, Any]:
+            """Create new API key."""
+            if not isinstance(body, dict):
+                return {"ok": False, "error": "invalid_body"}
+            
+            scopes = body.get("scopes", [])
+            is_admin = body.get("is_admin", False)
+            subject = body.get("subject")
+            expires_at = body.get("expires_at")  # Опционально: timestamp для истечения
+            
+            try:
+                api_key = await create_api_key(self.runtime, scopes, is_admin, subject, expires_at)
+                return {"ok": True, "api_key": api_key}
+            except Exception as e:
+                return {"ok": False, "error": str(e)}
+
+        async def admin_auth_list_api_keys() -> List[Dict[str, Any]]:
+            """List all API keys (without actual keys, with metadata)."""
+            try:
+                keys = await self.runtime.storage.list_keys(AUTH_API_KEYS_NAMESPACE)
+                result = []
+                current_time = time.time()
+                
+                for key_id in keys:
+                    try:
+                        key_data = await self.runtime.storage.get(AUTH_API_KEYS_NAMESPACE, key_id)
+                        if isinstance(key_data, dict):
+                            expires_at = key_data.get("expires_at")
+                            is_expired = expires_at is not None and current_time > expires_at
+                            
+                            # Пропускаем истекшие ключи
+                            if is_expired:
+                                continue
+                            
+                            key_info = {
+                                "id": key_id[:16] + "...",  # Обрезаем для безопасности
+                                "subject": key_data.get("subject"),
+                                "scopes": key_data.get("scopes", []),
+                                "is_admin": key_data.get("is_admin", False),
+                                "created_at": key_data.get("created_at"),
+                                "last_used": key_data.get("last_used"),
+                                "expires_at": expires_at,
+                                "is_expired": is_expired,
+                            }
+                            result.append(key_info)
+                    except Exception:
+                        pass
+                
+                # Сортируем по created_at (новые сначала)
+                result.sort(key=lambda x: x.get("created_at", 0), reverse=True)
+                return result
+            except Exception:
+                return []
+
+        async def admin_auth_create_user(body: Any = None) -> Dict[str, Any]:
+            """Create new user."""
+            if not isinstance(body, dict):
+                return {"ok": False, "error": "invalid_body"}
+            
+            user_id = body.get("user_id")
+            if not user_id:
+                return {"ok": False, "error": "user_id required"}
+            
+            scopes = body.get("scopes", [])
+            is_admin = body.get("is_admin", False)
+            username = body.get("username")
+            password = body.get("password")  # Опционально
+            
+            try:
+                await create_user(self.runtime, user_id, scopes, is_admin, username, password)
+                return {"ok": True, "user_id": user_id}
+            except Exception as e:
+                return {"ok": False, "error": str(e)}
+
+        async def admin_auth_list_users() -> List[Dict[str, Any]]:
+            """List all users."""
+            try:
+                user_ids = await self.runtime.storage.list_keys(AUTH_USERS_NAMESPACE)
+                result = []
+                for user_id in user_ids:
+                    try:
+                        user_data = await self.runtime.storage.get(AUTH_USERS_NAMESPACE, user_id)
+                        if isinstance(user_data, dict):
+                            result.append({
+                                "user_id": user_id,
+                                "username": user_data.get("username"),
+                                "scopes": user_data.get("scopes", []),
+                                "is_admin": user_data.get("is_admin", False),
+                                "created_at": user_data.get("created_at"),
+                            })
+                    except Exception:
+                        pass
+                return result
+            except Exception:
+                return []
+
+        async def admin_auth_login(body: Any = None) -> Dict[str, Any]:
+            """Login with password authentication, returns JWT access token and refresh token."""
+            if not isinstance(body, dict):
+                return {"ok": False, "error": "invalid_body"}
+            
+            user_id = body.get("user_id")
+            password = body.get("password")
+            
+            if not user_id:
+                return {"ok": False, "error": "user_id required"}
+            
+            if not password:
+                return {"ok": False, "error": "password required"}
+            
+            if not await validate_user_exists(self.runtime, user_id):
+                return {"ok": False, "error": "user not found"}
+            
+            # Проверяем пароль
+            if not await verify_user_password(self.runtime, user_id, password):
+                return {"ok": False, "error": "invalid_password"}
+            
+            try:
+                # Получаем данные пользователя
+                user_data = await self.runtime.storage.get(AUTH_USERS_NAMESPACE, user_id)
+                if not isinstance(user_data, dict):
+                    return {"ok": False, "error": "user data not found"}
+                
+                scopes = user_data.get("scopes", [])
+                is_admin = user_data.get("is_admin", False)
+                
+                # Получаем опциональные метаданные из body
+                client_ip = body.get("client_ip")
+                user_agent = body.get("user_agent")
+                
+                # Генерируем JWT access token
+                secret = await get_or_create_jwt_secret(self.runtime)
+                access_token = generate_access_token(user_id, scopes, is_admin, secret)
+                
+                # Создаём refresh token
+                refresh_token = await create_refresh_token(
+                    self.runtime,
+                    user_id,
+                    client_ip=client_ip,
+                    user_agent=user_agent
+                )
+                
+                return {
+                    "ok": True,
+                    "access_token": access_token,
+                    "refresh_token": refresh_token,
+                    "expires_in": 900,  # 15 минут в секундах
+                    "token_type": "Bearer"
+                }
+            except Exception as e:
+                return {"ok": False, "error": str(e)}
+        
+        async def admin_auth_refresh(body: Any = None) -> Dict[str, Any]:
+            """Refresh access token using refresh token."""
+            if not isinstance(body, dict):
+                return {"ok": False, "error": "invalid_body"}
+            
+            refresh_token = body.get("refresh_token")
+            if not refresh_token:
+                return {"ok": False, "error": "refresh_token required"}
+            
+            try:
+                access_token, new_refresh_token = await refresh_access_token(
+                    self.runtime,
+                    refresh_token,
+                    rotate_refresh=True
+                )
+                
+                result = {
+                    "ok": True,
+                    "access_token": access_token,
+                    "expires_in": 900,
+                    "token_type": "Bearer"
+                }
+                
+                # Добавляем новый refresh token, если он был создан
+                if new_refresh_token:
+                    result["refresh_token"] = new_refresh_token
+                
+                return result
+            except ValueError as e:
+                return {"ok": False, "error": str(e)}
+            except Exception as e:
+                return {"ok": False, "error": str(e)}
+        
+        async def admin_auth_set_password(body: Any = None) -> Dict[str, Any]:
+            """Set password for user."""
+            if not isinstance(body, dict):
+                return {"ok": False, "error": "invalid_body"}
+            
+            user_id = body.get("user_id")
+            password = body.get("password")
+            
+            if not user_id:
+                return {"ok": False, "error": "user_id required"}
+            
+            if not password:
+                return {"ok": False, "error": "password required"}
+            
+            try:
+                await set_password(self.runtime, user_id, password)
+                return {"ok": True, "user_id": user_id}
+            except Exception as e:
+                return {"ok": False, "error": str(e)}
+        
+        async def admin_auth_change_password(body: Any = None) -> Dict[str, Any]:
+            """Change password for user (requires old password)."""
+            if not isinstance(body, dict):
+                return {"ok": False, "error": "invalid_body"}
+            
+            user_id = body.get("user_id")
+            old_password = body.get("old_password")
+            new_password = body.get("new_password")
+            
+            if not user_id:
+                return {"ok": False, "error": "user_id required"}
+            
+            if not old_password:
+                return {"ok": False, "error": "old_password required"}
+            
+            if not new_password:
+                return {"ok": False, "error": "new_password required"}
+            
+            try:
+                await change_password(self.runtime, user_id, old_password, new_password)
+                return {"ok": True, "user_id": user_id}
+            except Exception as e:
+                return {"ok": False, "error": str(e)}
+        
+        async def admin_auth_list_sessions(user_id: Optional[str] = None) -> List[Dict[str, Any]]:
+            """
+            List active sessions (optionally filtered by user_id).
+            
+            Args:
+                user_id: опциональный query параметр для фильтрации по пользователю
+            """
+            try:
+                return await list_sessions(self.runtime, user_id)
+            except Exception:
+                return []
+        
+        async def admin_auth_revoke_session(body: Any = None) -> Dict[str, Any]:
+            """Revoke a specific session."""
+            if not isinstance(body, dict):
+                return {"ok": False, "error": "invalid_body"}
+            
+            session_id = body.get("session_id")
+            if not session_id:
+                return {"ok": False, "error": "session_id required"}
+            
+            try:
+                await revoke_session(self.runtime, session_id)
+                return {"ok": True, "session_id": session_id[:16] + "..."}
+            except Exception as e:
+                return {"ok": False, "error": str(e)}
+        
+        async def admin_auth_revoke_all_sessions(body: Any = None) -> Dict[str, Any]:
+            """Revoke all sessions for a user."""
+            if not isinstance(body, dict):
+                return {"ok": False, "error": "invalid_body"}
+            
+            user_id = body.get("user_id")
+            if not user_id:
+                return {"ok": False, "error": "user_id required"}
+            
+            try:
+                revoked_count = await revoke_all_sessions(self.runtime, user_id)
+                return {"ok": True, "user_id": user_id, "revoked_count": revoked_count}
+            except Exception as e:
+                return {"ok": False, "error": str(e)}
+        
+        async def admin_auth_revoke_api_key(body: Any = None) -> Dict[str, Any]:
+            """Revoke an API key."""
+            if not isinstance(body, dict):
+                return {"ok": False, "error": "invalid_body"}
+            
+            api_key = body.get("api_key")
+            if not api_key:
+                return {"ok": False, "error": "api_key required"}
+            
+            try:
+                await revoke_api_key(self.runtime, api_key)
+                return {"ok": True, "api_key": api_key[:16] + "..."}
+            except Exception as e:
+                return {"ok": False, "error": str(e)}
+        
+        async def admin_auth_rotate_api_key(body: Any = None) -> Dict[str, Any]:
+            """Rotate an API key (create new, revoke old)."""
+            if not isinstance(body, dict):
+                return {"ok": False, "error": "invalid_body"}
+            
+            old_api_key = body.get("old_api_key")
+            expires_at = body.get("expires_at")  # Опционально
+            
+            if not old_api_key:
+                return {"ok": False, "error": "old_api_key required"}
+            
+            try:
+                new_api_key = await rotate_api_key(self.runtime, old_api_key, expires_at)
+                return {"ok": True, "new_api_key": new_api_key, "old_api_key": old_api_key[:16] + "..."}
+            except Exception as e:
+                return {"ok": False, "error": str(e)}
+
         # Register all services
         service_registrations = [
             ("admin.list_plugins", list_plugins),
@@ -502,14 +692,20 @@ class AdminModule(RuntimeModule):
             ("admin.devices.create_mapping", admin_devices_create_mapping),
             ("admin.devices.delete_mapping", admin_devices_delete_mapping),
             ("admin.devices.auto_map", admin_devices_auto_map),
-            ("admin.oauth.yandex.status", oauth_status),
-            ("admin.oauth.yandex.configure", oauth_configure),
-            ("admin.oauth.yandex.authorize", oauth_authorize),
-            ("admin.oauth.yandex.exchange", oauth_exchange_code),
-            ("admin.yandex.sync", admin_yandex_sync),
-            ("admin.yandex.get_config", admin_yandex_get_config),
-            ("admin.yandex.set_use_real", admin_yandex_set_use_real),
             ("admin.v1.integrations", admin_v1_integrations),
+            ("admin.auth.create_api_key", admin_auth_create_api_key),
+            ("admin.auth.list_api_keys", admin_auth_list_api_keys),
+            ("admin.auth.create_user", admin_auth_create_user),
+            ("admin.auth.list_users", admin_auth_list_users),
+            ("admin.auth.login", admin_auth_login),
+            ("admin.auth.refresh", admin_auth_refresh),
+            ("admin.auth.set_password", admin_auth_set_password),
+            ("admin.auth.change_password", admin_auth_change_password),
+            ("admin.auth.list_sessions", admin_auth_list_sessions),
+            ("admin.auth.revoke_session", admin_auth_revoke_session),
+            ("admin.auth.revoke_all_sessions", admin_auth_revoke_all_sessions),
+            ("admin.auth.revoke_api_key", admin_auth_revoke_api_key),
+            ("admin.auth.rotate_api_key", admin_auth_rotate_api_key),
         ]
 
         for name, func in service_registrations:
@@ -534,13 +730,6 @@ class AdminModule(RuntimeModule):
             HttpEndpoint(method="GET", path="/admin/v1/events", service="admin.v1.events", description="List events and subscribers"),
             HttpEndpoint(method="GET", path="/admin/v1/storage", service="admin.v1.storage", description="List storage namespaces and key counts"),
             HttpEndpoint(method="GET", path="/admin/v1/state", service="admin.v1.state", description="Read-only state engine dump"),
-            HttpEndpoint(method="GET", path="/admin/v1/oauth/yandex/status", service="admin.oauth.yandex.status", description="Get OAuth Yandex connection status (no secrets returned)"),
-            HttpEndpoint(method="POST", path="/admin/v1/oauth/yandex/configure", service="admin.oauth.yandex.configure", description="Configure OAuth Yandex client (do not return secrets)"),
-            HttpEndpoint(method="POST", path="/admin/v1/oauth/yandex/authorize", service="admin.oauth.yandex.authorize", description="Get authorize URL for Yandex OAuth (open in UI)"),
-            HttpEndpoint(method="POST", path="/admin/v1/oauth/yandex/exchange-code", service="admin.oauth.yandex.exchange", description="Exchange authorization code for tokens (admin will not return secrets)"),
-            HttpEndpoint(method="POST", path="/admin/v1/yandex/sync", service="admin.yandex.sync", description="Trigger Yandex Smart Home devices sync"),
-            HttpEndpoint(method="GET", path="/admin/v1/yandex/config", service="admin.yandex.get_config", description="Get Yandex admin config (use_real_api)"),
-            HttpEndpoint(method="POST", path="/admin/v1/yandex/config/use-real", service="admin.yandex.set_use_real", description="Set Yandex admin config flag use_real_api (body: true/false)"),
             HttpEndpoint(method="GET", path="/admin/v1/devices", service="admin.devices.list", description="List internal devices"),
             HttpEndpoint(method="GET", path="/admin/v1/devices/mappings", service="admin.devices.list_mappings", description="List external->internal device mappings"),
             HttpEndpoint(method="POST", path="/admin/v1/devices/mappings", service="admin.devices.create_mapping", description="Create mapping: body {external_id, internal_id}"),
@@ -550,6 +739,19 @@ class AdminModule(RuntimeModule):
             HttpEndpoint(method="POST", path="/admin/v1/devices/{id}/state", service="admin.devices.set_state", description="Set state for internal device"),
             HttpEndpoint(method="GET", path="/admin/v1/devices/external/{provider}", service="admin.devices.list_external", description="List external devices for provider"),
             HttpEndpoint(method="GET", path="/admin/v1/integrations", service="admin.v1.integrations", description="List registered integrations"),
+            HttpEndpoint(method="POST", path="/admin/v1/auth/api-keys", service="admin.auth.create_api_key", description="Create new API key (body: {scopes, is_admin?, subject?, expires_at?})"),
+            HttpEndpoint(method="GET", path="/admin/v1/auth/api-keys", service="admin.auth.list_api_keys", description="List all API keys (without actual keys, with metadata)"),
+            HttpEndpoint(method="POST", path="/admin/v1/auth/api-keys/revoke", service="admin.auth.revoke_api_key", description="Revoke an API key (body: {api_key})"),
+            HttpEndpoint(method="POST", path="/admin/v1/auth/api-keys/rotate", service="admin.auth.rotate_api_key", description="Rotate an API key (body: {old_api_key, expires_at?})"),
+            HttpEndpoint(method="POST", path="/admin/v1/auth/users", service="admin.auth.create_user", description="Create new user (body: {user_id, scopes, is_admin?, username?, password?})"),
+            HttpEndpoint(method="GET", path="/admin/v1/auth/users", service="admin.auth.list_users", description="List all users"),
+            HttpEndpoint(method="POST", path="/admin/v1/auth/login", service="admin.auth.login", description="Login with password, returns JWT access_token and refresh_token (body: {user_id, password, client_ip?, user_agent?})"),
+            HttpEndpoint(method="POST", path="/admin/v1/auth/refresh", service="admin.auth.refresh", description="Refresh access token using refresh_token (body: {refresh_token})"),
+            HttpEndpoint(method="POST", path="/admin/v1/auth/password/set", service="admin.auth.set_password", description="Set password for user (body: {user_id, password})"),
+            HttpEndpoint(method="POST", path="/admin/v1/auth/password/change", service="admin.auth.change_password", description="Change password for user (body: {user_id, old_password, new_password})"),
+            HttpEndpoint(method="GET", path="/admin/v1/auth/sessions", service="admin.auth.list_sessions", description="List active sessions (query: user_id?)"),
+            HttpEndpoint(method="POST", path="/admin/v1/auth/sessions/revoke", service="admin.auth.revoke_session", description="Revoke a specific session (body: {session_id})"),
+            HttpEndpoint(method="POST", path="/admin/v1/auth/sessions/revoke-all", service="admin.auth.revoke_all_sessions", description="Revoke all sessions for a user (body: {user_id})"),
         ]
 
         for ep in http_endpoints:

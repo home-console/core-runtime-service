@@ -1,7 +1,28 @@
 from typing import Any, Dict, List, Optional
 
 
-async def create_device(runtime, device_id: str, name: str = "Unknown", device_type: str = "generic") -> Dict[str, Any]:
+async def create_device(
+    runtime, 
+    device_id: str, 
+    name: str = "Unknown", 
+    device_type: str = "generic",
+    owner_id: Optional[str] = None,
+    shared_with: Optional[List[str]] = None
+) -> Dict[str, Any]:
+    """
+    Создаёт новое устройство.
+    
+    Args:
+        runtime: экземпляр CoreRuntime
+        device_id: уникальный ID устройства
+        name: имя устройства
+        device_type: тип устройства
+        owner_id: ID владельца (опционально, для ACL)
+        shared_with: список user_id с доступом (опционально, для ACL)
+    
+    Returns:
+        Созданное устройство
+    """
     if not isinstance(device_id, str) or not device_id:
         raise ValueError("device_id должен быть непустой строкой")
 
@@ -15,6 +36,12 @@ async def create_device(runtime, device_id: str, name: str = "Unknown", device_t
             "pending": False,
         },
     }
+    
+    # Добавляем ACL поля, если указаны
+    if owner_id:
+        device["owner_id"] = owner_id
+    if shared_with and isinstance(shared_with, list):
+        device["shared_with"] = shared_with
 
     await runtime.storage.set("devices", device_id, device)
 
