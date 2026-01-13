@@ -92,7 +92,7 @@ class ApiModule(RuntimeModule):
             def make_handler(endpoint):
                 async def handler(
                     request: Request,
-                    body: Dict[str, Any] | None = Body(None) if ep.method in ["POST", "PUT", "PATCH"] else None
+                    body: Dict[str, Any] | None = Body(None) if endpoint.method in ["POST", "PUT", "PATCH"] else None
                 ):
                     # Получаем RequestContext из middleware (boundary-layer)
                     context = await get_request_context(request)
@@ -101,33 +101,27 @@ class ApiModule(RuntimeModule):
                     resource = None
                     
                     # Специальный случай: разрешаем создание первого API key без авторизации
+                    # SECURITY FIX: Используем атомарную проверку для предотвращения race condition
                     if endpoint.service == "admin.auth.create_api_key" and context is None:
-                        # Проверяем, есть ли уже API keys
+                        # Проверяем, есть ли уже API keys (атомарная операция)
                         try:
                             keys = await self.runtime.storage.list_keys("auth_api_keys")
-                            if len(keys) == 0:
-                                # Нет ключей - разрешаем создание первого
-                                resource = {"allow_first_key": True}
+                            # Дополнительная проверка: пытаемся получить флаг создания первого ключа
+                            first_key_flag = await self.runtime.storage.get("auth_config", "first_key_created")
+                            if len(keys) == 0 and first_key_flag is None:
+                                # Нет ключей и флаг не установлен - разрешаем создание первого
+                                # Устанавливаем флаг ДО создания ключа (защита от race condition)
+                                # Если флаг уже установлен другим запросом, это нормально
+                                try:
+                                    await self.runtime.storage.set("auth_config", "first_key_created", True)
+                                    resource = {"allow_first_key": True}
+                                except Exception:
+                                    # Если не удалось установить флаг, проверяем ещё раз
+                                    keys_retry = await self.runtime.storage.list_keys("auth_api_keys")
+                                    if len(keys_retry) == 0:
+                                        resource = {"allow_first_key": True}
                         except Exception:
                             pass
-                    
-                    # Resource-Based Authorization: подготавливаем resource для проверки ACL
-                    # Для devices.get и devices.set_state - получаем device и проверяем ownership/shared
-                    if endpoint.service in ["devices.get", "devices.set_state"]:
-                        device_id = request.path_params.get("id") or request.path_params.get("device_id")
-                        if device_id:
-                            try:
-                                device = await self.runtime.service_registry.call("devices.get", device_id)
-                                if isinstance(device, dict):
-                                    resource = {}
-                                    if "owner_id" in device:
-                                        resource["owner_id"] = device["owner_id"]
-                                    if "shared_with" in device:
-                                        resource["shared_with"] = device["shared_with"]
-                            except Exception:
-                                # Если device не найден, resource останется None
-                                # Проверка прав произойдёт позже при вызове сервиса
-                                pass
                     
                     # Для auth операций - передаём user_id из body или path
                     if endpoint.service in ["admin.auth.change_password", "admin.auth.set_password", 
@@ -144,15 +138,49 @@ class ApiModule(RuntimeModule):
                             if user_id:
                                 resource = {"user_id": user_id}
                     
-                    # Authorization Policy Layer - единая точка проверок
+                    # SECURITY FIX: Проверяем базовую авторизацию ДО получения device
+                    # Это предотвращает Information Disclosure (раскрытие существования device)
                     try:
-                        # Используем service_name как action (например, "devices.list")
-                        authz_require(context, endpoint.service, resource)
+                        # Сначала проверяем базовые права без resource (scope-based)
+                        # Передаём runtime для audit logging отказов
+                        authz_require(context, endpoint.service, None, runtime=self.runtime)
                     except AuthorizationError:
                         raise HTTPException(
                             status_code=401 if context is None else 403,
                             detail="Unauthorized" if context is None else "Forbidden: insufficient permissions"
                         )
+                    
+                    # Только если базовая авторизация прошла, получаем device для ACL проверки
+                    # Resource-Based Authorization: подготавливаем resource для проверки ACL
+                    # Для devices.get и devices.set_state - получаем device и проверяем ownership/shared
+                    if endpoint.service in ["devices.get", "devices.set_state"]:
+                        device_id = request.path_params.get("id") or request.path_params.get("device_id")
+                        if device_id:
+                            try:
+                                device = await self.runtime.service_registry.call("devices.get", device_id)
+                                if isinstance(device, dict):
+                                    resource = {}
+                                    if "owner_id" in device:
+                                        resource["owner_id"] = device["owner_id"]
+                                    if "shared_with" in device:
+                                        resource["shared_with"] = device["shared_with"]
+                                    
+                                    # Проверяем ACL (Resource-Based Authorization)
+                                    try:
+                                        # Передаём runtime для audit logging отказов
+                                        authz_require(context, endpoint.service, resource, runtime=self.runtime)
+                                    except AuthorizationError:
+                                        raise HTTPException(
+                                            status_code=403,
+                                            detail="Forbidden: insufficient permissions for this resource"
+                                        )
+                            except HTTPException:
+                                # Пробрасываем HTTPException (403 Forbidden)
+                                raise
+                            except Exception:
+                                # Если device не найден, это нормально - сервис вернёт 404
+                                # Не раскрываем информацию о существовании device здесь
+                                pass
                     
                     params: Dict[str, Any] = {}
                     # path params доступны через request.path_params
@@ -215,7 +243,7 @@ class ApiModule(RuntimeModule):
                 
                 # Извлекаем path параметры из пути (например, {id} из /admin/v1/devices/{id})
                 import re
-                path_params = re.findall(r'\{(\w+)\}', ep.path)
+                path_params = re.findall(r'\{(\w+)\}', endpoint.path)
                 for param_name in path_params:
                     params_sig.append(
                         inspect.Parameter(

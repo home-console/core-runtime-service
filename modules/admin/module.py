@@ -376,9 +376,10 @@ class AdminModule(RuntimeModule):
             is_admin = body.get("is_admin", False)
             subject = body.get("subject")
             expires_at = body.get("expires_at")  # Опционально: timestamp для истечения
+            user_id = body.get("user_id")  # Опционально: для Resource-Based Authorization с ACL
             
             try:
-                api_key = await create_api_key(self.runtime, scopes, is_admin, subject, expires_at)
+                api_key = await create_api_key(self.runtime, scopes, is_admin, subject, expires_at, user_id)
                 return {"ok": True, "api_key": api_key}
             except Exception as e:
                 return {"ok": False, "error": str(e)}

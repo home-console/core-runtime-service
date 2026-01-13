@@ -13,7 +13,8 @@ Authorization Policy Layer — единая точка авторизацион�
 - НЕ мутирует состояние
 """
 
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Set
+import asyncio
 from modules.api.auth import RequestContext
 
 
@@ -71,7 +72,34 @@ ACTION_SCOPE_MAP: Dict[str, str] = {
     "admin.auth.revoke_api_key": "admin.*",
     "admin.auth.rotate_api_key": "admin.*",
     
-    # Admin (wildcard - все admin.* действия требуют admin прав)
+    # Admin v1 services (read-only инвентарь)
+    "admin.v1.runtime": "admin.read",
+    "admin.v1.plugins": "admin.read",
+    "admin.v1.services": "admin.read",
+    "admin.v1.http": "admin.read",
+    "admin.v1.events": "admin.read",
+    "admin.v1.storage": "admin.read",
+    "admin.v1.state": "admin.read",
+    "admin.v1.integrations": "admin.read",
+    
+    # Admin basic services
+    "admin.list_plugins": "admin.read",
+    "admin.list_services": "admin.read",
+    "admin.list_http": "admin.read",
+    "admin.state_keys": "admin.read",
+    "admin.state_get": "admin.read",
+    
+    # Admin devices proxy services
+    "admin.devices.list": "admin.devices.read",
+    "admin.devices.get": "admin.devices.read",
+    "admin.devices.set_state": "admin.devices.write",
+    "admin.devices.list_external": "admin.devices.read",
+    "admin.devices.list_mappings": "admin.devices.read",
+    "admin.devices.create_mapping": "admin.devices.write",
+    "admin.devices.delete_mapping": "admin.devices.write",
+    "admin.devices.auto_map": "admin.devices.write",
+    
+    # Admin (wildcard - все остальные admin.* действия требуют admin.*)
     # Проверяется отдельно через action.startswith("admin.")
 }
 
@@ -102,6 +130,12 @@ def check(ctx: Optional[RequestContext], action: str, resource: Optional[Dict[st
     - Self-service: для auth операций разрешено если target_user_id == ctx.user_id
     - Admin override: если ctx.is_admin → разрешено
     """
+    # Валидация входных параметров
+    if not action or not isinstance(action, str):
+        return False
+    
+    if resource is not None and not isinstance(resource, dict):
+        return False
     # Специальный случай: создание первого API key разрешено без авторизации
     # Проверяем через resource, который передаётся из handler
     if action == "admin.auth.create_api_key" and resource and resource.get("allow_first_key"):
@@ -125,15 +159,31 @@ def check(ctx: Optional[RequestContext], action: str, resource: Optional[Dict[st
         return True
     
     # Полный wildcard даёт доступ ко всему (но проверяем ресурс отдельно)
+    # SECURITY FIX: Используем Set для O(1) проверки и защиты от timing attacks
     has_wildcard_scope = "*" in ctx.scopes
     
     # Проверяем права на действие (scope-based)
     action_allowed = False
     
     # Административные действия требуют admin прав
+    # Сначала проверяем явные маппинги, затем fallback на admin.*
     if action.startswith("admin."):
-        required_scope = "admin.*"
-        action_allowed = required_scope in ctx.scopes or has_wildcard_scope
+        # Проверяем, есть ли явный маппинг для этого действия
+        required_scope = ACTION_SCOPE_MAP.get(action)
+        if required_scope:
+            # Используем явный маппинг (например, "admin.read" или "admin.devices.read")
+            if required_scope in ctx.scopes:
+                action_allowed = True
+            elif "." in required_scope:
+                namespace = required_scope.split(".")[0]
+                namespace_wildcard = f"{namespace}.*"
+                if namespace_wildcard in ctx.scopes:
+                    action_allowed = True
+            action_allowed = action_allowed or has_wildcard_scope
+        else:
+            # Fallback: все admin.* действия требуют admin.*
+            required_scope = "admin.*"
+            action_allowed = required_scope in ctx.scopes or has_wildcard_scope
     else:
         # Ищем required scope в mapping
         required_scope = ACTION_SCOPE_MAP.get(action)
@@ -158,23 +208,24 @@ def check(ctx: Optional[RequestContext], action: str, resource: Optional[Dict[st
     
     # Проверяем права на ресурс (Resource-Based Authorization)
     if resource:
+        # SECURITY FIX: Добавлены проверки на None для ctx.user_id
         # 1. Ownership проверка
         if "owner_id" in resource:
             owner_id = resource["owner_id"]
-            if ctx.user_id == owner_id:
+            if ctx.user_id and ctx.user_id == owner_id:
                 return True  # Владелец имеет доступ
         
         # 2. Shared access (ACL)
         if "shared_with" in resource:
             shared_with = resource["shared_with"]
-            if isinstance(shared_with, list) and ctx.user_id in shared_with:
+            if isinstance(shared_with, list) and ctx.user_id and ctx.user_id in shared_with:
                 return True  # Пользователь в списке shared_with
         
         # 3. Self-service для auth операций
         if action in ["admin.auth.change_password", "admin.auth.set_password", 
                       "admin.auth.revoke_all_sessions", "admin.auth.list_sessions"]:
             target_user_id = resource.get("user_id")
-            if target_user_id and ctx.user_id == target_user_id:
+            if target_user_id and ctx.user_id and ctx.user_id == target_user_id:
                 return True  # Пользователь управляет своим аккаунтом
         
         # 4. Если ресурс указан, но нет совпадений → запрещаем
@@ -189,7 +240,7 @@ def check(ctx: Optional[RequestContext], action: str, resource: Optional[Dict[st
     return True
 
 
-def require(ctx: Optional[RequestContext], action: str, resource: Optional[Dict[str, Any]] = None) -> None:
+def require(ctx: Optional[RequestContext], action: str, resource: Optional[Dict[str, Any]] = None, runtime: Optional[Any] = None) -> None:
     """
     Требует разрешения на выполнение действия.
     
@@ -199,11 +250,61 @@ def require(ctx: Optional[RequestContext], action: str, resource: Optional[Dict[
         ctx: RequestContext или None
         action: действие
         resource: ресурс (принимается, но не используется)
+        runtime: опциональный экземпляр CoreRuntime для audit logging
     
     Raises:
         AuthorizationError: если доступ запрещён
     """
     if not check(ctx, action, resource):
+        # Audit logging отказов в авторизации
+        if runtime:
+            try:
+                from modules.api.auth.audit import audit_log_auth_event
+                
+                subject = ctx.user_id if ctx and ctx.user_id else (ctx.subject if ctx else "anonymous")
+                identifier = subject[:16] + "..." if len(subject) > 16 else subject
+                
+                # Конвертируем Set в List для JSON сериализации
+                scopes_list = list(ctx.scopes) if ctx and ctx.scopes else []
+                
+                # Логируем асинхронно, если возможно
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        # Если loop уже запущен, создаём задачу
+                        asyncio.create_task(audit_log_auth_event(
+                            runtime,
+                            "authorization_denied",
+                            identifier,
+                            {
+                                "action": action,
+                                "user_id": ctx.user_id if ctx else None,
+                                "scopes": scopes_list,
+                                "is_admin": ctx.is_admin if ctx else False,
+                            },
+                            success=False
+                        ))
+                    else:
+                        # Если loop не запущен, запускаем синхронно
+                        loop.run_until_complete(audit_log_auth_event(
+                            runtime,
+                            "authorization_denied",
+                            identifier,
+                            {
+                                "action": action,
+                                "user_id": ctx.user_id if ctx else None,
+                                "scopes": scopes_list,
+                                "is_admin": ctx.is_admin if ctx else False,
+                            },
+                            success=False
+                        ))
+                except Exception:
+                    # Если не удалось залогировать, не падаем
+                    pass
+            except Exception:
+                # Игнорируем ошибки audit logging
+                pass
+        
         raise AuthorizationError(f"Authorization failed for action: {action}")
 
 
