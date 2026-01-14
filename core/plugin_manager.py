@@ -507,6 +507,10 @@ class PluginManager:
             manifest = self._load_plugin_manifest(item)
             
             if manifest:
+                # Пропускаем отключенные плагины
+                if manifest.get("_disabled", False):
+                    continue
+                
                 plugin_name = manifest.get("name")
                 if plugin_name:
                     manifests[plugin_name] = manifest
