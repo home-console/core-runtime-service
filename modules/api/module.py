@@ -27,6 +27,7 @@ from modules.api.auth import (
     get_request_context,
 )
 from modules.api.authz import require as authz_require, AuthorizationError
+from modules.monitoring import MonitoringModule
 
 
 class ApiModule(RuntimeModule):
@@ -48,6 +49,7 @@ class ApiModule(RuntimeModule):
         self.app: FastAPI | None = None
         self._server: uvicorn.Server | None = None
         self._thread: threading.Thread | None = None
+        self.monitoring: MonitoringModule | None = None
 
     async def register(self) -> None:
         """
@@ -67,6 +69,10 @@ class ApiModule(RuntimeModule):
         
         # Добавляем auth middleware (boundary-layer)
         self.app.middleware("http")(require_auth_middleware)
+        
+        # Mount monitoring module
+        self.monitoring = MonitoringModule(runtime=self.runtime)
+        self.app.include_router(self.monitoring.router, prefix="/monitor", tags=["monitoring"])
 
     async def start(self) -> None:
         """
