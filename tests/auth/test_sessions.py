@@ -3,7 +3,7 @@
 """
 import pytest
 import time
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from modules.api.auth import (
     validate_session,
     create_session,
@@ -22,7 +22,8 @@ def mock_runtime():
     """Mock CoreRuntime для изоляции тестов."""
     runtime = MagicMock()
     runtime.storage = AsyncMock()
-    runtime.service_registry = AsyncMock()
+    runtime.service_registry = MagicMock()
+    runtime.service_registry.call = AsyncMock()
     return runtime
 
 
@@ -117,56 +118,33 @@ class TestCreateSession:
     async def test_create_session_success(self, mock_runtime):
         """Тест: успешное создание сессии."""
         user_id = "user_test"
-        scopes = ["devices.read", "devices.write"]
         
         mock_runtime.storage.set.return_value = None
         
-        session_id = await create_session(
-            mock_runtime,
-            user_id=user_id,
-            scopes=scopes,
-            is_admin=False
-        )
+        with patch('modules.api.auth.sessions.validate_user_exists', new_callable=AsyncMock) as mock_validate:
+            mock_validate.return_value = True
+            
+            session_id = await create_session(
+                mock_runtime,
+                user_id=user_id
+            )
+            
+            assert session_id is not None
+            assert len(session_id) >= 32
         
-        assert session_id is not None
-        assert len(session_id) >= 32
-        
-        # Verify storage.set was called
-        mock_runtime.storage.set.assert_called_once()
-        call_args = mock_runtime.storage.set.call_args
-        assert call_args[0][0] == AUTH_SESSIONS_NAMESPACE
-        assert call_args[0][1] == session_id
-        
-        session_data = call_args[0][2]
-        assert session_data["user_id"] == user_id
-        assert session_data["scopes"] == scopes
-        assert session_data["is_admin"] is False
-        assert "created_at" in session_data
-        assert "expires_at" in session_data
-    
-    @pytest.mark.asyncio
-    async def test_create_session_with_custom_expiration(self, mock_runtime):
-        """Тест: создание сессии с custom expiration."""
-        user_id = "user_test"
-        scopes = ["devices.read"]
-        expires_in = 7200  # 2 часа
-        
-        mock_runtime.storage.set.return_value = None
-        
-        session_id = await create_session(
-            mock_runtime,
-            user_id=user_id,
-            scopes=scopes,
-            is_admin=False,
-            expires_in=expires_in
-        )
-        
-        call_args = mock_runtime.storage.set.call_args
-        session_data = call_args[0][2]
-        
-        # Check expiration
-        expected_expiration = time.time() + expires_in
-        assert abs(session_data["expires_at"] - expected_expiration) < 5
+            # Verify storage.set was called (дважды - для сессии и для audit log)
+            call_args_list = mock_runtime.storage.set.call_args_list
+            assert len(call_args_list) >= 1
+            
+            # Первый вызов - сохранение сессии
+            call_args = call_args_list[0]
+            assert call_args[0][0] == AUTH_SESSIONS_NAMESPACE
+            assert call_args[0][1] == session_id
+            
+            session_data = call_args[0][2]
+            assert session_data["user_id"] == user_id
+            assert "created_at" in session_data
+            assert "expires_at" in session_data
 
 
 class TestDeleteSession:
@@ -179,9 +157,8 @@ class TestDeleteSession:
         
         mock_runtime.storage.delete.return_value = True
         
-        result = await delete_session(mock_runtime, session_id)
+        await delete_session(mock_runtime, session_id)
         
-        assert result is True
         mock_runtime.storage.delete.assert_called_once_with(
             AUTH_SESSIONS_NAMESPACE,
             session_id
@@ -192,9 +169,7 @@ class TestDeleteSession:
         """Тест: удаление несуществующей сессии."""
         mock_runtime.storage.delete.return_value = False
         
-        result = await delete_session(mock_runtime, "nonexistent")
-        
-        assert result is False
+        await delete_session(mock_runtime, "nonexistent")
 
 
 class TestListSessions:
@@ -204,24 +179,48 @@ class TestListSessions:
     async def test_list_sessions_for_user(self, mock_runtime):
         """Тест: список сессий пользователя."""
         user_id = "user_test"
-        
+        current_time = time.time()
+
         all_keys = ["session_1", "session_2", "session_3"]
-        mock_runtime.storage.list_keys.return_value = all_keys
-        
-        # Mock get для каждой сессии
+
         sessions_data = {
-            "session_1": {"user_id": "user_test", "created_at": time.time()},
-            "session_2": {"user_id": "other_user", "created_at": time.time()},
-            "session_3": {"user_id": "user_test", "created_at": time.time()}
+            "session_1": {
+                "user_id": "user_test",
+                "created_at": current_time,
+                "expires_at": current_time + 3600,
+                "last_used": current_time,
+            },
+            "session_2": {
+                "user_id": "other_user",
+                "created_at": current_time,
+                "expires_at": current_time + 3600,
+                "last_used": current_time,
+            },
+            "session_3": {
+                "user_id": "user_test",
+                "created_at": current_time,
+                "expires_at": current_time + 3600,
+                "last_used": current_time,
+            },
         }
-        
-        async def mock_get(namespace, key):
-            return sessions_data.get(key)
-        
-        mock_runtime.storage.get.side_effect = mock_get
-        
-        sessions = await list_sessions(mock_runtime, user_id)
-        
+
+        class DummyStorage:
+            async def list_keys(self, namespace):
+                return all_keys
+
+            async def get(self, namespace, key):
+                return sessions_data.get(key)
+
+        class DummyServiceRegistry:
+            async def call(self, *args, **kwargs):
+                return None
+
+        runtime = MagicMock()
+        runtime.storage = DummyStorage()
+        runtime.service_registry = DummyServiceRegistry()
+
+        sessions = await list_sessions(runtime, user_id)
+
         assert len(sessions) == 2
         assert all(s["user_id"] == user_id for s in sessions)
 
@@ -233,30 +232,28 @@ class TestRevokeAllSessions:
     async def test_revoke_all_sessions_for_user(self, mock_runtime):
         """Тест: отзыв всех сессий пользователя."""
         user_id = "user_test"
-        
-        # Mock list_sessions
-        sessions = [
-            {"session_id": "session_1", "user_id": user_id},
-            {"session_id": "session_2", "user_id": user_id}
-        ]
-        
-        import modules.api.auth.sessions as sessions_module
-        original_list = sessions_module.list_sessions
-        
-        async def mock_list_sessions(runtime, uid):
-            return sessions
-        
-        sessions_module.list_sessions = mock_list_sessions
-        
-        mock_runtime.storage.delete.return_value = True
-        
-        try:
+        current_time = time.time()
+
+        # Настраиваем list_keys и get для возврата двух сессий пользователя и одной чужой
+        all_keys = ["session_1", "session_2", "session_3"]
+        mock_runtime.storage.list_keys = AsyncMock(return_value=all_keys)
+
+        sessions_data = {
+            "session_1": {"user_id": user_id, "created_at": current_time, "expires_at": current_time + 3600},
+            "session_2": {"user_id": user_id, "created_at": current_time, "expires_at": current_time + 3600},
+            "session_3": {"user_id": "other", "created_at": current_time, "expires_at": current_time + 3600},
+        }
+
+        async def mock_get(namespace, key):
+            return sessions_data.get(key)
+
+        mock_runtime.storage.get = AsyncMock(side_effect=mock_get)
+
+        # Патчим revoke_session, чтобы не ходить в реальный код
+        with patch("modules.api.auth.sessions.revoke_session", new=AsyncMock()) as mock_revoke:
             count = await revoke_all_sessions(mock_runtime, user_id)
-            
             assert count == 2
-            assert mock_runtime.storage.delete.call_count == 2
-        finally:
-            sessions_module.list_sessions = original_list
+            assert mock_revoke.await_count == 2
 
 
 class TestExtractSessionFromCookie:

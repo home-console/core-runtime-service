@@ -2,7 +2,7 @@
 Тесты для modules/api/auth/passwords.py
 """
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from modules.api.auth import (
     hash_password,
     verify_password,
@@ -97,7 +97,7 @@ class TestValidatePasswordStrength:
         is_valid, error = validate_password_strength(password)
         
         assert is_valid is False
-        assert "length" in error.lower() or "short" in error.lower()
+        assert "character" in error.lower() or "at least" in error.lower()
     
     def test_no_uppercase_fails(self):
         """Тест: пароль без заглавных букв не проходит."""
@@ -153,15 +153,19 @@ class TestSetPassword:
         mock_runtime.storage.get.return_value = user_data
         mock_runtime.storage.set.return_value = None
         
-        result = await set_password(mock_runtime, user_id, password)
-        
-        assert result is True
-        
-        # Verify password_hash was saved
-        call_args = mock_runtime.storage.set.call_args
-        updated_data = call_args[0][2]
-        assert "password_hash" in updated_data
-        assert updated_data["password_hash"] != password  # Не plain text
+        with patch('modules.api.auth.passwords.validate_user_exists', new_callable=AsyncMock) as mock_validate:
+            mock_validate.return_value = True
+            
+            await set_password(mock_runtime, user_id, password)
+            
+            # Verify password_hash was saved
+            # storage.set вызывается дважды: один раз для пользователя, один раз для audit log
+            call_args_list = mock_runtime.storage.set.call_args_list
+            # Первый вызов - сохранение пользователя
+            user_call = call_args_list[0]
+            updated_data = user_call[0][2]
+            assert "password_hash" in updated_data
+            assert updated_data["password_hash"] != password  # Не plain text
     
     @pytest.mark.asyncio
     async def test_set_password_weak_password_fails(self, mock_runtime):
@@ -172,18 +176,16 @@ class TestSetPassword:
         user_data = {"user_id": user_id}
         mock_runtime.storage.get.return_value = user_data
         
-        result = await set_password(mock_runtime, user_id, weak_password)
-        
-        assert result is False
+        with pytest.raises(ValueError):
+            await set_password(mock_runtime, user_id, weak_password)
     
     @pytest.mark.asyncio
     async def test_set_password_nonexistent_user_fails(self, mock_runtime):
         """Тест: установка пароля несуществующему пользователю."""
         mock_runtime.storage.get.return_value = None
         
-        result = await set_password(mock_runtime, "nonexistent", "SecurePassword123")
-        
-        assert result is False
+        with pytest.raises(ValueError):
+            await set_password(mock_runtime, "nonexistent", "SecurePassword123")
 
 
 class TestChangePassword:
@@ -207,18 +209,23 @@ class TestChangePassword:
         mock_runtime.storage.get.return_value = user_data
         mock_runtime.storage.set.return_value = None
         
-        result = await change_password(mock_runtime, user_id, old_password, new_password)
-        
-        assert result is True
-        
-        # Verify new password was saved
-        call_args = mock_runtime.storage.set.call_args
-        updated_data = call_args[0][2]
-        
-        # Проверяем что новый пароль работает
-        assert verify_password(new_password, updated_data["password_hash"])
-        # Старый пароль больше не работает
-        assert not verify_password(old_password, updated_data["password_hash"])
+        with patch('modules.api.auth.passwords.validate_user_exists', new_callable=AsyncMock) as mock_validate:
+            with patch('modules.api.auth.passwords.revoke_all_sessions', new_callable=AsyncMock):
+                mock_validate.return_value = True
+                
+                await change_password(mock_runtime, user_id, old_password, new_password)
+                
+                # Verify new password was saved
+                # storage.set вызывается дважды: один раз для пользователя, один раз для audit log
+                call_args_list = mock_runtime.storage.set.call_args_list
+                # Первый вызов - сохранение пользователя
+                user_call = call_args_list[0]
+                updated_data = user_call[0][2]
+                
+                # Проверяем что новый пароль работает
+                assert verify_password(new_password, updated_data["password_hash"])
+                # Старый пароль больше не работает
+                assert not verify_password(old_password, updated_data["password_hash"])
     
     @pytest.mark.asyncio
     async def test_change_password_wrong_old_password(self, mock_runtime):
@@ -233,9 +240,11 @@ class TestChangePassword:
         
         mock_runtime.storage.get.return_value = user_data
         
-        result = await change_password(mock_runtime, user_id, wrong_old, new_password)
-        
-        assert result is False
+        with patch('modules.api.auth.passwords.validate_user_exists', new_callable=AsyncMock) as mock_validate:
+            mock_validate.return_value = True
+            
+            with pytest.raises(ValueError):
+                await change_password(mock_runtime, user_id, wrong_old, new_password)
 
 
 class TestVerifyUserPassword:

@@ -22,9 +22,10 @@ def extract_session_from_cookie(request: Request) -> Optional[str]:
         request: FastAPI Request
     
     Returns:
-        Session ID или None если cookie отсутствует
+        Session ID или None если cookie отсутствует или пуст
     """
-    return request.cookies.get("session_id")
+    session_id = request.cookies.get("session_id")
+    return session_id if session_id else None
 
 
 async def validate_session(runtime: Any, session_id: str) -> Optional[RequestContext]:
