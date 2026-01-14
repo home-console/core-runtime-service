@@ -20,7 +20,19 @@ HomeConsole — это модульная платформа для управл
 - ✅ **REST API** — полный HTTP API для управления
 - ✅ **Web Admin UI** — React интерфейс администратора
 - ✅ **Storage API** — key-value с поддержкой SQLite/PostgreSQL
+- ✅ **Monitoring** — Prometheus metrics, health checks
 - ✅ **Интеграции** — Yandex Smart Home, OAuth, и другие
+
+---
+
+## 📖 Documentation
+
+Complete documentation is available in the [docs/](docs/) directory:
+
+- [Documentation Index](docs/INDEX.md) - Full documentation overview
+- [Quick Start Guide](docs/03-QUICKSTART.md) - Getting started
+- [Architecture](docs/01-ARCHITECTURE.md) - System design
+- [Roadmap](ROADMAP.md) - Development priorities
 
 ---
 
