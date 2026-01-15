@@ -25,6 +25,8 @@ HTTP Request
 
 **Ключевой принцип:** Auth логика полностью изолирована на уровне HTTP boundary. CoreRuntime, RuntimeModule, ServiceRegistry и доменные модули не знают про auth.
 
+**Trusted Services Model:** Authorization выполняется ТОЛЬКО на boundary-слое (ApiModule, AdminModule). ServiceRegistry, RuntimeModule и доменные сервисы считаются trusted и не выполняют проверки доступа. Прямые вызовы сервисов через `service_registry.call()` допустимы только из trusted-кода (модулей и плагинов).
+
 ---
 
 ## RequestContext

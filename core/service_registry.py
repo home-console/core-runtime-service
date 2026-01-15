@@ -75,6 +75,10 @@ class ServiceRegistry:
             
         Пример:
             result = await service_registry.call("devices.turn_on", "lamp_kitchen")
+        
+        SECURITY NOTE: ServiceRegistry не выполняет проверки авторизации. Сервисы считаются trusted.
+        Authorization выполняется на boundary-слое (ApiModule, AdminModule) перед вызовом сервисов.
+        Прямые вызовы через service_registry.call() допустимы только из trusted-кода (модулей и плагинов).
         """
         # Получаем функцию под lock для thread-safety
         async with self._lock:
