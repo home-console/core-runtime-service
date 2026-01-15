@@ -24,6 +24,10 @@ from .audit import audit_log_auth_event
 from .users import validate_user_exists
 
 
+# In-memory cache для JWT secret чтобы избежать race condition
+_jwt_secret_cache: Optional[str] = None
+
+
 def extract_jwt_from_header(request: Request) -> Optional[str]:
     """
     Извлекает JWT access token из заголовка Authorization: Bearer <token>.
@@ -75,20 +79,36 @@ async def get_or_create_jwt_secret(runtime: Any) -> str:
     Returns:
         JWT secret key (строка)
     """
+    global _jwt_secret_cache
+    
+    # Сначала проверяем кеш в памяти
+    if _jwt_secret_cache:
+        return _jwt_secret_cache
+    
+    # Пытаемся загрузить из storage
     try:
-        secret = await runtime.storage.get("auth_config", JWT_SECRET_KEY_STORAGE_KEY)
-        if secret and isinstance(secret, str):
-            return secret
-    except Exception:
-        pass
+        data = await runtime.storage.get("auth_config", JWT_SECRET_KEY_STORAGE_KEY)
+        if data and isinstance(data, dict):
+            secret = data.get("value")
+            if secret and isinstance(secret, str):
+                print(f'[JWT] Loaded existing secret from storage, length: {len(secret)}')
+                _jwt_secret_cache = secret
+                return secret
+    except Exception as e:
+        print(f'[JWT] Failed to load secret from storage: {str(e)}')
     
     # Генерируем новый secret
     secret = secrets.token_urlsafe(JWT_SECRET_KEY_LENGTH)
+    print(f'[JWT] Generated NEW secret, length: {len(secret)}')
     try:
-        await runtime.storage.set("auth_config", JWT_SECRET_KEY_STORAGE_KEY, secret)
-    except Exception:
-        pass
+        # Оборачиваем в dict, так как storage.set требует dict
+        await runtime.storage.set("auth_config", JWT_SECRET_KEY_STORAGE_KEY, {"value": secret})
+        print('[JWT] Saved new secret to storage')
+    except Exception as e:
+        print(f'[JWT] Failed to save secret to storage: {str(e)}')
     
+    # Кешируем в памяти
+    _jwt_secret_cache = secret
     return secret
 
 
@@ -144,14 +164,19 @@ def validate_access_token(token: str, secret: str) -> Optional[Dict[str, Any]]:
         
         # Проверяем тип токена
         if payload.get("type") != "access":
+            print(f'[JWT] Token type mismatch: expected "access", got "{payload.get("type")}"')
             return None
         
+        print(f'[JWT] Token validated successfully for user: {payload.get("user_id")}')
         return payload
     except ExpiredSignatureError:
+        print('[JWT] Token expired')
         return None
-    except InvalidTokenError:
+    except InvalidTokenError as e:
+        print(f'[JWT] Invalid token: {str(e)}')
         return None
-    except Exception:
+    except Exception as e:
+        print(f'[JWT] Validation error: {str(e)}')
         return None
 
 

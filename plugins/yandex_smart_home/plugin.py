@@ -180,6 +180,19 @@ class YandexSmartHomeRealPlugin(BasePlugin):
         # Регистрируем сервис
         await self.runtime.service_registry.register("yandex.sync_devices", _sync_devices)
 
+        # Регистрируем HTTP endpoint для синхронизации
+        from core.http_registry import HttpEndpoint
+        try:
+            self.runtime.http.register(HttpEndpoint(
+                method="POST",
+                path="/admin/v1/yandex/sync",
+                service="yandex.sync_devices",
+                description="Синхронизировать устройства из Яндекс Smart Home API"
+            ))
+        except Exception:
+            # Best-effort: не блокируем загрузку плагина
+            pass
+
     async def _transform_device(self, yandex_device: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Преобразовать устройство из API Яндекса в стандартный формат.
 

@@ -224,6 +224,20 @@ class AdminModule(RuntimeModule):
                     out[k] = None
             return out
 
+        async def admin_v1_state_keys() -> List[str]:
+            """List all state keys."""
+            try:
+                return await self.runtime.state_engine.keys()
+            except Exception:
+                return []
+
+        async def admin_v1_state_get(key: str) -> Any:
+            """Get state value by key."""
+            try:
+                return await self.runtime.state_engine.get(key)
+            except Exception:
+                return None
+
         # --- Devices proxy services (admin v1) ---
         async def admin_devices_list():
             return await self.runtime.service_registry.call("devices.list")
@@ -464,8 +478,8 @@ class AdminModule(RuntimeModule):
             except Exception:
                 return []
 
-        async def admin_auth_login(body: Any = None) -> Dict[str, Any]:
-            """Login with password authentication, returns JWT access token and refresh token."""
+        async def admin_auth_login(body: Any = None, request: Any = None, response: Any = None) -> Dict[str, Any]:
+            """Login with password authentication, sets HttpOnly cookies with tokens."""
             if not isinstance(body, dict):
                 return {"ok": False, "error": "invalid_body"}
             
@@ -510,6 +524,32 @@ class AdminModule(RuntimeModule):
                     user_agent=user_agent
                 )
                 
+                # Set HttpOnly cookies if response object is available
+                if response is not None:
+                    # HttpOnly cookies for secure token storage
+                    # In dev mode: secure=False allows http://localhost cookies
+                    # samesite="lax" allows cookie in same-site requests from browser
+                    response.set_cookie(
+                        key="access_token",
+                        value=access_token,
+                        max_age=900,  # 15 минут
+                        httponly=True,
+                        secure=False,  # Dev mode - allow http
+                        samesite="lax",
+                        domain="localhost",
+                        path="/"
+                    )
+                    response.set_cookie(
+                        key="refresh_token",
+                        value=refresh_token,
+                        max_age=2592000,  # 30 дней
+                        httponly=True,
+                        secure=False,  # Dev mode - allow http
+                        samesite="lax",
+                        domain="localhost",
+                        path="/"
+                    )
+                
                 return {
                     "ok": True,
                     "access_token": access_token,
@@ -520,12 +560,16 @@ class AdminModule(RuntimeModule):
             except Exception as e:
                 return {"ok": False, "error": str(e)}
         
-        async def admin_auth_refresh(body: Any = None) -> Dict[str, Any]:
-            """Refresh access token using refresh token."""
-            if not isinstance(body, dict):
-                return {"ok": False, "error": "invalid_body"}
+        async def admin_auth_refresh(body: Any = None, request: Any = None, response: Any = None) -> Dict[str, Any]:
+            """Refresh access token using refresh token from cookie or body."""
+            # Try to get refresh_token from cookie first, then from body
+            refresh_token = None
+            if request is not None:
+                refresh_token = request.cookies.get("refresh_token")
             
-            refresh_token = body.get("refresh_token")
+            if not refresh_token and isinstance(body, dict):
+                refresh_token = body.get("refresh_token")
+            
             if not refresh_token:
                 return {"ok": False, "error": "refresh_token required"}
             
@@ -535,6 +579,30 @@ class AdminModule(RuntimeModule):
                     refresh_token,
                     rotate_refresh=True
                 )
+                
+                # Set HttpOnly cookies if response object is available
+                if response is not None:
+                    response.set_cookie(
+                        key="access_token",
+                        value=access_token,
+                        max_age=900,  # 15 минут
+                        httponly=True,
+                        secure=False,  # В dev режиме, в продакшене поставить True
+                        samesite="lax",
+                        domain="localhost",
+                        path="/"
+                    )
+                    if new_refresh_token:
+                        response.set_cookie(
+                            key="refresh_token",
+                            value=new_refresh_token,
+                            max_age=2592000,  # 30 дней
+                            httponly=True,
+                            secure=False,  # В dev режиме, в продакшене поставить True
+                            samesite="lax",
+                            domain="localhost",
+                            path="/"
+                        )
                 
                 result = {
                     "ok": True,
@@ -670,6 +738,36 @@ class AdminModule(RuntimeModule):
                 return {"ok": True, "new_api_key": new_api_key, "old_api_key": old_api_key[:16] + "..."}
             except Exception as e:
                 return {"ok": False, "error": str(e)}
+        
+        async def admin_auth_me(request: Any = None) -> Dict[str, Any]:
+            """Get current user information from request context."""
+            # Получаем context из request.state (устанавливается middleware)
+            if request is None:
+                return {"ok": False, "error": "request not available"}
+            
+            from modules.api.auth.middleware import get_request_context
+            context = await get_request_context(request)
+            
+            if context is None or context.user_id is None:
+                return {"ok": False, "error": "not authenticated"}
+            
+            try:
+                # Получаем данные пользователя из storage
+                user_data = await self.runtime.storage.get(AUTH_USERS_NAMESPACE, context.user_id)
+                if not isinstance(user_data, dict):
+                    return {"ok": False, "error": "user data not found"}
+                
+                return {
+                    "ok": True,
+                    "user_id": context.user_id,
+                    "username": user_data.get("username"),
+                    "scopes": list(context.scopes) if context.scopes else user_data.get("scopes", []),
+                    "is_admin": context.is_admin or user_data.get("is_admin", False),
+                    "created_at": user_data.get("created_at"),
+                    "source": context.source,
+                }
+            except Exception as e:
+                return {"ok": False, "error": str(e)}
 
         # Register all services
         service_registrations = [
@@ -685,6 +783,8 @@ class AdminModule(RuntimeModule):
             ("admin.v1.events", admin_v1_events),
             ("admin.v1.storage", admin_v1_storage),
             ("admin.v1.state", admin_v1_state),
+            ("admin.v1.state_keys", admin_v1_state_keys),
+            ("admin.v1.state_get", admin_v1_state_get),
             ("admin.devices.list", admin_devices_list),
             ("admin.devices.get", admin_devices_get),
             ("admin.devices.set_state", admin_devices_set_state),
@@ -707,6 +807,7 @@ class AdminModule(RuntimeModule):
             ("admin.auth.revoke_all_sessions", admin_auth_revoke_all_sessions),
             ("admin.auth.revoke_api_key", admin_auth_revoke_api_key),
             ("admin.auth.rotate_api_key", admin_auth_rotate_api_key),
+            ("admin.auth.me", admin_auth_me),
         ]
 
         for name, func in service_registrations:
@@ -719,11 +820,6 @@ class AdminModule(RuntimeModule):
 
         # Register HTTP endpoints
         http_endpoints = [
-            HttpEndpoint(method="GET", path="/admin/plugins", service="admin.list_plugins", description="List loaded plugins"),
-            HttpEndpoint(method="GET", path="/admin/services", service="admin.list_services", description="List registered services"),
-            HttpEndpoint(method="GET", path="/admin/http", service="admin.list_http", description="List HTTP endpoints"),
-            HttpEndpoint(method="GET", path="/admin/state/keys", service="admin.state_keys", description="List state keys"),
-            HttpEndpoint(method="GET", path="/admin/state/{key}", service="admin.state_get", description="Get state value by key"),
             HttpEndpoint(method="GET", path="/admin/v1/runtime", service="admin.v1.runtime", description="Runtime info: uptime, started_at, version"),
             HttpEndpoint(method="GET", path="/admin/v1/plugins", service="admin.v1.plugins", description="List plugins with stats"),
             HttpEndpoint(method="GET", path="/admin/v1/services", service="admin.v1.services", description="List services and owning plugin"),
@@ -731,6 +827,8 @@ class AdminModule(RuntimeModule):
             HttpEndpoint(method="GET", path="/admin/v1/events", service="admin.v1.events", description="List events and subscribers"),
             HttpEndpoint(method="GET", path="/admin/v1/storage", service="admin.v1.storage", description="List storage namespaces and key counts"),
             HttpEndpoint(method="GET", path="/admin/v1/state", service="admin.v1.state", description="Read-only state engine dump"),
+            HttpEndpoint(method="GET", path="/admin/v1/state/keys", service="admin.v1.state_keys", description="List all state keys"),
+            HttpEndpoint(method="GET", path="/admin/v1/state/{key}", service="admin.v1.state_get", description="Get state value by key"),
             HttpEndpoint(method="GET", path="/admin/v1/devices", service="admin.devices.list", description="List internal devices"),
             HttpEndpoint(method="GET", path="/admin/v1/devices/mappings", service="admin.devices.list_mappings", description="List external->internal device mappings"),
             HttpEndpoint(method="POST", path="/admin/v1/devices/mappings", service="admin.devices.create_mapping", description="Create mapping: body {external_id, internal_id}"),
@@ -743,6 +841,7 @@ class AdminModule(RuntimeModule):
             HttpEndpoint(method="POST", path="/admin/v1/auth/api-keys", service="admin.auth.create_api_key", description="Create new API key (body: {scopes, is_admin?, subject?, expires_at?})"),
             HttpEndpoint(method="GET", path="/admin/v1/auth/api-keys", service="admin.auth.list_api_keys", description="List all API keys (without actual keys, with metadata)"),
             HttpEndpoint(method="POST", path="/admin/v1/auth/api-keys/revoke", service="admin.auth.revoke_api_key", description="Revoke an API key (body: {api_key})"),
+            HttpEndpoint(method="GET", path="/admin/v1/auth/me", service="admin.auth.me", description="Get current user information"),
             HttpEndpoint(method="POST", path="/admin/v1/auth/api-keys/rotate", service="admin.auth.rotate_api_key", description="Rotate an API key (body: {old_api_key, expires_at?})"),
             HttpEndpoint(method="POST", path="/admin/v1/auth/users", service="admin.auth.create_user", description="Create new user (body: {user_id, scopes, is_admin?, username?, password?})"),
             HttpEndpoint(method="GET", path="/admin/v1/auth/users", service="admin.auth.list_users", description="List all users"),

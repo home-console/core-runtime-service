@@ -16,9 +16,10 @@ import asyncio
 import re
 import inspect
 
-from fastapi import FastAPI, Request, HTTPException, Path, Body, Depends
+from fastapi import FastAPI, Request, Response, HTTPException, Path, Body, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.openapi.utils import get_openapi
+from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
 from core.runtime_module import RuntimeModule
@@ -27,6 +28,7 @@ from modules.api.auth import (
     get_request_context,
 )
 from modules.api.authz import require as authz_require, AuthorizationError
+from modules.api.admin_access_middleware import admin_access_middleware
 from modules.monitoring import MonitoringModule
 
 
@@ -67,8 +69,25 @@ class ApiModule(RuntimeModule):
         # Сохраняем runtime в app.state для доступа из middleware
         self.app.state.runtime = self.runtime
         
-        # Добавляем auth middleware (boundary-layer)
+        # Добавляем CORS middleware для работы с frontend
+        self.app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+        
+        # ВАЖНО: Порядок выполнения middleware в FastAPI обратный порядку добавления
+        # Последний добавленный выполняется первым
+        
+        # Добавляем auth middleware (boundary-layer) - выполнится вторым
         self.app.middleware("http")(require_auth_middleware)
+        
+        # Добавляем admin access middleware ПОСЛЕДНИМ, чтобы выполнился ПЕРВЫМ
+        # Это блокирует доступ к /admin/* из публичного интернета
+        # Выполнится первым (проверка IP до проверки авторизации)
+        self.app.middleware("http")(admin_access_middleware)
         
         # Mount monitoring module
         self.monitoring = MonitoringModule(runtime=self.runtime)
@@ -98,6 +117,7 @@ class ApiModule(RuntimeModule):
             def make_handler(endpoint):
                 async def handler(
                     request: Request,
+                    response: Response,
                     body: Dict[str, Any] | None = Body(None) if endpoint.method in ["POST", "PUT", "PATCH"] else None
                 ):
                     # Получаем RequestContext из middleware (boundary-layer)
@@ -207,6 +227,15 @@ class ApiModule(RuntimeModule):
                     # Не мержим body в params, чтобы сохранить структуру данных
                     if body is not None:
                         params["body"] = body
+                    
+                    # Для auth эндпоинтов передаём request и response для установки cookies
+                    if endpoint.service in ["admin.auth.login", "admin.auth.refresh"]:
+                        params["request"] = request
+                        params["response"] = response
+                    
+                    # Для admin.auth.me передаём request для получения context
+                    if endpoint.service == "admin.auth.me":
+                        params["request"] = request
 
                     if not await self.runtime.service_registry.has_service(endpoint.service):
                         raise HTTPException(status_code=404, detail="service not found")
@@ -232,6 +261,15 @@ class ApiModule(RuntimeModule):
                         "request",
                         kind=inspect.Parameter.POSITIONAL_OR_KEYWORD,
                         annotation=Request,
+                    )
+                )
+                
+                # Добавляем response
+                params_sig.append(
+                    inspect.Parameter(
+                        "response",
+                        kind=inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                        annotation=Response,
                     )
                 )
                 
