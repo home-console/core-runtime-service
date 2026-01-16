@@ -83,9 +83,16 @@ class SQLiteAdapter(StorageAdapter):
             row = cursor.fetchone()
             if row is None:
                 return None
+            # Проверяем, что значение не None
+            value = row[0]
+            if value is None:
+                return None
+            # Проверяем, что это строка перед десериализацией
+            if not isinstance(value, (str, bytes, bytearray)):
+                return None
             try:
-                return json.loads(row[0])
-            except (json.JSONDecodeError, ValueError) as e:
+                return json.loads(value)
+            except (json.JSONDecodeError, ValueError, TypeError) as e:
                 # Логируем ошибку парсинга, но не падаем
                 # Возвращаем None, чтобы система могла продолжить работу
                 import sys
@@ -109,7 +116,13 @@ class SQLiteAdapter(StorageAdapter):
             )
             # Не делаем commit если мы в транзакции
             if not in_transaction:
-                conn.commit()
+                try:
+                    conn.commit()
+                except sqlite3.OperationalError as e:
+                    # Игнорируем ошибки типа "cannot commit - no transaction is active"
+                    # Это может произойти, если connection уже закрыт или транзакция не активна
+                    if "transaction" not in str(e).lower():
+                        raise
 
         await asyncio.to_thread(_set_sync, namespace, key, value, self._in_transaction)
 
@@ -124,7 +137,12 @@ class SQLiteAdapter(StorageAdapter):
             )
             # Не делаем commit если мы в транзакции
             if not in_transaction:
-                conn.commit()
+                try:
+                    conn.commit()
+                except sqlite3.OperationalError as e:
+                    # Игнорируем ошибки типа "cannot commit - no transaction is active"
+                    if "transaction" not in str(e).lower():
+                        raise
             return cursor.rowcount > 0
 
         return await asyncio.to_thread(_delete_sync, namespace, key, self._in_transaction)
@@ -147,7 +165,12 @@ class SQLiteAdapter(StorageAdapter):
             conn.execute("DELETE FROM storage WHERE namespace = ?", (ns,))
             # Не делаем commit если мы в транзакции
             if not in_transaction:
-                conn.commit()
+                try:
+                    conn.commit()
+                except sqlite3.OperationalError as e:
+                    # Игнорируем ошибки типа "cannot commit - no transaction is active"
+                    if "transaction" not in str(e).lower():
+                        raise
 
         await asyncio.to_thread(_clear_sync, namespace, self._in_transaction)
     
@@ -188,6 +211,28 @@ class SQLiteAdapter(StorageAdapter):
             raise
         finally:
             self._in_transaction = False
+    
+    async def batch_set(self, namespace: str, items: dict[str, dict[str, Any]]) -> None:
+        """Массовая запись значений в namespace (выполняется в threadpool)."""
+        
+        def _batch_set_sync(ns: str, items_dict: dict[str, dict[str, Any]], in_transaction: bool):
+            conn = self._get_connection()
+            for key, value in items_dict.items():
+                json_value = json.dumps(value, ensure_ascii=False)
+                conn.execute(
+                    "INSERT OR REPLACE INTO storage (namespace, key, value) VALUES (?, ?, ?)",
+                    (ns, key, json_value),
+                )
+            # Не делаем commit если мы в транзакции
+            if not in_transaction:
+                try:
+                    conn.commit()
+                except sqlite3.OperationalError as e:
+                    # Игнорируем ошибки типа "cannot commit - no transaction is active"
+                    if "transaction" not in str(e).lower():
+                        raise
+        
+        await asyncio.to_thread(_batch_set_sync, namespace, items, self._in_transaction)
 
     async def close(self) -> None:
         """Закрыть соединение с БД (выполняется в threadpool)."""

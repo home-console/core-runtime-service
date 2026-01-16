@@ -6,7 +6,7 @@ Storage работает по принципу namespace + key + JSON value.
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Optional, AsyncContextManager
+from typing import Any, Optional, AsyncIterator
 from contextlib import asynccontextmanager
 
 
@@ -81,9 +81,9 @@ class StorageAdapter(ABC):
         """Закрыть соединение с хранилищем."""
         pass
     
-    @abstractmethod
     @asynccontextmanager
-    async def transaction(self) -> AsyncContextManager[Any]:
+    @abstractmethod
+    async def transaction(self) -> AsyncIterator[None]:
         """
         Контекстный менеджер для транзакций.
         
@@ -96,6 +96,23 @@ class StorageAdapter(ABC):
                 # При исключении - откатывается
         
         Yields:
-            Объект транзакции (зависит от реализации адаптера)
+            None (контекстный менеджер для управления транзакцией)
+        """
+        yield  # pragma: no cover
+    
+    @abstractmethod
+    async def batch_set(self, namespace: str, items: dict[str, dict[str, Any]]) -> None:
+        """
+        Массовая запись значений в namespace.
+        
+        Args:
+            namespace: пространство имён
+            items: словарь {key: value}, где value - это dict с данными
+        
+        Пример:
+            await adapter.batch_set("devices", {
+                "device1": {"name": "Lamp 1", "state": "on"},
+                "device2": {"name": "Lamp 2", "state": "off"}
+            })
         """
         pass

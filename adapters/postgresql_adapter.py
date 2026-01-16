@@ -101,12 +101,16 @@ class PostgreSQLAdapter(StorageAdapter):
                 return None
             # JSONB уже является dict в asyncpg, но для совместимости возвращаем как dict
             value = row["value"]
+            if value is None:
+                return None
             if isinstance(value, dict):
                 return value
             # Fallback на json.loads если по какой-то причине вернулся текст
             try:
-                return json.loads(value) if isinstance(value, str) else value
-            except (json.JSONDecodeError, ValueError) as e:
+                if isinstance(value, (str, bytes, bytearray)):
+                    return json.loads(value)
+                return value
+            except (json.JSONDecodeError, ValueError, TypeError) as e:
                 # Логируем ошибку парсинга, но не падаем
                 import sys
                 print(
@@ -182,3 +186,16 @@ class PostgreSQLAdapter(StorageAdapter):
         async with pool.acquire() as conn:
             async with conn.transaction():
                 yield
+    
+    async def batch_set(self, namespace: str, items: dict[str, dict[str, Any]]) -> None:
+        """Массовая запись значений в namespace."""
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            # Используем executemany для оптимизации множественных вставок
+            # asyncpg автоматически сериализует dict в JSONB
+            values = [(namespace, key, value) for key, value in items.items()]
+            await conn.executemany("""
+                INSERT INTO storage (namespace, key, value)
+                VALUES ($1, $2, $3::jsonb)
+                ON CONFLICT (namespace, key) DO UPDATE SET value = $3::jsonb
+            """, values)
