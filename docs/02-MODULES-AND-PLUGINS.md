@@ -457,11 +457,31 @@ async def test_devices_integration(memory_runtime):
 
 ---
 
+## Текущая архитектура
+
+**RuntimeModule:**
+- Обязательные, встроенные домены системы
+- Регистрируются напрямую в CoreRuntime через ModuleManager
+- Всегда доступны при работе runtime
+- Примеры: logger, api, admin, devices, automation, presence
+
+**Plugin:**
+- Опциональные расширения, загружаемые через manifest (plugin.json или manifest.json)
+- Загружаются ТОЛЬКО через PluginManager.auto_load_plugins() на основе manifest
+- Без manifest плагин не загружается
+- Все плагины считаются доверенными и выполняются в том же процессе
+- Имеют полный доступ к Core API (storage, event_bus, service_registry, state_engine, http)
+
+**Core:**
+- Инфраструктурные компоненты без доменной логики
+- Предоставляет только API (EventBus, ServiceRegistry, Storage, StateEngine, HttpRegistry)
+- Не знает о доменах, интеграциях и бизнес-логике
+
+---
+
 ## Будущее направление
 
-**Текущая модель:** RuntimeModule и Plugin считаются доверенными, имеют полный доступ к Core API. Плагины загружаются только через manifest, выполняются в том же процессе.
-
-**Возможное будущее:** переход к untrusted plugins с capability-based permissions, изоляцией выполнения (remote/container/WASM), marketplace с версионированием. Это вне текущего scope — архитектура подготовлена, но код не реализует это.
+Архитектура допускает дальнейшее развитие: возможен вынос некоторых расширений в отдельные процессы или сервисы, реализация изоляции выполнения для плагинов. Это не реализовано и не является текущей целью — текущая модель остаётся простой и монолитной.
 
 ---
 
