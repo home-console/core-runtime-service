@@ -70,16 +70,19 @@ class ServiceRegistry:
     def __init__(self):
         # Словарь: service_name -> function
         self._services: dict[str, ServiceFunc] = {}
+        # Словарь: service_name.version -> deprecated flag
+        self._deprecated: dict[str, bool] = {}
         # Lock для thread-safety операций с _services
         self._lock = asyncio.Lock()
 
-    async def register(self, service_name: str, func: ServiceFunc) -> None:
+    async def register(self, service_name: str, func: ServiceFunc, version: Optional[str] = None) -> None:
         """
         Зарегистрировать сервис.
         
         Args:
             service_name: имя сервиса (например, "devices.turn_on")
             func: async функция-обработчик
+            version: опциональная версия API (например, "v1", "v2")
             
         Пример:
             async def turn_on_device(device_id: str):
@@ -87,11 +90,20 @@ class ServiceRegistry:
                 pass
             
             await service_registry.register("devices.turn_on", turn_on_device)
+            await service_registry.register("devices.turn_on", turn_on_device_v2, version="v2")
         """
+        # Если указана версия, добавляем её к имени сервиса
+        if version:
+            versioned_name = f"{service_name}.{version}"
+        else:
+            versioned_name = service_name
+        
         async with self._lock:
-            if service_name in self._services:
-                raise ValueError(f"Сервис '{service_name}' уже зарегистрирован")
-            self._services[service_name] = func
+            if versioned_name in self._services:
+                raise ValueError(f"Сервис '{versioned_name}' уже зарегистрирован")
+            self._services[versioned_name] = func
+            # По умолчанию сервис не deprecated
+            self._deprecated[versioned_name] = False
     
     async def register_with_middleware(
         self,
@@ -244,3 +256,78 @@ class ServiceRegistry:
         """Очистить все сервисы."""
         async with self._lock:
             self._services.clear()
+            self._deprecated.clear()
+    
+    async def get_versions(self, service_name: str) -> list[str]:
+        """
+        Получить список всех версий для сервиса.
+        
+        Args:
+            service_name: имя сервиса (например, "devices.list")
+        
+        Returns:
+            Список версий (например, ["v1", "v2"])
+        
+        Пример:
+            versions = await service_registry.get_versions("devices.list")
+            # Вернёт ["v1", "v2"] если есть devices.list.v1 и devices.list.v2
+        """
+        async with self._lock:
+            versions = []
+            for registered_name in self._services.keys():
+                if registered_name == service_name:
+                    # Сервис без версии
+                    versions.append("")
+                elif registered_name.startswith(f"{service_name}."):
+                    # Извлекаем версию из имени
+                    version = registered_name[len(service_name) + 1:]
+                    if version not in versions:
+                        versions.append(version)
+            return sorted(versions)
+    
+    async def is_deprecated(self, service_name: str, version: Optional[str] = None) -> bool:
+        """
+        Проверить, является ли версия сервиса устаревшей.
+        
+        Args:
+            service_name: имя сервиса
+            version: версия API (если None, проверяет сервис без версии)
+        
+        Returns:
+            True если версия помечена как deprecated
+        
+        Пример:
+            if await service_registry.is_deprecated("devices.list", "v1"):
+                print("Версия v1 устарела, используйте v2")
+        """
+        async with self._lock:
+            if version:
+                versioned_name = f"{service_name}.{version}"
+            else:
+                versioned_name = service_name
+            return self._deprecated.get(versioned_name, False)
+    
+    async def mark_deprecated(self, service_name: str, version: Optional[str] = None) -> None:
+        """
+        Пометить версию сервиса как устаревшую.
+        
+        Args:
+            service_name: имя сервиса
+            version: версия API (если None, помечает сервис без версии)
+        
+        Raises:
+            ValueError: если сервис не найден
+        
+        Пример:
+            await service_registry.mark_deprecated("devices.list", "v1")
+        """
+        async with self._lock:
+            if version:
+                versioned_name = f"{service_name}.{version}"
+            else:
+                versioned_name = service_name
+            
+            if versioned_name not in self._services:
+                raise ValueError(f"Сервис '{versioned_name}' не найден")
+            
+            self._deprecated[versioned_name] = True

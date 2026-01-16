@@ -20,6 +20,7 @@ Welcome to HomeConsole Core Runtime documentation.
 - [Runtime Module Contract](07-RUNTIME-MODULE-CONTRACT.md) - Module interface
 - [Plugin Contract](08-PLUGIN-CONTRACT.md) - Plugin interface
 - [Remote Plugin Contract](05-REMOTE-PLUGIN-CONTRACT.md) - Remote plugin protocol
+- [API Versioning](API_VERSIONING.md) - API versioning strategy and migration guide
 
 ## Implementation Guides
 

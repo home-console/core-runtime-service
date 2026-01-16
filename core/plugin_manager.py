@@ -13,6 +13,7 @@ PluginManager - управление lifecycle плагинов.
 
 import importlib
 import json
+import sys
 from pathlib import Path
 from typing import Optional, TYPE_CHECKING, Callable, Awaitable, Dict, Any, List
 from enum import Enum
@@ -185,6 +186,80 @@ class PluginManager:
         except Exception as e:
             self._states[plugin_name] = PluginState.ERROR
             raise RuntimeError(f"Ошибка выгрузки плагина '{plugin_name}': {e}")
+    
+    async def reload_plugin(self, plugin_name: str) -> None:
+        """
+        Перезагрузить плагин (hot-reload).
+        
+        Выполняет последовательность: stop → unload → load → start.
+        Плагин должен быть загружен из manifest для успешной перезагрузки.
+        
+        Args:
+            plugin_name: имя плагина для перезагрузки
+            
+        Raises:
+            ValueError: если плагин не найден или не может быть перезагружен
+            RuntimeError: если перезагрузка не удалась
+        
+        Пример:
+            await plugin_manager.reload_plugin("yandex_smart_home")
+        """
+        # Проверяем, что плагин существует
+        if plugin_name not in self._plugins:
+            raise ValueError(f"Плагин '{plugin_name}' не найден для перезагрузки")
+        
+        # Сохраняем информацию о состоянии перед перезагрузкой
+        was_started = self._states.get(plugin_name) == PluginState.STARTED
+        
+        # Получаем путь к плагину из манифеста (нужно для перезагрузки)
+        # Ищем плагин в каталоге plugins/
+        from pathlib import Path
+        plugins_dir = Path(__file__).parent.parent / "plugins"
+        plugin_dir = plugins_dir / plugin_name
+        
+        if not plugin_dir.exists() or not plugin_dir.is_dir():
+            raise ValueError(f"Не удалось найти директорию плагина '{plugin_name}' для перезагрузки")
+        
+        # Загружаем манифест
+        manifest = self._load_plugin_manifest(plugin_dir)
+        if not manifest:
+            raise ValueError(f"Не удалось найти manifest для плагина '{plugin_name}'")
+        
+        # Выгружаем плагин
+        await self.unload_plugin(plugin_name)
+        
+        # Перезагружаем модуль Python для обновления кода
+        # Извлекаем class_path из манифеста
+        class_path = manifest.get("class_path")
+        if class_path:
+            module_path = class_path.rsplit(".", 1)[0]
+            try:
+                import importlib
+                # Перезагружаем модуль
+                if module_path in sys.modules:
+                    importlib.reload(sys.modules[module_path])
+            except Exception as e:
+                # Логируем, но продолжаем - возможно модуль уже перезагружен
+                try:
+                    await warning(
+                        self._runtime,
+                        f"Не удалось перезагрузить модуль '{module_path}' для плагина '{plugin_name}': {e}",
+                        component="plugin_manager"
+                    )
+                except Exception:
+                    pass
+        
+        # Загружаем плагин заново из манифеста
+        async def dummy_logger(*args, **kwargs):
+            pass
+        
+        success = await self._load_plugin_from_manifest(manifest, plugin_dir, dummy_logger)
+        if not success:
+            raise RuntimeError(f"Не удалось загрузить плагин '{plugin_name}' после перезагрузки")
+        
+        # Запускаем плагин, если он был запущен до перезагрузки
+        if was_started:
+            await self.start_plugin(plugin_name)
 
     def get_plugin(self, plugin_name: str) -> Optional[BasePlugin]:
         """

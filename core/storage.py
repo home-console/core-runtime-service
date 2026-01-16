@@ -174,3 +174,41 @@ class Storage:
         """
         async with self.transaction():
             return await callback(self)
+    
+    async def batch_set(self, namespace: str, items: dict[str, dict[str, Any]]) -> None:
+        """
+        Массовая запись значений в namespace.
+        
+        Оптимизированная операция для записи множества значений за один раз.
+        Может быть быстрее множественных вызовов set() за счёт использования
+        batch операций адаптера.
+        
+        Args:
+            namespace: пространство имён
+            items: словарь {key: value}, где value - это dict с данными
+        
+        Raises:
+            ValueError: если namespace пустой или не строка
+            TypeError: если items не является dict или содержит не-dict значения
+        
+        Пример:
+            await storage.batch_set("devices", {
+                "device1": {"name": "Lamp 1", "state": "on"},
+                "device2": {"name": "Lamp 2", "state": "off"}
+            })
+        """
+        if not isinstance(namespace, str) or not namespace:
+            raise ValueError(
+                f"namespace must be non-empty string, got {type(namespace).__name__}: {namespace!r}"
+            )
+        if not isinstance(items, dict):
+            raise TypeError(f"items must be dict, got {type(items).__name__}")
+        
+        # Валидация значений
+        for key, value in items.items():
+            if not isinstance(value, dict):
+                raise TypeError(
+                    f"items[{key!r}] must be dict, got {type(value).__name__}"
+                )
+        
+        await self._adapter.batch_set(namespace, items)
