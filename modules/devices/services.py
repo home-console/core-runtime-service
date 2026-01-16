@@ -1,4 +1,25 @@
 from typing import Any, Dict, List, Optional
+import time
+
+# Константа для определения online статуса устройства
+DEVICE_ONLINE_TIMEOUT = 300  # секунд (5 минут)
+
+
+def _is_device_online(last_seen: Optional[float]) -> bool:
+    """
+    Определяет, онлайн ли устройство на основе last_seen.
+    
+    Args:
+        last_seen: timestamp последнего контакта или None
+        
+    Returns:
+        True если устройство видели недавно (в пределах DEVICE_ONLINE_TIMEOUT)
+    """
+    if last_seen is None:
+        return False
+    
+    now = time.time()
+    return (now - last_seen) <= DEVICE_ONLINE_TIMEOUT
 
 
 async def create_device(
@@ -26,16 +47,40 @@ async def create_device(
     if not isinstance(device_id, str) or not device_id:
         raise ValueError("device_id должен быть непустой строкой")
 
-    device = {
-        "id": device_id,
-        "name": name,
-        "type": device_type,
-        "state": {
-            "desired": {"on": False},
-            "reported": {"on": False},
-            "pending": False,
-        },
-    }
+    # Проверяем, существует ли устройство
+    existing_device = await runtime.storage.get("devices", device_id)
+    now = time.time()
+    
+    if existing_device is None:
+        # Создаём новое устройство
+        device = {
+            "id": device_id,
+            "name": name,
+            "type": device_type,
+            "state": {
+                "desired": {"on": False},
+                "reported": {"on": False},
+                "pending": False,
+            },
+            "created_at": now,
+            "updated_at": now,
+            "last_seen": None,  # Устройство ещё не видели
+            "online": False,    # По умолчанию оффлайн
+        }
+    else:
+        # Устройство уже существует - обновляем только поля, не трогая created_at
+        device = existing_device.copy()
+        device["name"] = name
+        device["type"] = device_type
+        # Обновляем updated_at, но сохраняем created_at если он есть
+        device["updated_at"] = now
+        if "created_at" not in device:
+            device["created_at"] = now
+        # Инициализируем online/offline поля, если их нет
+        if "last_seen" not in device:
+            device["last_seen"] = None
+        if "online" not in device:
+            device["online"] = _is_device_online(device.get("last_seen"))
     
     # Добавляем ACL поля, если указаны
     if owner_id:
@@ -74,12 +119,18 @@ async def set_state(runtime, device_id: str, state: Dict[str, Any]) -> Dict[str,
             f"Expected: {{desired: dict, reported: dict, pending: bool}}"
         )
 
-    if isinstance(state, dict):
-        current_state["desired"].update(state)
+    # Извлекаем реальное состояние: если передан { state: { on: ... } }, извлекаем внутренний state
+    actual_state = state
+    if isinstance(state, dict) and "state" in state and isinstance(state["state"], dict):
+        actual_state = state["state"]
+    
+    if isinstance(actual_state, dict):
+        current_state["desired"].update(actual_state)
 
     current_state["pending"] = True
 
     device["state"] = current_state
+    device["updated_at"] = time.time()
 
     await runtime.storage.set("devices", device_id, device)
 
@@ -98,7 +149,7 @@ async def set_state(runtime, device_id: str, state: Dict[str, Any]) -> Dict[str,
             "internal_id": device_id,
             "external_id": external_id,
             "command": "set_state",
-            "params": state,
+            "params": actual_state,  # Передаём извлечённое состояние
         }
     )
 
