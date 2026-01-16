@@ -115,10 +115,18 @@ class ApiModule(RuntimeModule):
 
         for ep in endpoints:
             def make_handler(endpoint):
+                # Извлекаем path параметры из пути ДО определения handler
+                import re
+                path_params = re.findall(r'\{(\w+)\}', endpoint.path)
+                
+                # Создаём базовую сигнатуру handler
+                # Параметры пути будут добавлены в сигнатуру ниже
+                # Используем **kwargs чтобы принимать параметры пути, которые FastAPI передаёт
                 async def handler(
                     request: Request,
                     response: Response,
-                    body: Dict[str, Any] | None = Body(None) if endpoint.method in ["POST", "PUT", "PATCH"] else None
+                    body: Dict[str, Any] | None = Body(None) if endpoint.method in ["POST", "PUT", "PATCH"] else None,
+                    **kwargs  # Принимаем все path параметры, которые FastAPI передаёт
                 ):
                     # Получаем RequestContext из middleware (boundary-layer)
                     context = await get_request_context(request)
@@ -166,15 +174,17 @@ class ApiModule(RuntimeModule):
                     
                     # SECURITY FIX: Проверяем базовую авторизацию ДО получения device
                     # Это предотвращает Information Disclosure (раскрытие существования device)
-                    try:
-                        # Сначала проверяем базовые права без resource (scope-based)
-                        # Передаём runtime для audit logging отказов
-                        authz_require(context, endpoint.service, None, runtime=self.runtime)
-                    except AuthorizationError:
-                        raise HTTPException(
-                            status_code=401 if context is None else 403,
-                            detail="Unauthorized" if context is None else "Forbidden: insufficient permissions"
-                        )
+                    # Исключение: admin.auth.me и admin.auth.initialize - публичные endpoints
+                    if endpoint.service not in ["admin.auth.me", "admin.auth.initialize"]:
+                        try:
+                            # Сначала проверяем базовые права без resource (scope-based)
+                            # Передаём runtime для audit logging отказов
+                            authz_require(context, endpoint.service, None, runtime=self.runtime)
+                        except AuthorizationError:
+                            raise HTTPException(
+                                status_code=401 if context is None else 403,
+                                detail="Unauthorized" if context is None else "Forbidden: insufficient permissions"
+                            )
                     
                     # Только если базовая авторизация прошла, получаем device для ACL проверки
                     # Resource-Based Authorization: подготавливаем resource для проверки ACL
@@ -236,6 +246,20 @@ class ApiModule(RuntimeModule):
                     # Для admin.auth.me передаём request для получения context
                     if endpoint.service == "admin.auth.me":
                         params["request"] = request
+                    
+                    # Для oauth_yandex.configure распаковываем body в отдельные параметры
+                    if endpoint.service == "oauth_yandex.configure" and body and isinstance(body, dict):
+                        params.pop("body", None)  # Убираем body
+                        params["client_id"] = body.get("client_id", "")
+                        params["client_secret"] = body.get("client_secret", "")
+                        params["redirect_uri"] = body.get("redirect_uri", "")
+                        if "scope" in body:
+                            params["scope"] = body.get("scope")
+                    
+                    # Для oauth_yandex.exchange_code распаковываем body в отдельные параметры
+                    if endpoint.service == "oauth_yandex.exchange_code" and body and isinstance(body, dict):
+                        params.pop("body", None)  # Убираем body
+                        params["code"] = body.get("code", "")
 
                     if not await self.runtime.service_registry.has_service(endpoint.service):
                         raise HTTPException(status_code=404, detail="service not found")
@@ -286,8 +310,7 @@ class ApiModule(RuntimeModule):
                     )
                 
                 # Извлекаем path параметры из пути (например, {id} из /admin/v1/devices/{id})
-                import re
-                path_params = re.findall(r'\{(\w+)\}', endpoint.path)
+                # Используем уже извлечённые path_params из начала функции
                 for param_name in path_params:
                     params_sig.append(
                         inspect.Parameter(

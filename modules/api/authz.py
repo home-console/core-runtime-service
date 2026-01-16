@@ -141,6 +141,14 @@ def check(ctx: Optional[RequestContext], action: str, resource: Optional[Dict[st
     if action == "admin.auth.create_api_key" and resource and resource.get("allow_first_key"):
         return True
     
+    # Специальный случай: создание первого админа - публичный endpoint
+    if action == "admin.auth.initialize":
+        return True
+    
+    # Специальный случай: /admin/v1/auth/me - публичный endpoint для проверки инициализации
+    if action == "admin.auth.me":
+        return True
+    
     # Специальный случай: OAuth эндпоинты публичные (не требуют авторизации)
     # Они используются для настройки OAuth до авторизации
     if action.startswith("oauth_yandex."):
