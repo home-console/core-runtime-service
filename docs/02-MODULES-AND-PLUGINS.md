@@ -455,6 +455,16 @@ async def test_devices_integration(memory_runtime):
 
 ---
 
+---
+
+## Будущее направление
+
+**Текущая модель:** RuntimeModule и Plugin считаются доверенными, имеют полный доступ к Core API. Плагины загружаются только через manifest, выполняются в том же процессе.
+
+**Возможное будущее:** переход к untrusted plugins с capability-based permissions, изоляцией выполнения (remote/container/WASM), marketplace с версионированием. Это вне текущего scope — архитектура подготовлена, но код не реализует это.
+
+---
+
 ## См. также
 
 - [01-ARCHITECTURE.md](01-ARCHITECTURE.md) — архитектурные инварианты

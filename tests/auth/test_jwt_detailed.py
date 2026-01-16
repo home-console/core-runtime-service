@@ -17,7 +17,7 @@ async def test_jwt_generate_validate_and_refresh(runtime):
     token = jwt.generate_access_token("testuser", ["read"], False, secret, expiration_seconds=60)
     assert isinstance(token, str)
 
-    payload = jwt.validate_access_token(token, secret)
+    payload = await jwt.validate_access_token(token, secret)
     assert payload is not None
     assert payload.get("user_id") == "testuser"
 

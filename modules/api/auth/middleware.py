@@ -98,18 +98,53 @@ async def require_auth_middleware(request: Request, call_next):
     # Если токен не в header, проверяем cookie
     if not jwt_token:
         jwt_token = request.cookies.get("access_token")
-        if jwt_token:
-            print(f'[AUTH] Found access_token in cookies, length: {len(jwt_token)}')
-        else:
-            print(f'[AUTH] No access_token in cookies. Available cookies: {list(request.cookies.keys())}')
-    else:
-        print(f'[AUTH] Found JWT in Authorization header')
+        if jwt_token and runtime:
+            try:
+                await runtime.service_registry.call(
+                    "logger.log",
+                    level="debug",
+                    message="Found access_token in cookies",
+                    module="auth",
+                    token_length=len(jwt_token)
+                )
+            except Exception:
+                pass
+        elif runtime:
+            try:
+                await runtime.service_registry.call(
+                    "logger.log",
+                    level="debug",
+                    message="No access_token in cookies",
+                    module="auth",
+                    available_cookies=list(request.cookies.keys())
+                )
+            except Exception:
+                pass
+    elif runtime:
+        try:
+            await runtime.service_registry.call(
+                "logger.log",
+                level="debug",
+                message="Found JWT in Authorization header",
+                module="auth"
+            )
+        except Exception:
+            pass
     
     if jwt_token and runtime:
         try:
             context = await validate_jwt_token(runtime, jwt_token)
             if context:
-                print(f'[AUTH] JWT validated successfully for user: {context.user_id}')
+                try:
+                    await runtime.service_registry.call(
+                        "logger.log",
+                        level="debug",
+                        message="JWT validated successfully",
+                        module="auth",
+                        user_id=context.user_id
+                    )
+                except Exception:
+                    pass
                 identifier = context.user_id or context.subject
                 auth_source = "jwt"
                 
@@ -120,10 +155,28 @@ async def require_auth_middleware(request: Request, call_next):
                 if rate_limit_response:
                     return rate_limit_response
             else:
-                print(f'[AUTH] JWT validation returned None for path: {request.url.path}')
+                try:
+                    await runtime.service_registry.call(
+                        "logger.log",
+                        level="debug",
+                        message="JWT validation returned None",
+                        module="auth",
+                        path=str(request.url.path)
+                    )
+                except Exception:
+                    pass
         except Exception as e:
             # JWT невалиден - переходим к проверке API key
-            print(f'[AUTH] JWT validation failed: {str(e)}, will try API key')
+            try:
+                await runtime.service_registry.call(
+                    "logger.log",
+                    level="debug",
+                    message="JWT validation failed, will try API key",
+                    module="auth",
+                    error=str(e)
+                )
+            except Exception:
+                pass
             context = None
     
     # Приоритет 2: API Key из Authorization header (если JWT не сработал или не найден)

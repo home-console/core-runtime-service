@@ -91,21 +91,65 @@ async def get_or_create_jwt_secret(runtime: Any) -> str:
         if data and isinstance(data, dict):
             secret = data.get("value")
             if secret and isinstance(secret, str):
-                print(f'[JWT] Loaded existing secret from storage, length: {len(secret)}')
+                try:
+                    await runtime.service_registry.call(
+                        "logger.log",
+                        level="debug",
+                        message="Loaded existing JWT secret from storage",
+                        module="auth",
+                        secret_length=len(secret)
+                    )
+                except Exception:
+                    pass
                 _jwt_secret_cache = secret
                 return secret
     except Exception as e:
-        print(f'[JWT] Failed to load secret from storage: {str(e)}')
+        try:
+            await runtime.service_registry.call(
+                "logger.log",
+                level="warning",
+                message="Failed to load JWT secret from storage",
+                module="auth",
+                error=str(e)
+            )
+        except Exception:
+            pass
     
     # Генерируем новый secret
     secret = secrets.token_urlsafe(JWT_SECRET_KEY_LENGTH)
-    print(f'[JWT] Generated NEW secret, length: {len(secret)}')
+    try:
+        await runtime.service_registry.call(
+            "logger.log",
+            level="info",
+            message="Generated new JWT secret",
+            module="auth",
+            secret_length=len(secret)
+        )
+    except Exception:
+        pass
     try:
         # Оборачиваем в dict, так как storage.set требует dict
         await runtime.storage.set("auth_config", JWT_SECRET_KEY_STORAGE_KEY, {"value": secret})
-        print('[JWT] Saved new secret to storage')
+        try:
+            await runtime.service_registry.call(
+                "logger.log",
+                level="debug",
+                message="Saved new JWT secret to storage",
+                module="auth"
+            )
+        except Exception:
+            pass
     except Exception as e:
-        print(f'[JWT] Failed to save secret to storage: {str(e)}')
+        try:
+            await runtime.service_registry.call(
+                "logger.log",
+                level="error",
+                message="Failed to save JWT secret to storage",
+                module="auth",
+                error=str(e)
+            )
+        except Exception:
+            pass
     
     # Кешируем в памяти
     _jwt_secret_cache = secret
@@ -148,13 +192,14 @@ def generate_access_token(
     return jwt.encode(payload, secret, algorithm=JWT_ALGORITHM)
 
 
-def validate_access_token(token: str, secret: str) -> Optional[Dict[str, Any]]:
+async def validate_access_token(token: str, secret: str, runtime: Optional[Any] = None) -> Optional[Dict[str, Any]]:
     """
     Валидирует JWT access token.
     
     Args:
         token: JWT token
         secret: JWT secret key
+        runtime: экземпляр CoreRuntime (опционально, для логирования)
     
     Returns:
         Payload если токен валиден, None если невалиден
@@ -164,19 +209,69 @@ def validate_access_token(token: str, secret: str) -> Optional[Dict[str, Any]]:
         
         # Проверяем тип токена
         if payload.get("type") != "access":
-            print(f'[JWT] Token type mismatch: expected "access", got "{payload.get("type")}"')
+            if runtime:
+                try:
+                    await runtime.service_registry.call(
+                        "logger.log",
+                        level="warning",
+                        message="JWT token type mismatch",
+                        module="auth",
+                        expected_type="access",
+                        actual_type=payload.get("type")
+                    )
+                except Exception:
+                    pass
             return None
         
-        print(f'[JWT] Token validated successfully for user: {payload.get("user_id")}')
+        if runtime:
+            try:
+                await runtime.service_registry.call(
+                    "logger.log",
+                    level="debug",
+                    message="JWT token validated successfully",
+                    module="auth",
+                    user_id=payload.get("user_id")
+                )
+            except Exception:
+                pass
         return payload
     except ExpiredSignatureError:
-        print('[JWT] Token expired')
+        if runtime:
+            try:
+                await runtime.service_registry.call(
+                    "logger.log",
+                    level="debug",
+                    message="JWT token expired",
+                    module="auth"
+                )
+            except Exception:
+                pass
         return None
     except InvalidTokenError as e:
-        print(f'[JWT] Invalid token: {str(e)}')
+        if runtime:
+            try:
+                await runtime.service_registry.call(
+                    "logger.log",
+                    level="debug",
+                    message="JWT token validation failed",
+                    module="auth",
+                    error=str(e)
+                )
+            except Exception:
+                pass
         return None
     except Exception as e:
-        print(f'[JWT] Validation error: {str(e)}')
+        if runtime:
+            try:
+                await runtime.service_registry.call(
+                    "logger.log",
+                    level="warning",
+                    message="JWT token validation error",
+                    module="auth",
+                    error=str(e)
+                )
+            except Exception:
+                pass
         return None
 
 
@@ -196,7 +291,7 @@ async def validate_jwt_token(runtime: Any, token: str) -> Optional[RequestContex
         secret = await get_or_create_jwt_secret(runtime)
         
         # Валидируем токен
-        payload = validate_access_token(token, secret)
+        payload = await validate_access_token(token, secret, runtime)
         if not payload:
             return None
         

@@ -748,6 +748,8 @@ class AdminModule(RuntimeModule):
             from modules.api.auth.middleware import get_request_context
             context = await get_request_context(request)
             
+            # NOTE: Проверка context здесь допустима — это boundary layer (AdminModule),
+            # где проверка авторизации выполняется на HTTP уровне.
             if context is None or context.user_id is None:
                 return {"ok": False, "error": "not authenticated"}
             
