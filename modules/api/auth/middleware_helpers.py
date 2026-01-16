@@ -39,6 +39,9 @@ async def apply_rate_limiting(
         return None
     
     # Формируем ключ для rate limiting в зависимости от источника
+    if not identifier:
+        return None  # Не можем применить rate limiting без идентификатора
+    
     if auth_source == "jwt":
         rate_limit_key = f"api:jwt:{context.user_id or 'unknown'}"
     elif auth_source == "api_key":
@@ -50,10 +53,11 @@ async def apply_rate_limiting(
     
     if not await rate_limit_check(runtime, rate_limit_key, "api"):
         # Превышен лимит API запросов
+        safe_identifier = identifier[:16] + "..." if identifier and len(identifier) > 16 else (identifier or "unknown")
         await audit_log_auth_event(
             runtime,
             "rate_limit_exceeded",
-            identifier[:16] + "..." if len(identifier) > 16 else identifier,
+            safe_identifier,
             {
                 "ip": client_ip,
                 "path": request_path,
@@ -100,14 +104,15 @@ async def log_auth_result(
     if not identifier:
         return
     
+    safe_identifier = identifier[:16] + "..." if identifier and len(identifier) > 16 else (identifier or "unknown")
     await audit_log_auth_event(
         runtime,
         "auth_success" if context else "auth_failure",
-        identifier[:16] + "..." if len(identifier) > 16 else identifier,
+        safe_identifier,
         {
             "ip": client_ip,
             "path": request_path,
-            "source": auth_source,
+            "source": auth_source or "unknown",
             "user_agent": (user_agent or "unknown")[:128]
         },
         success=(context is not None)

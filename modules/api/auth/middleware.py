@@ -98,54 +98,14 @@ async def require_auth_middleware(request: Request, call_next):
     # Если токен не в header, проверяем cookie
     if not jwt_token:
         jwt_token = request.cookies.get("access_token")
-        if jwt_token and runtime:
-            try:
-                await runtime.service_registry.call(
-                    "logger.log",
-                    level="debug",
-                    message="Found access_token in cookies",
-                    module="auth",
-                    token_length=len(jwt_token)
-                )
-            except Exception:
-                pass
-        elif runtime:
-            try:
-                await runtime.service_registry.call(
-                    "logger.log",
-                    level="debug",
-                    message="No access_token in cookies",
-                    module="auth",
-                    available_cookies=list(request.cookies.keys())
-                )
-            except Exception:
-                pass
-    elif runtime:
-        try:
-            await runtime.service_registry.call(
-                "logger.log",
-                level="debug",
-                message="Found JWT in Authorization header",
-                module="auth"
-            )
-        except Exception:
-            pass
+    # Убрано избыточное логирование рутинных операций
     
     if jwt_token and runtime:
         try:
             context = await validate_jwt_token(runtime, jwt_token)
             if context:
-                try:
-                    await runtime.service_registry.call(
-                        "logger.log",
-                        level="debug",
-                        message="JWT validated successfully",
-                        module="auth",
-                        user_id=context.user_id
-                    )
-                except Exception:
-                    pass
-                identifier = context.user_id or context.subject
+                # Убрано избыточное логирование успешной валидации
+                identifier = context.user_id or context.subject or "unknown"
                 auth_source = "jwt"
                 
                 # Применяем rate limiting для API запросов (не для auth endpoints)
@@ -155,28 +115,23 @@ async def require_auth_middleware(request: Request, call_next):
                 if rate_limit_response:
                     return rate_limit_response
             else:
+                # Убрано избыточное логирование для нормального fallback на API key
+                pass
+        except Exception as e:
+            # JWT невалиден - переходим к проверке API key
+            # Логируем только для не-auth endpoints, чтобы не засорять логи
+            if not is_auth_endpoint and runtime:
                 try:
                     await runtime.service_registry.call(
                         "logger.log",
-                        level="debug",
-                        message="JWT validation returned None",
+                        level="warning",
+                        message="JWT validation failed, will try API key",
                         module="auth",
+                        error=str(e),
                         path=str(request.url.path)
                     )
                 except Exception:
                     pass
-        except Exception as e:
-            # JWT невалиден - переходим к проверке API key
-            try:
-                await runtime.service_registry.call(
-                    "logger.log",
-                    level="debug",
-                    message="JWT validation failed, will try API key",
-                    module="auth",
-                    error=str(e)
-                )
-            except Exception:
-                pass
             context = None
     
     # Приоритет 2: API Key из Authorization header (если JWT не сработал или не найден)
@@ -217,6 +172,11 @@ async def require_auth_middleware(request: Request, call_next):
                 context = None
     
     # Audit logging
+    # identifier может быть не установлен, если ни один способ авторизации не сработал
+    if identifier is None:
+        identifier = "unknown"
+    if auth_source is None:
+        auth_source = "none"
     await log_auth_result(
         runtime,
         context,

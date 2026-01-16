@@ -44,6 +44,18 @@ async def rate_limit_check(
         window_seconds = RATE_LIMIT_AUTH_WINDOW if limit_type == "auth" else RATE_LIMIT_API_WINDOW
     
     try:
+        # Проверяем, что identifier не None и является строкой
+        if not identifier:
+            return True  # Fail-open: если нет идентификатора, разрешаем запрос
+        
+        # Нормализуем identifier в строку
+        if not isinstance(identifier, str):
+            identifier = str(identifier)
+        
+        # Проверяем, что limit_type тоже строка
+        if not isinstance(limit_type, str):
+            limit_type = str(limit_type)
+        
         # Создаём ключ для rate limit (hash для безопасности)
         rate_key = hashlib.sha256(f"{limit_type}:{identifier}".encode()).hexdigest()
         

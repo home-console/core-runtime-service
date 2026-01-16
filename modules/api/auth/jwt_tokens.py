@@ -91,16 +91,7 @@ async def get_or_create_jwt_secret(runtime: Any) -> str:
         if data and isinstance(data, dict):
             secret = data.get("value")
             if secret and isinstance(secret, str):
-                try:
-                    await runtime.service_registry.call(
-                        "logger.log",
-                        level="debug",
-                        message="Loaded existing JWT secret from storage",
-                        module="auth",
-                        secret_length=len(secret)
-                    )
-                except Exception:
-                    pass
+                # Убрано избыточное логирование загрузки секрета
                 _jwt_secret_cache = secret
                 return secret
     except Exception as e:
@@ -223,42 +214,13 @@ async def validate_access_token(token: str, secret: str, runtime: Optional[Any] 
                     pass
             return None
         
-        if runtime:
-            try:
-                await runtime.service_registry.call(
-                    "logger.log",
-                    level="debug",
-                    message="JWT token validated successfully",
-                    module="auth",
-                    user_id=payload.get("user_id")
-                )
-            except Exception:
-                pass
+        # Убрано избыточное логирование успешной валидации токена
         return payload
     except ExpiredSignatureError:
-        if runtime:
-            try:
-                await runtime.service_registry.call(
-                    "logger.log",
-                    level="debug",
-                    message="JWT token expired",
-                    module="auth"
-                )
-            except Exception:
-                pass
+        # Убрано избыточное логирование истекших токенов (нормальная ситуация)
         return None
     except InvalidTokenError as e:
-        if runtime:
-            try:
-                await runtime.service_registry.call(
-                    "logger.log",
-                    level="debug",
-                    message="JWT token validation failed",
-                    module="auth",
-                    error=str(e)
-                )
-            except Exception:
-                pass
+        # Убрано избыточное логирование невалидных токенов (нормальная ситуация)
         return None
     except Exception as e:
         if runtime:
