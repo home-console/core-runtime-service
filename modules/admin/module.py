@@ -478,6 +478,50 @@ class AdminModule(RuntimeModule):
             except Exception:
                 return []
 
+        async def admin_auth_initialize(body: Any = None) -> Dict[str, Any]:
+            """Initialize system by creating first admin user (public endpoint, no auth required)."""
+            if not isinstance(body, dict):
+                return {"ok": False, "error": "invalid_body"}
+            
+            user_id = body.get("user_id", "admin")
+            username = body.get("username", "Administrator")
+            password = body.get("password")
+            
+            if not password:
+                return {"ok": False, "error": "password required"}
+            
+            try:
+                # Проверяем, есть ли уже админ
+                user_ids = await self.runtime.storage.list_keys(AUTH_USERS_NAMESPACE)
+                has_admin = False
+                for uid in user_ids:
+                    try:
+                        user_data = await self.runtime.storage.get(AUTH_USERS_NAMESPACE, uid)
+                        if isinstance(user_data, dict) and user_data.get("is_admin", False):
+                            has_admin = True
+                            break
+                    except Exception:
+                        pass
+                
+                if has_admin:
+                    return {"ok": False, "error": "System already initialized. Admin user exists."}
+                
+                # Создаём первого админа
+                await create_user(
+                    self.runtime,
+                    user_id,
+                    ["admin.*"],  # Полные права админа
+                    is_admin=True,
+                    username=username,
+                    password=password
+                )
+                
+                return {"ok": True, "user_id": user_id, "message": "System initialized successfully"}
+            except ValueError as e:
+                return {"ok": False, "error": str(e)}
+            except Exception as e:
+                return {"ok": False, "error": f"Initialization failed: {str(e)}"}
+
         async def admin_auth_login(body: Any = None, request: Any = None, response: Any = None) -> Dict[str, Any]:
             """Login with password authentication, sets HttpOnly cookies with tokens."""
             if not isinstance(body, dict):
@@ -745,6 +789,26 @@ class AdminModule(RuntimeModule):
             if request is None:
                 return {"ok": False, "error": "request not available"}
             
+            # Сначала проверяем, есть ли вообще админы в системе
+            try:
+                user_ids = await self.runtime.storage.list_keys(AUTH_USERS_NAMESPACE)
+                has_admin = False
+                for user_id in user_ids:
+                    try:
+                        user_data = await self.runtime.storage.get(AUTH_USERS_NAMESPACE, user_id)
+                        if isinstance(user_data, dict) and user_data.get("is_admin", False):
+                            has_admin = True
+                            break
+                    except Exception:
+                        pass
+                
+                # Если админа нет - возвращаем специальный статус
+                if not has_admin:
+                    return {"ok": False, "needs_initialization": True, "error": "System not initialized"}
+            except Exception:
+                # В случае ошибки проверки продолжаем обычную логику
+                pass
+            
             from modules.api.auth.middleware import get_request_context
             context = await get_request_context(request)
             
@@ -771,6 +835,85 @@ class AdminModule(RuntimeModule):
             except Exception as e:
                 return {"ok": False, "error": str(e)}
 
+        # Wrapper for yandex.sync_devices to handle errors properly
+        async def admin_v1_yandex_sync() -> Dict[str, Any]:
+            """Wrapper for yandex.sync_devices that handles errors and returns proper format."""
+            try:
+                # Check if service exists
+                if not await self.runtime.service_registry.has_service("yandex.sync_devices"):
+                    return {"ok": False, "error": "yandex.sync_devices service not available"}
+                
+                # Ensure use_real_api flag is set
+                try:
+                    use_real = await self.runtime.storage.get("yandex", "use_real_api")
+                    if not use_real:
+                        # Auto-enable if not set
+                        await self.runtime.storage.set("yandex", "use_real_api", {"enabled": True})
+                except Exception:
+                    # If key doesn't exist, create it
+                    await self.runtime.storage.set("yandex", "use_real_api", {"enabled": True})
+                
+                # Call the service
+                devices = await self.runtime.service_registry.call("yandex.sync_devices")
+                
+                # After successful sync, try to auto-map devices
+                try:
+                    if await self.runtime.service_registry.has_service("devices.auto_map_external"):
+                        await self.runtime.service_registry.call("devices.auto_map_external", "yandex")
+                except Exception:
+                    # Auto-map is optional, don't fail if it errors
+                    pass
+                
+                return {
+                    "ok": True,
+                    "devices": devices if isinstance(devices, list) else [],
+                    "count": len(devices) if isinstance(devices, list) else 0,
+                }
+            except RuntimeError as e:
+                error_msg = str(e)
+                # Handle specific error cases
+                if "yandex_not_authorized" in error_msg:
+                    return {"ok": False, "error": "Yandex OAuth not authorized. Please configure and authorize OAuth first."}
+                elif "use_real_api_disabled" in error_msg:
+                    return {"ok": False, "error": "Real API is disabled. Enable it in storage: yandex.use_real_api = true"}
+                else:
+                    return {"ok": False, "error": error_msg}
+            except Exception as e:
+                return {"ok": False, "error": f"Sync failed: {str(e)}"}
+
+        async def admin_v1_yandex_check_online() -> Dict[str, Any]:
+            """Wrapper for yandex.check_devices_online that handles errors and returns proper format."""
+            try:
+                # Check if service exists
+                if not await self.runtime.service_registry.has_service("yandex.check_devices_online"):
+                    return {"ok": False, "error": "yandex.check_devices_online service not available"}
+                
+                # Call the service
+                result = await self.runtime.service_registry.call("yandex.check_devices_online")
+                
+                if isinstance(result, dict):
+                    return {
+                        "ok": True,
+                        **result
+                    }
+                else:
+                    return {
+                        "ok": True,
+                        "checked": 0,
+                        "online": 0,
+                        "offline": 0,
+                        "errors": []
+                    }
+            except RuntimeError as e:
+                error_msg = str(e)
+                # Handle specific error cases
+                if "yandex_not_authorized" in error_msg:
+                    return {"ok": False, "error": "Yandex OAuth not authorized. Please configure and authorize OAuth first."}
+                else:
+                    return {"ok": False, "error": error_msg}
+            except Exception as e:
+                return {"ok": False, "error": f"Check online failed: {str(e)}"}
+
         # Register all services
         service_registrations = [
             ("admin.list_plugins", list_plugins),
@@ -795,11 +938,14 @@ class AdminModule(RuntimeModule):
             ("admin.devices.create_mapping", admin_devices_create_mapping),
             ("admin.devices.delete_mapping", admin_devices_delete_mapping),
             ("admin.devices.auto_map", admin_devices_auto_map),
+            ("admin.v1.yandex.sync", admin_v1_yandex_sync),
+            ("admin.v1.yandex.check_online", admin_v1_yandex_check_online),
             ("admin.v1.integrations", admin_v1_integrations),
             ("admin.auth.create_api_key", admin_auth_create_api_key),
             ("admin.auth.list_api_keys", admin_auth_list_api_keys),
             ("admin.auth.create_user", admin_auth_create_user),
             ("admin.auth.list_users", admin_auth_list_users),
+            ("admin.auth.initialize", admin_auth_initialize),
             ("admin.auth.login", admin_auth_login),
             ("admin.auth.refresh", admin_auth_refresh),
             ("admin.auth.set_password", admin_auth_set_password),
@@ -839,6 +985,8 @@ class AdminModule(RuntimeModule):
             HttpEndpoint(method="GET", path="/admin/v1/devices/{id}", service="admin.devices.get", description="Get internal device by id"),
             HttpEndpoint(method="POST", path="/admin/v1/devices/{id}/state", service="admin.devices.set_state", description="Set state for internal device"),
             HttpEndpoint(method="GET", path="/admin/v1/devices/external/{provider}", service="admin.devices.list_external", description="List external devices for provider"),
+            HttpEndpoint(method="POST", path="/admin/v1/yandex/sync", service="admin.v1.yandex.sync", description="Sync devices from Yandex Smart Home API"),
+            HttpEndpoint(method="POST", path="/admin/v1/yandex/check-online", service="admin.v1.yandex.check_online", description="Check online status of all Yandex devices"),
             HttpEndpoint(method="GET", path="/admin/v1/integrations", service="admin.v1.integrations", description="List registered integrations"),
             HttpEndpoint(method="POST", path="/admin/v1/auth/api-keys", service="admin.auth.create_api_key", description="Create new API key (body: {scopes, is_admin?, subject?, expires_at?})"),
             HttpEndpoint(method="GET", path="/admin/v1/auth/api-keys", service="admin.auth.list_api_keys", description="List all API keys (without actual keys, with metadata)"),
@@ -847,6 +995,7 @@ class AdminModule(RuntimeModule):
             HttpEndpoint(method="POST", path="/admin/v1/auth/api-keys/rotate", service="admin.auth.rotate_api_key", description="Rotate an API key (body: {old_api_key, expires_at?})"),
             HttpEndpoint(method="POST", path="/admin/v1/auth/users", service="admin.auth.create_user", description="Create new user (body: {user_id, scopes, is_admin?, username?, password?})"),
             HttpEndpoint(method="GET", path="/admin/v1/auth/users", service="admin.auth.list_users", description="List all users"),
+            HttpEndpoint(method="POST", path="/admin/v1/auth/initialize", service="admin.auth.initialize", description="Initialize system by creating first admin (public endpoint, body: {user_id?, username?, password})"),
             HttpEndpoint(method="POST", path="/admin/v1/auth/login", service="admin.auth.login", description="Login with password, returns JWT access_token and refresh_token (body: {user_id, password, client_ip?, user_agent?})"),
             HttpEndpoint(method="POST", path="/admin/v1/auth/refresh", service="admin.auth.refresh", description="Refresh access token using refresh_token (body: {refresh_token})"),
             HttpEndpoint(method="POST", path="/admin/v1/auth/password/set", service="admin.auth.set_password", description="Set password for user (body: {user_id, password})"),
