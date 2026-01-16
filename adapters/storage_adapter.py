@@ -6,7 +6,8 @@ Storage работает по принципу namespace + key + JSON value.
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Optional
+from typing import Any, Optional, AsyncContextManager
+from contextlib import asynccontextmanager
 
 
 class StorageAdapter(ABC):
@@ -78,4 +79,23 @@ class StorageAdapter(ABC):
     @abstractmethod
     async def close(self) -> None:
         """Закрыть соединение с хранилищем."""
+        pass
+    
+    @abstractmethod
+    @asynccontextmanager
+    async def transaction(self) -> AsyncContextManager[Any]:
+        """
+        Контекстный менеджер для транзакций.
+        
+        Использование:
+            async with adapter.transaction():
+                await adapter.set("ns", "key1", {"value": 1})
+                await adapter.set("ns", "key2", {"value": 2})
+                # Все операции выполняются в одной транзакции
+                # При выходе из блока транзакция коммитится
+                # При исключении - откатывается
+        
+        Yields:
+            Объект транзакции (зависит от реализации адаптера)
+        """
         pass

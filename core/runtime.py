@@ -11,14 +11,15 @@ CoreRuntime - главный класс Core Runtime.
 Это kernel/runtime, а не backend-приложение.
 """
 
-from typing import Any
+from typing import Any, Dict, Optional
+import asyncio
 
 from core.event_bus import EventBus
 from core.service_registry import ServiceRegistry
 from core.state_engine import StateEngine
 from core.storage import Storage
 from core.storage_mirror import StorageWithStateMirror
-from core.plugin_manager import PluginManager
+from core.plugin_manager import PluginManager, PluginState
 from core.module_manager import ModuleManager
 from core.http_registry import HttpRegistry
 from core.integration_registry import IntegrationRegistry
@@ -35,12 +36,13 @@ class CoreRuntime:
     Предоставляет единую точку доступа для плагинов.
     """
 
-    def __init__(self, storage_adapter: Any):
+    def __init__(self, storage_adapter: Any, config: Optional[Any] = None):
         """
         Инициализация Core Runtime.
         
         Args:
             storage_adapter: адаптер для работы с хранилищем
+            config: опциональная конфигурация (для shutdown_timeout)
         """
         # Инициализация компонентов
         self.event_bus = EventBus()
@@ -58,6 +60,9 @@ class CoreRuntime:
         self.http = HttpRegistry()
         # Реестр интеграций (минимальный каталог для admin API)
         self.integrations = IntegrationRegistry()
+        
+        # Сохраняем config для shutdown_timeout
+        self._config = config
 
         self._running = False
 
@@ -145,22 +150,47 @@ class CoreRuntime:
         - останавливает все плагины
         - очищает состояние
         - закрывает storage
+        
+        Использует timeout из конфига (если доступен) для защиты от зависания.
         """
         if not self._running:
             return
         
-        # Остановить все плагины
-        await self.plugin_manager.stop_all()
+        # Получаем timeout из конфига или используем значение по умолчанию
+        timeout = 10
+        if self._config is not None:
+            timeout = getattr(self._config, "shutdown_timeout", 10)
         
-        # Остановить все модули
-        await self.module_manager.stop_all()
+        async def _stop_internal() -> None:
+            """Внутренняя функция остановки."""
+            # Остановить все плагины
+            await self.plugin_manager.stop_all()
+            
+            # Остановить все модули
+            await self.module_manager.stop_all()
+            
+            # Закрыть storage
+            await self.storage.close()
+            
+            # Установить состояние runtime
+            await self.state_engine.set("runtime.status", "stopped")
+            self._running = False
         
-        # Закрыть storage
-        await self.storage.close()
-        
-        # Установить состояние runtime
-        await self.state_engine.set("runtime.status", "stopped")
-        self._running = False
+        try:
+            await asyncio.wait_for(_stop_internal(), timeout=timeout)
+        except asyncio.TimeoutError:
+            # Логируем timeout и принудительно завершаем
+            try:
+                await warning(
+                    self,
+                    f"Timeout ({timeout}s) при остановке runtime, принудительное завершение",
+                    component="runtime"
+                )
+            except Exception:
+                pass
+            # Принудительно устанавливаем состояние остановки
+            self._running = False
+            raise
 
     async def shutdown(self) -> None:
         """
@@ -178,3 +208,131 @@ class CoreRuntime:
         await self.event_bus.clear()
         await self.service_registry.clear()
         await self.state_engine.clear()
+    
+    async def health_check(self) -> Dict[str, Any]:
+        """
+        Проверка здоровья всех компонентов runtime.
+        
+        Returns:
+            Словарь с результатами проверки здоровья компонентов
+        """
+        from enum import Enum
+        
+        class HealthStatus(Enum):
+            HEALTHY = "healthy"
+            DEGRADED = "degraded"
+            UNHEALTHY = "unhealthy"
+        
+        checks: Dict[str, str] = {}
+        
+        # Проверка Storage
+        try:
+            await self.storage.get("health_check", "test")
+            checks["storage"] = HealthStatus.HEALTHY.value
+        except Exception as e:
+            checks["storage"] = HealthStatus.UNHEALTHY.value
+            checks["storage_error"] = str(e)
+        
+        # Проверка модулей
+        try:
+            modules = self.module_manager.list_modules()
+            required_modules = self.module_manager.get_required_modules()
+            missing_required = [m for m in required_modules if m not in modules]
+            if missing_required:
+                checks["modules"] = HealthStatus.UNHEALTHY.value
+                checks["modules_error"] = f"Missing required modules: {missing_required}"
+            else:
+                checks["modules"] = HealthStatus.HEALTHY.value
+        except Exception as e:
+            checks["modules"] = HealthStatus.UNHEALTHY.value
+            checks["modules_error"] = str(e)
+        
+        # Проверка плагинов
+        try:
+            plugins = self.plugin_manager.list_plugins()
+            error_plugins = [
+                p for p in plugins
+                if self.plugin_manager.get_plugin_state(p) == PluginState.ERROR
+            ]
+            if error_plugins:
+                checks["plugins"] = HealthStatus.DEGRADED.value
+                checks["plugins_error"] = f"Plugins in error state: {error_plugins}"
+            else:
+                checks["plugins"] = HealthStatus.HEALTHY.value
+        except Exception as e:
+            checks["plugins"] = HealthStatus.UNHEALTHY.value
+            checks["plugins_error"] = str(e)
+        
+        # Определяем общий статус
+        overall = HealthStatus.HEALTHY
+        if any(c == HealthStatus.UNHEALTHY.value for c in checks.values()):
+            overall = HealthStatus.UNHEALTHY
+        elif any(c == HealthStatus.DEGRADED.value for c in checks.values()):
+            overall = HealthStatus.DEGRADED
+        
+        return {
+            "status": overall.value,
+            "checks": checks
+        }
+    
+    async def get_metrics(self) -> Dict[str, Any]:
+        """
+        Получить метрики runtime.
+        
+        Returns:
+            Словарь с метриками плагинов, модулей, сервисов и storage
+        """
+        metrics: Dict[str, Any] = {}
+        
+        # Метрики плагинов
+        try:
+            plugins = self.plugin_manager.list_plugins()
+            plugin_states = {}
+            for plugin_name in plugins:
+                state = self.plugin_manager.get_plugin_state(plugin_name)
+                if state:
+                    plugin_states[plugin_name] = state.value
+            
+            started_count = sum(
+                1 for state in plugin_states.values()
+                if state == PluginState.STARTED.value
+            )
+            
+            metrics["plugins"] = {
+                "total": len(plugins),
+                "started": started_count,
+                "states": plugin_states
+            }
+        except Exception:
+            metrics["plugins"] = {"error": "failed to collect"}
+        
+        # Метрики модулей
+        try:
+            modules = self.module_manager.list_modules()
+            metrics["modules"] = {
+                "total": len(modules),
+                "list": modules
+            }
+        except Exception:
+            metrics["modules"] = {"error": "failed to collect"}
+        
+        # Метрики сервисов
+        try:
+            services = await self.service_registry.list_services()
+            metrics["services"] = {
+                "total": len(services)
+            }
+        except Exception:
+            metrics["services"] = {"error": "failed to collect"}
+        
+        # Метрики storage (количество namespaces)
+        try:
+            # Для получения namespaces нужно использовать адаптер напрямую
+            # Это упрощённая версия - в реальности может потребоваться более сложная логика
+            metrics["storage"] = {
+                "available": True
+            }
+        except Exception:
+            metrics["storage"] = {"error": "failed to collect"}
+        
+        return metrics

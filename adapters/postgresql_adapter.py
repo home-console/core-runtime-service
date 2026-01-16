@@ -8,6 +8,7 @@ PostgreSQL адаптер для Storage API.
 import json
 from typing import Any, Optional
 import asyncio
+from contextlib import asynccontextmanager
 
 try:
     import asyncpg
@@ -165,3 +166,19 @@ class PostgreSQLAdapter(StorageAdapter):
         if self._pool:
             await self._pool.close()
             self._pool = None
+    
+    @asynccontextmanager
+    async def transaction(self):
+        """
+        Контекстный менеджер для транзакций PostgreSQL.
+        
+        Использование:
+            async with adapter.transaction():
+                await adapter.set("ns", "key1", {"value": 1})
+                await adapter.set("ns", "key2", {"value": 2})
+                # Все операции выполняются в одной транзакции
+        """
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                yield

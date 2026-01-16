@@ -5,7 +5,8 @@ Storage API - единый интерфейс для работы с храни�
 Никакого прямого доступа к БД.
 """
 
-from typing import Any, Optional
+from typing import Any, Optional, Callable, Awaitable
+from contextlib import asynccontextmanager
 
 from adapters.storage_adapter import StorageAdapter
 
@@ -134,3 +135,42 @@ class Storage:
     async def close(self) -> None:
         """Закрыть соединение."""
         await self._adapter.close()
+    
+    @asynccontextmanager
+    async def transaction(self):
+        """
+        Контекстный менеджер для транзакций.
+        
+        Использование:
+            async with storage.transaction():
+                await storage.set("ns", "key1", {"value": 1})
+                await storage.set("ns", "key2", {"value": 2})
+                # Все операции выполняются в одной транзакции
+                # При выходе из блока транзакция коммитится
+                # При исключении - откатывается
+        
+        Yields:
+            None (контекстный менеджер для управления транзакцией)
+        """
+        async with self._adapter.transaction():
+            yield
+    
+    async def transaction_callback(self, callback: Callable[["Storage"], Awaitable[Any]]) -> Any:
+        """
+        Выполнить callback в транзакции.
+        
+        Args:
+            callback: асинхронная функция, принимающая Storage и возвращающая результат
+        
+        Returns:
+            Результат выполнения callback
+        
+        Пример:
+            result = await storage.transaction_callback(async def(storage):
+                await storage.set("ns", "key1", {"value": 1})
+                await storage.set("ns", "key2", {"value": 2})
+                return "done"
+            )
+        """
+        async with self.transaction():
+            return await callback(self)

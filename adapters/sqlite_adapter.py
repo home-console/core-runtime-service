@@ -10,6 +10,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Optional
 import asyncio
+from contextlib import asynccontextmanager
 
 from .storage_adapter import StorageAdapter
 
@@ -31,6 +32,7 @@ class SQLiteAdapter(StorageAdapter):
         """
         self.db_path = db_path
         self._conn: Optional[sqlite3.Connection] = None
+        self._in_transaction: bool = False
 
     def _get_connection(self) -> sqlite3.Connection:
         """Создать или вернуть существующее соединение.
@@ -98,30 +100,34 @@ class SQLiteAdapter(StorageAdapter):
     async def set(self, namespace: str, key: str, value: dict[str, Any]) -> None:
         """Сохранить значение в storage (выполняется в threadpool)."""
 
-        def _set_sync(ns: str, k: str, v: dict[str, Any]):
+        def _set_sync(ns: str, k: str, v: dict[str, Any], in_transaction: bool):
             conn = self._get_connection()
             json_value = json.dumps(v, ensure_ascii=False)
             conn.execute(
                 "INSERT OR REPLACE INTO storage (namespace, key, value) VALUES (?, ?, ?)",
                 (ns, k, json_value),
             )
-            conn.commit()
+            # Не делаем commit если мы в транзакции
+            if not in_transaction:
+                conn.commit()
 
-        await asyncio.to_thread(_set_sync, namespace, key, value)
+        await asyncio.to_thread(_set_sync, namespace, key, value, self._in_transaction)
 
     async def delete(self, namespace: str, key: str) -> bool:
         """Удалить значение из storage (выполняется в threadpool)."""
 
-        def _delete_sync(ns: str, k: str):
+        def _delete_sync(ns: str, k: str, in_transaction: bool):
             conn = self._get_connection()
             cursor = conn.execute(
                 "DELETE FROM storage WHERE namespace = ? AND key = ?",
                 (ns, k),
             )
-            conn.commit()
+            # Не делаем commit если мы в транзакции
+            if not in_transaction:
+                conn.commit()
             return cursor.rowcount > 0
 
-        return await asyncio.to_thread(_delete_sync, namespace, key)
+        return await asyncio.to_thread(_delete_sync, namespace, key, self._in_transaction)
 
     async def list_keys(self, namespace: str) -> list[str]:
         """Получить список ключей в namespace (выполняется в threadpool)."""
@@ -136,12 +142,52 @@ class SQLiteAdapter(StorageAdapter):
     async def clear_namespace(self, namespace: str) -> None:
         """Очистить все записи в namespace (выполняется в threadpool)."""
 
-        def _clear_sync(ns: str):
+        def _clear_sync(ns: str, in_transaction: bool):
             conn = self._get_connection()
             conn.execute("DELETE FROM storage WHERE namespace = ?", (ns,))
-            conn.commit()
+            # Не делаем commit если мы в транзакции
+            if not in_transaction:
+                conn.commit()
 
-        await asyncio.to_thread(_clear_sync, namespace)
+        await asyncio.to_thread(_clear_sync, namespace, self._in_transaction)
+    
+    @asynccontextmanager
+    async def transaction(self):
+        """
+        Контекстный менеджер для транзакций SQLite.
+        
+        Использование:
+            async with adapter.transaction():
+                await adapter.set("ns", "key1", {"value": 1})
+                await adapter.set("ns", "key2", {"value": 2})
+                # Все операции выполняются в одной транзакции
+        """
+        def _begin_sync():
+            conn = self._get_connection()
+            conn.execute("BEGIN")
+        
+        def _commit_sync():
+            conn = self._get_connection()
+            conn.commit()
+        
+        def _rollback_sync():
+            conn = self._get_connection()
+            conn.rollback()
+        
+        # Начинаем транзакцию
+        self._in_transaction = True
+        await asyncio.to_thread(_begin_sync)
+        
+        try:
+            yield
+            # Коммитим транзакцию
+            await asyncio.to_thread(_commit_sync)
+        except Exception:
+            # Откатываем транзакцию при ошибке
+            await asyncio.to_thread(_rollback_sync)
+            raise
+        finally:
+            self._in_transaction = False
 
     async def close(self) -> None:
         """Закрыть соединение с БД (выполняется в threadpool)."""

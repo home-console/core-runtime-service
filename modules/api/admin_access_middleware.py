@@ -20,19 +20,17 @@ def is_private_ip(ip: str) -> bool:
     Returns:
         True если IP приватный, False если публичный
     """
+    # Проверяем на localhost строку ПЕРЕД вызовом ipaddress.ip_address()
+    # чтобы избежать ValueError при передаче "localhost"
+    if ip == "127.0.0.1" or ip == "::1" or ip == "localhost":
+        return True
+    
     try:
         ip_obj = ipaddress.ip_address(ip)
-        # Проверяем на localhost
-        if ip == "127.0.0.1" or ip == "::1" or ip == "localhost":
-            return True
         
         # Проверяем на приватные сети
         # 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 (link-local)
         if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local:
-            return True
-        
-        # Проверяем на IPv6 localhost и private ranges
-        if ip_obj.is_loopback:
             return True
         
         return False

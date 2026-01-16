@@ -551,10 +551,8 @@ class PluginManager:
         """
         Определить, является ли плагин интеграцией, и зарегистрировать в IntegrationRegistry.
         
-        Критерии определения интеграции:
-        1. Явная пометка в manifest: "is_integration": true
-        2. Автоматически: плагин публикует события "external.*" (проверяется по коду)
-        3. По паттернам: имя/описание содержат ключевые слова
+        Критерий определения интеграции:
+        - Только явная пометка в manifest: "is_integration": true
         
         Args:
             plugin_instance: экземпляр загруженного плагина
@@ -567,42 +565,17 @@ class PluginManager:
         plugin_description = manifest.get("description", "")
         metadata = plugin_instance.metadata
         
-        # Критерий 1: Явная пометка в manifest
-        is_integration_explicit = manifest.get("is_integration", False)
-        
-        # Критерий 2: Автоматическое определение по паттернам
-        # Проверяем имя и описание на ключевые слова интеграций
-        integration_keywords = [
-            "integration", "oauth", "yandex", "alexa", "google", "homekit",
-            "webhook", "api", "external", "vendor", "sdk", "smart home"
-        ]
-        name_lower = plugin_name.lower()
-        desc_lower = (plugin_description + " " + metadata.description).lower()
-        is_integration_by_pattern = any(
-            keyword in name_lower or keyword in desc_lower
-            for keyword in integration_keywords
-        )
-        
-        # Критерий 3: Проверка кода на наличие "external.*" событий
-        # Это упрощённая проверка - ищем строки "external." в исходном коде
-        is_integration_by_code = False
-        try:
-            import inspect
-            source = inspect.getsource(plugin_instance.__class__)
-            if "external." in source or '"external.' in source or "'external." in source:
-                is_integration_by_code = True
-        except Exception:
-            # Если не удалось получить исходный код, пропускаем эту проверку
-            pass
-        
-        # Определяем, является ли плагин интеграцией
-        is_integration = is_integration_explicit or is_integration_by_pattern or is_integration_by_code
+        # Единственный критерий: явная пометка в manifest
+        is_integration = manifest.get("is_integration", False)
         
         if not is_integration:
             return
         
         # Определяем флаги интеграции
         flags = set()
+        
+        name_lower = plugin_name.lower()
+        desc_lower = (plugin_description + " " + metadata.description).lower()
         
         # REQUIRES_OAUTH: если имя содержит "oauth" или есть зависимость на oauth плагин
         if "oauth" in name_lower or "oauth" in desc_lower:

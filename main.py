@@ -28,7 +28,8 @@ async def main():
     
     # Создать Core Runtime
     # Модули (devices, automation, presence) регистрируются автоматически в CoreRuntime.__init__
-    runtime = CoreRuntime(storage_adapter)
+    # Передаём config для поддержки shutdown_timeout
+    runtime = CoreRuntime(storage_adapter, config=config)
     
     # Диагностика: показать, какие модули и плагины зарегистрированы
     try:
