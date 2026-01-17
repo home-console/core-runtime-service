@@ -50,6 +50,7 @@ class ModuleSpec:
 # ВАЖНО: logger должен быть первым, так как он нужен для логирования других модулей!
 BUILTIN_MODULES = [
     ModuleSpec("logger", required=True),      # LoggerModule (инфраструктурный, должен быть первым)
+    ModuleSpec("request_logger", required=False),  # RequestLoggerModule (опциональный, для отладки)
     ModuleSpec("api", required=True),         # ApiModule (HTTP API Gateway)
     ModuleSpec("admin", required=True),       # AdminModule (административные endpoints)
     ModuleSpec("devices", required=True),     # DevicesModule
@@ -283,11 +284,32 @@ class ModuleManager:
                 # Для REQUIRED модулей ошибки не глотаются
                 if module_spec.required:
                     failed_required.append((module_spec.name, str(e)))
-                # Для OPTIONAL модулей ошибки игнорируются
+                else:
+                    # Для OPTIONAL модулей логируем ошибки, но не останавливаем runtime
+                    try:
+                        await log_error(
+                            self._runtime,
+                            f"Ошибка при регистрации optional модуля '{module_spec.name}': {e}",
+                            component="module_manager",
+                            module=module_spec.name
+                        )
+                    except Exception:
+                        print(f"[ModuleManager] Ошибка при регистрации optional модуля '{module_spec.name}': {e}", file=sys.stderr)
             except Exception as e:
                 # Неожиданные ошибки для REQUIRED модулей также не глотаются
                 if module_spec.required:
                     failed_required.append((module_spec.name, f"Unexpected error: {e}"))
+                else:
+                    # Для OPTIONAL модулей логируем ошибки, но не останавливаем runtime
+                    try:
+                        await log_error(
+                            self._runtime,
+                            f"Неожиданная ошибка при регистрации optional модуля '{module_spec.name}': {e}",
+                            component="module_manager",
+                            module=module_spec.name
+                        )
+                    except Exception:
+                        print(f"[ModuleManager] Неожиданная ошибка при регистрации optional модуля '{module_spec.name}': {e}", file=sys.stderr)
         
         if failed_required:
             failed_names = [name for name, _ in failed_required]
@@ -321,7 +343,11 @@ class ModuleManager:
         try:
             # Все модули экспортируют класс через __init__.py
             module = importlib.import_module(module_path)
-            module_class_name = f"{module_name.capitalize()}Module"
+            # Преобразуем имя модуля в camelCase для имени класса
+            # Например: "request_logger" -> "RequestLogger"
+            parts = module_name.split("_")
+            camel_case_name = "".join(part.capitalize() for part in parts)
+            module_class_name = f"{camel_case_name}Module"
             module_class = getattr(module, module_class_name, None)
 
             if module_class is None:

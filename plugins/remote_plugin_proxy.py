@@ -105,11 +105,11 @@ class RemotePluginProxy(BasePlugin):
 			timeout = aiohttp.ClientTimeout(total=self._http_timeout)
 			async with aiohttp.ClientSession(timeout=timeout) as session:
 				if method == "GET":
-					async with session.get(url) as resp:
+					async with await session.get(url) as resp:
 						text = await resp.text()
 						return json.loads(text)
 				elif method == "POST":
-					async with session.post(url, json=json_data or {}) as resp:
+					async with await session.post(url, json=json_data or {}) as resp:
 						text = await resp.text()
 						return json.loads(text)
 				else:

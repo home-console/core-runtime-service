@@ -7,6 +7,7 @@ SQLite адаптер для Storage API.
 
 import json
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Any, Optional
 import asyncio
@@ -21,6 +22,9 @@ class SQLiteAdapter(StorageAdapter):
     Все блокирующие операции выполняются в threadpool через `asyncio.to_thread`.
     Инициализация схемы не выполняется автоматически — отдельный метод
     `initialize_schema()` должен быть вызван явно.
+    
+    CRITICAL: Использует thread-local storage для SQLite connections, чтобы избежать
+    InterfaceError при параллельных запросах из разных потоков.
     """
 
     def __init__(self, db_path: str = "data.db"):
@@ -31,20 +35,32 @@ class SQLiteAdapter(StorageAdapter):
             db_path: путь к файлу базы данных (или ':memory:' для in-memory БД)
         """
         self.db_path = db_path
-        self._conn: Optional[sqlite3.Connection] = None
-        self._in_transaction: bool = False
+        self._local = threading.local()  # Thread-local storage для connections и transactions
 
     def _get_connection(self) -> sqlite3.Connection:
-        """Создать или вернуть существующее соединение.
+        """Создать или вернуть thread-local соединение.
 
-        Соединение создается с `check_same_thread=False`, чтобы его можно было
-        безопасно использовать из разных потоков через threadpool.
+        CRITICAL: Каждый поток получает свое собственное соединение, чтобы избежать
+        InterfaceError: bad parameter or other API misuse при параллельных запросах.
         """
-        if self._conn is None:
-            # Для файловой БД создаём директорию при явной инициализации схемы,
-            # здесь только создаём соединение.
-            self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
-        return self._conn
+        if not hasattr(self._local, 'conn') or self._local.conn is None:
+            # Создаем новое соединение для текущего потока
+            self._local.conn = sqlite3.connect(
+                self.db_path,
+                check_same_thread=True,  # Теперь каждый поток имеет свое соединение
+                timeout=30.0  # Таймаут для database locked ситуаций
+            )
+            # Включаем WAL mode для лучшей параллельной работы
+            self._local.conn.execute("PRAGMA journal_mode=WAL")
+        return self._local.conn
+    
+    def _get_in_transaction(self) -> bool:
+        """Получить thread-local флаг транзакции."""
+        return getattr(self._local, 'in_transaction', False)
+    
+    def _set_in_transaction(self, value: bool) -> None:
+        """Установить thread-local флаг транзакции."""
+        self._local.in_transaction = value
 
     def _create_schema_sync(self) -> None:
         """Синхронная функция создания таблицы схемы."""
@@ -116,15 +132,12 @@ class SQLiteAdapter(StorageAdapter):
             )
             # Не делаем commit если мы в транзакции
             if not in_transaction:
-                try:
-                    conn.commit()
-                except sqlite3.OperationalError as e:
-                    # Игнорируем ошибки типа "cannot commit - no transaction is active"
-                    # Это может произойти, если connection уже закрыт или транзакция не активна
-                    if "transaction" not in str(e).lower():
-                        raise
+                # CRITICAL: ВСЕГДА делаем commit и выбрасываем исключение при ошибке
+                # Подавление ошибок commit() приводит к сохранению битых данных
+                # и потере токенов OAuth (токены записываются, но не коммитятся)
+                conn.commit()
 
-        await asyncio.to_thread(_set_sync, namespace, key, value, self._in_transaction)
+        await asyncio.to_thread(_set_sync, namespace, key, value, self._get_in_transaction())
 
     async def delete(self, namespace: str, key: str) -> bool:
         """Удалить значение из storage (выполняется в threadpool)."""
@@ -137,15 +150,11 @@ class SQLiteAdapter(StorageAdapter):
             )
             # Не делаем commit если мы в транзакции
             if not in_transaction:
-                try:
-                    conn.commit()
-                except sqlite3.OperationalError as e:
-                    # Игнорируем ошибки типа "cannot commit - no transaction is active"
-                    if "transaction" not in str(e).lower():
-                        raise
+                # CRITICAL: ВСЕГДА делаем commit и выбрасываем исключение при ошибке
+                conn.commit()
             return cursor.rowcount > 0
 
-        return await asyncio.to_thread(_delete_sync, namespace, key, self._in_transaction)
+        return await asyncio.to_thread(_delete_sync, namespace, key, self._get_in_transaction())
 
     async def list_keys(self, namespace: str) -> list[str]:
         """Получить список ключей в namespace (выполняется в threadpool)."""
@@ -165,14 +174,10 @@ class SQLiteAdapter(StorageAdapter):
             conn.execute("DELETE FROM storage WHERE namespace = ?", (ns,))
             # Не делаем commit если мы в транзакции
             if not in_transaction:
-                try:
-                    conn.commit()
-                except sqlite3.OperationalError as e:
-                    # Игнорируем ошибки типа "cannot commit - no transaction is active"
-                    if "transaction" not in str(e).lower():
-                        raise
+                # CRITICAL: ВСЕГДА делаем commit и выбрасываем исключение при ошибке
+                conn.commit()
 
-        await asyncio.to_thread(_clear_sync, namespace, self._in_transaction)
+        await asyncio.to_thread(_clear_sync, namespace, self._get_in_transaction())
     
     @asynccontextmanager
     async def transaction(self):
@@ -198,7 +203,7 @@ class SQLiteAdapter(StorageAdapter):
             conn.rollback()
         
         # Начинаем транзакцию
-        self._in_transaction = True
+        self._set_in_transaction(True)
         await asyncio.to_thread(_begin_sync)
         
         try:
@@ -210,7 +215,7 @@ class SQLiteAdapter(StorageAdapter):
             await asyncio.to_thread(_rollback_sync)
             raise
         finally:
-            self._in_transaction = False
+            self._set_in_transaction(False)
     
     async def batch_set(self, namespace: str, items: dict[str, dict[str, Any]]) -> None:
         """Массовая запись значений в namespace (выполняется в threadpool)."""
@@ -225,22 +230,19 @@ class SQLiteAdapter(StorageAdapter):
                 )
             # Не делаем commit если мы в транзакции
             if not in_transaction:
-                try:
-                    conn.commit()
-                except sqlite3.OperationalError as e:
-                    # Игнорируем ошибки типа "cannot commit - no transaction is active"
-                    if "transaction" not in str(e).lower():
-                        raise
+                # CRITICAL: ВСЕГДА делаем commit и выбрасываем исключение при ошибке
+                conn.commit()
         
-        await asyncio.to_thread(_batch_set_sync, namespace, items, self._in_transaction)
+        await asyncio.to_thread(_batch_set_sync, namespace, items, self._get_in_transaction())
 
     async def close(self) -> None:
-        """Закрыть соединение с БД (выполняется в threadpool)."""
+        """Закрыть thread-local соединение с БД (выполняется в threadpool)."""
         def _close_sync():
-            if self._conn:
+            # Закрываем только соединение текущего потока
+            if hasattr(self._local, 'conn') and self._local.conn is not None:
                 try:
-                    self._conn.close()
+                    self._local.conn.close()
                 finally:
-                    self._conn = None
+                    self._local.conn = None
 
         await asyncio.to_thread(_close_sync)

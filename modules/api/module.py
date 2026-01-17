@@ -11,6 +11,7 @@ API Key Authentication:
 """
 
 from typing import Any, Dict
+import os
 import threading
 import asyncio
 import re
@@ -81,6 +82,15 @@ class ApiModule(RuntimeModule):
         # ВАЖНО: Порядок выполнения middleware в FastAPI обратный порядку добавления
         # Последний добавленный выполняется первым
         
+        # Добавляем request logger middleware ПЕРВЫМ (выполнится ПОСЛЕДНИМ)
+        # Это нужно для того, чтобы он мог перехватывать все запросы
+        try:
+            from modules.request_logger.middleware import request_logger_middleware
+            self.app.middleware("http")(request_logger_middleware)
+        except ImportError:
+            # RequestLoggerModule может быть не установлен - это нормально
+            pass
+        
         # Добавляем auth middleware (boundary-layer) - выполнится вторым
         self.app.middleware("http")(require_auth_middleware)
         
@@ -92,6 +102,15 @@ class ApiModule(RuntimeModule):
         # Mount monitoring module
         self.monitoring = MonitoringModule(runtime=self.runtime)
         self.app.include_router(self.monitoring.router, prefix="/monitor", tags=["monitoring"])
+        
+        # Mount request logger router (если модуль доступен)
+        try:
+            from modules.request_logger.router import create_request_logger_router
+            request_logger_router = create_request_logger_router(self.runtime)
+            self.app.include_router(request_logger_router)
+        except ImportError:
+            # RequestLoggerModule может быть не установлен - это нормально
+            pass
 
     async def start(self) -> None:
         """
@@ -363,7 +382,16 @@ class ApiModule(RuntimeModule):
         # Переопределяем openapi для добавления security
         self.app.openapi = custom_openapi
 
-        config = uvicorn.Config(self.app, host="127.0.0.1", port=8000, log_level="info")
+        # Уровень логирования uvicorn: можно изменить через LOG_LEVEL или по умолчанию warning
+        # Отключаем access log для uvicorn (используем наш middleware для логирования)
+        uvicorn_log_level = os.getenv("UVICORN_LOG_LEVEL", "warning")
+        config = uvicorn.Config(
+            self.app, 
+            host="127.0.0.1", 
+            port=8000, 
+            log_level=uvicorn_log_level,
+            access_log=False  # Отключаем access log uvicorn, используем наш middleware
+        )
         server = uvicorn.Server(config)
         self._server = server
 
