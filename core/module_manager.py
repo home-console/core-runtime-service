@@ -50,7 +50,7 @@ class ModuleSpec:
 # ВАЖНО: logger должен быть первым, так как он нужен для логирования других модулей!
 BUILTIN_MODULES = [
     ModuleSpec("logger", required=True),      # LoggerModule (инфраструктурный, должен быть первым)
-    ModuleSpec("request_logger", required=False),  # RequestLoggerModule (опциональный, для отладки)
+    ModuleSpec("request_logger", required=True),  # RequestLoggerModule (инфраструктурный)
     ModuleSpec("api", required=True),         # ApiModule (HTTP API Gateway)
     ModuleSpec("admin", required=True),       # AdminModule (административные endpoints)
     ModuleSpec("devices", required=True),     # DevicesModule

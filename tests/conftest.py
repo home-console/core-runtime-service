@@ -37,6 +37,21 @@ class InMemoryStorageAdapter(StorageAdapter):
     async def close(self) -> None:
         self.closed = True
 
+    async def batch_set(self, namespace: str, items: dict[str, dict]) -> None:
+        ns = self._data.setdefault(namespace, {})
+        for k, v in items.items():
+            ns[k] = v
+
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def transaction(self):
+        # In-memory adapter: transaction is a no-op
+        try:
+            yield
+        finally:
+            pass
+
 
 @pytest.fixture
 def memory_adapter():
