@@ -302,13 +302,21 @@ class OAuthYandexPlugin(BasePlugin):
         async def _refresh_access_token() -> str:
             """Внутренний метод для обновления access_token через refresh_token.
             
+            IMPORTANT:
+            OAuthReauthRequired MUST be raised ONLY when user re-authorization is required:
+            - invalid_grant (refresh_token revoked/expired/invalid)
+            - 200 response but no access_token
+            
+            Temporary errors (429, 5xx, network, parse) are re-raised without token deletion.
+            
             Returns:
                 Новый access_token
                 
             Raises:
-                OAuthReauthRequired: если refresh невозможен (нет refresh_token, ошибка API)
-                aiohttp.ClientError: для network errors (для retry)
-                asyncio.TimeoutError: для timeout (для retry)
+                OAuthReauthRequired: if refresh_token invalid or response format broken (FATAL)
+                aiohttp.ClientError: network errors (TEMPORARY)
+                asyncio.TimeoutError: timeout (TEMPORARY)
+                RuntimeError: for 429, 5xx, parse errors (TEMPORARY)
             """
             config = await self.runtime.storage.get(self.TOKEN_NAMESPACE, self.CONFIG_KEY)
             if not config:
@@ -336,37 +344,42 @@ class OAuthYandexPlugin(BasePlugin):
                         text = await resp.text()
                         
                         if resp.status != 200:
-                            # CRITICAL FIX: Tokens are cleared ONLY when refresh_token is invalid (invalid_grant),
-                            # not on temporary network or rate limit errors (429, 502, 503, timeout).
-                            # This prevents unnecessary re-authentication due to temporary Yandex API issues.
+                            # IMPORTANT: Distinguish FATAL (invalid_grant) from TEMPORARY (429, 5xx, network).
+                            # Only clear tokens and raise OAuthReauthRequired for FATAL cases.
+                            # Temporary errors must NOT trigger re-auth flow.
                             should_clear_tokens = False
+                            is_fatal = False
                             
-                            # Clear tokens only for OAuth errors indicating invalid refresh_token
+                            # Check for FATAL: invalid_grant or other permanent OAuth errors
                             if resp.status in (400, 401):
-                                # Try to parse error response to check for invalid_grant
                                 try:
                                     error_data = await resp.json()
                                     error_type = error_data.get("error", "")
-                                    # invalid_grant means refresh_token is revoked/expired/invalid
+                                    # invalid_grant means refresh_token is revoked/expired/invalid → FATAL
                                     if error_type == "invalid_grant":
                                         should_clear_tokens = True
+                                        is_fatal = True
                                 except Exception:
-                                    # If we can't parse, assume 401 means invalid token
+                                    # If we can't parse, assume 401 means invalid token → FATAL
                                     if resp.status == 401:
                                         should_clear_tokens = True
+                                        is_fatal = True
                             
-                            if should_clear_tokens:
-                                await self.runtime.storage.delete(self.TOKEN_NAMESPACE, self.TOKEN_KEY)
+                            # If FATAL: clear tokens and raise OAuthReauthRequired
+                            if is_fatal:
+                                if should_clear_tokens:
+                                    await self.runtime.storage.delete(self.TOKEN_NAMESPACE, self.TOKEN_KEY)
+                                raise OAuthReauthRequired(f"Ошибка обновления токена: HTTP {resp.status} (invalid_grant)")
                             
-                            # Always raise error, but tokens are preserved for temporary errors
-                            raise OAuthReauthRequired(f"Ошибка обновления токена: HTTP {resp.status}")
+                            # If TEMPORARY (429, 5xx, etc): DO NOT clear tokens, raise RuntimeError
+                            raise RuntimeError(f"Временная ошибка refresh: HTTP {resp.status}")
                         
                         try:
                             json_data = await resp.json()
                         except Exception:
-                            # Parse error with 200 OK - this is unexpected but not a reason to clear tokens
-                            # Do NOT clear tokens here - might be temporary issue
-                            raise OAuthReauthRequired(f"Ошибка парсинга ответа: {text[:200]}")
+                            # Parse error with 200 OK - TEMPORARY, not FATAL
+                            # DO NOT clear tokens, DO NOT raise OAuthReauthRequired
+                            raise RuntimeError(f"Ошибка парсинга ответа OAuth: {text[:200]}")
                         
                         # Вычисляем expires_at
                         tokens_to_save = dict(json_data)
@@ -391,25 +404,32 @@ class OAuthYandexPlugin(BasePlugin):
                         
                         access_token = tokens_to_save.get("access_token")
                         if not access_token:
-                            # Response was 200 but no access_token - this indicates invalid response format
-                            # Clear tokens as the OAuth server response is fundamentally broken
+                            # Response was 200 but no access_token - FATAL (server returned broken response)
+                            # Clear tokens and raise OAuthReauthRequired
                             await self.runtime.storage.delete(self.TOKEN_NAMESPACE, self.TOKEN_KEY)
-                            raise OAuthReauthRequired("Access token не получен после refresh")
+                            raise OAuthReauthRequired("Access token не получен после refresh (FATAL)")
                         
                         return access_token
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-                # Network errors - DO NOT clear tokens, this is temporary
+                # Network errors - TEMPORARY, DO NOT clear tokens, DO NOT convert to OAuthReauthRequired
+                # Re-raise as-is for caller to handle
                 raise
             except OAuthReauthRequired:
-                # OAuthReauthRequired - tokens already cleared if needed
+                # FATAL: tokens already cleared if needed, re-raise for caller
+                raise
+            except RuntimeError:
+                # TEMPORARY: parse errors, 429, 5xx, etc - DO NOT clear tokens, re-raise as-is
                 raise
             except Exception as e:
-                # Unexpected errors - DO NOT clear tokens, might be temporary
-                # Only raise error for retry mechanism
-                raise OAuthReauthRequired(f"Ошибка обновления токена: {str(e)}")
+                # Unexpected errors - assume TEMPORARY, DO NOT clear tokens, DO NOT raise OAuthReauthRequired
+                raise RuntimeError(f"Ошибка обновления токена (temporary): {str(e)}")
 
         async def get_access_token() -> str:
             """Получить валидный access_token с автоматическим обновлением.
+            
+            IMPORTANT:
+            OAuthReauthRequired is raised ONLY when user re-authorization is truly required.
+            Temporary errors (network, 429, 5xx, parse) do NOT trigger re-auth flow.
             
             Поведение:
             - Загружает токены из storage
@@ -417,14 +437,15 @@ class OAuthYandexPlugin(BasePlugin):
             - Если токен валиден → возвращает его
             - Если токен истёк → пытается refresh (с блокировкой для параллельных запросов)
             - Если refresh успешен → возвращает новый токен
-            - Если refresh неуспешен → очищает токены и выбрасывает OAuthReauthRequired
+            - Если refresh выбрасывает OAuthReauthRequired (FATAL) → пробрасывает дальше
+            - Если refresh выбрасывает другую ошибку (TEMPORARY) → пробрасывает как есть
             
             Returns:
                 Валидный access_token
                 
             Raises:
-                OAuthReauthRequired: если требуется повторная авторизация
-                RuntimeError: если OAuth не настроен
+                OAuthReauthRequired: если требуется повторная авторизация (FATAL)
+                RuntimeError: для временных ошибок (TEMPORARY)
             """
             tokens = await self.runtime.storage.get(self.TOKEN_NAMESPACE, self.TOKEN_KEY)
             if not tokens or not isinstance(tokens, dict):
@@ -500,24 +521,32 @@ class OAuthYandexPlugin(BasePlugin):
                             async with operation("oauth.refresh_token", self.metadata.name, self.runtime):
                                 new_token = await _refresh_access_token()
                             return new_token
-                        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-                            # Retry только для network errors (1 раз)
-                            try:
-                                async with operation("oauth.refresh_token", self.metadata.name, self.runtime):
-                                    new_token = await _refresh_access_token()
-                                return new_token
-                            except Exception as retry_error:
-                                # CRITICAL: После failed retry НИКОГДА не возвращаем истёкший токен
-                                # Выбрасываем OAuthReauthRequired с информацией об ошибке
-                                raise OAuthReauthRequired(
-                                    f"Не удалось обновить истёкший токен после retry: {str(retry_error)}"
-                                )
                         except OAuthReauthRequired:
-                            # Не retry для OAuthReauthRequired - пробрасываем дальше
+                            # FATAL: refresh_token invalid or 200 without access_token
+                            # Tokens already deleted, raise for user to re-authorize
+                            raise
+                        except (aiohttp.ClientError, asyncio.TimeoutError, RuntimeError) as e:
+                            # TEMPORARY: network, timeout, 429, 5xx, parse errors
+                            # Do NOT clear tokens, do NOT raise OAuthReauthRequired
+                            # Retry once for network errors only
+                            if isinstance(e, (aiohttp.ClientError, asyncio.TimeoutError)):
+                                try:
+                                    async with operation("oauth.refresh_token", self.metadata.name, self.runtime):
+                                        new_token = await _refresh_access_token()
+                                    return new_token
+                                except OAuthReauthRequired:
+                                    # FATAL on retry
+                                    raise
+                                except Exception as retry_error:
+                                    # TEMPORARY on retry - still don't raise OAuthReauthRequired
+                                    raise RuntimeError(
+                                        f"Не удалось обновить токен после retry (temporary): {str(retry_error)}"
+                                    )
+                            # Non-network temporary errors: don't retry, just propagate
                             raise
                         except Exception as e:
-                            # CRITICAL: Для любых других ошибок refresh НИКОГДА не возвращаем истёкший токен
-                            raise OAuthReauthRequired(f"Ошибка обновления токена: {str(e)}")
+                            # Unexpected errors - propagate as-is, don't convert to OAuthReauthRequired
+                            raise RuntimeError(f"Неожиданная ошибка при refresh: {str(e)}")
             
             # Токен валиден (expires_at проверен или отсутствует) - логируем для отладки
             await self.runtime.service_registry.call(
