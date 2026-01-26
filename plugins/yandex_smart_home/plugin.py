@@ -82,8 +82,9 @@ class YandexSmartHomeRealPlugin(BasePlugin):
         # Инициализируем модули
         self.device_sync = DeviceSync(self.runtime, self.metadata.name)
         self.device_status_checker = DeviceStatusChecker(self.runtime, self.metadata.name)
-        self.command_handler = CommandHandler(self.runtime, self.metadata.name, self._tasks)
         self.quasar_ws = YandexQuasarWS(self.runtime, self.metadata.name)
+        # Передаем quasar_ws в command_handler для проверки активности WebSocket
+        self.command_handler = CommandHandler(self.runtime, self.metadata.name, self._tasks, self.quasar_ws)
 
         # Регистрируем сервис синхронизации устройств
         async def _sync_devices():

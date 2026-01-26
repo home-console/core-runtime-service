@@ -159,15 +159,17 @@ class YandexQuasarWS:
                 raise
             except Exception as e:
                 # Специальная обработка таймаута ожидания PONG от сервера
-                if isinstance(e, ServerTimeoutError) or e.__class__.__name__ == "ServerTimeoutError":
+                # Это нормальное поведение - сервер Quasar может не отвечать на PING
+                if isinstance(e, ServerTimeoutError) or e.__class__.__name__ == "ServerTimeoutError" or "No PONG received" in str(e):
                     await self._log(
-                        "warning",
-                        f"Quasar WS timeout (No PONG received): {e}",
+                        "debug",
+                        f"Quasar WS heartbeat timeout (server may not respond to PING, reconnecting): {e}",
                         error_type=type(e).__name__,
                         error_msg=str(e),
                     )
                     # Небольшая пауза перед повторным подключением — не увеличиваем счетчик consecutive_errors
-                    await asyncio.sleep(5 + random.random())
+                    # Это не критическая ошибка, просто переподключаемся
+                    await asyncio.sleep(2 + random.random())
                     backoff = 1.0
                     continue
 
@@ -281,9 +283,9 @@ class YandexQuasarWS:
         assert "Authorization" not in headers, "NEVER use OAuth with Quasar WebSocket!"
         
         # YandexStation передает updates_url напрямую как строку
-        # Пробуем сначала строку, если не работает - используем URL объект
+        # Используем heartbeat=60 как в YandexStation (увеличенный интервал для избежания таймаутов)
         try:
-            async with self._session.ws_connect(updates_url, headers=headers, heartbeat=25) as ws:
+            async with self._session.ws_connect(updates_url, headers=headers, heartbeat=60) as ws:
                 self._ws = ws
                 await self._log("info", "Quasar WS connected", url=updates_url[:80])
                 async for msg in ws:
@@ -300,7 +302,7 @@ class YandexQuasarWS:
             if "raw_host" in str(e) or "str" in str(e):
                 await self._log("debug", f"Retrying WS connect with URL object: {e}")
                 ws_url = URL(updates_url)
-                async with self._session.ws_connect(ws_url, headers=headers, heartbeat=25) as ws:
+                async with self._session.ws_connect(ws_url, headers=headers, heartbeat=60) as ws:
                     self._ws = ws
                     await self._log("info", "Quasar WS connected (via URL object)", url=updates_url[:80])
                     async for msg in ws:
@@ -349,10 +351,23 @@ class YandexQuasarWS:
 
         state = DeviceTransformer._extract_state(states_list, caps)
 
-        # Сохраняем и уведомляем только если есть полезные данные
-        if state:
-            self._devices[device_id] = {"state": state, "raw": device}
-            await self._publish_state(device_id, state)
+        # ВАЖНО: Публикуем обновление ВСЕГДА, даже если state пустой
+        # Это нужно для сброса pending состояния, даже если обновление не содержит изменений
+        # Сохраняем состояние для кеша
+        self._devices[device_id] = {"state": state or {}, "raw": device}
+        
+        # Публикуем обновление - если state пустой, это все равно сбросит pending
+        # Это важно для случаев, когда устройство уже в нужном состоянии
+        await self._publish_state(device_id, state or {})
+        
+        # Логируем для отладки
+        await self._log(
+            "debug",
+            f"Processed device update from WS",
+            device_id=device_id,
+            state=state,
+            has_on="on" in (state or {}),
+        )
 
     async def _seed_and_publish(self, devices: List[Dict[str, Any]]) -> None:
         for device in devices:
@@ -367,9 +382,38 @@ class YandexQuasarWS:
                 await self._publish_state(device_id, state)
 
     async def _publish_state(self, device_id: str, state: Dict[str, Any]) -> None:
+        """Публикует обновление состояния устройства из WebSocket.
+        
+        Args:
+            device_id: external_id устройства (ID из Quasar API)
+            state: словарь с состоянием (например, {"on": True})
+        """
         payload = {"external_id": device_id, "state": state}
-        with contextlib.suppress(Exception):
+        
+        # Логируем публикацию для отладки
+        await self._log(
+            "debug",
+            f"Publishing state update from WS",
+            external_id=device_id,
+            state=state,
+        )
+        
+        try:
             await self.runtime.event_bus.publish("external.device_state_reported", payload)
+            await self._log(
+                "debug",
+                f"State update published successfully",
+                external_id=device_id,
+            )
+        except Exception as e:
+            await self._log(
+                "error",
+                f"Failed to publish state update: {e}",
+                external_id=device_id,
+                state=state,
+            )
+        
+        # Вызываем подписчиков
         for cb in list(self._subscribers.get(device_id, [])):
             try:
                 result = cb(payload)

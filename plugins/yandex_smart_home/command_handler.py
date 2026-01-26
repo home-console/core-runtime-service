@@ -13,18 +13,20 @@ from .device_transformer import DeviceTransformer
 class CommandHandler:
     """Класс для обработки команд управления устройствами."""
 
-    def __init__(self, runtime: Any, plugin_name: str, tasks: set):
+    def __init__(self, runtime: Any, plugin_name: str, tasks: set, quasar_ws: Any = None):
         """Инициализация обработчика команд.
 
         Args:
             runtime: экземпляр Runtime
             plugin_name: имя плагина для логирования
             tasks: множество для отслеживания фоновых задач
+            quasar_ws: экземпляр YandexQuasarWS для проверки активности WebSocket
         """
         self.runtime = runtime
         self.plugin_name = plugin_name
         self.tasks = tasks
         self.api_client = YandexAPIClient(runtime, plugin_name)
+        self.quasar_ws = quasar_ws  # WebSocket клиент для проверки активности
 
     async def handle_command(self, data: Dict[str, Any]) -> None:
         """Обработать команду управления устройством.
@@ -195,34 +197,55 @@ class CommandHandler:
                 except Exception:
                     pass
 
-            # Также запускаем background polling для получения актуального
-            # состояния устройства через GET /v1.0/devices (для подтверждения).
-            try:
-                # логируем факт успешной отправки команды
+            # Проверяем, активен ли WebSocket для получения обновлений состояния
+            # Если WebSocket активен - НЕ делаем polling через OAuth API
+            # WebSocket будет автоматически публиковать обновления состояния
+            ws_active = False
+            if self.quasar_ws:
+                try:
+                    # Проверяем, запущен ли WebSocket runner
+                    runner = self.quasar_ws.runner
+                    ws_active = runner is not None and not runner.done()
+                except Exception:
+                    pass
+
+            if ws_active:
+                # WebSocket активен - полагаемся на него для получения обновлений состояния
+                # Не делаем polling, так как WebSocket уже получает обновления в реальном времени
                 try:
                     await self.runtime.service_registry.call(
                         "logger.log",
                         level="info",
-                        message=f"Command sent successfully to Yandex device {external_id}",
+                        message=f"Command sent successfully to Yandex device {external_id}. WebSocket active, state will be updated via WebSocket.",
                         plugin=self.plugin_name,
-                        context={"state": params}
+                        context={"state": params, "ws_active": True}
                     )
                 except Exception:
                     pass
-
-                # Запускаем фоновую задачу пуллинга (не ждём её)
-                task = asyncio.create_task(
-                    self._poll_and_publish(external_id, data.get("internal_id"), params)
-                )
-                # Track and auto-remove completed tasks
+                # WebSocket автоматически опубликует обновление состояния когда оно придет
+                # pending будет сброшен в handle_external_state когда придет обновление
+            else:
+                # WebSocket не активен - используем fallback через OAuth API polling
                 try:
+                    await self.runtime.service_registry.call(
+                        "logger.log",
+                        level="info",
+                        message=f"Command sent successfully to Yandex device {external_id}. WebSocket not active, using OAuth API polling.",
+                        plugin=self.plugin_name,
+                        context={"state": params, "ws_active": False}
+                    )
+                except Exception:
+                    pass
+                # Запускаем фоновую задачу пуллинга (не ждём её)
+                try:
+                    task = asyncio.create_task(
+                        self._poll_and_publish(external_id, data.get("internal_id"), params)
+                    )
+                    # Track and auto-remove completed tasks
                     self.tasks.add(task)
                     task.add_done_callback(lambda t, tasks=self.tasks: tasks.discard(t))
                 except Exception:
                     pass
-
-            except Exception:
-                pass
 
         except RuntimeError as e:
             # Ошибка от API — сбрасываем pending и логируем ошибку
