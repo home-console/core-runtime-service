@@ -28,6 +28,10 @@ class Config:
 
     # Тайм-аут для shutdown (секунды)
     shutdown_timeout: int = 10
+    
+    # Тайм-аут для вызовов сервисов (секунды)
+    # Защита от зависших вызовов плагинов
+    service_call_timeout: float = 30.0
 
     def validate(self) -> None:
         """
@@ -88,6 +92,7 @@ class Config:
             pg_password=os.getenv("RUNTIME_PG_PASSWORD", ""),
             pg_dsn=os.getenv("RUNTIME_PG_DSN"),
             shutdown_timeout=int(os.getenv("RUNTIME_SHUTDOWN_TIMEOUT", "10")),
+            service_call_timeout=float(os.getenv("RUNTIME_SERVICE_CALL_TIMEOUT", "30.0")),
         )
         config.validate()
         return config

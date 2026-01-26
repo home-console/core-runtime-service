@@ -46,7 +46,9 @@ class CoreRuntime:
         """
         # Инициализация компонентов
         self.event_bus = EventBus()
-        self.service_registry = ServiceRegistry()
+        # ServiceRegistry с timeout из конфига (защита от зависших вызовов)
+        default_timeout = config.service_call_timeout if config else None
+        self.service_registry = ServiceRegistry(default_timeout=default_timeout)
         self.state_engine = StateEngine()
         
         # Base storage adapter instance

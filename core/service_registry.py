@@ -65,15 +65,25 @@ class ServiceRegistry:
     - плагины регистрируют сервисы (методы)
     - другие плагины вызывают эти сервисы по имени
     - ServiceRegistry маршрутизирует вызовы
+    - Все вызовы защищены timeout по умолчанию
     """
 
-    def __init__(self):
+    def __init__(self, default_timeout: Optional[float] = None):
+        """
+        Инициализация ServiceRegistry.
+        
+        Args:
+            default_timeout: дефолтный timeout для вызовов сервисов (секунды).
+                           Если None, timeout не применяется (для обратной совместимости).
+        """
         # Словарь: service_name -> function
         self._services: dict[str, ServiceFunc] = {}
         # Словарь: service_name.version -> deprecated flag
         self._deprecated: dict[str, bool] = {}
         # Lock для thread-safety операций с _services
         self._lock = asyncio.Lock()
+        # Дефолтный timeout для всех вызовов
+        self._default_timeout: Optional[float] = default_timeout
 
     async def register(self, service_name: str, func: ServiceFunc, version: Optional[str] = None) -> None:
         """
@@ -178,6 +188,7 @@ class ServiceRegistry:
             
         Raises:
             ValueError: если сервис не найден
+            asyncio.TimeoutError: если вызов превысил timeout (если установлен default_timeout)
             
         Пример:
             result = await service_registry.call("devices.turn_on", "lamp_kitchen")
@@ -185,6 +196,8 @@ class ServiceRegistry:
         SECURITY NOTE: ServiceRegistry не выполняет проверки авторизации. Сервисы считаются trusted.
         Authorization выполняется на boundary-слое (ApiModule, AdminModule) перед вызовом сервисов.
         Прямые вызовы через service_registry.call() допустимы только из trusted-кода (модулей и плагинов).
+        
+        TIMEOUT NOTE: Если установлен default_timeout, все вызовы защищены timeout автоматически.
         """
         # Получаем функцию под lock для thread-safety
         async with self._lock:
@@ -193,7 +206,14 @@ class ServiceRegistry:
                 raise ValueError(f"Сервис '{service_name}' не найден")
         
         # Вызываем функцию вне lock, чтобы не блокировать другие вызовы
-        return await func(*args, **kwargs)
+        # Если установлен default_timeout, применяем его
+        if self._default_timeout is not None:
+            return await asyncio.wait_for(
+                func(*args, **kwargs),
+                timeout=self._default_timeout
+            )
+        else:
+            return await func(*args, **kwargs)
     
     async def call_with_timeout(
         self,
