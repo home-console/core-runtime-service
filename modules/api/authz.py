@@ -154,6 +154,11 @@ def check(ctx: Optional[RequestContext], action: str, resource: Optional[Dict[st
     if action.startswith("oauth_yandex."):
         return True
     
+    # Специальный случай: yandex_device_auth эндпоинты публичные
+    # Они используются для OAuth авторизации пользователя в Яндекс
+    if action.startswith("yandex_device_auth."):
+        return True
+    
     # Специальный случай: login публичный (не требует авторизации)
     if action == "admin.auth.login":
         return True

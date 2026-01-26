@@ -193,8 +193,16 @@ class ApiModule(RuntimeModule):
                     
                     # SECURITY FIX: Проверяем базовую авторизацию ДО получения device
                     # Это предотвращает Information Disclosure (раскрытие существования device)
-                    # Исключение: admin.auth.me и admin.auth.initialize - публичные endpoints
-                    if endpoint.service not in ["admin.auth.me", "admin.auth.initialize"]:
+                    # Исключение: публичные endpoints не требуют авторизации
+                    public_endpoints = [
+                        "admin.auth.me",
+                        "admin.auth.initialize",
+                        "yandex_device_auth.start",
+                        "yandex_device_auth.cookies",
+                        "yandex_device_auth.status",
+                        "yandex_device_auth.get_session",
+                    ]
+                    if endpoint.service not in public_endpoints:
                         try:
                             # Сначала проверяем базовые права без resource (scope-based)
                             # Передаём runtime для audit logging отказов

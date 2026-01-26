@@ -296,6 +296,33 @@ class OAuthYandexPlugin(BasePlugin):
                 # Сохраняем токены в storage (single source of truth)
                 await self.runtime.storage.set(self.TOKEN_NAMESPACE, self.TOKEN_KEY, tokens_to_save)
 
+                # Публикуем событие линковки аккаунта (для UI/расширений)
+                try:
+                    await self.runtime.event_bus.publish(
+                        "oauth_yandex.linked",
+                        {
+                            "authorized": True,
+                            "expires_in": json_data.get("expires_in"),
+                        }
+                    )
+                except Exception:
+                    # События — best-effort, не блокируем ответ
+                    pass
+
+                # Лог: подсказка про cookies для Quasar
+                try:
+                    await self.runtime.service_registry.call(
+                        "logger.log",
+                        level="info",
+                        message=(
+                            "Yandex account linked via OAuth. If you want realtime updates (Quasar WS), "
+                            "ensure Yandex session cookies (Session_id, yandexuid) are stored via /oauth/yandex/cookies."
+                        ),
+                        plugin=self.metadata.name,
+                    )
+                except Exception:
+                    pass
+
                 # Do NOT return raw tokens to caller. Return minimal status only.
                 return {"ok": True, "authorized": True, "expires_in": json_data.get("expires_in")}
 
@@ -641,6 +668,34 @@ class OAuthYandexPlugin(BasePlugin):
                 )
                 return {'valid': False, 'reason': 'request_failed', 'error': str(e)}
 
+        async def clear_tokens(**kwargs) -> Dict[str, Any]:
+            """Очистить сохранённые токены (разлинковка аккаунта).
+            
+            Удаляет все сохранённые токены, что делает аккаунт неавторизованным.
+            Конфигурация OAuth остаётся нетронутой для возможности переавторизации.
+            
+            Returns:
+                {'status': 'success', 'message': 'Tokens cleared'}
+            """
+            try:
+                await self.runtime.storage.delete(self.TOKEN_NAMESPACE, self.TOKEN_KEY)
+                await self.runtime.service_registry.call(
+                    "logger.log",
+                    level="info",
+                    message="OAuth tokens cleared (account unlinked)",
+                    plugin=self.metadata.name
+                )
+                return {'status': 'success', 'message': 'Tokens cleared'}
+            except Exception as e:
+                await self.runtime.service_registry.call(
+                    "logger.log",
+                    level="error",
+                    message=f"OAuth clear_tokens exception: {type(e).__name__}: {str(e)}",
+                    plugin=self.metadata.name,
+                    context={"error": str(e), "error_type": type(e).__name__}
+                )
+                raise
+
         async def set_tokens(tokens: Dict[str, Any]) -> None:
             """Сохранить токены (internal/test service).
             
@@ -675,6 +730,56 @@ class OAuthYandexPlugin(BasePlugin):
         await self.runtime.service_registry.register("oauth_yandex.validate_token", validate_token)
         await self.runtime.service_registry.register("oauth_yandex.set_tokens", set_tokens)
 
+        async def set_cookies(cookies: Dict[str, str]) -> Dict[str, Any]:
+            """Сохранить cookies сессии Яндекса для Quasar API.
+            
+            Quasar API (iot.quasar.yandex.ru) требует cookies сессии, а не OAuth токен.
+            Необходимые cookies: Session_id, yandexuid, и другие из активной сессии яндекса.
+            
+            Args:
+                cookies: словарь cookies вида {"Session_id": "...", "yandexuid": "...", ...}
+            
+            Returns:
+                {"ok": True}
+            """
+            if not cookies or not isinstance(cookies, dict):
+                raise ValueError("cookies должен быть словарём")
+            
+            await self.runtime.storage.set("yandex", "cookies", cookies)
+            return {"ok": True}
+
+        async def get_cookies() -> Optional[Dict[str, str]]:
+            """Получить сохранённые cookies для Quasar API.
+            
+            Returns:
+                Словарь cookies или None если не установлены
+            """
+            try:
+                cookies = await self.runtime.storage.get("yandex", "cookies")
+                if isinstance(cookies, dict):
+                    return cookies
+            except Exception:
+                pass
+            return None
+
+        await self.runtime.service_registry.register("oauth_yandex.clear_tokens", clear_tokens)
+        await self.runtime.service_registry.register("oauth_yandex.set_cookies", set_cookies)
+        await self.runtime.service_registry.register("oauth_yandex.get_cookies", get_cookies)
+
+        # Дополнительно: единый login entrypoint через контролируемый WebView
+        # (новая архитектура). Сервисы: yandex.login.start / yandex.login.status
+        from .login_flow import YandexLoginService
+        self._login_service = YandexLoginService(self.runtime)
+
+        async def yandex_login_start() -> Dict[str, Any]:
+            return await self._login_service.start()
+
+        async def yandex_login_status() -> Dict[str, Any]:
+            return await self._login_service.status()
+
+        await self.runtime.service_registry.register("yandex.login.start", yandex_login_start)
+        await self.runtime.service_registry.register("yandex.login.status", yandex_login_status)
+
         # Регистрируем HTTP-контракты через runtime.http.register()
         # UI НЕ должен передавать OAuth параметры после configure —
         # они берутся из storage автоматически.
@@ -694,13 +799,8 @@ class OAuthYandexPlugin(BasePlugin):
                 service="oauth_yandex.get_status",
                 description="Получить статус OAuth: configured, authorized, access_token_valid"
             ))
-            # GET /oauth/yandex/authorize-url — построить URL авторизации
-            self.runtime.http.register(HttpEndpoint(
-                method="GET",
-                path="/oauth/yandex/authorize-url",
-                service="oauth_yandex.get_authorize_url",
-                description="Получить URL авторизации (использует сохранённую конфигурацию)"
-            ))
+            # [DEPRECATED] /oauth/yandex/authorize-url — НЕ публикуем как HTTP.
+            # Метод остаётся доступен как внутренний сервис для обратной совместимости.
             # POST /oauth/yandex/exchange-code — обменять код на токены
             # Этот HTTP-эндпоинт сохраняет токены в storage, но не возвращает их клиенту.
             self.runtime.http.register(HttpEndpoint(
@@ -715,6 +815,41 @@ class OAuthYandexPlugin(BasePlugin):
                 path="/oauth/yandex/validate",
                 service="oauth_yandex.validate_token",
                 description="Проверить валидность access_token (если не указан, используется сохранённый)"
+            ))
+            # POST /oauth/yandex/unlink — очистить токены и разлинковать аккаунт
+            self.runtime.http.register(HttpEndpoint(
+                method="POST",
+                path="/oauth/yandex/unlink",
+                service="oauth_yandex.clear_tokens",
+                description="Очистить сохранённые токены (разлинковка аккаунта)"
+            ))
+            # POST /oauth/yandex/cookies — сохранить cookies для Quasar API
+            self.runtime.http.register(HttpEndpoint(
+                method="POST",
+                path="/oauth/yandex/cookies",
+                service="oauth_yandex.set_cookies",
+                description="Сохранить Yandex session cookies для Quasar API"
+            ))
+            # GET /oauth/yandex/cookies — получить cookies
+            self.runtime.http.register(HttpEndpoint(
+                method="GET",
+                path="/oauth/yandex/cookies",
+                service="oauth_yandex.get_cookies",
+                description="Получить сохранённые Yandex session cookies"
+            ))
+
+            # Новые единые login-эндпоинты для контролируемого UI
+            self.runtime.http.register(HttpEndpoint(
+                method="POST",
+                path="/yandex/login/start",
+                service="yandex.login.start",
+                description="Запустить единый login flow (Embedded WebView)"
+            ))
+            self.runtime.http.register(HttpEndpoint(
+                method="POST",
+                path="/yandex/login/status",
+                service="yandex.login.status",
+                description="Получить статус login-процесса/аккаунта"
             ))
         except Exception:
             # Ошибки регистрации HTTP не должны блокировать загрузку плагина
@@ -731,7 +866,12 @@ class OAuthYandexPlugin(BasePlugin):
             await self.runtime.service_registry.unregister("oauth_yandex.get_access_token")
             await self.runtime.service_registry.unregister("oauth_yandex.get_tokens")
             await self.runtime.service_registry.unregister("oauth_yandex.validate_token")
+            await self.runtime.service_registry.unregister("oauth_yandex.clear_tokens")
             await self.runtime.service_registry.unregister("oauth_yandex.set_tokens")
+            await self.runtime.service_registry.unregister("oauth_yandex.set_cookies")
+            await self.runtime.service_registry.unregister("oauth_yandex.get_cookies")
+            await self.runtime.service_registry.unregister("yandex.login.start")
+            await self.runtime.service_registry.unregister("yandex.login.status")
         except Exception:
             pass
 

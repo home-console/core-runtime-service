@@ -1,0 +1,41 @@
+{
+    "name": "yandex_device_auth",
+    "version": "0.1.0",
+    "description": "Device/QR авторизация Яндекса для получения session cookies (Quasar WebSocket)",
+    "author": "Home Console",
+    "license": "MIT",
+    "type": "authentication",
+    "class_path": "plugins.yandex_device_auth.plugin.YandexDeviceAuthPlugin",
+    "requires": [
+        "core"
+    ],
+    "provides": {
+        "services": [
+            "yandex_device_auth.start",
+            "yandex_device_auth.status",
+            "yandex_device_auth.cancel",
+            "yandex_device_auth.get_session",
+            "yandex_device_auth.force_approve"
+        ],
+        "http_endpoints": [
+            "/yandex/auth/device/start",
+            "/yandex/auth/device/status",
+            "/yandex/auth/device/cancel",
+            "/yandex/auth/device/session",
+            "/yandex/auth/device/approve"
+        ],
+        "events": [
+            "yandex.device_auth.linked"
+        ]
+    },
+    "config": {
+        "enabled": true,
+        "poll_interval": 5,
+        "session_timeout": 600
+    },
+    "documentation": {
+        "readme": "README.md",
+        "architecture": "../../../docs/YANDEX_DEVICE_AUTH_ARCHITECTURE.md",
+        "sequence": "../../../docs/YANDEX_DEVICE_AUTH_SEQUENCE.md"
+    }
+}

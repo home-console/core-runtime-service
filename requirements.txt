@@ -24,3 +24,6 @@ bcrypt>=4.0.0
 PyJWT>=2.8.0
 cryptography>=41.0.0  # Для алгоритмов JWT
 prometheus-client
+
+# QR code generation (для yandex_device_auth plugin)
+qrcode[pil]>=7.4.0
