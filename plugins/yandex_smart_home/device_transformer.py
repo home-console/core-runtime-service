@@ -176,9 +176,22 @@ class DeviceTransformer:
             value = state_value.get("value")
 
             if value is not None:
-                # Для capability on_off используем ключ "on", для остального используем cap_name
+                # Для capability on_off приводим значение к булеву типу (нормализуем 'on'/'off' и подобные)
                 if cap_name == "on_off":
-                    state["on"] = value
+                    norm = None
+                    if isinstance(value, bool):
+                        norm = value
+                    elif isinstance(value, str):
+                        v = value.strip().lower()
+                        if v in ("on", "true", "1", "yes"):
+                            norm = True
+                        elif v in ("off", "false", "0", "no"):
+                            norm = False
+                    elif isinstance(value, (int, float)):
+                        norm = bool(value)
+
+                    if norm is not None:
+                        state["on"] = norm
                 else:
                     state[cap_name] = value
 
