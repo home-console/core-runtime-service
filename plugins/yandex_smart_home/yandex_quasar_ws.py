@@ -38,6 +38,8 @@ import random
 from urllib.parse import urlparse
 
 import aiohttp
+from aiohttp import ServerTimeoutError
+from yarl import URL
 
 from .api_client import YandexAPIClient
 from .device_transformer import DeviceTransformer
@@ -73,6 +75,7 @@ class YandexQuasarWS:
         self._subscribers: Dict[str, Set[Callable[[Dict[str, Any]], Any]]] = {}
         self._devices: Dict[str, Dict[str, Any]] = {}
         self._cookie_jar: Optional[aiohttp.CookieJar] = None
+        self._current_cookies: Optional[Dict[str, str]] = None
 
     @property
     def runner(self) -> Optional[asyncio.Task]:
@@ -110,6 +113,9 @@ class YandexQuasarWS:
 
     async def _run_loop(self) -> None:
         backoff = 1.0
+        consecutive_errors = 0
+        max_consecutive_errors = 10  # Максимум ошибок подряд перед остановкой
+        
         while not self._stop_event.is_set():
             try:
                 cookies = await self._load_cookies()
@@ -139,23 +145,51 @@ class YandexQuasarWS:
                     "info",
                     f"Quasar WS: using cookies for auth (NO OAuth token)",
                     cookie_count=len(cookies),
-                    cookie_names=list(cookies.keys())
+                    cookie_names=list(cookies.keys()),
+                    has_session_id="Session_id" in cookies,
+                    has_yandexuid="yandexuid" in cookies
                 )
                 
                 devices, updates_url = await self._fetch_devices_and_url(cookies)
                 await self._seed_and_publish(devices)
                 backoff = 1.0
+                consecutive_errors = 0  # Сбрасываем счетчик при успешном подключении
                 await self._consume_ws(updates_url, cookies)
             except asyncio.CancelledError:
                 raise
             except Exception as e:
+                # Специальная обработка таймаута ожидания PONG от сервера
+                if isinstance(e, ServerTimeoutError) or e.__class__.__name__ == "ServerTimeoutError":
+                    await self._log(
+                        "warning",
+                        f"Quasar WS timeout (No PONG received): {e}",
+                        error_type=type(e).__name__,
+                        error_msg=str(e),
+                    )
+                    # Небольшая пауза перед повторным подключением — не увеличиваем счетчик consecutive_errors
+                    await asyncio.sleep(5 + random.random())
+                    backoff = 1.0
+                    continue
+
+                consecutive_errors += 1
                 await self._log(
                     "error",
                     f"Quasar WS loop error: {type(e).__name__}: {e}",
                     error_type=type(e).__name__,
                     error_msg=str(e),
                     backoff=round(backoff, 2),
+                    consecutive_errors=consecutive_errors,
                 )
+
+                # Если слишком много ошибок подряд - останавливаем попытки
+                if consecutive_errors >= max_consecutive_errors:
+                    await self._log(
+                        "error",
+                        f"Quasar WS: too many consecutive errors ({consecutive_errors}), stopping reconnection attempts. Fix the issue and restart the plugin.",
+                        consecutive_errors=consecutive_errors,
+                    )
+                    break  # Выходим из цикла
+
                 await asyncio.sleep(backoff + random.random())
                 backoff = min(backoff * 2, 30.0)
 
@@ -195,6 +229,22 @@ class YandexQuasarWS:
         devices = data.get("devices") or []
         if not updates_url:
             raise RuntimeError("updates_url missing in Quasar response")
+        
+        # Валидация и нормализация updates_url
+        if not isinstance(updates_url, str):
+            raise ValueError(f"Invalid updates_url type: {type(updates_url)}, expected str")
+        
+        # Убеждаемся, что URL начинается с ws:// или wss://
+        if not updates_url.startswith(('ws://', 'wss://')):
+            # Если URL начинается с http:// или https://, заменяем на ws:// или wss://
+            if updates_url.startswith('https://'):
+                updates_url = updates_url.replace('https://', 'wss://', 1)
+            elif updates_url.startswith('http://'):
+                updates_url = updates_url.replace('http://', 'ws://', 1)
+            else:
+                # Если нет протокола, добавляем wss://
+                updates_url = f"wss://{updates_url.lstrip('/')}"
+        
         return devices, updates_url
 
     async def _consume_ws(self, updates_url: str, cookies: Dict[str, str]) -> None:
@@ -204,6 +254,25 @@ class YandexQuasarWS:
         ⚠️ ARCHITECTURAL RULE: NEVER add Authorization header here!
         WebSocket will reject OAuth Bearer tokens.
         """
+        # Валидация URL
+        if not updates_url or not isinstance(updates_url, str):
+            raise ValueError(f"Invalid updates_url: {updates_url}")
+        
+        # Обновляем сессию если cookies изменились
+        if self._current_cookies != cookies:
+            # Закрываем старую сессию если есть
+            if self._session and not self._session.closed:
+                await self._session.close()
+            # Создаем новую сессию с обновленными cookies
+            self._cookie_jar = self._cookie_jar_from(cookies)
+            self._session = aiohttp.ClientSession(cookie_jar=self._cookie_jar)
+            self._current_cookies = cookies.copy()
+        elif not self._session or self._session.closed:
+            # Создаем сессию если её нет
+            self._cookie_jar = self._cookie_jar_from(cookies)
+            self._session = aiohttp.ClientSession(cookie_jar=self._cookie_jar)
+            self._current_cookies = cookies.copy()
+        
         headers = {
             "Origin": "https://iot.quasar.yandex.ru",
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
@@ -211,20 +280,40 @@ class YandexQuasarWS:
         # CRITICAL: NO Authorization header! Quasar WS uses cookies ONLY.
         assert "Authorization" not in headers, "NEVER use OAuth with Quasar WebSocket!"
         
-        if not self._session or self._session.closed:
-            self._session = aiohttp.ClientSession(cookie_jar=self._cookie_jar_from(cookies))
-        async with self._session.ws_connect(updates_url, headers=headers, heartbeat=25) as ws:
-            self._ws = ws
-            await self._log("info", "Quasar WS connected", url=updates_url[:80])
-            async for msg in ws:
-                if self._stop_event.is_set():
-                    break
-                if msg.type == aiohttp.WSMsgType.TEXT:
-                    await self._handle_message(msg.data)
-                elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
-                    exc = ws.exception()
-                    raise exc or RuntimeError("WebSocket closed")
-            await self._log("warning", "Quasar WS finished (loop exit)")
+        # YandexStation передает updates_url напрямую как строку
+        # Пробуем сначала строку, если не работает - используем URL объект
+        try:
+            async with self._session.ws_connect(updates_url, headers=headers, heartbeat=25) as ws:
+                self._ws = ws
+                await self._log("info", "Quasar WS connected", url=updates_url[:80])
+                async for msg in ws:
+                    if self._stop_event.is_set():
+                        break
+                    if msg.type == aiohttp.WSMsgType.TEXT:
+                        await self._handle_message(msg.data)
+                    elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
+                        exc = ws.exception()
+                        raise exc or RuntimeError("WebSocket closed")
+                await self._log("warning", "Quasar WS finished (loop exit)")
+        except (TypeError, AttributeError) as e:
+            # Если ошибка с raw_host, пробуем использовать URL объект
+            if "raw_host" in str(e) or "str" in str(e):
+                await self._log("debug", f"Retrying WS connect with URL object: {e}")
+                ws_url = URL(updates_url)
+                async with self._session.ws_connect(ws_url, headers=headers, heartbeat=25) as ws:
+                    self._ws = ws
+                    await self._log("info", "Quasar WS connected (via URL object)", url=updates_url[:80])
+                    async for msg in ws:
+                        if self._stop_event.is_set():
+                            break
+                        if msg.type == aiohttp.WSMsgType.TEXT:
+                            await self._handle_message(msg.data)
+                        elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
+                            exc = ws.exception()
+                            raise exc or RuntimeError("WebSocket closed")
+                    await self._log("warning", "Quasar WS finished (loop exit)")
+            else:
+                raise
 
     async def _handle_message(self, raw: str) -> None:
         try:
@@ -290,38 +379,71 @@ class YandexQuasarWS:
                 continue
 
     def _cookie_jar_from(self, cookies: Optional[Dict[str, str]]) -> aiohttp.CookieJar:
-        if self._cookie_jar:
-            # Если уже есть куки и не переданы новые — используем текущие
-            if not cookies:
-                return self._cookie_jar
-            existing = self._cookie_jar.filter_cookies("https://iot.quasar.yandex.ru")
-            if existing:
-                return self._cookie_jar
-        jar = aiohttp.CookieJar()
+        """Создает CookieJar с cookies для Quasar API.
+        
+        ВАЖНО: Cookies должны быть установлены для домена .yandex.ru
+        чтобы работать с iot.quasar.yandex.ru
+        """
+        jar = aiohttp.CookieJar(unsafe=True)  # unsafe=True для cross-domain cookies
         if cookies:
-            parsed = urlparse("https://iot.quasar.yandex.ru")
+            # Используем URL объект для правильной установки cookies
+            base_url = URL("https://iot.quasar.yandex.ru")
+            
+            # Устанавливаем cookies используя SimpleCookie для правильного формата
+            from http.cookies import SimpleCookie
+            cookie_dict = SimpleCookie()
             for name, value in cookies.items():
-                jar.update_cookies({name: value}, response_url=parsed.geturl())
-        self._cookie_jar = jar
+                cookie_dict[name] = str(value)
+                # Устанавливаем domain для работы со всеми поддоменами yandex.ru
+                cookie_dict[name]["domain"] = ".yandex.ru"
+                cookie_dict[name]["path"] = "/"
+            
+            # Обновляем jar с cookies
+            jar.update_cookies(cookie_dict, response_url=base_url)
+            
+            # Также устанавливаем для yandex.ru напрямую (на всякий случай)
+            yandex_url = URL("https://yandex.ru")
+            jar.update_cookies(cookie_dict, response_url=yandex_url)
+        
         return jar
 
     async def _load_cookies(self) -> Optional[Dict[str, str]]:
         """Попытка получить cookies из service_registry, иначе None."""
-        # Приоритет: сервис oauth_yandex.get_cookies если реализован
+        # Приоритет 1: yandex_device_auth.get_session (device auth сохраняет cookies)
+        try:
+            if await self.runtime.service_registry.has_service("yandex_device_auth.get_session"):
+                session = await self.runtime.service_registry.call("yandex_device_auth.get_session")
+                if isinstance(session, dict) and session.get("linked"):
+                    # Пытаемся получить cookies из storage (device_auth сохраняет их там)
+                    try:
+                        stored = await self.runtime.storage.get("yandex", "cookies")
+                        if isinstance(stored, dict) and stored:
+                            await self._log("debug", "Loaded cookies from yandex_device_auth", cookie_count=len(stored))
+                            return stored
+                    except Exception as e:
+                        await self._log("debug", f"Failed to load cookies from storage: {e}")
+        except Exception as e:
+            await self._log("debug", f"Failed to check yandex_device_auth.get_session: {e}")
+        
+        # Приоритет 2: сервис oauth_yandex.get_cookies если реализован (для обратной совместимости)
         try:
             if await self.runtime.service_registry.has_service("oauth_yandex.get_cookies"):
                 cookies = await self.runtime.service_registry.call("oauth_yandex.get_cookies")
-                if isinstance(cookies, dict):
+                if isinstance(cookies, dict) and cookies:
+                    await self._log("debug", "Loaded cookies from oauth_yandex", cookie_count=len(cookies))
                     return cookies
-        except Exception:
-            pass
-        # Альтернативно: storage namespace yandex -> cookies
+        except Exception as e:
+            await self._log("debug", f"Failed to load cookies from oauth_yandex: {e}")
+        
+        # Приоритет 3: storage namespace yandex -> cookies (fallback)
         try:
             stored = await self.runtime.storage.get("yandex", "cookies")
-            if isinstance(stored, dict):
+            if isinstance(stored, dict) and stored:
+                await self._log("debug", "Loaded cookies from storage fallback", cookie_count=len(stored))
                 return stored
-        except Exception:
-            pass
+        except Exception as e:
+            await self._log("debug", f"Failed to load cookies from storage fallback: {e}")
+        
         return None
 
     async def _log(self, level: str, message: str, **context: Any) -> None:
