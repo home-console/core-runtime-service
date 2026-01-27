@@ -1,5 +1,6 @@
 import copy
 import time
+from modules.devices.services import _is_device_online
 
 
 async def handle_external_device_discovered(runtime, data: dict) -> None:
@@ -81,6 +82,14 @@ async def handle_external_state(runtime, data: dict) -> None:
         except Exception:
             pass
         return
+
+    # Обновляем last_seen и online статус при получении обновления
+    now = time.time()
+    device["last_seen"] = now
+    device["updated_at"] = now
+    
+    # Определяем онлайн статус на основе last_seen
+    device["online"] = _is_device_online(device.get("last_seen"))
 
     old_state = device.get("state", {})
 

@@ -23,6 +23,15 @@ async def apply_rate_limiting(
     """
     Применяет rate limiting для авторизованного запроса.
     
+    Rate limiting защищает от:
+    - DDoS атак (ограничение количества запросов)
+    - Brute force атак на auth endpoints
+    - Злоупотребления API (один клиент не может перегрузить сервер)
+    - Непреднамеренных ошибок в коде (бесконечные циклы запросов)
+    
+    В production ВСЕГДА должен быть включен!
+    В разработке можно отключить через Config.rate_limiting_enabled = False
+    
     Args:
         runtime: экземпляр CoreRuntime
         context: RequestContext или None
@@ -35,6 +44,11 @@ async def apply_rate_limiting(
     Returns:
         Response с 429 если лимит превышен, None если всё OK
     """
+    # Проверяем, включен ли rate limiting (можно отключить для разработки)
+    if runtime and hasattr(runtime, "_config") and runtime._config:
+        if not getattr(runtime._config, "rate_limiting_enabled", True):
+            return None  # Rate limiting отключен для разработки
+    
     if not context or is_auth_endpoint:
         return None
     

@@ -63,6 +63,22 @@ class DeviceTransformer:
             yandex_states = yandex_device.get("states", [])
             device_state = DeviceTransformer._extract_state(yandex_states, capabilities)
 
+            # Извлекаем информацию о доме и комнате (если есть)
+            home_id = yandex_device.get("house_id")
+            home_name = yandex_device.get("house_name")
+            room_id = yandex_device.get("room_id")
+            room_name = yandex_device.get("room_name")
+            
+            # Если room_name не в корне, проверяем в parameters
+            if not room_name:
+                parameters = yandex_device.get("parameters", {})
+                if isinstance(parameters, dict):
+                    room_name = parameters.get("room_name")
+
+            # Извлекаем онлайн статус
+            device_state_value = yandex_device.get("state")
+            online = device_state_value not in ("offline", None) if device_state_value else True
+
             # Собираем в стандартный формат
             device = {
                 "provider": "yandex",
@@ -72,6 +88,18 @@ class DeviceTransformer:
                 "capabilities": capabilities,
                 "state": device_state,
             }
+
+            # Добавляем информацию о доме/комнате, если есть
+            if home_id:
+                device["home_id"] = home_id
+            if home_name:
+                device["home_name"] = home_name
+            if room_id:
+                device["room_id"] = room_id
+            if room_name:
+                device["room_name"] = room_name
+            if device_state_value is not None:
+                device["online"] = online
 
             return device
 

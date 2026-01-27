@@ -13,6 +13,7 @@ CoreRuntime - главный класс Core Runtime.
 
 from typing import Any, Dict, Optional
 import asyncio
+import time
 
 from core.event_bus import EventBus
 from core.service_registry import ServiceRegistry
@@ -67,6 +68,7 @@ class CoreRuntime:
         self._config = config
 
         self._running = False
+        self._start_time: Optional[float] = None
 
     @property
     def is_running(self) -> bool:
@@ -274,6 +276,7 @@ class CoreRuntime:
         
         return {
             "status": overall.value,
+            "uptime": time.time() - self._start_time if self._start_time else 0,
             "checks": checks
         }
     
@@ -284,7 +287,9 @@ class CoreRuntime:
         Returns:
             Словарь с метриками плагинов, модулей, сервисов и storage
         """
-        metrics: Dict[str, Any] = {}
+        metrics: Dict[str, Any] = {
+            "uptime": time.time() - self._start_time if self._start_time else 0
+        }
         
         # Метрики плагинов
         try:
@@ -327,14 +332,33 @@ class CoreRuntime:
         except Exception:
             metrics["services"] = {"error": "failed to collect"}
         
-        # Метрики storage (количество namespaces)
+        # Метрики storage
         try:
-            # Для получения namespaces нужно использовать адаптер напрямую
-            # Это упрощённая версия - в реальности может потребоваться более сложная логика
+            # Проверяем доступность storage
+            await self.storage.get("metrics", "test")
             metrics["storage"] = {
-                "available": True
+                "available": True,
+                "type": self.storage._adapter.__class__.__name__ if hasattr(self.storage, "_adapter") else "unknown"
             }
+        except Exception as e:
+            metrics["storage"] = {
+                "available": False,
+                "error": str(e)
+            }
+        
+        # Метрики HTTP endpoints
+        try:
+            endpoints = self.http.list()
+            metrics["http_endpoints"] = {
+                "total": len(endpoints),
+                "by_method": {}
+            }
+            for endpoint in endpoints:
+                method = endpoint.method
+                if method not in metrics["http_endpoints"]["by_method"]:
+                    metrics["http_endpoints"]["by_method"][method] = 0
+                metrics["http_endpoints"]["by_method"][method] += 1
         except Exception:
-            metrics["storage"] = {"error": "failed to collect"}
+            metrics["http_endpoints"] = {"error": "failed to collect"}
         
         return metrics

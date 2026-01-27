@@ -32,6 +32,14 @@ class Config:
     # Тайм-аут для вызовов сервисов (секунды)
     # Защита от зависших вызовов плагинов
     service_call_timeout: float = 30.0
+    
+    # Rate limiting настройки
+    # Отключить rate limiting для разработки (НЕ использовать в production!)
+    rate_limiting_enabled: bool = True
+    # Максимум запросов в окне времени
+    rate_limit_requests: int = 100
+    # Окно времени в секундах
+    rate_limit_window: int = 60
 
     def validate(self) -> None:
         """
@@ -93,6 +101,9 @@ class Config:
             pg_dsn=os.getenv("RUNTIME_PG_DSN"),
             shutdown_timeout=int(os.getenv("RUNTIME_SHUTDOWN_TIMEOUT", "10")),
             service_call_timeout=float(os.getenv("RUNTIME_SERVICE_CALL_TIMEOUT", "30.0")),
+            rate_limiting_enabled=os.getenv("RUNTIME_RATE_LIMITING_ENABLED", "true").lower() == "true",
+            rate_limit_requests=int(os.getenv("RUNTIME_RATE_LIMIT_REQUESTS", "100")),
+            rate_limit_window=int(os.getenv("RUNTIME_RATE_LIMIT_WINDOW", "60")),
         )
         config.validate()
         return config

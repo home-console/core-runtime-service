@@ -66,6 +66,11 @@ async def create_device(
             "updated_at": now,
             "last_seen": None,  # Устройство ещё не видели
             "online": False,    # По умолчанию оффлайн
+            # Поля для домов/комнат (опционально)
+            "home_id": None,
+            "home_name": None,
+            "room_id": None,
+            "room_name": None,
         }
     else:
         # Устройство уже существует - обновляем только поля, не трогая created_at
@@ -81,6 +86,15 @@ async def create_device(
             device["last_seen"] = None
         if "online" not in device:
             device["online"] = _is_device_online(device.get("last_seen"))
+        # Инициализируем поля домов/комнат, если их нет
+        if "home_id" not in device:
+            device["home_id"] = None
+        if "home_name" not in device:
+            device["home_name"] = None
+        if "room_id" not in device:
+            device["room_id"] = None
+        if "room_name" not in device:
+            device["room_name"] = None
     
     # Добавляем ACL поля, если указаны
     if owner_id:
@@ -260,7 +274,24 @@ async def auto_map_external(runtime, provider: Optional[str] = None) -> Dict[str
 
         device_type = payload.get("type", "generic") if isinstance(payload, dict) else "generic"
 
-        await create_device(runtime, internal_id, name, device_type)
+        # Создаем устройство
+        device = await create_device(runtime, internal_id, name, device_type)
+        
+        # Обновляем информацию о доме/комнате, если есть
+        if isinstance(payload, dict):
+            if "home_id" in payload:
+                device["home_id"] = payload["home_id"]
+            if "home_name" in payload:
+                device["home_name"] = payload["home_name"]
+            if "room_id" in payload:
+                device["room_id"] = payload["room_id"]
+            if "room_name" in payload:
+                device["room_name"] = payload["room_name"]
+            if "online" in payload:
+                device["online"] = payload["online"]
+            
+            # Сохраняем обновленное устройство
+            await runtime.storage.set("devices", internal_id, device)
 
         try:
             dev = await runtime.storage.get("devices", internal_id)

@@ -63,20 +63,64 @@ class DeviceSync:
             # Not enabled — signal to caller that real API is disabled
             raise RuntimeError("use_real_api_disabled")
 
-        # Получаем данные из API
-        api_response = await self.api_client.get_user_info()
+        # Пытаемся получить устройства через Quasar API (с домами/комнатами)
+        # Если не получается, fallback на OAuth API
+        yandex_devices = []
+        households = []
+        
+        try:
+            # Пробуем Quasar API (требует cookies)
+            quasar_response = await self.api_client.get_quasar_devices()
+            
+            # Структура Quasar API: {"status": "ok", "households": [...]}
+            if isinstance(quasar_response, dict) and quasar_response.get("status") == "ok":
+                households = quasar_response.get("households", [])
+                
+                # Извлекаем все устройства из всех домов
+                for house in households:
+                    house_id = house.get("id")
+                    house_name = house.get("name")
+                    all_devices = house.get("all", [])
+                    
+                    # Добавляем информацию о доме к каждому устройству
+                    for device in all_devices:
+                        device["house_id"] = house_id
+                        device["house_name"] = house_name
+                        yandex_devices.append(device)
+                
+                # Логируем успех
+                try:
+                    await self.runtime.service_registry.call(
+                        "logger.log",
+                        level="info",
+                        message=f"Loaded {len(yandex_devices)} devices from Quasar API ({len(households)} households)",
+                        plugin=self.plugin_name,
+                    )
+                except Exception:
+                    pass
+        except Exception as e:
+            # Quasar API не доступен (нет cookies или ошибка) - fallback на OAuth API
+            try:
+                await self.runtime.service_registry.call(
+                    "logger.log",
+                    level="warning",
+                    message=f"Quasar API unavailable, falling back to OAuth API: {e}",
+                    plugin=self.plugin_name,
+                )
+            except Exception:
+                pass
+            
+            # Fallback: используем OAuth API
+            api_response = await self.api_client.get_user_info()
+            
+            # Структура ответа OAuth API: {"devices": [...]}
+            if isinstance(api_response, dict) and "devices" in api_response:
+                yandex_devices = api_response.get("devices", [])
+            elif isinstance(api_response, list):
+                yandex_devices = api_response
 
         # ЭТАП 3-4: Преобразовать устройства и опубликовать события
         devices = []
-
-        # Структура ответа Яндекса: {"devices": [...]}
-        # Some versions return list directly or under 'devices'
-        if isinstance(api_response, dict) and "devices" in api_response:
-            yandex_devices = api_response.get("devices", [])
-        elif isinstance(api_response, list):
-            yandex_devices = api_response
-        else:
-            yandex_devices = []
 
         for yandex_device in yandex_devices:
             # Преобразуем устройство в стандартный формат

@@ -765,3 +765,80 @@ class YandexAPIClient:
         }
 
         return await self._request_with_retry("POST", url, headers, json_data=request_body, read_json=True)
+
+    async def get_quasar_devices(self) -> Dict[str, Any]:
+        """Получить список устройств через Quasar API (с домами и комнатами).
+
+        Quasar API возвращает структуру с households (домами) и комнатами.
+        Использует cookies сессии, а не OAuth token.
+
+        Returns:
+            Ответ Quasar API со структурой households -> rooms -> devices
+
+        Raises:
+            RuntimeError: при ошибках запроса или отсутствии cookies
+        """
+        try:
+            import aiohttp
+            from yarl import URL
+        except ImportError:
+            raise RuntimeError("Требуется установить aiohttp и yarl для Quasar API")
+
+        # Получаем cookies из yandex_device_auth или oauth_yandex
+        cookies = {}
+        try:
+            # Приоритет 1: yandex_device_auth
+            if await self.runtime.service_registry.has_service("yandex_device_auth.get_session"):
+                session = await self.runtime.service_registry.call("yandex_device_auth.get_session")
+                if isinstance(session, dict) and session.get("linked"):
+                    stored = await self.runtime.storage.get("yandex", "cookies")
+                    if isinstance(stored, dict) and stored:
+                        cookies = stored
+        except Exception:
+            pass
+
+        # Приоритет 2: oauth_yandex
+        if not cookies:
+            try:
+                if await self.runtime.service_registry.has_service("oauth_yandex.get_cookies"):
+                    cookies = await self.runtime.service_registry.call("oauth_yandex.get_cookies")
+                    if not isinstance(cookies, dict):
+                        cookies = {}
+            except Exception:
+                pass
+
+        # Приоритет 3: прямое хранилище
+        if not cookies:
+            stored = await self.runtime.storage.get("yandex", "cookies")
+            if isinstance(stored, dict) and stored:
+                cookies = stored
+
+        if not cookies:
+            raise RuntimeError("Cookies required for Quasar API. Use yandex_device_auth or oauth_yandex with cookies.")
+
+        # Создаем CookieJar
+        jar = aiohttp.CookieJar()
+        base_url = URL("https://iot.quasar.yandex.ru")
+        for name, value in cookies.items():
+            jar.update_cookies({name: value}, response_url=base_url)
+
+        # Заголовки для Quasar API (БЕЗ Authorization!)
+        headers = {
+            "Content-Type": "application/json",
+            "Origin": "https://iot.quasar.yandex.ru",
+        }
+
+        url = "https://iot.quasar.yandex.ru/m/v3/user/devices"
+        timeout = aiohttp.ClientTimeout(total=15)
+
+        async with aiohttp.ClientSession(cookie_jar=jar, timeout=timeout) as session:
+            async with session.get(url, headers=headers) as resp:
+                if resp.status != 200:
+                    text = await resp.text()
+                    raise RuntimeError(f"Quasar devices HTTP {resp.status}: {text[:500]}")
+
+                try:
+                    return await resp.json()
+                except Exception as parse_err:
+                    text = await resp.text()
+                    raise RuntimeError(f"Quasar devices parse error: {parse_err} — {text[:200]}")
