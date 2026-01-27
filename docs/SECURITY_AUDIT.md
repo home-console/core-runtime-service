@@ -69,33 +69,45 @@
 
 ### A04:2021 – Insecure Design
 
-**Статус:** ⚠️ Требует внимания
+**Статус:** ✅ Частично защищено
 
-**Проблемы:**
-- ⚠️ Нет rate limiting на auth endpoints (только на API)
+**Реализовано:**
+- ✅ Rate limiting на auth endpoints (login, create_api_key, refresh_token)
+- ✅ Защита от clickjacking (X-Frame-Options: DENY)
+- ✅ Content-Security-Policy с frame-ancestors 'none'
+
+**Требует улучшения:**
 - ⚠️ Нет защиты от CSRF (только CORS)
-- ⚠️ Нет защиты от clickjacking
+- ⚠️ CSP разрешает unsafe-inline (для разработки, нужно ужесточить в production)
 
 **Рекомендации:**
-- Добавить rate limiting на auth endpoints
 - Добавить CSRF tokens для state-changing операций
-- Добавить X-Frame-Options header
+- Ужесточить CSP в production (убрать unsafe-inline)
 
 ---
 
 ### A05:2021 – Security Misconfiguration
 
-**Статус:** ⚠️ Требует внимания
+**Статус:** ✅ Защищено
 
-**Проблемы:**
-- ⚠️ CORS разрешает только localhost (хорошо для разработки, нужно настроить для production)
-- ⚠️ Нет security headers (X-Content-Type-Options, X-XSS-Protection, etc.)
-- ⚠️ Debug режим может быть включен в production
+**Реализовано:**
+- ✅ Security headers middleware добавлен
+- ✅ X-Content-Type-Options: nosniff
+- ✅ X-Frame-Options: DENY
+- ✅ X-XSS-Protection: 1; mode=block
+- ✅ Strict-Transport-Security (HSTS) для HTTPS
+- ✅ Content-Security-Policy (базовая)
+- ✅ Referrer-Policy: strict-origin-when-cross-origin
+- ✅ Permissions-Policy для ограничения браузерных API
+- ✅ CORS настроен (localhost для разработки)
+
+**Требует улучшения:**
+- ⚠️ CORS нужно настроить для production доменов
+- ⚠️ Debug режим может быть включен в production (проверить)
 
 **Рекомендации:**
-- Добавить security headers middleware
-- Настроить CORS для production
-- Отключить debug в production
+- Настроить CORS для production доменов через переменные окружения
+- Убедиться, что debug отключен в production
 
 ---
 
@@ -127,14 +139,14 @@
 - ✅ Session management
 - ✅ API keys с хешированием
 - ✅ Rate limiting на API запросы
+- ✅ Rate limiting на auth endpoints (login, create_api_key, refresh_token)
+- ✅ Rate limiting можно отключить для разработки через config
 
 **Требует улучшения:**
-- ⚠️ Нет rate limiting на auth endpoints (login, create_api_key)
-- ⚠️ Нет защиты от account enumeration
+- ⚠️ Нет защиты от account enumeration (унифицированные ответы)
 - ⚠️ Нет multi-factor authentication (MFA)
 
 **Рекомендации:**
-- Добавить rate limiting на auth endpoints
 - Унифицировать ответы при неверных credentials (защита от enumeration)
 - Реализовать MFA (опционально)
 
@@ -198,8 +210,8 @@
 ## Приоритетные исправления
 
 ### Высокий приоритет (1-2 недели)
-1. **Rate limiting на auth endpoints** (A04, A07)
-2. **Security headers middleware** (A05)
+1. ✅ **Rate limiting на auth endpoints** (A04, A07) - ВЫПОЛНЕНО
+2. ✅ **Security headers middleware** (A05) - ВЫПОЛНЕНО
 3. **Input validation с Pydantic** (A03)
 4. **Ownership проверки в сервисах** (A01)
 

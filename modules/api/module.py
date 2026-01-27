@@ -82,7 +82,12 @@ class ApiModule(RuntimeModule):
         # ВАЖНО: Порядок выполнения middleware в FastAPI обратный порядку добавления
         # Последний добавленный выполняется первым
         
-        # Добавляем request logger middleware ПЕРВЫМ (выполнится ПОСЛЕДНИМ)
+        # Добавляем security headers middleware ПОСЛЕДНИМ (выполнится ПЕРВЫМ)
+        # Это добавляет security headers ко всем ответам
+        from modules.api.security_headers import security_headers_middleware
+        self.app.middleware("http")(security_headers_middleware)
+        
+        # Добавляем request logger middleware (выполнится предпоследним)
         # Это нужно для того, чтобы он мог перехватывать все запросы
         try:
             from modules.request_logger.middleware import request_logger_middleware
@@ -91,7 +96,7 @@ class ApiModule(RuntimeModule):
             # RequestLoggerModule может быть не установлен - это нормально
             pass
         
-        # Добавляем auth middleware (boundary-layer) - выполнится вторым
+        # Добавляем auth middleware (boundary-layer) - выполнится третьим
         self.app.middleware("http")(require_auth_middleware)
         
         # Добавляем admin access middleware ПОСЛЕДНИМ, чтобы выполнился ПЕРВЫМ

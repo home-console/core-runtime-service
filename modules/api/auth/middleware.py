@@ -66,29 +66,46 @@ async def require_auth_middleware(request: Request, call_next):
     client_ip = request.client.host if request.client else "unknown"
     
     # Проверяем, является ли это auth endpoint (требует специального rate limiting)
-    is_auth_endpoint = str(request.url.path).startswith("/admin/auth/")
+    # Auth endpoints: login, create_api_key, refresh_token, и другие операции аутентификации
+    request_path = str(request.url.path)
+    is_auth_endpoint = (
+        request_path.startswith("/admin/auth/") or
+        request_path.startswith("/auth/") or
+        "login" in request_path.lower() or
+        "create_api_key" in request_path.lower() or
+        "refresh" in request_path.lower()
+    )
     
     # Rate limiting для auth endpoints (до попытки авторизации)
+    # Защита от brute force атак
     if is_auth_endpoint and runtime:
-        rate_limit_key = f"auth:{client_ip}"
-        if not await rate_limit_check(runtime, rate_limit_key, "auth"):
-            await audit_log_auth_event(
-                runtime,
-                "rate_limit_exceeded",
-                client_ip,
-                {"ip": client_ip, "path": str(request.url.path), "type": "auth_endpoint", "limit_type": "auth"},
-                success=False
-            )
-            return Response(
-                content='{"detail": "Rate limit exceeded. Too many authentication attempts. Please try again later."}',
-                status_code=429,
-                media_type="application/json",
-                headers={
-                    "Retry-After": "60",
-                    "X-RateLimit-Limit": str(RATE_LIMIT_AUTH_ATTEMPTS),
-                    "X-RateLimit-Window": str(RATE_LIMIT_AUTH_WINDOW)
-                }
-            )
+        # Проверяем, включен ли rate limiting (можно отключить для разработки)
+        rate_limiting_enabled = True
+        if hasattr(runtime, "_config") and runtime._config:
+            rate_limiting_enabled = getattr(runtime._config, "rate_limiting_enabled", True)
+        
+        if rate_limiting_enabled:
+            # Используем IP для rate limiting auth endpoints (защита от brute force)
+            rate_limit_key = f"auth:{client_ip}"
+            if not await rate_limit_check(runtime, rate_limit_key, "auth"):
+                await audit_log_auth_event(
+                    runtime,
+                    "rate_limit_exceeded",
+                    client_ip,
+                    {"ip": client_ip, "path": request_path, "type": "auth_endpoint", "limit_type": "auth"},
+                    success=False
+                )
+                return Response(
+                    content='{"detail": "Rate limit exceeded. Too many authentication attempts. Please try again later."}',
+                    status_code=429,
+                    media_type="application/json",
+                    headers={
+                        "Retry-After": str(RATE_LIMIT_AUTH_WINDOW),
+                        "X-RateLimit-Limit": str(RATE_LIMIT_AUTH_ATTEMPTS),
+                        "X-RateLimit-Window": str(RATE_LIMIT_AUTH_WINDOW),
+                        "X-RateLimit-Type": "auth"
+                    }
+                )
     
     # Приоритет 1: JWT access token из Authorization header или Cookie
     # SECURITY FIX: extract_jwt_from_header проверяет формат JWT (3 части через точку)
