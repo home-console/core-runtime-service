@@ -45,9 +45,10 @@ async def apply_rate_limiting(
         Response с 429 если лимит превышен, None если всё OK
     """
     # Проверяем, включен ли rate limiting (можно отключить для разработки)
-    if runtime and hasattr(runtime, "_config") and runtime._config:
-        if not getattr(runtime._config, "rate_limiting_enabled", True):
-            return None  # Rate limiting отключен для разработки
+    cfg = getattr(runtime, "_config", None) if runtime is not None else None
+    if cfg is not None:
+        if not getattr(cfg, "rate_limiting_enabled", True):
+            return None  # Rate limiting отключен (dev)
     
     if not context or is_auth_endpoint:
         return None
@@ -65,7 +66,11 @@ async def apply_rate_limiting(
     else:
         return None
     
-    if not await rate_limit_check(runtime, rate_limit_key, "api"):
+    # Конфигурируем лимиты (если заданы в Config)
+    limit = getattr(cfg, "rate_limit_requests", RATE_LIMIT_API_REQUESTS) if cfg is not None else RATE_LIMIT_API_REQUESTS
+    window = getattr(cfg, "rate_limit_window", RATE_LIMIT_API_WINDOW) if cfg is not None else RATE_LIMIT_API_WINDOW
+
+    if not await rate_limit_check(runtime, rate_limit_key, "api", limit=limit, window_seconds=window):
         # Превышен лимит API запросов
         safe_identifier = identifier[:16] + "..." if identifier and len(identifier) > 16 else (identifier or "unknown")
         await audit_log_auth_event(
@@ -85,9 +90,9 @@ async def apply_rate_limiting(
             status_code=429,
             media_type="application/json",
             headers={
-                "Retry-After": "60",
-                "X-RateLimit-Limit": str(RATE_LIMIT_API_REQUESTS),
-                "X-RateLimit-Window": str(RATE_LIMIT_API_WINDOW)
+                "Retry-After": str(window),
+                "X-RateLimit-Limit": str(limit),
+                "X-RateLimit-Window": str(window)
             }
         )
     

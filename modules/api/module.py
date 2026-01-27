@@ -31,6 +31,7 @@ from modules.api.auth import (
 from modules.api.authz import require as authz_require, AuthorizationError
 from modules.api.admin_access_middleware import admin_access_middleware
 from modules.monitoring import MonitoringModule
+from modules.api.validation_models import validate_body_for_service
 
 
 class ApiModule(RuntimeModule):
@@ -71,9 +72,16 @@ class ApiModule(RuntimeModule):
         self.app.state.runtime = self.runtime
         
         # Добавляем CORS middleware для работы с frontend
+        # В production задаётся через Config.cors_allowed_origins / env RUNTIME_CORS_ALLOWED_ORIGINS
+        cors_allowed = None
+        try:
+            cfg = getattr(self.runtime, "_config", None)
+            cors_allowed = getattr(cfg, "cors_allowed_origins", None) if cfg else None
+        except Exception:
+            cors_allowed = None
         self.app.add_middleware(
             CORSMiddleware,
-            allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+            allow_origins=cors_allowed or ["http://localhost:3000", "http://127.0.0.1:3000"],
             allow_credentials=True,
             allow_methods=["*"],
             allow_headers=["*"],
@@ -81,11 +89,6 @@ class ApiModule(RuntimeModule):
         
         # ВАЖНО: Порядок выполнения middleware в FastAPI обратный порядку добавления
         # Последний добавленный выполняется первым
-        
-        # Добавляем security headers middleware ПОСЛЕДНИМ (выполнится ПЕРВЫМ)
-        # Это добавляет security headers ко всем ответам
-        from modules.api.security_headers import security_headers_middleware
-        self.app.middleware("http")(security_headers_middleware)
         
         # Добавляем request logger middleware (выполнится предпоследним)
         # Это нужно для того, чтобы он мог перехватывать все запросы
@@ -99,10 +102,15 @@ class ApiModule(RuntimeModule):
         # Добавляем auth middleware (boundary-layer) - выполнится третьим
         self.app.middleware("http")(require_auth_middleware)
         
-        # Добавляем admin access middleware ПОСЛЕДНИМ, чтобы выполнился ПЕРВЫМ
+        # Добавляем admin access middleware (должен выполниться раньше auth)
         # Это блокирует доступ к /admin/* из публичного интернета
-        # Выполнится первым (проверка IP до проверки авторизации)
+        # Выполнится после security headers и до проверки авторизации
         self.app.middleware("http")(admin_access_middleware)
+
+        # Добавляем security headers middleware ПОСЛЕДНИМ (выполнится ПЕРВЫМ)
+        # Это добавляет security headers ко всем ответам, включая ранние 403/401.
+        from modules.api.security_headers import security_headers_middleware
+        self.app.middleware("http")(security_headers_middleware)
         
         # Mount monitoring module
         self.monitoring = MonitoringModule(runtime=self.runtime)
@@ -264,6 +272,13 @@ class ApiModule(RuntimeModule):
                             body = await request.json()
                         except Exception:
                             body = None
+
+                    # A03: input validation (Pydantic) для критичных endpoints
+                    if body is not None and endpoint.method in ["POST", "PUT", "PATCH"]:
+                        try:
+                            body = validate_body_for_service(endpoint.service, body)
+                        except ValueError as ve:
+                            raise HTTPException(status_code=400, detail=str(ve))
 
                     # Передаём body отдельно от query/path params только если он не None
                     # Не мержим body в params, чтобы сохранить структуру данных

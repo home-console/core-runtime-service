@@ -41,9 +41,16 @@ class LoggerModule(RuntimeModule):
         # Можно установить LOG_LEVEL=DEBUG для отладки, или LOG_LEVEL=WARNING для тихих логов
         log_level_str = os.getenv("LOG_LEVEL", "INFO").upper()
         self._log_level = getattr(logging, log_level_str, logging.INFO)
-        
-        # НЕ используем logging для вывода - используем прямой print в stdout
-        # Это гарантирует простой формат без JSON обёртки
+
+        # Формат логов:
+        # - text (по умолчанию) — человекочитаемый
+        # - json — структурированный (для production / ELK / Loki)
+        cfg = getattr(self.runtime, "_config", None)
+        cfg_fmt = getattr(cfg, "log_format", None) if cfg is not None else None
+        env_fmt = os.getenv("RUNTIME_LOG_FORMAT") or os.getenv("LOG_FORMAT")
+        self._log_format = (cfg_fmt or env_fmt or "text").lower()
+        if self._log_format not in ("text", "json"):
+            self._log_format = "text"
 
         # Регистрируем сервис logger.log
         await self.runtime.service_registry.register("logger.log", self._log_service)
@@ -120,39 +127,54 @@ class LoggerModule(RuntimeModule):
             # Лог ниже установленного уровня - пропускаем
             return
 
-        # Формируем простой читаемый формат лога
-        # Формат: [LEVEL] [plugin/module] message (context если есть)
-        parts = [f"[{lvl.upper()}]"]
-        
-        # Добавляем источник (plugin или module)
-        plugin = context.get("plugin")
-        module = context.get("module")
-        if plugin:
-            parts.append(f"[{plugin}]")
-        elif module:
-            parts.append(f"[{module}]")
-        
-        # Добавляем сообщение
-        parts.append(message)
-        
-        # Добавляем важный контекст (исключая plugin/module, так как уже добавили)
-        important_context = {}
-        for key, value in context.items():
-            if key not in ("plugin", "module", "request_id"):
-                # Добавляем только простые значения (не вложенные объекты)
-                if isinstance(value, (str, int, float, bool, type(None))):
-                    important_context[key] = value
-        
-        if important_context:
-            # Форматируем контекст как key=value
-            context_str = " ".join(f"{k}={v}" for k, v in important_context.items())
-            parts.append(f"({context_str})")
-        
-        line = " ".join(parts)
-
-        # ВАЖНО: Используем прямой вывод в stdout чтобы избежать JSON обёртки от других handlers
-        # Это гарантирует что логи будут в простом формате без JSON
-        print(line, file=sys.stdout, flush=True)
+        if getattr(self, "_log_format", "text") == "json":
+            # Структурированный JSON лог (одна строка на событие)
+            event: dict[str, Any] = {
+                "level": lvl.upper(),
+                "message": message,
+            }
+            plugin = context.get("plugin")
+            module = context.get("module")
+            if plugin:
+                event["plugin"] = plugin
+            if module:
+                event["module"] = module
+            if operation_id:
+                event["operation_id"] = operation_id
+            # Добавляем контекст как есть (только сериализуемые типы)
+            safe_ctx: dict[str, Any] = {}
+            for k, v in context.items():
+                if k in ("plugin", "module"):
+                    continue
+                # базовые типы + dict/list (json сможет)
+                if isinstance(v, (str, int, float, bool, type(None), dict, list)):
+                    safe_ctx[k] = v
+                else:
+                    safe_ctx[k] = str(v)
+            if safe_ctx:
+                event["context"] = safe_ctx
+            print(json.dumps(event, ensure_ascii=False), file=sys.stdout, flush=True)
+        else:
+            # Формируем простой читаемый формат лога
+            # Формат: [LEVEL] [plugin/module] message (context если есть)
+            parts = [f"[{lvl.upper()}]"]
+            plugin = context.get("plugin")
+            module = context.get("module")
+            if plugin:
+                parts.append(f"[{plugin}]")
+            elif module:
+                parts.append(f"[{module}]")
+            parts.append(message)
+            important_context = {}
+            for key, value in context.items():
+                if key not in ("plugin", "module", "request_id"):
+                    if isinstance(value, (str, int, float, bool, type(None))):
+                        important_context[key] = value
+            if important_context:
+                context_str = " ".join(f"{k}={v}" for k, v in important_context.items())
+                parts.append(f"({context_str})")
+            line = " ".join(parts)
+            print(line, file=sys.stdout, flush=True)
         
         # Если доступен RequestLoggerModule, записываем лог туда тоже
         try:

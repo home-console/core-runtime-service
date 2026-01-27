@@ -69,6 +69,7 @@ async def require_auth_middleware(request: Request, call_next):
     # Auth endpoints: login, create_api_key, refresh_token, и другие операции аутентификации
     request_path = str(request.url.path)
     is_auth_endpoint = (
+        request_path.startswith("/admin/v1/auth/") or
         request_path.startswith("/admin/auth/") or
         request_path.startswith("/auth/") or
         "login" in request_path.lower() or
@@ -111,10 +112,12 @@ async def require_auth_middleware(request: Request, call_next):
     # SECURITY FIX: extract_jwt_from_header проверяет формат JWT (3 части через точку)
     # Если это не JWT, функция вернёт None и мы перейдём к проверке API key
     jwt_token = extract_jwt_from_header(request)
+    jwt_from_cookie = False
     
     # Если токен не в header, проверяем cookie
     if not jwt_token:
         jwt_token = request.cookies.get("access_token")
+        jwt_from_cookie = bool(jwt_token)
     # Убрано избыточное логирование рутинных операций
     
     if jwt_token and runtime:
@@ -187,6 +190,30 @@ async def require_auth_middleware(request: Request, call_next):
                     return rate_limit_response
             except Exception:
                 context = None
+
+    # CSRF protection (только для cookie-based auth, только для state-changing методов)
+    # Если авторизация идёт через Authorization header (api_key/jwt header), CSRF не нужен.
+    if runtime and context is not None:
+        cfg = getattr(runtime, "_config", None)
+        csrf_enabled = getattr(cfg, "csrf_enabled", True) if cfg is not None else True
+        if csrf_enabled:
+            unsafe_method = request.method.upper() in ("POST", "PUT", "PATCH", "DELETE")
+            cookie_based = (auth_source == "session") or (auth_source == "jwt" and jwt_from_cookie)
+            if unsafe_method and cookie_based and not is_auth_endpoint:
+                csrf_cookie_name = getattr(cfg, "csrf_cookie_name", "csrf_token") if cfg is not None else "csrf_token"
+                csrf_header_name = getattr(cfg, "csrf_header_name", "X-CSRF-Token") if cfg is not None else "X-CSRF-Token"
+
+                csrf_cookie = request.cookies.get(csrf_cookie_name)
+                csrf_header = request.headers.get(csrf_header_name)
+
+                # Требуем double-submit token: cookie == header
+                if not csrf_cookie or not csrf_header or csrf_cookie != csrf_header:
+                    return Response(
+                        content='{"detail": "CSRF token missing or invalid"}',
+                        status_code=403,
+                        media_type="application/json",
+                        headers={"X-CSRF-Required": "true"}
+                    )
     
     # Audit logging
     # identifier может быть не установлен, если ни один способ авторизации не сработал

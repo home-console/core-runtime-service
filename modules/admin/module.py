@@ -536,12 +536,14 @@ class AdminModule(RuntimeModule):
             if not password:
                 return {"ok": False, "error": "password required"}
             
+            # SECURITY: защита от account enumeration
+            # Никогда не раскрываем, существует ли пользователь — всегда возвращаем одинаковую ошибку.
             if not await validate_user_exists(self.runtime, user_id):
-                return {"ok": False, "error": "user not found"}
+                return {"ok": False, "error": "invalid_credentials"}
             
             # Проверяем пароль
             if not await verify_user_password(self.runtime, user_id, password):
-                return {"ok": False, "error": "invalid_password"}
+                return {"ok": False, "error": "invalid_credentials"}
             
             try:
                 # Получаем данные пользователя
@@ -570,17 +572,27 @@ class AdminModule(RuntimeModule):
                 
                 # Set HttpOnly cookies if response object is available
                 if response is not None:
+                    import secrets
+                    cfg = getattr(self.runtime, "_config", None)
+                    cookies_samesite = getattr(cfg, "cookies_samesite", "lax") if cfg is not None else "lax"
+                    cookies_domain = getattr(cfg, "cookies_domain", "localhost") if cfg is not None else "localhost"
+                    # secure: None => auto (https => True), иначе берём из config
+                    secure_cfg = getattr(cfg, "cookies_secure", None) if cfg is not None else None
+                    req_scheme = getattr(getattr(request, "url", None), "scheme", "http") if request is not None else "http"
+                    secure_cookie = (req_scheme == "https") if secure_cfg is None else bool(secure_cfg)
+                    csrf_cookie_name = getattr(cfg, "csrf_cookie_name", "csrf_token") if cfg is not None else "csrf_token"
+
+                    csrf_token = secrets.token_urlsafe(32)
+
                     # HttpOnly cookies for secure token storage
-                    # In dev mode: secure=False allows http://localhost cookies
-                    # samesite="lax" allows cookie in same-site requests from browser
                     response.set_cookie(
                         key="access_token",
                         value=access_token,
                         max_age=900,  # 15 минут
                         httponly=True,
-                        secure=False,  # Dev mode - allow http
-                        samesite="lax",
-                        domain="localhost",
+                        secure=secure_cookie,
+                        samesite=cookies_samesite,
+                        domain=cookies_domain,
                         path="/"
                     )
                     response.set_cookie(
@@ -588,9 +600,20 @@ class AdminModule(RuntimeModule):
                         value=refresh_token,
                         max_age=2592000,  # 30 дней
                         httponly=True,
-                        secure=False,  # Dev mode - allow http
-                        samesite="lax",
-                        domain="localhost",
+                        secure=secure_cookie,
+                        samesite=cookies_samesite,
+                        domain=cookies_domain,
+                        path="/"
+                    )
+                    # CSRF double-submit token (не HttpOnly, чтобы фронт мог читать и слать в header)
+                    response.set_cookie(
+                        key=csrf_cookie_name,
+                        value=csrf_token,
+                        max_age=2592000,
+                        httponly=False,
+                        secure=secure_cookie,
+                        samesite=cookies_samesite,
+                        domain=cookies_domain,
                         path="/"
                     )
                 
@@ -626,14 +649,25 @@ class AdminModule(RuntimeModule):
                 
                 # Set HttpOnly cookies if response object is available
                 if response is not None:
+                    import secrets
+                    cfg = getattr(self.runtime, "_config", None)
+                    cookies_samesite = getattr(cfg, "cookies_samesite", "lax") if cfg is not None else "lax"
+                    cookies_domain = getattr(cfg, "cookies_domain", "localhost") if cfg is not None else "localhost"
+                    secure_cfg = getattr(cfg, "cookies_secure", None) if cfg is not None else None
+                    req_scheme = getattr(getattr(request, "url", None), "scheme", "http") if request is not None else "http"
+                    secure_cookie = (req_scheme == "https") if secure_cfg is None else bool(secure_cfg)
+                    csrf_cookie_name = getattr(cfg, "csrf_cookie_name", "csrf_token") if cfg is not None else "csrf_token"
+
+                    csrf_token = secrets.token_urlsafe(32)
+
                     response.set_cookie(
                         key="access_token",
                         value=access_token,
                         max_age=900,  # 15 минут
                         httponly=True,
-                        secure=False,  # В dev режиме, в продакшене поставить True
-                        samesite="lax",
-                        domain="localhost",
+                        secure=secure_cookie,
+                        samesite=cookies_samesite,
+                        domain=cookies_domain,
                         path="/"
                     )
                     if new_refresh_token:
@@ -642,11 +676,22 @@ class AdminModule(RuntimeModule):
                             value=new_refresh_token,
                             max_age=2592000,  # 30 дней
                             httponly=True,
-                            secure=False,  # В dev режиме, в продакшене поставить True
-                            samesite="lax",
-                            domain="localhost",
+                            secure=secure_cookie,
+                            samesite=cookies_samesite,
+                            domain=cookies_domain,
                             path="/"
                         )
+                    # обновляем CSRF токен
+                    response.set_cookie(
+                        key=csrf_cookie_name,
+                        value=csrf_token,
+                        max_age=2592000,
+                        httponly=False,
+                        secure=secure_cookie,
+                        samesite=cookies_samesite,
+                        domain=cookies_domain,
+                        path="/"
+                    )
                 
                 result = {
                     "ok": True,
