@@ -88,7 +88,7 @@ async def handle_external_state(runtime, data: dict) -> None:
     device["last_seen"] = now
     device["updated_at"] = now
     
-    # Определяем онлайн статус на основе last_seen
+    # Определяем онлайн статус на основе last_seen (функция уже импортирована в начале файла)
     device["online"] = _is_device_online(device.get("last_seen"))
 
     old_state = device.get("state", {})
@@ -190,8 +190,7 @@ async def handle_external_state(runtime, data: dict) -> None:
     # Обновляем last_seen и online статус при реальном контакте с устройством
     now = time.time()
     device["last_seen"] = now
-    # Импортируем функцию для определения online статуса
-    from .services import _is_device_online
+    # Функция _is_device_online уже импортирована в начале файла
     device["online"] = _is_device_online(device["last_seen"])
 
     await runtime.storage.set("devices", internal_id, device)
