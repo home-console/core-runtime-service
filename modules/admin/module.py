@@ -1005,7 +1005,17 @@ class AdminModule(RuntimeModule):
 
         for name, func in service_registrations:
             try:
-                await self.runtime.service_registry.register(name, func)
+                # Для всего admin.* по умолчанию: admin_only (ACL на уровне ядра).
+                # Исключения — публичные auth endpoints (initialize/login/refresh).
+                admin_only = True
+                if name in ("admin.auth.initialize", "admin.auth.login", "admin.auth.refresh"):
+                    admin_only = False
+
+                if hasattr(self.runtime.service_registry, "register_with_acl"):
+                    await self.runtime.service_registry.register_with_acl(name, func, admin_only=admin_only)
+                else:
+                    await self.runtime.service_registry.register(name, func)
+
                 self._registered_services.append(name)
             except ValueError:
                 # Already registered - skip

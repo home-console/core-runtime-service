@@ -47,31 +47,16 @@ class RequestLoggerModule(RuntimeModule):
         
         Регистрирует сервисы для записи и чтения логов.
         """
-        # Регистрируем сервисы
-        await self.runtime.service_registry.register(
-            "request_logger.log",
-            self._log_service
-        )
-        await self.runtime.service_registry.register(
-            "request_logger.get_request_logs",
-            self._get_request_logs_service
-        )
-        await self.runtime.service_registry.register(
-            "request_logger.list_requests",
-            self._list_requests_service
-        )
-        await self.runtime.service_registry.register(
-            "request_logger.clear_logs",
-            self._clear_logs_service
-        )
-        await self.runtime.service_registry.register(
-            "request_logger.set_request_metadata",
-            self._set_request_metadata_service
-        )
-        await self.runtime.service_registry.register(
-            "request_logger.create_http_session",
-            self._create_http_session_service
-        )
+        # Регистрируем сервисы (ACL-метаданные в ядре: чтение/очистка — admin_only)
+        reg = self.runtime.service_registry
+
+        await reg.register_with_acl("request_logger.log", self._log_service)
+        await reg.register_with_acl("request_logger.set_request_metadata", self._set_request_metadata_service)
+        await reg.register_with_acl("request_logger.create_http_session", self._create_http_session_service)
+
+        await reg.register_with_acl("request_logger.get_request_logs", self._get_request_logs_service, admin_only=True)
+        await reg.register_with_acl("request_logger.list_requests", self._list_requests_service, admin_only=True)
+        await reg.register_with_acl("request_logger.clear_logs", self._clear_logs_service, admin_only=True)
 
     async def start(self) -> None:
         """Запуск модуля."""
@@ -103,6 +88,8 @@ class RequestLoggerModule(RuntimeModule):
             await self.runtime.service_registry.unregister("request_logger.get_request_logs")
             await self.runtime.service_registry.unregister("request_logger.list_requests")
             await self.runtime.service_registry.unregister("request_logger.clear_logs")
+            await self.runtime.service_registry.unregister("request_logger.set_request_metadata")
+            await self.runtime.service_registry.unregister("request_logger.create_http_session")
         except Exception:
             pass
 

@@ -160,14 +160,15 @@ class YandexDeviceAuthPlugin(BasePlugin):
             """
             return await self.auth_service.get_account_status()
 
-        # Register services
-        await self.runtime.service_registry.register("yandex_device_auth.start", start_device_auth)
-        await self.runtime.service_registry.register("yandex_device_auth.status", check_qr_status)
-        await self.runtime.service_registry.register("yandex_device_auth.cookies", save_cookies)
-        await self.runtime.service_registry.register("yandex_device_auth.get_account_status", get_account_status)
-        await self.runtime.service_registry.register("yandex_device_auth.cancel", cancel_auth)
-        await self.runtime.service_registry.register("yandex_device_auth.unlink", unlink_account)
-        await self.runtime.service_registry.register("yandex_device_auth.get_session", get_account_session)
+        # Register services (ACL в ядре: операции с куками/сессией — admin_only при наличии ctx)
+        reg = self.runtime.service_registry
+        await reg.register_with_acl("yandex_device_auth.start", start_device_auth, admin_only=True)
+        await reg.register_with_acl("yandex_device_auth.status", check_qr_status, admin_only=True)
+        await reg.register_with_acl("yandex_device_auth.cookies", save_cookies, admin_only=True)
+        await reg.register_with_acl("yandex_device_auth.get_account_status", get_account_status, admin_only=True)
+        await reg.register_with_acl("yandex_device_auth.cancel", cancel_auth, admin_only=True)
+        await reg.register_with_acl("yandex_device_auth.unlink", unlink_account, admin_only=True)
+        await reg.register_with_acl("yandex_device_auth.get_session", get_account_session, admin_only=True)
 
         # Register HTTP endpoints
         from core.http_registry import HttpEndpoint

@@ -78,6 +78,9 @@ class ServiceRegistry:
         """
         # Словарь: service_name -> function
         self._services: dict[str, ServiceFunc] = {}
+        # Словарь: service_name -> ACL метаданные
+        # {"resource": "device", "admin_only": bool, "filter_result": bool}
+        self._service_acl: dict[str, dict[str, Any]] = {}
         # Словарь: service_name.version -> deprecated flag
         self._deprecated: dict[str, bool] = {}
         # Lock для thread-safety операций с _services
@@ -114,6 +117,122 @@ class ServiceRegistry:
             self._services[versioned_name] = func
             # По умолчанию сервис не deprecated
             self._deprecated[versioned_name] = False
+            # Сбрасываем ACL метаданные, если были
+            self._service_acl.pop(versioned_name, None)
+
+    async def register_with_acl(
+        self,
+        service_name: str,
+        func: ServiceFunc,
+        *,
+        resource: Optional[str] = None,
+        admin_only: Optional[bool] = None,
+        filter_result: bool = False,
+        enforce_result: bool = False,
+        preload_resource: Optional[Callable[[tuple, dict], Awaitable[Any]]] = None,
+        inject_owner_param: Optional[str] = None,
+        version: Optional[str] = None,
+    ) -> None:
+        """
+        Зарегистрировать сервис с ACL-метаданными.
+
+        Args:
+            service_name: имя сервиса
+            func: async функция-обработчик
+            resource: логическое имя ресурса для политики (например, "device")
+            admin_only: требует админ-доступ при наличии RequestContext
+            filter_result: если True и результат — iterable[dict], отфильтрует через политику
+            version: версия сервиса (опционально)
+        """
+
+        # Вычисляем effective_admin_only один раз и используем и в обёртке, и в метаданных
+        effective_admin_only: Optional[bool] = admin_only
+
+        if effective_admin_only is None:
+            # Всё под префиксом admin.* по умолчанию только для админов,
+            # кроме публичных auth endpoint'ов и инициализации.
+            if service_name.startswith("admin."):
+                if service_name in (
+                    "admin.auth.initialize",
+                    "admin.auth.login",
+                    "admin.auth.refresh",
+                ):
+                    effective_admin_only = False
+                else:
+                    effective_admin_only = True
+            # Чтение/очистка логов запросов — только для админов
+            elif service_name in {
+                "request_logger.get_request_logs",
+                "request_logger.list_requests",
+                "request_logger.clear_logs",
+            }:
+                effective_admin_only = True
+            # Чувствительные интеграции Яндекса (сессии/куки/устройства) — тоже под админом
+            elif service_name.startswith(
+                (
+                    "yandex_device_auth.",
+                    "oauth_yandex.",
+                    "yandex.sync_",
+                    "yandex.check_devices_online",
+                    "yandex.subscribe_device_updates",
+                )
+            ):
+                effective_admin_only = True
+            else:
+                effective_admin_only = False
+
+        async def wrapped(*args, **kwargs):
+            from core import acl
+
+            ctx = None
+            try:
+                ctx = acl.current_context()
+            except Exception:
+                ctx = None
+
+            # Админ-флажок
+            if effective_admin_only:
+                acl.enforce_admin(ctx)
+
+            # Ownership injection для create-like сервисов
+            if inject_owner_param:
+                from core.errors import ForbiddenError
+                if ctx is not None and kwargs.get(inject_owner_param) is None:
+                    kwargs[inject_owner_param] = getattr(ctx, "user_id", None)
+                # Если пользователь пытается создать ресурс "не себе" — блокируем (если не админ)
+                if ctx is not None and kwargs.get(inject_owner_param) is not None and not acl.is_privileged(ctx):
+                    if getattr(ctx, "user_id", None) != kwargs.get(inject_owner_param):
+                        raise ForbiddenError("forbidden")
+
+            # Preload + policy enforcement до выполнения (важно для write операций)
+            if resource and preload_resource:
+                obj = await preload_resource(args, kwargs)
+                acl.enforce_policy(ctx, resource, obj)
+
+            result = await func(*args, **kwargs)
+
+            # Enforcement по результату (например, get возвращает объект)
+            if enforce_result and resource:
+                acl.enforce_policy(ctx, resource, result)
+
+            # Фильтрация результата (list operations)
+            if filter_result and resource:
+                try:
+                    if isinstance(result, (list, tuple)):
+                        result = acl.filter_with_policy(ctx, resource, result)
+                except Exception:
+                    # Если политика кинула исключение — пробрасываем
+                    raise
+            return result
+
+        await self.register(service_name, wrapped, version=version)
+        versioned_name = f"{service_name}.{version}" if version else service_name
+        self._service_acl[versioned_name] = {
+            "resource": resource,
+            "admin_only": effective_admin_only,
+            "filter_result": filter_result,
+            "enforce_result": enforce_result,
+        }
     
     async def register_with_middleware(
         self,

@@ -26,7 +26,10 @@ RuntimeModule — это обязательные домены системы, �
 """
 
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Awaitable, Callable, Optional
+
+# Тип для сервисной функции: async (*args, **kwargs) -> Any
+ServiceFunc = Callable[..., Awaitable[Any]]
 
 
 class RuntimeModule(ABC):
@@ -56,6 +59,46 @@ class RuntimeModule(ABC):
             runtime: экземпляр CoreRuntime
         """
         self.runtime = runtime
+
+    async def register_service(
+        self,
+        name: str,
+        func: ServiceFunc,
+        *,
+        resource: Optional[str] = None,
+        admin_only: bool = False,
+        filter_result: bool = False,
+        enforce_result: bool = False,
+        preload_resource: Optional[Callable[[tuple, dict], Awaitable[Any]]] = None,
+        inject_owner_param: Optional[str] = None,
+        version: Optional[str] = None,
+    ) -> None:
+        """
+        Удобный helper для регистрации сервиса из модулей без копипасты.
+
+        Автоматически:
+        - пробрасывает runtime как первый аргумент в доменные service-функции
+        - вешает ACL-метаданные через ServiceRegistry.register_with_acl (если доступно)
+        """
+
+        async def _wrapper(*args, **kwargs):
+            return await func(self.runtime, *args, **kwargs)
+
+        reg = self.runtime.service_registry
+        if hasattr(reg, "register_with_acl"):
+            await reg.register_with_acl(
+                name,
+                _wrapper,
+                resource=resource,
+                admin_only=admin_only,
+                filter_result=filter_result,
+                enforce_result=enforce_result,
+                preload_resource=preload_resource,
+                inject_owner_param=inject_owner_param,
+                version=version,
+            )
+        else:
+            await reg.register(name, _wrapper, version=version)
 
     @property
     @abstractmethod

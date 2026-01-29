@@ -28,7 +28,7 @@ class DevicesModule(RuntimeModule):
 
         Регистрирует сервисы и подписывается на события.
         """
-        # Регистрация сервисов
+        # Регистрация сервисов (+ централизованный ACL через ServiceRegistry.register_with_acl)
         service_names = [
             ("devices.list", services.list_devices),
             ("devices.get", services.get_device),
@@ -40,6 +40,21 @@ class DevicesModule(RuntimeModule):
             ("devices.delete_mapping", services.delete_mapping),
             ("devices.auto_map_external", services.auto_map_external),
         ]
+
+        acl_meta = {
+            "devices.list": {"resource": "device", "filter_result": True},
+            "devices.get": {"resource": "device", "enforce_result": True},
+            # на create делаем owner injection (owner_id=ctx.user_id), без копипасты в services.py
+            "devices.create": {"inject_owner_param": "owner_id"},
+            # для set_state делаем preload устройства до выполнения (важно: write)
+            "devices.set_state": {"resource": "device", "preload": "device_by_id"},
+            # инвентарь/маппинги — admin-only при наличии ctx
+            "devices.list_external": {"admin_only": True},
+            "devices.create_mapping": {"admin_only": True},
+            "devices.list_mappings": {"admin_only": True},
+            "devices.delete_mapping": {"admin_only": True},
+            "devices.auto_map_external": {"admin_only": True},
+        }
 
         self._registered_services = []
 
@@ -57,7 +72,37 @@ class DevicesModule(RuntimeModule):
                 return await _func(self.runtime, *args, **kwargs)
 
             try:
-                await self.runtime.service_registry.register(name, _wrapper)
+                meta = acl_meta.get(name, {})
+
+                # preload loaders
+                preload_resource = None
+                if meta.get("preload") == "device_by_id":
+                    async def _preload(args, kwargs, _runtime=self.runtime):
+                        device_id = None
+                        if args:
+                            device_id = args[0]
+                        if device_id is None:
+                            device_id = kwargs.get("device_id") or kwargs.get("id")
+                        if not device_id:
+                            return None
+                        return await _runtime.storage.get("devices", device_id)
+
+                    preload_resource = _preload
+
+                if hasattr(self.runtime.service_registry, "register_with_acl"):
+                    await self.runtime.service_registry.register_with_acl(
+                        name,
+                        _wrapper,
+                        resource=meta.get("resource"),
+                        admin_only=bool(meta.get("admin_only", False)),
+                        filter_result=bool(meta.get("filter_result", False)),
+                        enforce_result=bool(meta.get("enforce_result", False)),
+                        preload_resource=preload_resource,
+                        inject_owner_param=meta.get("inject_owner_param"),
+                    )
+                else:
+                    # Fallback: older ServiceRegistry without ACL support
+                    await self.runtime.service_registry.register(name, _wrapper)
                 self._registered_services.append(name)
             except ValueError:
                 # already registered concurrently — skip

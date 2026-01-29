@@ -68,11 +68,18 @@ class YandexPassportClient:
     """
 
     CLIENT_ID = "c0ebe342af7d48fbbbfcf2d2eedb8f9e"
-    CLIENT_SECRET = "ad0a908f0aa341a182a37ecd75bc319e"
+    # SECURITY: CLIENT_SECRET moved to environment variable
+    # Set YANDEX_CLIENT_SECRET env variable
 
     def __init__(self):
         """Initialize client."""
-        pass
+        import os
+        self.client_secret = os.environ.get("YANDEX_CLIENT_SECRET")
+        if not self.client_secret:
+            raise RuntimeError(
+                "YANDEX_CLIENT_SECRET environment variable not set. "
+                "System cannot start without OAuth client secret."
+            )
 
     async def get_qr_url(self, auth_session: DeviceAuthSession) -> Optional[Dict[str, str]]:
         """Get PWL QR URL - simple GET request to Yandex PWL page.
@@ -299,10 +306,11 @@ class YandexPassportClient:
                     
                     x_token = response_data.get("access_token")
                     if not x_token:
-                        logger.error(f"[Yandex] No access_token in response: {response_data}")
+                        from core.security import sanitize_for_logging
+                        logger.error(f"[Yandex] No access_token in response: {sanitize_for_logging(response_data)}")
                         return None
                     
-                    logger.info(f"[Yandex] ✓ Got x_token: {x_token[:20]}...")
+                    logger.info(f"[Yandex] ✓ Got x_token (masked for security)")
                     return x_token
 
         except Exception as e:

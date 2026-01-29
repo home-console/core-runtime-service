@@ -13,6 +13,7 @@ from .jwt_tokens import validate_jwt_token, extract_jwt_from_header
 from .rate_limiting import rate_limit_check
 from .audit import audit_log_auth_event
 from .middleware_helpers import apply_rate_limiting, log_auth_result
+from .contextvars import set_current_request_context
 
 
 async def get_request_context(request: Request) -> Optional[RequestContext]:
@@ -233,7 +234,14 @@ async def require_auth_middleware(request: Request, call_next):
     
     # Сохраняем context в request.state
     request.state.auth_context = context
-    
-    # Продолжаем обработку запроса
-    response = await call_next(request)
-    return response
+
+    # Пробрасываем context через ContextVar для доменных сервисов
+    set_current_request_context(context)
+
+    try:
+        # Продолжаем обработку запроса
+        response = await call_next(request)
+        return response
+    finally:
+        # Очищаем ContextVar чтобы не протекало между запросами
+        set_current_request_context(None)

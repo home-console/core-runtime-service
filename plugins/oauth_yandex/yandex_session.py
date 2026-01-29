@@ -214,11 +214,16 @@ class YandexSession:
             host = next((p["domain"] for p in raw if p["domain"].startswith(".yandex.")), host)
             cookies = "; ".join([f"{p['name']}={p['value']}" for p in raw])
 
+        import os
+        client_secret = os.environ.get("YANDEX_CLIENT_SECRET")
+        if not client_secret:
+            raise RuntimeError("YANDEX_CLIENT_SECRET environment variable not set")
+        
         r = await self._post(
             "https://mobileproxy.passport.yandex.net/1/bundle/oauth/token_by_sessionid",
             data={
                 "client_id": "c0ebe342af7d48fbbbfcf2d2eedb8f9e",
-                "client_secret": "ad0a908f0aa341a182a37ecd75bc319e",
+                "client_secret": client_secret,
             },
             headers={"Ya-Client-Host": host, "Ya-Client-Cookie": cookies},
         )

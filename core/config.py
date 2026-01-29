@@ -45,6 +45,11 @@ class Config:
     # "development" | "production"
     env: str = "development"
 
+    # Proxy / network trust
+    # Если True — доверяем X-Forwarded-For / X-Real-IP (только если вы реально стоите за trusted reverse proxy).
+    # Если False — используем только request.client.host.
+    trust_proxy_headers: bool = False
+
     # CORS
     # В production обязательно ограничить домены.
     cors_allowed_origins: List[str] = None  # type: ignore[assignment]
@@ -113,6 +118,10 @@ class Config:
         if self.env not in ("development", "production"):
             raise ValueError(f"env must be 'development' or 'production', got: {self.env!r}")
 
+        # trust_proxy_headers
+        if not isinstance(self.trust_proxy_headers, bool):
+            raise ValueError("trust_proxy_headers must be bool")
+
         # cors_allowed_origins
         if self.cors_allowed_origins is None:
             # Default for dev
@@ -169,6 +178,7 @@ class Config:
             rate_limit_requests=int(os.getenv("RUNTIME_RATE_LIMIT_REQUESTS", "100")),
             rate_limit_window=int(os.getenv("RUNTIME_RATE_LIMIT_WINDOW", "60")),
             env=os.getenv("RUNTIME_ENV", "development").lower(),
+            trust_proxy_headers=os.getenv("RUNTIME_TRUST_PROXY_HEADERS", "false").lower() == "true",
             cors_allowed_origins=cors_allowed,
             csrf_enabled=os.getenv("RUNTIME_CSRF_ENABLED", "true").lower() == "true",
             csrf_cookie_name=os.getenv("RUNTIME_CSRF_COOKIE_NAME", "csrf_token"),

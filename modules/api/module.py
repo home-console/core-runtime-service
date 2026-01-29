@@ -99,6 +99,16 @@ class ApiModule(RuntimeModule):
             # RequestLoggerModule может быть не установлен - это нормально
             pass
         
+        # SECURITY P0: Add CSRF protection and rate limiting for admin API
+        try:
+            from modules.api.csrf_middleware import csrf_protection_middleware, rate_limit_middleware
+            self.app.middleware("http")(csrf_protection_middleware)
+            self.app.middleware("http")(rate_limit_middleware)
+        except ImportError:
+            # CSRF middleware not available - log warning
+            import logging
+            logging.warning("CSRF middleware not available - admin API vulnerable to CSRF attacks")
+        
         # Добавляем auth middleware (boundary-layer) - выполнится третьим
         self.app.middleware("http")(require_auth_middleware)
         
@@ -257,6 +267,8 @@ class ApiModule(RuntimeModule):
                                 # Если device не найден, это нормально - сервис вернёт 404
                                 # Не раскрываем информацию о существовании device здесь
                                 pass
+                    # для list_devices не используем отдельную ACL проверку здесь —
+                    # enforcement делается в services.list_devices через ContextVar.
                     
                     params: Dict[str, Any] = {}
                     # path params доступны через request.path_params
@@ -315,6 +327,26 @@ class ApiModule(RuntimeModule):
                         # Вызов сервиса - CoreRuntime и доменные модули НЕ знают про auth
                         result = await self.runtime.service_registry.call(endpoint.service, **params)
                     except Exception as e:
+                        # Typed core errors -> proper HTTP mapping
+                        try:
+                            from core.errors import (
+                                BadRequestError,
+                                UnauthorizedError,
+                                ForbiddenError,
+                                NotFoundError,
+                            )
+                        except Exception:
+                            BadRequestError = UnauthorizedError = ForbiddenError = NotFoundError = ()  # type: ignore
+
+                        if BadRequestError and isinstance(e, BadRequestError):
+                            raise HTTPException(status_code=400, detail=str(e))
+                        if UnauthorizedError and isinstance(e, UnauthorizedError):
+                            raise HTTPException(status_code=401, detail="Unauthorized")
+                        if ForbiddenError and isinstance(e, ForbiddenError):
+                            raise HTTPException(status_code=403, detail="Forbidden")
+                        if NotFoundError and isinstance(e, NotFoundError):
+                            raise HTTPException(status_code=404, detail="Not Found")
+
                         # Map ValueError from services to HTTP 400 (bad request)
                         if isinstance(e, ValueError):
                             raise HTTPException(status_code=400, detail=str(e))

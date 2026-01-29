@@ -91,20 +91,20 @@ class YandexSmartHomeRealPlugin(BasePlugin):
             """Синхронизировать устройства из реального API Яндекса."""
             return await self.device_sync.sync_devices()
 
-        await self.runtime.service_registry.register("yandex.sync_devices", _sync_devices)
+        await self.runtime.service_registry.register_with_acl("yandex.sync_devices", _sync_devices, admin_only=True)
 
         # Регистрируем сервис проверки онлайн статуса
         async def _check_devices_online():
             """Проверить онлайн статус всех устройств через Яндекс API."""
             return await self.device_status_checker.check_devices_online()
 
-        await self.runtime.service_registry.register("yandex.check_devices_online", _check_devices_online)
+        await self.runtime.service_registry.register_with_acl("yandex.check_devices_online", _check_devices_online, admin_only=True)
 
         async def _subscribe_device_updates(device_id: str, callback):
             """Подписка на обновления состояния конкретного устройства (ws)."""
             return self.quasar_ws.subscribe(device_id, callback)
 
-        await self.runtime.service_registry.register("yandex.subscribe_device_updates", _subscribe_device_updates)
+        await self.runtime.service_registry.register_with_acl("yandex.subscribe_device_updates", _subscribe_device_updates, admin_only=True)
 
         # HTTP endpoint регистрируется в AdminModule (admin.v1.yandex.sync)
         # для правильной обработки ошибок и формата ответа

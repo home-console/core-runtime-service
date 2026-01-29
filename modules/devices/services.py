@@ -194,6 +194,7 @@ async def get_device(runtime, device_id: str) -> Dict[str, Any]:
 
 
 async def list_external(runtime, provider: Optional[str] = None) -> List[Dict[str, Any]]:
+
     keys = await runtime.storage.list_keys("devices_external")
 
     out: List[Dict[str, Any]] = []
@@ -210,6 +211,7 @@ async def list_external(runtime, provider: Optional[str] = None) -> List[Dict[st
 
 
 async def create_mapping(runtime, external_id: str, internal_id: str) -> Dict[str, Any]:
+
     if not external_id or not internal_id:
         raise ValueError("external_id и internal_id должны быть непустыми")
 
@@ -220,6 +222,7 @@ async def create_mapping(runtime, external_id: str, internal_id: str) -> Dict[st
 
 
 async def list_mappings(runtime) -> List[Dict[str, Any]]:
+
     keys = await runtime.storage.list_keys("devices_mappings")
 
     out: List[Dict[str, Any]] = []
@@ -233,6 +236,7 @@ async def list_mappings(runtime) -> List[Dict[str, Any]]:
 
 
 async def delete_mapping(runtime, external_id: str) -> Dict[str, Any]:
+
     if not external_id:
         return {"ok": False, "error": "external_id required"}
 
@@ -242,6 +246,7 @@ async def delete_mapping(runtime, external_id: str) -> Dict[str, Any]:
 
 
 async def auto_map_external(runtime, provider: Optional[str] = None) -> Dict[str, Any]:
+
     created = 0
     skipped = 0
     errors: List[str] = []

@@ -78,6 +78,32 @@ class PluginManager:
                 from typing import cast
 
                 plugin.runtime = cast("CoreRuntime", self._runtime)
+                
+                # SECURITY P0: Setup plugin isolation
+                # Give plugin isolated storage and service access
+                from core.plugin_isolation import (
+                    StorageProxy, 
+                    ServiceProxy, 
+                    DEFAULT_ALLOWED_SERVICES
+                )
+                
+                # Create StorageProxy for plugin (isolated namespace)
+                if self._runtime and hasattr(self._runtime, 'storage'):
+                    plugin.storage = StorageProxy(
+                        self._runtime.storage,
+                        namespace=plugin_name
+                    )
+                
+                # Create ServiceProxy for plugin (limited service access)
+                if self._runtime and hasattr(self._runtime, 'service_registry'):
+                    # TODO: Load allowed_services from plugin manifest
+                    # For now, use default allowed services
+                    plugin.services = ServiceProxy(
+                        self._runtime.service_registry,
+                        allowed_services=DEFAULT_ALLOWED_SERVICES,
+                        plugin_name=plugin_name
+                    )
+                
             except Exception:
                 # Установка runtime не должна ломать загрузку
                 pass

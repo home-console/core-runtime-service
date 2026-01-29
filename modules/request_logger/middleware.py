@@ -54,9 +54,20 @@ async def request_logger_middleware(request: Request, call_next: Callable) -> Re
     """
     Middleware для перехвата HTTP запросов и записи логов.
     
+    SECURITY: Sanitizes sensitive data (tokens, passwords, headers) before logging.
+    In DEBUG mode, logs request/response bodies for debugging.
+    In production mode, does NOT log bodies to prevent data exfiltration.
+    
     Создаёт request_id для каждого запроса и записывает все логи в RequestLoggerModule.
-    Захватывает полную информацию о запросе и ответе (заголовки, тело).
     """
+    import os
+    
+    # SECURITY: Import sanitizer
+    from core.security import sanitize_for_logging
+    
+    # Check if DEBUG mode enabled
+    debug_mode = os.getenv("DEBUG", "false").lower() in ("true", "1", "yes")
+    
     runtime = request.app.state.runtime
     
     # Генерируем request_id (или используем из заголовка X-Request-ID)
@@ -85,36 +96,28 @@ async def request_logger_middleware(request: Request, call_next: Callable) -> Re
     
     # Захватываем информацию о запросе
     request_headers = dict(request.headers)
-    # Убираем чувствительные данные из заголовков
-    sensitive_headers = ["authorization", "cookie", "x-api-key"]
-    sanitized_request_headers = {
-        k: "***" if k.lower() in sensitive_headers else v
-        for k, v in request_headers.items()
-    }
+    # SECURITY: Sanitize sensitive headers
+    sanitized_request_headers = sanitize_for_logging(request_headers)
     
-    # Захватываем тело запроса
-    # ВАЖНО: FastAPI может уже прочитать body в handler'е, поэтому мы пытаемся прочитать его здесь
-    # Если body уже прочитано, request.body() может вернуть пустые байты или выбросить исключение
+    # SECURITY: Capture request body ONLY in DEBUG mode
     request_body = None
-    try:
-        if request.method in ["POST", "PUT", "PATCH", "DELETE"]:
-            # Проверяем, есть ли body в request.state (может быть сохранено в handler'е)
-            if hasattr(request.state, "request_body"):
-                request_body = request.state.request_body
-            else:
-                # Пытаемся прочитать body напрямую
+    if debug_mode:
+        try:
+            if request.method in ["POST", "PUT", "PATCH", "DELETE"]:
+                # Пытаемся прочитать body
                 body_bytes = await request.body()
                 if body_bytes:
                     try:
-                        # Пытаемся распарсить как JSON
                         import json
                         request_body = json.loads(body_bytes.decode("utf-8"))
+                        # SECURITY: Sanitize body even in debug mode
+                        request_body = sanitize_for_logging(request_body)
                     except (json.JSONDecodeError, UnicodeDecodeError):
                         # Если не JSON, сохраняем как строку (ограничиваем размер)
                         request_body = body_bytes.decode("utf-8", errors="replace")[:10000]
-    except Exception:
-        # Игнорируем ошибки при чтении тела (body может быть уже прочитано)
-        pass
+        except Exception:
+            # Игнорируем ошибки при чтении тела
+            pass
     
     # Сохраняем метаданные запроса
     request_metadata = {
@@ -123,7 +126,7 @@ async def request_logger_middleware(request: Request, call_next: Callable) -> Re
         "path": request.url.path,
         "query_params": dict(request.query_params),
         "headers": sanitized_request_headers,
-        "body": request_body,
+        "body": request_body if debug_mode else None,  # Only in DEBUG mode
         "client": request.client.host if request.client else None,
         "user_agent": request.headers.get("user-agent"),
         "direction": "incoming",  # Входящий запрос
@@ -169,65 +172,37 @@ async def request_logger_middleware(request: Request, call_next: Callable) -> Re
         
         # Захватываем информацию об ответе
         response_headers = dict(response.headers)
-        # Убираем чувствительные данные из заголовков ответа
-        sanitized_response_headers = {
-            k: "***" if k.lower() in ["set-cookie"] else v
-            for k, v in response_headers.items()
-        }
+        # SECURITY: Sanitize sensitive response headers
+        sanitized_response_headers = sanitize_for_logging(response_headers)
         
-        # Захватываем тело ответа
-        # Используем кастомный Response wrapper для захвата body
+        # SECURITY: Capture response body ONLY in DEBUG mode
         response_body = None
-        try:
-            # Проверяем, есть ли body в response (для JSONResponse)
-            if hasattr(response, "body"):
-                body_bytes = response.body
-                if body_bytes:
-                    try:
-                        import json
-                        response_body = json.loads(body_bytes.decode("utf-8"))
-                    except (json.JSONDecodeError, UnicodeDecodeError, AttributeError):
-                        # Если не JSON или не bytes, пытаемся получить как строку
+        if debug_mode:
+            try:
+                # Проверяем, есть ли body в response (для JSONResponse)
+                if hasattr(response, "body"):
+                    body_bytes = response.body
+                    if body_bytes:
                         try:
-                            response_body = body_bytes.decode("utf-8", errors="replace")[:10000]
-                        except (AttributeError, TypeError):
-                            # Если body не bytes, возможно это уже dict/str
-                            response_body = str(body_bytes)[:10000] if body_bytes else None
-            elif hasattr(response, "body_iterator"):
-                # Для StreamingResponse читаем iterator
-                body_chunks = []
-                async for chunk in response.body_iterator:
-                    body_chunks.append(chunk)
-                
-                if body_chunks:
-                    body_bytes = b"".join(body_chunks)
-                    try:
-                        import json
-                        response_body = json.loads(body_bytes.decode("utf-8"))
-                    except (json.JSONDecodeError, UnicodeDecodeError):
-                        response_body = body_bytes.decode("utf-8", errors="replace")[:10000]
-                
-                # Восстанавливаем body iterator для ответа
-                from starlette.responses import StreamingResponse
-                async def body_generator():
-                    for chunk in body_chunks:
-                        yield chunk
-                
-                response = StreamingResponse(
-                    body_generator(),
-                    status_code=response.status_code,
-                    headers=dict(response.headers),
-                    media_type=response.media_type
-                )
-        except Exception:
-            # Если не удалось захватить тело, продолжаем без него
-            pass
+                            import json
+                            response_body = json.loads(body_bytes.decode("utf-8"))
+                            # SECURITY: Sanitize body even in debug mode
+                            response_body = sanitize_for_logging(response_body)
+                        except (json.JSONDecodeError, UnicodeDecodeError, AttributeError):
+                            # Если не JSON, сохраняем как строку (ограничиваем размер)
+                            try:
+                                response_body = body_bytes.decode("utf-8", errors="replace")[:10000]
+                            except (AttributeError, TypeError):
+                                response_body = str(body_bytes)[:10000] if body_bytes else None
+            except Exception:
+                # Игнорируем ошибки при чтении тела
+                pass
         
         # Сохраняем метаданные ответа
         response_metadata = {
             "status_code": response.status_code,
             "headers": sanitized_response_headers,
-            "body": response_body,
+            "body": response_body if debug_mode else None,  # Only in DEBUG mode
             "duration_ms": duration * 1000,
         }
         

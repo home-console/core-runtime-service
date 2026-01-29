@@ -51,18 +51,26 @@ def get_client_ip(request: Request) -> Optional[str]:
     Returns:
         IP адрес клиента или None
     """
-    # Проверяем заголовки прокси (если приложение за reverse proxy)
-    forwarded_for = request.headers.get("X-Forwarded-For")
-    if forwarded_for:
-        # X-Forwarded-For может содержать несколько IP через запятую
-        # Берём первый (оригинальный клиент)
-        ip = forwarded_for.split(",")[0].strip()
-        if ip:
-            return ip
-    
-    real_ip = request.headers.get("X-Real-IP")
-    if real_ip:
-        return real_ip.strip()
+    # SECURITY: proxy headers можно подделать.
+    # Доверяем X-Forwarded-For / X-Real-IP только если runtime конфиг явно разрешает это.
+    trust_proxy_headers = False
+    try:
+        runtime = getattr(getattr(request, "app", None), "state", None) and getattr(request.app.state, "runtime", None)
+        cfg = getattr(runtime, "_config", None) if runtime is not None else None
+        trust_proxy_headers = bool(getattr(cfg, "trust_proxy_headers", False)) if cfg is not None else False
+    except Exception:
+        trust_proxy_headers = False
+
+    if trust_proxy_headers:
+        forwarded_for = request.headers.get("X-Forwarded-For")
+        if forwarded_for:
+            ip = forwarded_for.split(",")[0].strip()
+            if ip:
+                return ip
+
+        real_ip = request.headers.get("X-Real-IP")
+        if real_ip:
+            return real_ip.strip()
     
     # Используем IP из request.client
     if request.client:

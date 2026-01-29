@@ -52,8 +52,8 @@ class LoggerModule(RuntimeModule):
         if self._log_format not in ("text", "json"):
             self._log_format = "text"
 
-        # Регистрируем сервис logger.log
-        await self.runtime.service_registry.register("logger.log", self._log_service)
+        # Регистрируем сервис logger.log (ACL обвязка в ядре — без ограничений)
+        await self.runtime.service_registry.register_with_acl("logger.log", self._log_service)
 
     async def start(self) -> None:
         """
@@ -102,11 +102,18 @@ class LoggerModule(RuntimeModule):
         """
         Сервис логирования.
         
+        SECURITY: All logs are sanitized before output to prevent secret leakage.
+        
         Args:
             level: уровень логирования (debug, info, warning, error)
             message: сообщение для логирования
             **context: дополнительный контекст (может включать operation_id, plugin, module и др.)
         """
+        # SECURITY: Sanitize all data before logging
+        from core.security import sanitize_for_logging
+        message = sanitize_for_logging(message)
+        context = sanitize_for_logging(context)
+        
         # Извлекаем operation_id из context (может быть передан явно)
         operation_id = context.pop("operation_id", None)
         

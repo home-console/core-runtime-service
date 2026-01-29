@@ -13,7 +13,7 @@ NOTE: В будущем, когда появится отдельный SDK па
 import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Awaitable, Callable, Any
 
 if TYPE_CHECKING:
     from core.runtime import CoreRuntime
@@ -28,6 +28,9 @@ class PluginMetadata:
     description: str = ""
     author: str = ""
     dependencies: list[str] | None = field(default_factory=list)  # Список имён плагинов-зависимостей
+    # По умолчанию все сервисы плагина доступны не только админам.
+    # Можно включить default_admin_only=True для "админских" плагинов.
+    default_admin_only: bool = False
 
 
 class BasePlugin(ABC):
@@ -72,6 +75,50 @@ class BasePlugin(ABC):
         self._runtime = runtime
         self._loaded = False
         self._started = False
+
+    async def register_service(
+        self,
+        name: str,
+        func: Callable[..., Awaitable[Any]],
+        *,
+        resource: Optional[str] = None,
+        admin_only: Optional[bool] = None,
+        filter_result: bool = False,
+        enforce_result: bool = False,
+        preload_resource: Optional[Callable[[tuple, dict], Awaitable[Any]]] = None,
+        inject_owner_param: Optional[str] = None,
+        version: Optional[str] = None,
+    ) -> None:
+        """
+        Удобный helper для регистрации сервисов в плагинах.
+
+        ACL enforcement находится в ядре (ServiceRegistry.register_with_acl).
+        Плагин просто указывает метаданные при регистрации.
+        """
+        # Если явно не указали admin_only — берём дефолт из metadata (для всего плагина)
+        effective_admin_only = admin_only
+        try:
+            if effective_admin_only is None and getattr(self, "metadata", None) is not None:
+                effective_admin_only = bool(self.metadata.default_admin_only)
+        except Exception:
+            # В сомнительных случаях не ужесточаем, оставляем на усмотрение конвенций в ServiceRegistry
+            effective_admin_only = admin_only
+
+        reg = self.runtime.service_registry
+        if hasattr(reg, "register_with_acl"):
+            await reg.register_with_acl(
+                name,
+                func,
+                resource=resource,
+                admin_only=effective_admin_only,
+                filter_result=filter_result,
+                enforce_result=enforce_result,
+                preload_resource=preload_resource,
+                inject_owner_param=inject_owner_param,
+                version=version,
+            )
+        else:
+            await reg.register(name, func, version=version)
 
     def get_env_config(self, key: str, default: Optional[str] = None, prefix: Optional[str] = None) -> Optional[str]:
         """

@@ -71,6 +71,52 @@ class OAuthYandexPlugin(BasePlugin):
             author="Home Console",
         )
 
+    async def _decrypt_tokens(self, tokens_raw: Any) -> Optional[Dict[str, Any]]:
+        """Decrypt tokens from storage.
+        
+        SECURITY P0: All token reads must go through this method.
+        
+        Args:
+            tokens_raw: Raw data from storage (encrypted or plaintext)
+            
+        Returns:
+            Decrypted tokens dict or None
+        """
+        if not tokens_raw:
+            return None
+        
+        # Check if encrypted
+        if isinstance(tokens_raw, dict) and "encrypted" in tokens_raw:
+            try:
+                from core.security import TokenEncryption
+                encryptor = TokenEncryption.from_env()
+                return encryptor.decrypt(tokens_raw["encrypted"])
+            except Exception:
+                # Decryption failed
+                return None
+        
+        # Plaintext tokens (legacy)
+        return tokens_raw
+    
+    async def _encrypt_and_save_tokens(self, tokens: Dict[str, Any]) -> None:
+        """Encrypt and save tokens to storage.
+        
+        SECURITY P0: All token writes must go through this method.
+        
+        Args:
+            tokens: Tokens dict to encrypt and save
+        """
+        from core.security import TokenEncryption
+        try:
+            encryptor = TokenEncryption.from_env()
+            encrypted_blob = encryptor.encrypt(tokens)
+            await self.runtime.storage.set(self.TOKEN_NAMESPACE, self.TOKEN_KEY, {"encrypted": encrypted_blob})
+        except RuntimeError:
+            # Encryption not configured - fallback to plaintext (log warning)
+            import logging
+            logging.warning("SECURITY: OAuth tokens stored in plaintext (OAUTH_ENCRYPTION_KEY not set)")
+            await self.runtime.storage.set(self.TOKEN_NAMESPACE, self.TOKEN_KEY, tokens)
+    
     async def _get_http_session(self):
         """Получить HTTP session (обёрнутый для логирования, если доступен)."""
         try:
@@ -142,7 +188,22 @@ class OAuthYandexPlugin(BasePlugin):
             UI использует этот сервис для отображения состояния.
             """
             config = await self.runtime.storage.get(self.TOKEN_NAMESPACE, self.CONFIG_KEY)
-            tokens = await self.runtime.storage.get(self.TOKEN_NAMESPACE, self.TOKEN_KEY)
+            tokens_raw = await self.runtime.storage.get(self.TOKEN_NAMESPACE, self.TOKEN_KEY)
+            
+            # SECURITY P0: Decrypt tokens if encrypted
+            tokens = None
+            if tokens_raw:
+                if isinstance(tokens_raw, dict) and "encrypted" in tokens_raw:
+                    try:
+                        from core.security import TokenEncryption
+                        encryptor = TokenEncryption.from_env()
+                        tokens = encryptor.decrypt(tokens_raw["encrypted"])
+                    except Exception:
+                        # Decryption failed - tokens corrupted or key changed
+                        tokens = None
+                else:
+                    # Plaintext tokens (legacy)
+                    tokens = tokens_raw
             
             configured = config is not None
             authorized = tokens is not None and "access_token" in tokens if tokens else False
@@ -190,7 +251,8 @@ class OAuthYandexPlugin(BasePlugin):
             if not config:
                 raise ValueError("OAuth не настроен. Вызовите oauth_yandex.configure сначала.")
             
-            tokens = await self.runtime.storage.get(self.TOKEN_NAMESPACE, self.TOKEN_KEY)
+            tokens_raw = await self.runtime.storage.get(self.TOKEN_NAMESPACE, self.TOKEN_KEY)
+            tokens = await self._decrypt_tokens(tokens_raw)
             if tokens and "access_token" in tokens:
                 raise ValueError("Уже авторизован. Удалите токены перед повторной авторизацией.")
             
@@ -293,8 +355,18 @@ class OAuthYandexPlugin(BasePlugin):
                         except (ValueError, TypeError):
                             pass
 
-                # Сохраняем токены в storage (single source of truth)
-                await self.runtime.storage.set(self.TOKEN_NAMESPACE, self.TOKEN_KEY, tokens_to_save)
+                # SECURITY P0: Encrypt tokens before storing
+                from core.security import TokenEncryption
+                try:
+                    encryptor = TokenEncryption.from_env()
+                    encrypted_blob = encryptor.encrypt(tokens_to_save)
+                    # Store encrypted blob instead of plaintext tokens
+                    await self.runtime.storage.set(self.TOKEN_NAMESPACE, self.TOKEN_KEY, {"encrypted": encrypted_blob})
+                except RuntimeError:
+                    # Encryption not configured - fallback to plaintext (log warning)
+                    import logging
+                    logging.warning("SECURITY: OAuth tokens stored in plaintext (OAUTH_ENCRYPTION_KEY not set)")
+                    await self.runtime.storage.set(self.TOKEN_NAMESPACE, self.TOKEN_KEY, tokens_to_save)
 
                 # Публикуем событие линковки аккаунта (для UI/расширений)
                 try:
@@ -349,7 +421,8 @@ class OAuthYandexPlugin(BasePlugin):
             if not config:
                 raise OAuthReauthRequired("OAuth не настроен")
             
-            tokens = await self.runtime.storage.get(self.TOKEN_NAMESPACE, self.TOKEN_KEY)
+            tokens_raw = await self.runtime.storage.get(self.TOKEN_NAMESPACE, self.TOKEN_KEY)
+            tokens = await self._decrypt_tokens(tokens_raw)
             if not tokens or not isinstance(tokens, dict):
                 raise OAuthReauthRequired("Токены не найдены")
             
@@ -426,8 +499,8 @@ class OAuthYandexPlugin(BasePlugin):
                         if "refresh_token" not in tokens_to_save and refresh_token:
                             tokens_to_save["refresh_token"] = refresh_token
                         
-                        # Сохраняем обновленные токены
-                        await self.runtime.storage.set(self.TOKEN_NAMESPACE, self.TOKEN_KEY, tokens_to_save)
+                        # SECURITY P0: Encrypt and save updated tokens
+                        await self._encrypt_and_save_tokens(tokens_to_save)
                         
                         access_token = tokens_to_save.get("access_token")
                         if not access_token:
@@ -474,7 +547,8 @@ class OAuthYandexPlugin(BasePlugin):
                 OAuthReauthRequired: если требуется повторная авторизация (FATAL)
                 RuntimeError: для временных ошибок (TEMPORARY)
             """
-            tokens = await self.runtime.storage.get(self.TOKEN_NAMESPACE, self.TOKEN_KEY)
+            tokens_raw = await self.runtime.storage.get(self.TOKEN_NAMESPACE, self.TOKEN_KEY)
+            tokens = await self._decrypt_tokens(tokens_raw)
             if not tokens or not isinstance(tokens, dict):
                 # Если токены невалидны (например, невалидный JSON в storage),
                 # пытаемся очистить их явно
@@ -718,7 +792,8 @@ class OAuthYandexPlugin(BasePlugin):
                     except (ValueError, TypeError):
                         pass
             
-            await self.runtime.storage.set(self.TOKEN_NAMESPACE, self.TOKEN_KEY, tokens_to_save)
+            # SECURITY P0: Encrypt and save tokens
+            await self._encrypt_and_save_tokens(tokens_to_save)
 
         # Регистрируем сервисы
         await self.runtime.service_registry.register("oauth_yandex.configure", configure)

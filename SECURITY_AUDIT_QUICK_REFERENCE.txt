@@ -1,0 +1,185 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║           SECURITY AUDIT QUICK REFERENCE — 27 January 2026                  ║
+║           HomeConsole Core Runtime Service v0.2.0                            ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🔴 CRITICAL ISSUES (Immediate Action Required)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. SSRF in RemotePluginProxy
+   📍 File: plugins/remote_plugin_proxy.py (lines 64-110)
+   ⚠️  No URL validation before HTTP requests
+   💡 Fix: Use validate_url_for_plugin() from modules/api/security/url_validator.py
+   ⏱️  Time to fix: ~1 hour
+   
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🟠 HIGH/MEDIUM ISSUES (Fix This Week)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+2. No Idempotency Support
+   📍 File: All POST/PUT/DELETE endpoints
+   ⚠️  No protection against duplicate requests (race conditions)
+   💡 Fix: Add idempotency_middleware from modules/api/security/idempotency.py
+   ⏱️  Time to fix: ~2 hours
+
+3. No JWT Key Rotation
+   📍 File: modules/api/auth/jwt_tokens.py
+   ⚠️  JWT secret never changes, can't revoke compromised key
+   💡 Fix: Implement multi-key support + kid + grace period
+   ⏱️  Time to fix: ~1 day
+
+4. No Dependency Scanning
+   📍 File: CI/CD (GitHub Actions)
+   ⚠️  No automated check for vulnerable dependencies
+   💡 Fix: Add pip-audit + npm audit to CI pipeline
+   ⏱️  Time to fix: ~30 minutes
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📊 OWASP TOP 10 (2021) SUMMARY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+A01 – Broken Access Control          🟡 PARTIAL   (medium risk)
+A02 – Cryptographic Failures         🟡 PARTIAL   (medium risk)
+A03 – Injection                      🟡 PARTIAL   (low risk)
+A04 – Insecure Design                🟡 PARTIAL   (low risk)
+A05 – Security Misconfiguration      🟡 PARTIAL   (medium risk)
+A06 – Vulnerable Components          🟡 PARTIAL   (medium risk)
+A07 – Auth Failures                  🟡 PARTIAL   (low risk)
+A08 – Integrity Failures             🔴 OPEN      (HIGH risk)
+A09 – Logging & Monitoring           🟡 PARTIAL   (low risk)
+A10 – SSRF                           🔴 OPEN      (CRITICAL)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ DELIVERABLES FROM AUDIT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Files Created:
+✓ modules/api/security/url_validator.py      (SSRF protection)
+✓ modules/api/security/idempotency.py        (Race condition protection)
+✓ tests/security/test_url_validator.py       (20+ unit tests)
+✓ tests/security/test_idempotency.py         (Unit tests)
+
+Documentation:
+✓ docs/SECURITY_AUDIT.md                     (Full OWASP audit report)
+✓ docs/SECURITY_AUDIT_SUMMARY.md             (This audit summary)
+✓ docs/SECURITY_FIXES_ROADMAP.md             (Action plan with code examples)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🚀 QUICK START FOR FIXES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Step 1: Apply SSRF validation (IMMEDIATE)
+────────────────────────────────────────
+# In plugins/remote_plugin_proxy.py:
+
+from modules.api.security.url_validator import validate_url_for_plugin
+
+async def _http_call(self, endpoint: str, ...):
+    url = f"{self.remote_url}{endpoint}"
+    
+    # ADD THIS:
+    try:
+        validate_url_for_plugin(url)
+    except BadRequestError as e:
+        raise RuntimeError(f"URL blocked: {str(e)}")
+    
+    # Then proceed with HTTP call...
+
+Step 2: Add Idempotency middleware (DAY 1)
+──────────────────────────────────────────
+# In modules/api/module.py:
+
+from modules.api.security import idempotency_middleware
+
+# Add to FastAPI app:
+app.add_middleware(idempotency_middleware)
+
+# Clients now send:
+headers = {"Idempotency-Key": f"{action_id}:{uuid.uuid4()}"}
+
+Step 3: Test everything
+───────────────────────
+pytest tests/security/ -v
+pytest tests/ -v
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📚 DETAILED DOCUMENTATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Full Audit Report:
+  👉 core-runtime-service/docs/SECURITY_AUDIT.md
+
+Action Plan with Code Examples:
+  👉 core-runtime-service/docs/SECURITY_FIXES_ROADMAP.md
+
+This Summary:
+  👉 core-runtime-service/docs/SECURITY_AUDIT_SUMMARY.md
+
+Security Modules:
+  👉 core-runtime-service/modules/api/security/
+
+Tests:
+  👉 core-runtime-service/tests/security/
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+💡 KEY FINDINGS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✓ JWT secret: 256-bit entropy (HS256) — GOOD
+✓ Password hashing: bcrypt — GOOD
+✓ HTTP headers: Security headers middleware — GOOD
+✓ Rate limiting: 10 attempts/60 sec — GOOD
+✓ Admin access: Private IPs only — GOOD
+
+✗ SSRF: No URL validation — CRITICAL
+✗ Idempotency: No protection — HIGH
+✗ JWT Rotation: No key rotation — MEDIUM
+✗ Dependency Scan: Not automated — MEDIUM
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🔐 PRODUCTION DEPLOYMENT CHECKLIST
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Before deploying to production:
+
+□ SSRF validation applied
+□ Idempotency middleware enabled
+□ JWT key rotation planned/implemented
+□ Dependency scanning in CI
+□ RUNTIME_ENV=production
+□ RUNTIME_TRUST_PROXY_HEADERS=false
+□ RUNTIME_CSP_MODE=strict
+□ RUNTIME_LOG_FORMAT=json
+□ RUNTIME_COOKIES_SECURE=true
+□ Rate limiting verified
+□ Security tests passing
+□ Load testing with Idempotency-Key
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📞 CONTACT & QUESTIONS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Audit performed by: GitHub Copilot (Claude Haiku 4.5)
+Date: 27 January 2026
+Version: 1.0 (Initial Comprehensive Audit)
+
+For questions, refer to documentation files or create an issue in the repository.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+⏱️  ESTIMATED TIME TO FIX ALL ISSUES: 2-3 days
+🎯 PRIORITY 1 (IMMEDIATE): SSRF fix — 1 hour
+🎯 PRIORITY 2 (THIS WEEK): Idempotency + Dependencies — 3 hours
+🎯 PRIORITY 3 (MONTH 1): JWT Rotation — 1 day
+
+╚══════════════════════════════════════════════════════════════════════════════╝

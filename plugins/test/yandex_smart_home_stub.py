@@ -99,7 +99,7 @@ class YandexSmartHomeStubPlugin(BasePlugin):
 
         # Регистрируем сервисы
         # Primary service name kept for backwards-compatibility
-        await self.runtime.service_registry.register("yandex.sync_devices", _sync_devices)
+        await self.runtime.service_registry.register_with_acl("yandex.sync_devices", _sync_devices, admin_only=True)
         # New explicit sync entry requested by admin UI
         await self.runtime.service_registry.register("yandex.sync", _sync_devices)
         await self.runtime.service_registry.register("yandex.set_device_state", _set_device_state)
