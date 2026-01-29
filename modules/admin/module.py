@@ -288,8 +288,33 @@ class AdminModule(RuntimeModule):
             if "on" not in state:
                 raise ValueError("state must contain 'on' property (boolean), e.g. {\"state\": {\"on\": true}}")
 
-            # Proxy call to devices.set_state
-            return await self.runtime.service_registry.call("devices.set_state", device_id, state)
+            # Route through operations subsystem
+            operations_mgr = getattr(self.runtime, "operations", None)
+            if not operations_mgr:
+                # Fallback to direct call if operations not available
+                return await self.runtime.service_registry.call("devices.set_state", device_id, state)
+            
+            from core.operations import OperationInitiator, OperationInitiatorKind
+            
+            initiator = OperationInitiator(
+                kind=OperationInitiatorKind.ADMIN,
+                user_id=None,
+            )
+            
+            operation = await operations_mgr.create(
+                op_type="device.set_state",
+                params={"device_id": device_id, "state": state},
+                initiator=initiator,
+            )
+            
+            result = await operations_mgr.execute(operation)
+            
+            return {
+                "operation_id": result.operation_id,
+                "status": result.status.value,
+                "result": result.result,
+                "error": result.error.to_dict() if result.error else None,
+            }
 
         async def admin_devices_list_external(provider: Optional[str] = None, **kwargs):
             # provider может прийти из path params {provider}
@@ -882,41 +907,61 @@ class AdminModule(RuntimeModule):
 
         # Wrapper for yandex.sync_devices to handle errors properly
         async def admin_v1_yandex_sync() -> Dict[str, Any]:
-            """Wrapper for yandex.sync_devices that handles errors and returns proper format."""
+            """Wrapper for yandex.sync_devices that routes through operations subsystem."""
             try:
-                # Check if service exists
-                if not await self.runtime.service_registry.has_service("yandex.sync_devices"):
-                    return {"ok": False, "error": "yandex.sync_devices service not available"}
-                
-                # Ensure use_real_api flag is set
-                try:
-                    use_real = await self.runtime.storage.get("yandex", "use_real_api")
-                    if not use_real:
-                        # Auto-enable if not set
+                # Route through operations subsystem
+                operations_mgr = getattr(self.runtime, "operations", None)
+                if not operations_mgr:
+                    # Fallback to direct call if operations not available
+                    if not await self.runtime.service_registry.has_service("yandex.sync_devices"):
+                        return {"ok": False, "error": "yandex.sync_devices service not available"}
+                    
+                    try:
+                        use_real = await self.runtime.storage.get("yandex", "use_real_api")
+                        if not use_real:
+                            await self.runtime.storage.set("yandex", "use_real_api", {"enabled": True})
+                    except Exception:
                         await self.runtime.storage.set("yandex", "use_real_api", {"enabled": True})
-                except Exception:
-                    # If key doesn't exist, create it
-                    await self.runtime.storage.set("yandex", "use_real_api", {"enabled": True})
+                    
+                    devices = await self.runtime.service_registry.call("yandex.sync_devices")
+                    
+                    try:
+                        if await self.runtime.service_registry.has_service("devices.auto_map_external"):
+                            await self.runtime.service_registry.call("devices.auto_map_external", "yandex")
+                    except Exception:
+                        pass
+                    
+                    return {
+                        "ok": True,
+                        "devices": devices if isinstance(devices, list) else [],
+                        "count": len(devices) if isinstance(devices, list) else 0,
+                    }
                 
-                # Call the service
-                devices = await self.runtime.service_registry.call("yandex.sync_devices")
+                # Create operation
+                from core.operations import OperationInitiator, OperationInitiatorKind
                 
-                # After successful sync, try to auto-map devices
-                try:
-                    if await self.runtime.service_registry.has_service("devices.auto_map_external"):
-                        await self.runtime.service_registry.call("devices.auto_map_external", "yandex")
-                except Exception:
-                    # Auto-map is optional, don't fail if it errors
-                    pass
+                initiator = OperationInitiator(
+                    kind=OperationInitiatorKind.ADMIN,
+                    user_id=None,
+                )
+                
+                operation = await operations_mgr.create(
+                    op_type="yandex.sync",
+                    params={},
+                    initiator=initiator,
+                )
+                
+                result = await operations_mgr.execute(operation)
                 
                 return {
-                    "ok": True,
-                    "devices": devices if isinstance(devices, list) else [],
-                    "count": len(devices) if isinstance(devices, list) else 0,
+                    "ok": result.status.value == "success",
+                    "operation_id": result.operation_id,
+                    "status": result.status.value,
+                    "result": result.result,
+                    "error": result.error.to_dict() if result.error else None,
                 }
             except RuntimeError as e:
                 error_msg = str(e)
-                # Handle specific error cases
                 if "yandex_not_authorized" in error_msg:
                     return {"ok": False, "error": "Yandex OAuth not authorized. Please configure and authorize OAuth first."}
                 elif "use_real_api_disabled" in error_msg:
