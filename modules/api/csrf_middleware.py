@@ -59,9 +59,11 @@ async def csrf_protection_middleware(request: Request, call_next: Callable) -> R
         from fastapi import HTTPException
         raise HTTPException(status_code=403, detail="CSRF token required")
     
-    # Get session from request context
-    # RequestContext should be populated by auth middleware
-    ctx = getattr(request.state, "context", None)
+    # Get session from request context populated by auth middleware.
+    # NOTE: auth middleware stores context in `request.state.auth_context`.
+    # Older code used `request.state.context` which caused CSRF checks to
+    # always fail (no context) and return 403 even for authenticated sessions.
+    ctx = getattr(request.state, "auth_context", None)
     if not ctx:
         from fastapi import HTTPException
         raise HTTPException(status_code=403, detail="Authentication required for CSRF validation")
