@@ -26,6 +26,7 @@ from core.http_registry import HttpRegistry
 from core.integration_registry import IntegrationRegistry
 from core.logger_helper import info, warning
 from core.base_plugin import BasePlugin
+from core.operations import OperationManager
 
 
 
@@ -63,6 +64,8 @@ class CoreRuntime:
         self.http = HttpRegistry()
         # Реестр интеграций (минимальный каталог для admin API)
         self.integrations = IntegrationRegistry()
+        # Operations manager (инфраструктура для всех модулей)
+        self.operations = OperationManager(self)
         
         # Сохраняем config для shutdown_timeout
         self._config = config

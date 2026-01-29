@@ -41,6 +41,32 @@ class AdminModule(RuntimeModule):
         
         Регистрирует все административные сервисы и HTTP endpoints.
         """
+        # Register operations handlers
+        try:
+            from modules.operations.handlers import (
+                handle_device_set_state,
+                handle_yandex_sync,
+                handle_yandex_check_online,
+                handle_oauth_refresh,
+                handle_mappings_create,
+                handle_mappings_delete,
+                handle_mappings_auto,
+            )
+            
+            ops_mgr = self.runtime.operations
+            if ops_mgr:
+                ops_mgr.register_handler("device.set_state", handle_device_set_state)
+                ops_mgr.register_handler("yandex.sync", handle_yandex_sync)
+                ops_mgr.register_handler("yandex.check_devices_online", handle_yandex_check_online)
+                ops_mgr.register_handler("oauth.refresh_token", handle_oauth_refresh)
+                ops_mgr.register_handler("mappings.create", handle_mappings_create)
+                ops_mgr.register_handler("mappings.delete", handle_mappings_delete)
+                ops_mgr.register_handler("mappings.auto", handle_mappings_auto)
+        except Exception as e:
+            # Log but don't block admin registration if operations handlers not available
+            import traceback
+            traceback.print_exc()
+        
         # Record admin module start time
         try:
             self._admin_started_at = time.time()
@@ -1004,6 +1030,144 @@ class AdminModule(RuntimeModule):
             except Exception as e:
                 return {"ok": False, "error": f"Check online failed: {str(e)}"}
 
+        # ======================================================================
+        # Operations endpoints
+        # ======================================================================
+        
+        async def admin_operations_create(body: Any = None, **kwargs) -> Dict[str, Any]:
+            """Create and execute an operation."""
+            try:
+                if not isinstance(body, dict):
+                    raise ValueError("Request body must be JSON object")
+                
+                op_type = body.get("type")
+                params = body.get("params", {})
+                
+                if not op_type:
+                    raise ValueError("Missing 'type' in request body")
+                
+                # Get operations manager
+                ops_mgr = self.runtime.operations
+                if not ops_mgr:
+                    raise RuntimeError("Operations manager not available")
+                
+                # Create operation with admin initiator
+                from core.operations import OperationInitiator, OperationInitiatorKind
+                
+                initiator = OperationInitiator(
+                    kind=OperationInitiatorKind.ADMIN,
+                    user_id=None,
+                )
+                
+                operation = await ops_mgr.create(
+                    op_type=op_type,
+                    params=params,
+                    initiator=initiator,
+                )
+                
+                # Execute operation
+                result = await ops_mgr.execute(operation)
+                
+                return result.to_dict()
+            
+            except ValueError as e:
+                raise ValueError(str(e))
+            except Exception as e:
+                raise RuntimeError(f"Operation creation failed: {str(e)}")
+        
+        async def admin_operations_list(limit: int = 100, offset: int = 0, status: Optional[str] = None, **kwargs) -> Dict[str, Any]:
+            """List operations with pagination and filtering."""
+            try:
+                ops_mgr = self.runtime.operations
+                if not ops_mgr:
+                    raise RuntimeError("Operations manager not available")
+                
+                ops = await ops_mgr.list(limit=limit, offset=offset)
+                
+                # Filter by status if provided
+                if status:
+                    ops = [op for op in ops if op.status.value == status]
+                
+                return {
+                    "ok": True,
+                    "operations": [op.to_dict() for op in ops],
+                    "total": len(ops),
+                }
+            except Exception as e:
+                raise RuntimeError(f"Failed to list operations: {str(e)}")
+        
+        async def admin_operations_get(operation_id: str, **kwargs) -> Dict[str, Any]:
+            """Get operation details by ID."""
+            try:
+                ops_mgr = self.runtime.operations
+                if not ops_mgr:
+                    raise RuntimeError("Operations manager not available")
+                
+                op = await ops_mgr.get(operation_id)
+                if not op:
+                    raise ValueError(f"Operation {operation_id} not found")
+                
+                return op.to_dict()
+            except ValueError as e:
+                raise e
+            except Exception as e:
+                raise RuntimeError(f"Failed to get operation: {str(e)}")
+        
+        async def admin_operations_cancel(operation_id: str, **kwargs) -> Dict[str, Any]:
+            """Cancel a pending or running operation."""
+            try:
+                ops_mgr = self.runtime.operations
+                if not ops_mgr:
+                    raise RuntimeError("Operations manager not available")
+                
+                op = await ops_mgr.cancel(operation_id)
+                if not op:
+                    raise ValueError(f"Cannot cancel operation {operation_id}")
+                
+                return {
+                    "ok": True,
+                    "operation": op.to_dict(),
+                }
+            except ValueError as e:
+                raise e
+            except Exception as e:
+                raise RuntimeError(f"Failed to cancel operation: {str(e)}")
+        
+        async def admin_operations_retry(operation_id: str, **kwargs) -> Dict[str, Any]:
+            """Retry a failed operation."""
+            try:
+                ops_mgr = self.runtime.operations
+                if not ops_mgr:
+                    raise RuntimeError("Operations manager not available")
+                
+                # Get original operation
+                original_op = await ops_mgr.get(operation_id)
+                if not original_op:
+                    raise ValueError(f"Operation {operation_id} not found")
+                
+                # Create retry operation
+                new_op = await ops_mgr.retry(operation_id)
+                if not new_op:
+                    raise ValueError(
+                        f"Cannot retry operation {operation_id} "
+                        "(not failed or error not retryable)"
+                    )
+                
+                # Execute retry operation
+                result = await ops_mgr.execute(new_op)
+                
+                return {
+                    "ok": True,
+                    "new_operation_id": result.operation_id,
+                    "status": result.status.value,
+                    "result": result.result,
+                    "error": result.error.to_dict() if result.error else None,
+                }
+            except ValueError as e:
+                raise e
+            except Exception as e:
+                raise RuntimeError(f"Failed to retry operation: {str(e)}")
+
         # Register all services
         service_registrations = [
             ("admin.list_plugins", list_plugins),
@@ -1028,6 +1192,11 @@ class AdminModule(RuntimeModule):
             ("admin.devices.create_mapping", admin_devices_create_mapping),
             ("admin.devices.delete_mapping", admin_devices_delete_mapping),
             ("admin.devices.auto_map", admin_devices_auto_map),
+            ("admin.operations.create", admin_operations_create),
+            ("admin.operations.list", admin_operations_list),
+            ("admin.operations.get", admin_operations_get),
+            ("admin.operations.cancel", admin_operations_cancel),
+            ("admin.operations.retry", admin_operations_retry),
             ("admin.v1.yandex.sync", admin_v1_yandex_sync),
             ("admin.v1.yandex.check_online", admin_v1_yandex_check_online),
             ("admin.v1.integrations", admin_v1_integrations),
@@ -1087,6 +1256,11 @@ class AdminModule(RuntimeModule):
             HttpEndpoint(method="GET", path="/admin/v1/devices/external/{provider}", service="admin.devices.list_external", description="List external devices for provider"),
             HttpEndpoint(method="POST", path="/admin/v1/yandex/sync", service="admin.v1.yandex.sync", description="Sync devices from Yandex Smart Home API"),
             HttpEndpoint(method="POST", path="/admin/v1/yandex/check-online", service="admin.v1.yandex.check_online", description="Check online status of all Yandex devices"),
+            HttpEndpoint(method="POST", path="/admin/v1/operations", service="admin.operations.create", description="Create and execute operation (body: {type, params})"),
+            HttpEndpoint(method="GET", path="/admin/v1/operations", service="admin.operations.list", description="List operations (query: limit?, offset?, status?)"),
+            HttpEndpoint(method="GET", path="/admin/v1/operations/{operation_id}", service="admin.operations.get", description="Get operation details"),
+            HttpEndpoint(method="POST", path="/admin/v1/operations/{operation_id}/cancel", service="admin.operations.cancel", description="Cancel pending/running operation"),
+            HttpEndpoint(method="POST", path="/admin/v1/operations/{operation_id}/retry", service="admin.operations.retry", description="Retry failed operation"),
             HttpEndpoint(method="GET", path="/admin/v1/integrations", service="admin.v1.integrations", description="List registered integrations"),
             HttpEndpoint(method="POST", path="/admin/v1/auth/api-keys", service="admin.auth.create_api_key", description="Create new API key (body: {scopes, is_admin?, subject?, expires_at?})"),
             HttpEndpoint(method="GET", path="/admin/v1/auth/api-keys", service="admin.auth.list_api_keys", description="List all API keys (without actual keys, with metadata)"),
