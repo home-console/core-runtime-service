@@ -311,3 +311,39 @@ async def auto_map_external(runtime, provider: Optional[str] = None) -> Dict[str
         created += 1
 
     return {"ok": True, "created": created, "skipped": skipped, "errors": errors}
+
+async def get_hung_pending_devices(runtime) -> Dict[str, Any]:
+    """
+    Get list of devices with hung pending commands (older than timeout).
+    
+    Used for diagnostics and admin dashboard.
+    """
+    from .pending_cleaner import get_hung_pending_devices as _get_hung
+    
+    hung = await _get_hung(runtime)
+    return {
+        "ok": True,
+        "hung_devices": [
+            {
+                "device_id": item["device_id"],
+                "elapsed_sec": item["elapsed_sec"],
+                "timeout_sec": item["timeout_sec"],
+                "device_name": item["device"].get("name"),
+                "device_type": item["device"].get("type"),
+                "state": item["device"].get("state", {}),
+            }
+            for item in hung
+        ],
+        "total_hung": len(hung),
+    }
+
+
+async def clear_pending_device(runtime, device_id: str) -> Dict[str, Any]:
+    """
+    Manually clear pending flag for a device.
+    
+    Used to reset hung commands via admin API.
+    """
+    from .pending_cleaner import clear_pending_manually
+    
+    return await clear_pending_manually(runtime, device_id)

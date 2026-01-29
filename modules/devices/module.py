@@ -39,6 +39,8 @@ class DevicesModule(RuntimeModule):
             ("devices.list_mappings", services.list_mappings),
             ("devices.delete_mapping", services.delete_mapping),
             ("devices.auto_map_external", services.auto_map_external),
+            ("devices.get_hung_pending", services.get_hung_pending_devices),
+            ("devices.clear_pending", services.clear_pending_device),
         ]
 
         acl_meta = {
@@ -54,6 +56,9 @@ class DevicesModule(RuntimeModule):
             "devices.list_mappings": {"admin_only": True},
             "devices.delete_mapping": {"admin_only": True},
             "devices.auto_map_external": {"admin_only": True},
+            # Diagnostics — admin-only
+            "devices.get_hung_pending": {"admin_only": True},
+            "devices.clear_pending": {"admin_only": True},
         }
 
         self._registered_services = []
@@ -122,9 +127,23 @@ class DevicesModule(RuntimeModule):
         """
         Запуск модуля.
 
-        В текущей реализации devices не требует инициализации при старте.
+        Запускает background task для очистки зависших pending команд.
         """
-        pass
+        # Запускаем background cleaner для зависших pending команд
+        try:
+            from .pending_cleaner import start_pending_cleaner
+            await start_pending_cleaner(self.runtime)
+        except Exception as e:
+            # Логируем но не ломаем старт модуля
+            try:
+                await self.runtime.service_registry.call(
+                    "logger.log",
+                    level="warning",
+                    message=f"Failed to start pending cleaner: {e}",
+                    module="devices"
+                )
+            except Exception:
+                pass
 
     async def stop(self) -> None:
         """
