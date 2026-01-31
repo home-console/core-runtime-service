@@ -6,6 +6,7 @@ DevicesModule — встроенный модуль управления уст�
 """
 
 from core.runtime_module import RuntimeModule
+from core.http_registry import HttpEndpoint
 from . import services, handlers
 
 
@@ -28,6 +29,57 @@ class DevicesModule(RuntimeModule):
 
         Регистрирует сервисы и подписывается на события.
         """
+        # Register HTTP endpoints (declarative only, no FastAPI code)
+        # Devices API endpoints
+        self.runtime.http.register(HttpEndpoint(
+            method="GET",
+            path="/admin/v1/devices",
+            service="admin.devices.list",
+            description="List all devices"
+        ))
+        self.runtime.http.register(HttpEndpoint(
+            method="GET",
+            path="/admin/v1/devices/{id}",
+            service="admin.devices.get",
+            description="Get device by ID"
+        ))
+        self.runtime.http.register(HttpEndpoint(
+            method="POST",
+            path="/admin/v1/devices/{id}/state",
+            service="admin.devices.set_state",
+            description="Set device state"
+        ))
+        self.runtime.http.register(HttpEndpoint(
+            method="GET",
+            path="/admin/v1/devices/external/{provider}",
+            service="admin.devices.list_external",
+            description="List external devices from provider"
+        ))
+        self.runtime.http.register(HttpEndpoint(
+            method="GET",
+            path="/admin/v1/devices/mappings",
+            service="admin.devices.list_mappings",
+            description="List device mappings"
+        ))
+        self.runtime.http.register(HttpEndpoint(
+            method="POST",
+            path="/admin/v1/devices/mappings",
+            service="admin.devices.create_mapping",
+            description="Create device mapping"
+        ))
+        self.runtime.http.register(HttpEndpoint(
+            method="DELETE",
+            path="/admin/v1/devices/mappings/{external_id}",
+            service="admin.devices.delete_mapping",
+            description="Delete device mapping"
+        ))
+        self.runtime.http.register(HttpEndpoint(
+            method="POST",
+            path="/admin/v1/devices/mappings/auto-map/{provider}",
+            service="admin.devices.auto_map",
+            description="Auto-map devices from provider"
+        ))
+        
         # Регистрация сервисов (+ централизованный ACL через ServiceRegistry.register_with_acl)
         service_names = [
             ("devices.list", services.list_devices),

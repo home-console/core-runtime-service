@@ -9,8 +9,10 @@ from .handlers import (
     handle_mappings_delete,
     handle_mappings_auto,
 )
+from .module import OperationsModule
 
 __all__ = [
+    "OperationsModule",
     "handle_device_set_state",
     "handle_yandex_sync",
     "handle_yandex_check_online",

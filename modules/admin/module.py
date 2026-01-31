@@ -41,6 +41,33 @@ class AdminModule(RuntimeModule):
         
         Регистрирует все административные сервисы и HTTP endpoints.
         """
+        # Register HTTP endpoints (declarative only, no FastAPI code)
+        # Admin introspection endpoints для диагностики runtime
+        self.runtime.http.register(HttpEndpoint(
+            method="GET",
+            path="/admin/v1/runtime",
+            service="admin.v1.runtime",
+            description="Get runtime info"
+        ))
+        self.runtime.http.register(HttpEndpoint(
+            method="GET",
+            path="/admin/v1/services",
+            service="admin.v1.services",
+            description="List all registered services"
+        ))
+        self.runtime.http.register(HttpEndpoint(
+            method="GET",
+            path="/admin/v1/http",
+            service="admin.v1.http",
+            description="List all HTTP endpoints"
+        ))
+        self.runtime.http.register(HttpEndpoint(
+            method="GET",
+            path="/admin/v1/dashboard",
+            service="admin.v1.dashboard",
+            description="Get dashboard data (aggregated: runtime, plugins, services, http, state)"
+        ))
+        
         # Register operations handlers
         try:
             from modules.operations.handlers import (
@@ -206,6 +233,55 @@ class AdminModule(RuntimeModule):
             except Exception:
                 pass
             return out
+        
+        async def admin_v1_dashboard() -> Dict[str, Any]:
+            """Агрегированный endpoint для dashboard - возвращает все основные данные одним запросом."""
+            try:
+                # Параллельный запрос всех данных
+                plugins_list = list_plugins()
+                services_list = list_services()
+                http_list = list_http()
+                state_keys_list = state_keys()
+                runtime_info = admin_v1_runtime()
+                
+                # Ожидаем все результаты
+                plugins, services, http_endpoints, state_keys_data, runtime = await asyncio.gather(
+                    plugins_list,
+                    services_list,
+                    http_list,
+                    state_keys_list,
+                    runtime_info,
+                    return_exceptions=True
+                )
+                
+                # Обработка возможных ошибок
+                result = {
+                    "ok": True,
+                    "summary": {
+                        "plugins": len(plugins) if not isinstance(plugins, Exception) else 0,
+                        "services": len(services) if not isinstance(services, Exception) else 0,
+                        "http_endpoints": len(http_endpoints) if not isinstance(http_endpoints, Exception) else 0,
+                        "state_keys": len(state_keys_data) if not isinstance(state_keys_data, Exception) else 0,
+                    },
+                    "runtime": runtime if not isinstance(runtime, Exception) else {"error": str(runtime)},
+                    "plugins": plugins if not isinstance(plugins, Exception) else [],
+                    "services": services if not isinstance(services, Exception) else [],
+                    "http_endpoints": http_endpoints if not isinstance(http_endpoints, Exception) else [],
+                    "state_keys": state_keys_data if not isinstance(state_keys_data, Exception) else [],
+                }
+                
+                return result
+            except Exception as e:
+                return {
+                    "ok": False,
+                    "error": str(e),
+                    "summary": {
+                        "plugins": 0,
+                        "services": 0,
+                        "http_endpoints": 0,
+                        "state_keys": 0,
+                    }
+                }
 
         async def admin_v1_storage() -> List[Dict[str, Any]]:
             # Return list of namespaces with key counts. Best-effort introspection of adapter.
@@ -1180,6 +1256,7 @@ class AdminModule(RuntimeModule):
             ("admin.v1.services", admin_v1_services),
             ("admin.v1.http", admin_v1_http),
             ("admin.v1.events", admin_v1_events),
+            ("admin.v1.dashboard", admin_v1_dashboard),
             ("admin.v1.storage", admin_v1_storage),
             ("admin.v1.state", admin_v1_state),
             ("admin.v1.state_keys", admin_v1_state_keys),
@@ -1234,57 +1311,6 @@ class AdminModule(RuntimeModule):
             except ValueError:
                 # Already registered - skip
                 continue
-
-        # Register HTTP endpoints
-        http_endpoints = [
-            HttpEndpoint(method="GET", path="/admin/v1/runtime", service="admin.v1.runtime", description="Runtime info: uptime, started_at, version"),
-            HttpEndpoint(method="GET", path="/admin/v1/plugins", service="admin.v1.plugins", description="List plugins with stats"),
-            HttpEndpoint(method="GET", path="/admin/v1/services", service="admin.v1.services", description="List services and owning plugin"),
-            HttpEndpoint(method="GET", path="/admin/v1/http", service="admin.v1.http", description="List HTTP contracts"),
-            HttpEndpoint(method="GET", path="/admin/v1/events", service="admin.v1.events", description="List events and subscribers"),
-            HttpEndpoint(method="GET", path="/admin/v1/storage", service="admin.v1.storage", description="List storage namespaces and key counts"),
-            HttpEndpoint(method="GET", path="/admin/v1/state", service="admin.v1.state", description="Read-only state engine dump"),
-            HttpEndpoint(method="GET", path="/admin/v1/state/keys", service="admin.v1.state_keys", description="List all state keys"),
-            HttpEndpoint(method="GET", path="/admin/v1/state/{key}", service="admin.v1.state_get", description="Get state value by key"),
-            HttpEndpoint(method="GET", path="/admin/v1/devices", service="admin.devices.list", description="List internal devices"),
-            HttpEndpoint(method="GET", path="/admin/v1/devices/mappings", service="admin.devices.list_mappings", description="List external->internal device mappings"),
-            HttpEndpoint(method="POST", path="/admin/v1/devices/mappings", service="admin.devices.create_mapping", description="Create mapping: body {external_id, internal_id}"),
-            HttpEndpoint(method="DELETE", path="/admin/v1/devices/mappings/{external_id}", service="admin.devices.delete_mapping", description="Delete mapping by external_id"),
-            HttpEndpoint(method="POST", path="/admin/v1/devices/mappings/auto-map/{provider}", service="admin.devices.auto_map", description="Auto-map external devices for provider to internal devices"),
-            HttpEndpoint(method="GET", path="/admin/v1/devices/{id}", service="admin.devices.get", description="Get internal device by id"),
-            HttpEndpoint(method="POST", path="/admin/v1/devices/{id}/state", service="admin.devices.set_state", description="Set state for internal device"),
-            HttpEndpoint(method="GET", path="/admin/v1/devices/external/{provider}", service="admin.devices.list_external", description="List external devices for provider"),
-            HttpEndpoint(method="POST", path="/admin/v1/yandex/sync", service="admin.v1.yandex.sync", description="Sync devices from Yandex Smart Home API"),
-            HttpEndpoint(method="POST", path="/admin/v1/yandex/check-online", service="admin.v1.yandex.check_online", description="Check online status of all Yandex devices"),
-            HttpEndpoint(method="POST", path="/admin/v1/operations", service="admin.operations.create", description="Create and execute operation (body: {type, params})"),
-            HttpEndpoint(method="GET", path="/admin/v1/operations", service="admin.operations.list", description="List operations (query: limit?, offset?, status?)"),
-            HttpEndpoint(method="GET", path="/admin/v1/operations/{operation_id}", service="admin.operations.get", description="Get operation details"),
-            HttpEndpoint(method="POST", path="/admin/v1/operations/{operation_id}/cancel", service="admin.operations.cancel", description="Cancel pending/running operation"),
-            HttpEndpoint(method="POST", path="/admin/v1/operations/{operation_id}/retry", service="admin.operations.retry", description="Retry failed operation"),
-            HttpEndpoint(method="GET", path="/admin/v1/integrations", service="admin.v1.integrations", description="List registered integrations"),
-            HttpEndpoint(method="POST", path="/admin/v1/auth/api-keys", service="admin.auth.create_api_key", description="Create new API key (body: {scopes, is_admin?, subject?, expires_at?})"),
-            HttpEndpoint(method="GET", path="/admin/v1/auth/api-keys", service="admin.auth.list_api_keys", description="List all API keys (without actual keys, with metadata)"),
-            HttpEndpoint(method="POST", path="/admin/v1/auth/api-keys/revoke", service="admin.auth.revoke_api_key", description="Revoke an API key (body: {api_key})"),
-            HttpEndpoint(method="GET", path="/admin/v1/auth/me", service="admin.auth.me", description="Get current user information"),
-            HttpEndpoint(method="POST", path="/admin/v1/auth/api-keys/rotate", service="admin.auth.rotate_api_key", description="Rotate an API key (body: {old_api_key, expires_at?})"),
-            HttpEndpoint(method="POST", path="/admin/v1/auth/users", service="admin.auth.create_user", description="Create new user (body: {user_id, scopes, is_admin?, username?, password?})"),
-            HttpEndpoint(method="GET", path="/admin/v1/auth/users", service="admin.auth.list_users", description="List all users"),
-            HttpEndpoint(method="POST", path="/admin/v1/auth/initialize", service="admin.auth.initialize", description="Initialize system by creating first admin (public endpoint, body: {user_id?, username?, password})"),
-            HttpEndpoint(method="POST", path="/admin/v1/auth/login", service="admin.auth.login", description="Login with password, returns JWT access_token and refresh_token (body: {user_id, password, client_ip?, user_agent?})"),
-            HttpEndpoint(method="POST", path="/admin/v1/auth/refresh", service="admin.auth.refresh", description="Refresh access token using refresh_token (body: {refresh_token})"),
-            HttpEndpoint(method="POST", path="/admin/v1/auth/password/set", service="admin.auth.set_password", description="Set password for user (body: {user_id, password})"),
-            HttpEndpoint(method="POST", path="/admin/v1/auth/password/change", service="admin.auth.change_password", description="Change password for user (body: {user_id, old_password, new_password})"),
-            HttpEndpoint(method="GET", path="/admin/v1/auth/sessions", service="admin.auth.list_sessions", description="List active sessions (query: user_id?)"),
-            HttpEndpoint(method="POST", path="/admin/v1/auth/sessions/revoke", service="admin.auth.revoke_session", description="Revoke a specific session (body: {session_id})"),
-            HttpEndpoint(method="POST", path="/admin/v1/auth/sessions/revoke-all", service="admin.auth.revoke_all_sessions", description="Revoke all sessions for a user (body: {user_id})"),
-        ]
-
-        for ep in http_endpoints:
-            try:
-                self.runtime.http.register(ep)
-            except Exception:
-                # Best-effort: не блокируем загрузку
-                pass
 
     async def start(self) -> None:
         """

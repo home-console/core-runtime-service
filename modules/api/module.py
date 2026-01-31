@@ -134,6 +134,15 @@ class ApiModule(RuntimeModule):
         except ImportError:
             # RequestLoggerModule может быть не установлен - это нормально
             pass
+        
+        # Bootstrap: регистрируем минимальный набор HTTP endpoints
+        # для восстановления функциональности после C1 (удаления HTTP из admin/module.py)
+        try:
+            from adapters.http.bootstrap import register_core_http
+            register_core_http(self.runtime)
+        except ImportError:
+            # Bootstrap не критичен для старта
+            pass
 
     async def start(self) -> None:
         """
