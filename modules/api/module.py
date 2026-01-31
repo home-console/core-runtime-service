@@ -99,7 +99,12 @@ class ApiModule(RuntimeModule):
             # RequestLoggerModule может быть не установлен - это нормально
             pass
         
+        # Добавляем auth middleware (boundary-layer)
+        self.app.middleware("http")(require_auth_middleware)
+        
         # SECURITY P0: Add CSRF protection and rate limiting for admin API
+        # ВАЖНО: добавляем ПОСЛЕ auth middleware в коде, но они выполнятся РАНЬШЕ
+        # из-за обратного порядка выполнения FastAPI middleware
         try:
             from modules.api.csrf_middleware import csrf_protection_middleware, rate_limit_middleware
             self.app.middleware("http")(csrf_protection_middleware)
@@ -108,9 +113,6 @@ class ApiModule(RuntimeModule):
             # CSRF middleware not available - log warning
             import logging
             logging.warning("CSRF middleware not available - admin API vulnerable to CSRF attacks")
-        
-        # Добавляем auth middleware (boundary-layer) - выполнится третьим
-        self.app.middleware("http")(require_auth_middleware)
         
         # Добавляем admin access middleware (должен выполниться раньше auth)
         # Это блокирует доступ к /admin/* из публичного интернета
@@ -164,7 +166,12 @@ class ApiModule(RuntimeModule):
         # Регистрируем маршруты на основе текущего состояния HttpRegistry.
         endpoints = self.runtime.http.list()
 
-        for ep in endpoints:
+        # Разделяем endpoints на API и webhook
+        api_endpoints = [ep for ep in endpoints if ep.kind == "api"]
+        webhook_endpoints = [ep for ep in endpoints if ep.kind == "webhook"]
+
+        # Регистрируем API endpoints (с auth, acl, context)
+        for ep in api_endpoints:
             def make_handler(endpoint):
                 # Извлекаем path параметры из пути ДО определения handler
                 import re
@@ -234,7 +241,8 @@ class ApiModule(RuntimeModule):
                         "yandex_device_auth.status",
                         "yandex_device_auth.get_session",
                     ]
-                    if endpoint.service not in public_endpoints:
+                    is_public = endpoint.service in public_endpoints
+                    if not is_public:
                         try:
                             # Сначала проверяем базовые права без resource (scope-based)
                             # Передаём runtime для audit logging отказов
@@ -417,6 +425,64 @@ class ApiModule(RuntimeModule):
             # HttpRegistry теперь нормализует пути, удаляя завершающий '/'.
             # Дублирование со слэшем и без слэша больше не нужно.
             self.app.add_api_route(ep.path, handler, methods=[ep.method], name=route_name)
+
+        # Регистрируем webhook endpoints (без auth, без ACL, минимальный context)
+        for ep in webhook_endpoints:
+            def make_webhook_handler(endpoint):
+                async def webhook_handler(request: Request):
+                    """
+                    Webhook handler - minimal processing, no auth/ACL.
+                    
+                    Webhook endpoint:
+                    - Called by external systems
+                    - No authentication required
+                    - No ACL checks
+                    - Minimal context (just payload + headers)
+                    - Directly calls service
+                    """
+                    try:
+                        # Try to extract JSON payload
+                        payload = None
+                        try:
+                            payload = await request.json()
+                        except Exception:
+                            # If no JSON, try to get raw body
+                            payload = await request.body()
+                        
+                        # Call service - handle both sync and async
+                        try:
+                            result = await self.runtime.service_registry.call(
+                                endpoint.service,
+                                payload=payload,
+                                headers=dict(request.headers),
+                                raw_request=request
+                            )
+                        except TypeError:
+                            # If service is sync, call it directly
+                            result = self.runtime.service_registry.call(
+                                endpoint.service,
+                                payload=payload,
+                                headers=dict(request.headers),
+                                raw_request=request
+                            )
+                        
+                        return {"ok": True, "result": result}
+                    
+                    except Exception as e:
+                        import logging
+                        logging.error(f"Webhook error for {endpoint.service}: {str(e)}")
+                        import traceback
+                        traceback.print_exc()
+                        # Return error response
+                        return {"ok": False, "error": str(e)}
+                
+                return webhook_handler
+            
+            webhook_handler = make_webhook_handler(ep)
+            route_name = f"webhook_{ep.method}_{ep.path}"
+            # Регистрируем webhook как API route (FastAPI будет знать о нём)
+            # Но он НЕ будет показан в OpenAPI /docs потому что мы отфильтруем его при генерации schema
+            self.app.add_api_route(ep.path, webhook_handler, methods=[ep.method], name=route_name, include_in_schema=False)
 
         # Настраиваем OpenAPI схему ПОСЛЕ регистрации всех routes
         def custom_openapi():

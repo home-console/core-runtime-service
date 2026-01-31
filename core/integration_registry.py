@@ -18,7 +18,7 @@ IntegrationRegistry — минимальный реестр интеграций
 """
 
 from dataclasses import dataclass
-from typing import Optional, Dict, Set
+from typing import Optional, Dict, Set, List
 from enum import Enum
 
 
@@ -102,7 +102,7 @@ class IntegrationRegistry:
         """
         return self._integrations.get(integration_id)
     
-    def list(self) -> list[IntegrationInfo]:
+    def list(self) -> List[IntegrationInfo]:
         """
         Получить список всех зарегистрированных интеграций.
         
@@ -111,7 +111,7 @@ class IntegrationRegistry:
         """
         return list(self._integrations.values())
     
-    def list_by_plugin(self, plugin_name: str) -> list[IntegrationInfo]:
+    def list_by_plugin(self, plugin_name: str) -> List[IntegrationInfo]:
         """
         Получить список интеграций для плагина.
         

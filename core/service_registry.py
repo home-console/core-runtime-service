@@ -155,6 +155,7 @@ class ServiceRegistry:
                 if service_name in (
                     "admin.auth.initialize",
                     "admin.auth.login",
+                    "admin.auth.me",
                     "admin.auth.refresh",
                 ):
                     effective_admin_only = False

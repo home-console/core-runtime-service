@@ -3,15 +3,28 @@ AdminModule — встроенный модуль административны
 
 Предоставляет read-only административные сервисы и HTTP endpoints
 для инспекции runtime состояния.
+
+После C3: AdminModule только регистрирует endpoints и сервисы.
+Логика вынесена в modules/admin/services/.
 """
 
 from typing import Any, Dict, List, Optional
 import time
-import datetime
-import asyncio
 
 from core.runtime_module import RuntimeModule
 from core.http_registry import HttpEndpoint
+from modules.admin.services import (
+    get_runtime_info,
+    list_plugins,
+    list_services,
+    list_http_endpoints,
+    list_events,
+    get_dashboard,
+    list_storage_namespaces,
+    get_state,
+    list_state_keys,
+    get_state_value,
+)
 
 
 class AdminModule(RuntimeModule):
@@ -22,6 +35,8 @@ class AdminModule(RuntimeModule):
     - список плагинов, сервисов, HTTP endpoints
     - состояние state_engine и storage
     - proxy-сервисы для devices
+    
+    После C3: тонкий слой регистрации, логика в services/.
     """
 
     @property
@@ -33,7 +48,6 @@ class AdminModule(RuntimeModule):
         """Инициализация модуля."""
         super().__init__(runtime)
         self._admin_started_at: Optional[float] = None
-        self._registered_services: List[str] = []
 
     async def register(self) -> None:
         """
@@ -41,31 +55,36 @@ class AdminModule(RuntimeModule):
         
         Регистрирует все административные сервисы и HTTP endpoints.
         """
-        # Register HTTP endpoints (declarative only, no FastAPI code)
-        # Admin introspection endpoints для диагностики runtime
+        # Record admin module start time
+        self._admin_started_at = time.time()
+        
+        # Register introspection HTTP endpoints
+        introspection_endpoints = [
+            ("/admin/v1/runtime", "admin.v1.runtime", "Get runtime info"),
+            ("/admin/v1/plugins", "admin.v1.plugins", "List all plugins"),
+            ("/admin/v1/services", "admin.v1.services", "List all services"),
+            ("/admin/v1/http", "admin.v1.http", "List all HTTP endpoints"),
+            ("/admin/v1/events", "admin.v1.events", "List event subscriptions"),
+            ("/admin/v1/dashboard", "admin.v1.dashboard", "Get dashboard (aggregated data)"),
+            ("/admin/v1/storage", "admin.v1.storage", "List storage namespaces"),
+            ("/admin/v1/state", "admin.v1.state", "Get all state"),
+            ("/admin/v1/state/keys", "admin.v1.state.keys", "List state keys"),
+        ]
+        
+        for path, service, description in introspection_endpoints:
+            self.runtime.http.register(HttpEndpoint(
+                method="GET",
+                path=path,
+                service=service,
+                description=description
+            ))
+        
+        # Register GET with path param
         self.runtime.http.register(HttpEndpoint(
             method="GET",
-            path="/admin/v1/runtime",
-            service="admin.v1.runtime",
-            description="Get runtime info"
-        ))
-        self.runtime.http.register(HttpEndpoint(
-            method="GET",
-            path="/admin/v1/services",
-            service="admin.v1.services",
-            description="List all registered services"
-        ))
-        self.runtime.http.register(HttpEndpoint(
-            method="GET",
-            path="/admin/v1/http",
-            service="admin.v1.http",
-            description="List all HTTP endpoints"
-        ))
-        self.runtime.http.register(HttpEndpoint(
-            method="GET",
-            path="/admin/v1/dashboard",
-            service="admin.v1.dashboard",
-            description="Get dashboard data (aggregated: runtime, plugins, services, http, state)"
+            path="/admin/v1/state/{key}",
+            service="admin.v1.state.get",
+            description="Get state value by key"
         ))
         
         # Register operations handlers
@@ -90,256 +109,76 @@ class AdminModule(RuntimeModule):
                 ops_mgr.register_handler("mappings.delete", handle_mappings_delete)
                 ops_mgr.register_handler("mappings.auto", handle_mappings_auto)
         except Exception as e:
-            # Log but don't block admin registration if operations handlers not available
             import traceback
             traceback.print_exc()
+
+        # --- Register webhook demo service (C4) ---
+        async def webhook_test_service(payload, **kwargs):
+            """Demo webhook service that logs incoming webhook payload."""
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"[C4 Webhook Demo] Received payload: {payload}")
+            return {
+                "ok": True,
+                "message": "Webhook received and processed",
+                "payload_type": str(type(payload).__name__),
+                "payload_sample": str(payload)[:100] if payload else None
+            }
         
-        # Record admin module start time
-        try:
-            self._admin_started_at = time.time()
-        except Exception:
-            self._admin_started_at = None
+        await self.runtime.service_registry.register("system.webhook_test", webhook_test_service)
 
-        # --- Basic admin services ---
-        async def list_plugins() -> List[str]:
-            return self.runtime.plugin_manager.list_plugins()
-
-        async def list_services() -> List[str]:
-            return await self.runtime.service_registry.list_services()
-
-        async def list_http() -> List[Dict[str, Any]]:
-            return [
-                {"method": ep.method, "path": ep.path, "service": ep.service, "description": ep.description}
-                for ep in self.runtime.http.list()
-            ]
-
-        async def state_keys() -> List[str]:
-            return await self.runtime.state_engine.keys()
-
-        async def state_get(key: str) -> Optional[Any]:
-            return await self.runtime.state_engine.get(key)
-
-        # --- Admin v1 read-only inventory services ---
-        async def admin_v1_runtime() -> Dict[str, Any]:
-            """Return runtime info: uptime (sec), started_at (ISO), version"""
-            started_at_ts = self._admin_started_at
-            if started_at_ts is None:
-                started_at_iso = None
-                uptime = None
-            else:
-                started_at_iso = datetime.datetime.fromtimestamp(started_at_ts).isoformat()
-                uptime = int(time.time() - started_at_ts)
-
-            version = getattr(self.runtime, "version", None) or "0.1.0"
-            return {"uptime": uptime, "started_at": started_at_iso, "version": version}
-
-        async def admin_v1_plugins() -> List[Dict[str, Any]]:
-            res: List[Dict[str, Any]] = []
-            services = await self.runtime.service_registry.list_services()
-            http_eps = self.runtime.http.list()
-            # Build mapping: plugin -> events subscribed
-            events_map: Dict[str, List[str]] = {}
-            try:
-                handlers_map = getattr(self.runtime.event_bus, "_handlers", {})
-                for ev, handlers in handlers_map.items():
-                    for h in handlers:
-                        owner = None
-                        try:
-                            # bound method? try to get plugin metadata
-                            if hasattr(h, "__self__") and hasattr(h.__self__, "metadata"):
-                                owner = h.__self__.metadata.name
-                        except Exception:
-                            owner = None
-                        if not owner:
-                            # fallback to qualname/module
-                            try:
-                                owner = getattr(h, "__qualname__", None)
-                                if owner and "." in owner:
-                                    owner = owner.split(".")[0]
-                            except Exception:
-                                owner = "unknown"
-                        events_map.setdefault(owner or "unknown", []).append(ev)
-            except Exception:
-                events_map = {}
-
-            for plugin_name in self.runtime.plugin_manager.list_plugins():
-                state = self.runtime.plugin_manager.get_plugin_state(plugin_name)
-                state_val = None
-                try:
-                    state_val = getattr(state, "value", str(state))
-                except Exception:
-                    state_val = str(state)
-                started_flag = (state_val == "started")
-
-                svc_count = 0
-                try:
-                    svc_count = len([s for s in services if s.split(".")[0] == plugin_name])
-                except Exception:
-                    svc_count = 0
-
-                http_count = 0
-                try:
-                    http_count = len([ep for ep in http_eps if ep.service and ep.service.split(".")[0] == plugin_name])
-                except Exception:
-                    http_count = 0
-
-                res.append({
-                    "name": plugin_name,
-                    "loaded": state_val in ("loaded", "started"),
-                    "started": started_flag,
-                    "services_count": svc_count,
-                    "http_count": http_count,
-                    "event_subscriptions": events_map.get(plugin_name, []),
-                })
-            return res
-
-        async def admin_v1_services() -> List[Dict[str, str]]:
-            svcs = []
-            all_services = await self.runtime.service_registry.list_services()
-            for s in all_services:
-                owner = s.split(".")[0] if s and "." in s else ""
-                svcs.append({"service_name": s, "plugin_name": owner})
-            return svcs
-
-        async def admin_v1_http() -> List[Dict[str, Any]]:
-            out: List[Dict[str, Any]] = []
-            for ep in self.runtime.http.list():
-                owner = ep.service.split(".")[0] if ep.service and "." in ep.service else ""
-                out.append({"method": ep.method, "path": ep.path, "service": ep.service, "plugin": owner})
-            return out
-
-        async def admin_v1_events() -> List[Dict[str, Any]]:
-            out: List[Dict[str, Any]] = []
-            try:
-                handlers_map = getattr(self.runtime.event_bus, "_handlers", {})
-                for ev, handlers in handlers_map.items():
-                    subs = []
-                    for h in handlers:
-                        try:
-                            plugin_name = None
-                            if hasattr(h, "__self__") and hasattr(h.__self__, "metadata"):
-                                plugin_name = h.__self__.metadata.name
-                            else:
-                                # fallback
-                                plugin_name = getattr(h, "__qualname__", None)
-                                if plugin_name and "." in plugin_name:
-                                    plugin_name = plugin_name.split(".")[0]
-                        except Exception:
-                            plugin_name = "unknown"
-
-                        handler_name = getattr(h, "__name__", None) or getattr(h, "__qualname__", repr(h))
-                        subs.append({"plugin": plugin_name, "handler": handler_name})
-                    out.append({"event_name": ev, "subscribers": subs})
-            except Exception:
-                pass
-            return out
+        # --- Register introspection services (using extracted logic) ---
         
-        async def admin_v1_dashboard() -> Dict[str, Any]:
-            """Агрегированный endpoint для dashboard - возвращает все основные данные одним запросом."""
-            try:
-                # Параллельный запрос всех данных
-                plugins_list = list_plugins()
-                services_list = list_services()
-                http_list = list_http()
-                state_keys_list = state_keys()
-                runtime_info = admin_v1_runtime()
-                
-                # Ожидаем все результаты
-                plugins, services, http_endpoints, state_keys_data, runtime = await asyncio.gather(
-                    plugins_list,
-                    services_list,
-                    http_list,
-                    state_keys_list,
-                    runtime_info,
-                    return_exceptions=True
-                )
-                
-                # Обработка возможных ошибок
-                result = {
-                    "ok": True,
-                    "summary": {
-                        "plugins": len(plugins) if not isinstance(plugins, Exception) else 0,
-                        "services": len(services) if not isinstance(services, Exception) else 0,
-                        "http_endpoints": len(http_endpoints) if not isinstance(http_endpoints, Exception) else 0,
-                        "state_keys": len(state_keys_data) if not isinstance(state_keys_data, Exception) else 0,
-                    },
-                    "runtime": runtime if not isinstance(runtime, Exception) else {"error": str(runtime)},
-                    "plugins": plugins if not isinstance(plugins, Exception) else [],
-                    "services": services if not isinstance(services, Exception) else [],
-                    "http_endpoints": http_endpoints if not isinstance(http_endpoints, Exception) else [],
-                    "state_keys": state_keys_data if not isinstance(state_keys_data, Exception) else [],
-                }
-                
-                return result
-            except Exception as e:
-                return {
-                    "ok": False,
-                    "error": str(e),
-                    "summary": {
-                        "plugins": 0,
-                        "services": 0,
-                        "http_endpoints": 0,
-                        "state_keys": 0,
-                    }
-                }
-
-        async def admin_v1_storage() -> List[Dict[str, Any]]:
-            # Return list of namespaces with key counts. Best-effort introspection of adapter.
-            out: List[Dict[str, Any]] = []
-            adapter = getattr(self.runtime.storage, "_adapter", None)
-            if adapter is None:
-                return out
-
-            # SQLiteAdapter: query distinct namespaces
-            try:
-                if hasattr(adapter, "_get_connection"):
-                    def _query_namespaces():
-                        conn = adapter._get_connection()
-                        cur = conn.execute("SELECT DISTINCT namespace FROM storage")
-                        return [row[0] for row in cur.fetchall()]
-
-                    namespaces = await asyncio.to_thread(_query_namespaces)
-                    for ns in namespaces:
-                        try:
-                            keys = await self.runtime.storage.list_keys(ns)
-                            out.append({"namespace": ns, "keys_count": len(keys)})
-                        except Exception:
-                            out.append({"namespace": ns, "keys_count": None})
-                    return out
-            except Exception:
-                pass
-
-            # Fallback: no way to list namespaces — return empty
-            return out
-
-        async def admin_v1_state() -> Dict[str, Any]:
-            ks = []
-            try:
-                ks = await self.runtime.state_engine.keys()
-            except Exception:
-                ks = []
-            out: Dict[str, Any] = {}
-            for k in ks:
-                try:
-                    out[k] = await self.runtime.state_engine.get(k)
-                except Exception:
-                    out[k] = None
-            return out
-
-        async def admin_v1_state_keys() -> List[str]:
-            """List all state keys."""
-            try:
-                return await self.runtime.state_engine.keys()
-            except Exception:
-                return []
-
-        async def admin_v1_state_get(key: str) -> Any:
-            """Get state value by key."""
-            try:
-                return await self.runtime.state_engine.get(key)
-            except Exception:
-                return None
-
+        await self.runtime.service_registry.register(
+            "admin.v1.runtime",
+            lambda: get_runtime_info(self.runtime, self._admin_started_at)
+        )
+        
+        await self.runtime.service_registry.register(
+            "admin.v1.plugins",
+            lambda: list_plugins(self.runtime)
+        )
+        
+        await self.runtime.service_registry.register(
+            "admin.v1.services",
+            lambda: list_services(self.runtime)
+        )
+        
+        await self.runtime.service_registry.register(
+            "admin.v1.http",
+            lambda: list_http_endpoints(self.runtime)
+        )
+        
+        await self.runtime.service_registry.register(
+            "admin.v1.events",
+            lambda: list_events(self.runtime)
+        )
+        
+        await self.runtime.service_registry.register(
+            "admin.v1.dashboard",
+            lambda: get_dashboard(self.runtime, self._admin_started_at)
+        )
+        
+        await self.runtime.service_registry.register(
+            "admin.v1.storage",
+            lambda: list_storage_namespaces(self.runtime)
+        )
+        
+        await self.runtime.service_registry.register(
+            "admin.v1.state",
+            lambda: get_state(self.runtime)
+        )
+        
+        await self.runtime.service_registry.register(
+            "admin.v1.state.keys",
+            lambda: list_state_keys(self.runtime)
+        )
+        
+        await self.runtime.service_registry.register(
+            "admin.v1.state.get",
+            lambda key: get_state_value(self.runtime, key)
+        )
+        
         # --- Devices proxy services (admin v1) ---
         async def admin_devices_list():
             return await self.runtime.service_registry.call("devices.list")
@@ -1297,9 +1136,9 @@ class AdminModule(RuntimeModule):
         for name, func in service_registrations:
             try:
                 # Для всего admin.* по умолчанию: admin_only (ACL на уровне ядра).
-                # Исключения — публичные auth endpoints (initialize/login/refresh).
+                # Исключения — публичные auth endpoints (initialize/login/refresh/me).
                 admin_only = True
-                if name in ("admin.auth.initialize", "admin.auth.login", "admin.auth.refresh"):
+                if name in ("admin.auth.initialize", "admin.auth.login", "admin.auth.refresh", "admin.auth.me"):
                     admin_only = False
 
                 if hasattr(self.runtime.service_registry, "register_with_acl"):

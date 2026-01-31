@@ -20,5 +20,27 @@ def register_core_http(runtime):
     Args:
         runtime: CoreRuntime instance
     """
-    # Bootstrap теперь пустой - все endpoints в модулях
-    pass
+    # C4: Webhook demo endpoint
+    # Демонстрирует webhooks как first-class inbound механизм
+    # NOTE: Webhook service регистрация откложена - сервис будет зарегистрирован
+    # во время первого вызова через lazy registration pattern
+    try:
+        from core.http_registry import HttpEndpoint
+        
+        # Register webhook test endpoint
+        runtime.http.register(HttpEndpoint(
+            method="POST",
+            path="/webhooks/test",
+            service="system.webhook_test",
+            description="Webhook test endpoint - demonstrates webhook mechanism",
+            kind="webhook"
+        ))
+        
+        import logging
+        logging.info("C4: Webhook demo endpoint registered at POST /webhooks/test")
+        # NOTE: Service registration is lazy - will be done by ApiModule during startup
+    
+    except Exception as e:
+        import logging
+        logging.warning(f"Failed to register webhook demo endpoint: {str(e)}")
+

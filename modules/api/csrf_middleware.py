@@ -14,8 +14,8 @@ Safe methods (GET, HEAD, OPTIONS) are exempt from CSRF validation.
 
 from typing import Callable
 from fastapi import Request, Response
+from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
-from core.errors import ForbiddenError
 
 
 # Methods that don't require CSRF protection (read-only)
@@ -56,8 +56,7 @@ async def csrf_protection_middleware(request: Request, call_next: Callable) -> R
     # Get CSRF token from header
     csrf_token = request.headers.get("X-CSRF-Token")
     if not csrf_token:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=403, detail="CSRF token required")
+        return JSONResponse(status_code=403, content={"detail": "CSRF token required"})
     
     # Get session from request context populated by auth middleware.
     # NOTE: auth middleware stores context in `request.state.auth_context`.
@@ -65,14 +64,12 @@ async def csrf_protection_middleware(request: Request, call_next: Callable) -> R
     # always fail (no context) and return 403 even for authenticated sessions.
     ctx = getattr(request.state, "auth_context", None)
     if not ctx:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=403, detail="Authentication required for CSRF validation")
+        return JSONResponse(status_code=403, content={"detail": "Authentication required for CSRF validation"})
     
     # Get session_id for CSRF validation
     session_id = getattr(ctx, "session_id", None) or getattr(ctx, "user_id", None)
     if not session_id:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=403, detail="Session required for CSRF validation")
+        return JSONResponse(status_code=403, content={"detail": "Session required for CSRF validation"})
     
     # Validate CSRF token
     try:
@@ -84,13 +81,11 @@ async def csrf_protection_middleware(request: Request, call_next: Callable) -> R
         # In production, this should fail-closed
         import os
         if os.getenv("ENV", "development") == "production":
-            from fastapi import HTTPException
-            raise HTTPException(status_code=500, detail="CSRF protection not configured")
+            return JSONResponse(status_code=500, content={"detail": "CSRF protection not configured"})
         # Development mode - allow without CSRF
         pass
     except ValueError:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=403, detail="Invalid CSRF token")
+        return JSONResponse(status_code=403, content={"detail": "Invalid CSRF token"})
     
     return await call_next(request)
 

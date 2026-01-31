@@ -6,7 +6,7 @@ HTTP Interface Registry для Core Runtime.
 """
 
 from dataclasses import dataclass
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Literal
 
 
 @dataclass
@@ -20,6 +20,7 @@ class HttpEndpoint:
       - description: необязательное описание
       - version: опциональная версия API (например, "v1", "v2")
       - deprecated: флаг устаревшей версии (True если версия помечена как deprecated)
+      - kind: тип endpoint ("api" или "webhook") — определяет обработку и авторизацию
     """
     method: str
     path: str
@@ -27,6 +28,7 @@ class HttpEndpoint:
     description: Optional[str] = None
     version: Optional[str] = None
     deprecated: bool = False
+    kind: Literal["api", "webhook"] = "api"
 
 
 class HttpRegistry:
@@ -87,7 +89,8 @@ class HttpRegistry:
             path=path,
             service=endpoint.service,
             description=endpoint.description,
-            version=api_version
+            version=api_version,
+            kind=endpoint.kind
         )
         self._endpoints.append(ep)
         self._index.add(key)
@@ -323,3 +326,22 @@ class HttpRegistry:
             openapi_schema["servers"] = servers
         
         return openapi_schema
+
+    def list_api_endpoints(self) -> List[HttpEndpoint]:
+        """Вернуть список всех API endpoints (kind="api")."""
+        return [ep for ep in self._endpoints if ep.kind == "api"]
+
+    def list_webhook_endpoints(self) -> List[HttpEndpoint]:
+        """Вернуть список всех webhook endpoints (kind="webhook")."""
+        return [ep for ep in self._endpoints if ep.kind == "webhook"]
+
+    def list_by_kind(self, kind: Literal["api", "webhook"]) -> List[HttpEndpoint]:
+        """Вернуть список endpoints по типу.
+        
+        Args:
+            kind: "api" или "webhook"
+        
+        Returns:
+            Список endpoints с указанным kind
+        """
+        return [ep for ep in self._endpoints if ep.kind == kind]
