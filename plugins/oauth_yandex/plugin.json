@@ -4,5 +4,9 @@
   "version": "0.1.0",
   "description": "OAuth helper для Яндекса: получение и хранение токенов",
   "author": "Home Console",
-  "dependencies": []
+  "dependencies": [],
+
+  "role": "capability_provider",
+  "capability": "oauth:yandex",
+  "user_facing": false
 }

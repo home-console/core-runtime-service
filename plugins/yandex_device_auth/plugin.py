@@ -36,6 +36,7 @@ class YandexDeviceAuthPlugin(BasePlugin):
             version="1.0.0",
             description="Yandex QR-code and password authentication for Quasar",
             author="Home Console",
+            capabilities_provided=["yandex:session_cookies"],
         )
 
     async def on_load(self) -> None:

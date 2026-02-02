@@ -147,6 +147,50 @@ Core не содержит доменной логики; он только пр
 
 ---
 
+## Capabilities и вызовы через ServiceRegistry
+
+**Статус:** Stable (CapabilityRegistry — метаданные; вызовы — только через ServiceRegistry/фасад)
+
+### Capability ≠ Plugin
+
+- **Capability** — это обещание наличия поведения, а не способ его вызова.
+- **Plugin** может быть: **provider** (предоставляет capability), **consumer** (требует capability), или тем и другим.
+- Плагин объявляет в `PluginMetadata`: `capabilities_provided`, `capabilities_required`.
+- **CapabilityRegistry** (core) хранит только метаданные: кто какой capability предоставляет и кто какой требует. Нет методов `call` / `resolve` / `invoke`. Вызовы — только через ServiceRegistry (внутри фасада consumer'а).
+
+### Правило: плагину запрещено зависеть от имени другого плагина
+
+- **Плагину ЗАПРЕЩЕНО:**
+  - зависеть от имени другого плагина (жёсткая привязка к `oauth_yandex`, `yandex_device_auth` и т.п.);
+  - делать `service_registry.call()` к чужому плагину **вне фасада** — все вызовы к capability идут через один фасад внутри плагина.
+
+- **МОЖНО** вызывать через ServiceRegistry:
+  - **Инфраструктурные сервисы** (logger.log, request_logger.create_http_session).
+  - **Сервисы модулей** (devices.list, devices.get, devices.list_mappings).
+  - **Собственные сервисы плагина** (внутри одного плагина).
+  - Вызовы к capability — **только из фасада** (фасад внутри consumer'а делегирует в service_registry по известным именам сервисов; замена реализации в будущем — локально в фасаде).
+
+### CapabilityRegistry и старт плагинов
+
+- При загрузке плагина PluginManager регистрирует в CapabilityRegistry: `capabilities_provided`, `capabilities_required`.
+- При старте плагина проверяется: все ли требуемые capabilities имеют хотя бы одного provider. Если нет — плагин **не стартует** (состояние остаётся LOADED), причина доступна через `plugin_manager.get_plugin_block_reason(plugin_name)` (например `{"missing_capabilities": ["oauth:yandex"]}`). Это управляемое состояние (misconfigured/blocked), а не исключение рантайма.
+
+### Legacy / Transitional
+
+- Прямые вызовы `service_registry.call("oauth_yandex.*")` вне фасада считаются **legacy**.
+- AdminModule и операции могут вызывать сервисы плагинов по имени (`yandex.sync_devices`) — **transitional**.
+
+### Карта capability → provider → consumers
+
+| Capability ID       | Provider (текущий) | Consumers              |
+|---------------------|--------------------|------------------------|
+| `oauth:yandex`      | oauth_yandex       | yandex_smart_home      |
+| `yandex:session_cookies` | oauth_yandex, yandex_device_auth | yandex_smart_home |
+
+Контракты (документация/типизация): `plugins/oauth_yandex/capability.py`, `docs/capabilities/`. Consumer знает capability только по ID (строка); контракты не импортируются из consumer'а.
+
+---
+
 ## Краткая диаграмма взаимодействия
 
 ```

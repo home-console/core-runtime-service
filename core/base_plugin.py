@@ -31,6 +31,9 @@ class PluginMetadata:
     # По умолчанию все сервисы плагина доступны не только админам.
     # Можно включить default_admin_only=True для "админских" плагинов.
     default_admin_only: bool = False
+    # Capability: плагин объявляет, какие capabilities предоставляет и какие требует.
+    capabilities_provided: list[str] | None = field(default_factory=list)  # ["oauth:yandex"]
+    capabilities_required: list[str] | None = field(default_factory=list)  # ["oauth:yandex", "yandex:session_cookies"]
 
 
 class BasePlugin(ABC):

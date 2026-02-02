@@ -54,6 +54,8 @@ class PluginManager:
         self._plugins: dict[str, BasePlugin] = {}
         # Словарь: plugin_name -> state
         self._states: dict[str, PluginState] = {}
+        # Причина блокировки старта (missing capabilities): plugin_name -> {"missing_capabilities": [...]}
+        self._block_reasons: dict[str, dict] = {}
 
     async def load_plugin(self, plugin: BasePlugin) -> None:
         """
@@ -129,6 +131,14 @@ class PluginManager:
 
             self._plugins[plugin_name] = plugin
             self._states[plugin_name] = PluginState.LOADED
+
+            # CapabilityRegistry: регистрируем provided и required
+            if self._runtime and hasattr(self._runtime, "capability_registry"):
+                reg = self._runtime.capability_registry
+                for cap_id in (metadata.capabilities_provided or []):
+                    reg.register_provider(plugin_name, cap_id)
+                for cap_id in (metadata.capabilities_required or []):
+                    reg.register_consumer(plugin_name, cap_id)
         except Exception as e:
             # Устанавливаем состояние ERROR
             self._states[plugin_name] = PluginState.ERROR
@@ -138,6 +148,9 @@ class PluginManager:
     async def start_plugin(self, plugin_name: str) -> None:
         """
         Запустить плагин.
+
+        Если у плагина есть требуемые capabilities и хотя бы одна не имеет provider,
+        плагин НЕ стартует; состояние остаётся LOADED, причина в get_plugin_block_reason().
         
         Args:
             plugin_name: имя плагина
@@ -151,6 +164,14 @@ class PluginManager:
         
         if self._states[plugin_name] == PluginState.STARTED:
             return  # Уже запущен
+
+        # Проверка required capabilities: все должны иметь хотя бы одного provider
+        self._block_reasons.pop(plugin_name, None)
+        if self._runtime and hasattr(self._runtime, "capability_registry"):
+            ok, missing = self._runtime.capability_registry.validate_plugin_requirements(plugin_name)
+            if not ok:
+                self._block_reasons[plugin_name] = {"missing_capabilities": missing}
+                return  # Плагин не стартуем — управляемое состояние (blocked), не исключение
         
         try:
             await plugin.on_start()
@@ -203,6 +224,9 @@ class PluginManager:
         
         try:
             await plugin.on_unload()
+            self._block_reasons.pop(plugin_name, None)
+            if self._runtime and hasattr(self._runtime, "capability_registry"):
+                self._runtime.capability_registry.unregister_plugin(plugin_name)
             del self._plugins[plugin_name]
             self._states[plugin_name] = PluginState.UNLOADED
             
@@ -310,6 +334,16 @@ class PluginManager:
             Состояние плагина или None
         """
         return self._states.get(plugin_name)
+
+    def get_plugin_block_reason(self, plugin_name: str) -> Optional[Dict[str, Any]]:
+        """
+        Причина, по которой плагин не стартовал (например, отсутствующие capabilities).
+
+        Returns:
+            None если плагин стартовал или не загружен.
+            Иначе dict, например {"missing_capabilities": ["oauth:yandex"]}.
+        """
+        return self._block_reasons.get(plugin_name)
 
     def list_plugins(self) -> list[str]:
         """

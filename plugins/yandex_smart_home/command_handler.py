@@ -1,5 +1,6 @@
 """
 Модуль для обработки команд управления устройствами через Яндекс API.
+Использует capability oauth:yandex через фасад oauth_provider (get_status).
 """
 from __future__ import annotations
 
@@ -8,6 +9,7 @@ import asyncio
 
 from .api_client import YandexAPIClient
 from .device_transformer import DeviceTransformer
+from .oauth_provider import get_status as oauth_get_status
 
 
 class CommandHandler:
@@ -87,9 +89,9 @@ class CommandHandler:
             await self._reset_pending_on_error(data.get("internal_id"), None, "Missing external_id")
             return
 
-        # Проверяем авторизацию
+        # Capability oauth:yandex — статус авторизации через фасад
         try:
-            status = await self.runtime.service_registry.call("oauth_yandex.get_status")
+            status = await oauth_get_status(self.runtime)
         except Exception:
             status = None
 

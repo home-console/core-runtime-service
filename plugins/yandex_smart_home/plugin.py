@@ -1,6 +1,10 @@
 """
 Плагин `yandex_smart_home` — синхронизация реальных устройств Яндекса.
 
+Requires capabilities:
+- oauth:yandex — get_access_token, get_status (через фасад oauth_provider)
+- yandex:session_cookies — get_cookies для Quasar API (через фасад oauth_provider)
+
 Назначение:
 - получить устройства из реального API Яндекса
 - преобразовать их в стандартный формат
@@ -13,16 +17,14 @@
   
   1) OAuth API (api.iot.yandex.net):
      - Официальный публичный API
-     - Авторизация: OAuth Bearer token
+     - Авторизация: OAuth Bearer token (capability oauth:yandex)
      - Используется для: команды, initial sync
-     - Токены через oauth_yandex.get_tokens()
   
   2) Quasar API (iot.quasar.yandex.ru):
      ⚠️ КРИТИЧНО: НЕ использует OAuth!
      - Внутренний reverse-engineered API
-     - Авторизация: cookies сессии (Session_id, yandexuid)
+     - Авторизация: cookies сессии (capability yandex:session_cookies)
      - Используется для: realtime WebSocket обновления
-     - Cookies через oauth_yandex.get_cookies()
 
 См. QUASAR_ARCHITECTURE_RULE.md для деталей.
 
@@ -45,13 +47,14 @@ from .device_sync import DeviceSync
 from .device_status import DeviceStatusChecker
 from .command_handler import CommandHandler
 from .yandex_quasar_ws import YandexQuasarWS
+from .oauth_provider import get_cookies as oauth_get_cookies
 
 
 class YandexSmartHomeRealPlugin(BasePlugin):
     """Синхронизирует реальные устройства из API Яндекса.
 
-    Получает доступ к токенам только через:
-    - runtime.service_registry.call("oauth_yandex.get_tokens")
+    Requires capability oauth:yandex (get_access_token, get_status) и
+    yandex:session_cookies (get_cookies). Все вызовы — через фасад oauth_provider.
 
     Публикует события:
     - external.device_discovered для каждого полученного устройства
@@ -69,6 +72,7 @@ class YandexSmartHomeRealPlugin(BasePlugin):
             version="0.1.0",
             description="Синхронизация реальных устройств из API Яндекса",
             author="Home Console",
+            capabilities_required=["oauth:yandex", "yandex:session_cookies"],
         )
 
     async def on_load(self) -> None:
@@ -187,33 +191,8 @@ class YandexSmartHomeRealPlugin(BasePlugin):
             pass
 
     async def _get_cookies(self):
-        """Получить cookies с приоритетом: device_auth → oauth_yandex."""
-        # 1. Проверяем device_auth
-        try:
-            session = await self.runtime.storage.get("yandex", "device_auth/session")
-            if session and isinstance(session, dict) and session.get("cookies"):
-                return session["cookies"]
-        except Exception:
-            pass
-        
-        # 2. Fallback на oauth_yandex
-        try:
-            if await self.runtime.service_registry.has_service("oauth_yandex.get_cookies"):
-                cookies = await self.runtime.service_registry.call("oauth_yandex.get_cookies")
-                if cookies:
-                    return cookies
-        except Exception:
-            pass
-        
-        # 3. Fallback на прямой storage (старая схема)
-        try:
-            cookies = await self.runtime.storage.get("yandex", "cookies")
-            if isinstance(cookies, dict):
-                return cookies
-        except Exception:
-            pass
-        
-        return None
+        """Получить cookies через capability yandex:session_cookies (фасад oauth_provider)."""
+        return await oauth_get_cookies(self.runtime)
 
     async def on_stop(self) -> None:
         """Остановка: логируем завершение."""

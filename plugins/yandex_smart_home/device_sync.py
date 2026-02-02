@@ -31,7 +31,7 @@ class DeviceSync:
 
         Этапы:
         1. Проверить feature flag `yandex.use_real_api`
-        2. Получить токены из oauth_yandex.get_tokens()
+        2. Получить токены через capability oauth:yandex (фасад oauth_provider)
         3. Выполнить HTTP GET к https://api.iot.yandex.net/v1.0/user/info
         4. Преобразовать каждое устройство в стандартный формат
         5. Опубликовать external.device_discovered для каждого

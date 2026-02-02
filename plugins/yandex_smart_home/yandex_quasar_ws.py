@@ -43,6 +43,7 @@ from yarl import URL
 
 from .api_client import YandexAPIClient
 from .device_transformer import DeviceTransformer
+from .oauth_provider import get_cookies as oauth_get_cookies
 
 
 class YandexQuasarWS:
@@ -59,9 +60,7 @@ class YandexQuasarWS:
     - yandexuid (обязательно)  
     - sessionid2 (желательно)
     
-    Cookies загружаются через:
-    - oauth_yandex.get_cookies() service
-    - или storage: namespace="yandex", key="cookies"
+    Cookies загружаются через capability yandex:session_cookies (фасад oauth_provider).
     """
 
     def __init__(self, runtime: Any, plugin_name: str):
@@ -452,43 +451,11 @@ class YandexQuasarWS:
         return jar
 
     async def _load_cookies(self) -> Optional[Dict[str, str]]:
-        """Попытка получить cookies из service_registry, иначе None."""
-        # Приоритет 1: yandex_device_auth.get_session (device auth сохраняет cookies)
-        try:
-            if await self.runtime.service_registry.has_service("yandex_device_auth.get_session"):
-                session = await self.runtime.service_registry.call("yandex_device_auth.get_session")
-                if isinstance(session, dict) and session.get("linked"):
-                    # Пытаемся получить cookies из storage (device_auth сохраняет их там)
-                    try:
-                        stored = await self.runtime.storage.get("yandex", "cookies")
-                        if isinstance(stored, dict) and stored:
-                            await self._log("debug", "Loaded cookies from yandex_device_auth", cookie_count=len(stored))
-                            return stored
-                    except Exception as e:
-                        await self._log("debug", f"Failed to load cookies from storage: {e}")
-        except Exception as e:
-            await self._log("debug", f"Failed to check yandex_device_auth.get_session: {e}")
-        
-        # Приоритет 2: сервис oauth_yandex.get_cookies если реализован (для обратной совместимости)
-        try:
-            if await self.runtime.service_registry.has_service("oauth_yandex.get_cookies"):
-                cookies = await self.runtime.service_registry.call("oauth_yandex.get_cookies")
-                if isinstance(cookies, dict) and cookies:
-                    await self._log("debug", "Loaded cookies from oauth_yandex", cookie_count=len(cookies))
-                    return cookies
-        except Exception as e:
-            await self._log("debug", f"Failed to load cookies from oauth_yandex: {e}")
-        
-        # Приоритет 3: storage namespace yandex -> cookies (fallback)
-        try:
-            stored = await self.runtime.storage.get("yandex", "cookies")
-            if isinstance(stored, dict) and stored:
-                await self._log("debug", "Loaded cookies from storage fallback", cookie_count=len(stored))
-                return stored
-        except Exception as e:
-            await self._log("debug", f"Failed to load cookies from storage fallback: {e}")
-        
-        return None
+        """Получить cookies через capability yandex:session_cookies (фасад oauth_provider)."""
+        cookies = await oauth_get_cookies(self.runtime)
+        if cookies:
+            await self._log("debug", "Loaded cookies via oauth_provider", cookie_count=len(cookies))
+        return cookies
 
     async def _log(self, level: str, message: str, **context: Any) -> None:
         with contextlib.suppress(Exception):

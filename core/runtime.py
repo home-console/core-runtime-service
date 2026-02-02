@@ -24,6 +24,7 @@ from core.plugin_manager import PluginManager, PluginState
 from core.module_manager import ModuleManager
 from core.http_registry import HttpRegistry
 from core.integration_registry import IntegrationRegistry
+from core.capability_registry import CapabilityRegistry
 from core.logger_helper import info, warning
 from core.base_plugin import BasePlugin
 from core.operations import OperationManager
@@ -64,6 +65,8 @@ class CoreRuntime:
         self.http = HttpRegistry()
         # Реестр интеграций (минимальный каталог для admin API)
         self.integrations = IntegrationRegistry()
+        # Реестр capability (только метаданные: provider/consumer, проверки, диагностика)
+        self.capability_registry = CapabilityRegistry()
         # Operations manager (инфраструктура для всех модулей)
         self.operations = OperationManager(self)
         

@@ -1,5 +1,11 @@
 """
-Плагин `oauth_yandex` — self-contained реализация OAuth flow для Яндекса.
+Плагин `oauth_yandex` — OAuth Capability Provider для Яндекса (инфраструктурный
+компонент Core Runtime, не user-facing и не integration plugin).
+
+Роль:
+- capability provider для возможности `oauth:yandex`
+- используется другими плагинами/модулями только через `runtime.service_registry`
+- не содержит доменной логики устройств/интеграций, только инфраструктурный OAuth
 
 Назначение:
 - хранение конфигурации OAuth (`configure`)
@@ -8,6 +14,13 @@
 - проверка статуса авторизации (`get_status`)
 - автоматическое обновление токенов через refresh (`get_access_token`)
 - хранение токенов через `runtime.storage`
+
+Публичная поверхность capability-провайдера (для других плагинов через ServiceRegistry):
+- `oauth_yandex.get_access_token` — получить валидный access_token (с auto-refresh)
+- `oauth_yandex.get_status` — агрегированный статус авторизации (configured/authorized/...)
+
+Все остальные сервисы этого плагина, включая HTTP-эндпоинты, считаются
+INTERNAL или DEPRECATED и сохраняются только для обратной совместимости.
 
 Архитектура:
 - Вся логика OAuth — в плагине (self-contained)
@@ -18,7 +31,7 @@
 
 Ограничения:
 - НЕ управляет устройствами
-- НЕ публикует события
+- НЕ публикует события бизнес-домена
 - НЕ знает про `devices` или `automation`
 
 Комментарии на русском языке.
@@ -32,6 +45,12 @@ import aiohttp
 
 from core.base_plugin import BasePlugin, PluginMetadata
 
+# Логический идентификатор capability, который реализует этот плагин.
+# Сервисы ServiceRegistry остаются в пространстве имён `oauth_yandex.*` для
+# обратной совместимости, но концептуально относятся к capability `oauth:yandex`.
+# Контракт: plugins/oauth_yandex/capability.py
+CAPABILITY_ID = "oauth:yandex"
+
 
 class OAuthReauthRequired(Exception):
     """Исключение, указывающее что требуется повторная авторизация."""
@@ -41,19 +60,20 @@ class OAuthReauthRequired(Exception):
 class OAuthYandexPlugin(BasePlugin):
     """Self-contained плагин аутентификации через OAuth Яндекса.
 
-    Сервисы:
-    - `oauth_yandex.configure(client_id, client_secret, redirect_uri, scope?)`
-      Сохраняет конфигурацию OAuth в storage.
+    Implements capability: oauth:yandex (см. plugins/oauth_yandex/capability.py).
+
+    Роль:
+    - OAuth Capability Provider для возможности `oauth:yandex`
+    - инфраструктурный компонент Core Runtime (не integration plugin и не UI)
+
+    Публичная capability-поверхность (для других плагинов/модулей через ServiceRegistry):
     - `oauth_yandex.get_status()`
-      Возвращает статус: configured, authorized, access_token_valid, etc.
-    - `oauth_yandex.get_authorize_url()`
-      Вернёт URL авторизации (использует сохранённую конфигурацию).
-    - `oauth_yandex.exchange_code(code)`
-      Обменяет код на токены (использует сохранённую конфигурацию).
-    - `oauth_yandex.get_tokens()`
-      Вернёт сохранённые токены (debug).
-    - `oauth_yandex.set_tokens(tokens)`
-      Сохранит токены (для тестов).
+      Возвращает агрегированный статус: configured, authorized, access_token_valid, etc.
+    - `oauth_yandex.get_access_token()`
+      Возвращает валидный access_token (при необходимости с авто-refresh).
+
+    Остальные зарегистрированные сервисы считаются INTERNAL/DEPRECATED и
+    оставлены только для обратной совместимости и/или административных задач.
     """
 
     TOKEN_NAMESPACE = "oauth_yandex"
@@ -69,6 +89,7 @@ class OAuthYandexPlugin(BasePlugin):
             version="0.1.0",
             description="OAuth helper для Яндекса: получение и хранение токенов",
             author="Home Console",
+            capabilities_provided=["oauth:yandex", "yandex:session_cookies"],
         )
 
     async def _decrypt_tokens(self, tokens_raw: Any) -> Optional[Dict[str, Any]]:
@@ -795,12 +816,23 @@ class OAuthYandexPlugin(BasePlugin):
             # SECURITY P0: Encrypt and save tokens
             await self._encrypt_and_save_tokens(tokens_to_save)
 
-        # Регистрируем сервисы
-        await self.runtime.service_registry.register("oauth_yandex.configure", configure)
+        # Регистрируем сервисы capability-провайдера.
+        #
+        # ВАЖНО:
+        # - Публичная поверхность capability `oauth:yandex` для других плагинов:
+        #   * `oauth_yandex.get_status`
+        #   * `oauth_yandex.get_access_token`
+        # - Остальные сервисы помечены как INTERNAL/DEPRECATED и не должны
+        #   использоваться новыми плагинами напрямую.
+
+        # Публичные capability-сервисы (используются другими плагинами/модулями):
         await self.runtime.service_registry.register("oauth_yandex.get_status", get_status)
+        await self.runtime.service_registry.register("oauth_yandex.get_access_token", get_access_token)
+
+        # INTERNAL / admin / legacy surface — оставлено для обратной совместимости:
+        await self.runtime.service_registry.register("oauth_yandex.configure", configure)
         await self.runtime.service_registry.register("oauth_yandex.get_authorize_url", get_authorize_url)
         await self.runtime.service_registry.register("oauth_yandex.exchange_code", exchange_code)
-        await self.runtime.service_registry.register("oauth_yandex.get_access_token", get_access_token)
         await self.runtime.service_registry.register("oauth_yandex.get_tokens", get_tokens)
         await self.runtime.service_registry.register("oauth_yandex.validate_token", validate_token)
         await self.runtime.service_registry.register("oauth_yandex.set_tokens", set_tokens)
@@ -855,9 +887,16 @@ class OAuthYandexPlugin(BasePlugin):
         await self.runtime.service_registry.register("yandex.login.start", yandex_login_start)
         await self.runtime.service_registry.register("yandex.login.status", yandex_login_status)
 
-        # Регистрируем HTTP-контракты через runtime.http.register()
-        # UI НЕ должен передавать OAuth параметры после configure —
-        # они берутся из storage автоматически.
+        # Регистрируем HTTP-контракты через runtime.http.register().
+        #
+        # ВАЖНО:
+        # - Эти HTTP-эндпоинты считаются legacy/user-facing поверхностью и
+        #   оставлены только для обратной совместимости.
+        # - Плагин концептуально является capability-провайдером `oauth:yandex`,
+        #   и новый код должен использовать его через ServiceRegistry, а не
+        #   напрямую через HTTP.
+        # - UI НЕ должен передавать OAuth параметры после configure —
+        #   они берутся из storage автоматически.
         from core.http_registry import HttpEndpoint
         try:
             # POST /oauth/yandex/configure — сохранить конфигурацию OAuth

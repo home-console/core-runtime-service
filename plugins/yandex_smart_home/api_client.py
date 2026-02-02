@@ -2,7 +2,7 @@
 Модуль для работы с Яндекс API.
 
 Обеспечивает:
-- Получение токенов через service_registry
+- Получение токенов через capability oauth:yandex (фасад oauth_provider)
 - Выполнение HTTP запросов к Яндекс API
 - Обработку ошибок авторизации
 - Retry механизм для временных ошибок
@@ -13,6 +13,8 @@ from typing import Any, Dict, Optional
 import aiohttp
 import asyncio
 import random
+
+from .oauth_provider import get_access_token as oauth_get_access_token, get_cookies as oauth_get_cookies
 
 
 class YandexAPIClient:
@@ -37,10 +39,7 @@ class YandexAPIClient:
         self._token_refresh_attempted = False  # Флаг для однократного refresh при 401
 
     async def get_access_token(self) -> str:
-        """Получить валидный access token через oauth_yandex с автоматическим refresh.
-
-        Использует новый сервис oauth_yandex.get_access_token(), который автоматически
-        обновляет токен при необходимости.
+        """Получить валидный access token через capability oauth:yandex (фасад oauth_provider).
 
         Returns:
             Access token для использования в запросах
@@ -49,14 +48,13 @@ class YandexAPIClient:
             RuntimeError: если токены недоступны, авторизация не пройдена или требуется повторная авторизация
         """
         try:
-            # Используем новый сервис, который автоматически делает refresh
-            access_token = await self.runtime.service_registry.call("oauth_yandex.get_access_token")
+            access_token = await oauth_get_access_token(self.runtime)
             if not access_token or not isinstance(access_token, str):
                 try:
                     await self.runtime.service_registry.call(
                         "logger.log",
                         level="error",
-                        message="Получен пустой или невалидный access_token от oauth_yandex",
+                        message="Получен пустой или невалидный access_token от oauth:yandex",
                         plugin=self.plugin_name,
                         context={"token_type": type(access_token).__name__}
                     )
@@ -784,37 +782,11 @@ class YandexAPIClient:
         except ImportError:
             raise RuntimeError("Требуется установить aiohttp и yarl для Quasar API")
 
-        # Получаем cookies из yandex_device_auth или oauth_yandex
-        cookies = {}
-        try:
-            # Приоритет 1: yandex_device_auth
-            if await self.runtime.service_registry.has_service("yandex_device_auth.get_session"):
-                session = await self.runtime.service_registry.call("yandex_device_auth.get_session")
-                if isinstance(session, dict) and session.get("linked"):
-                    stored = await self.runtime.storage.get("yandex", "cookies")
-                    if isinstance(stored, dict) and stored:
-                        cookies = stored
-        except Exception:
-            pass
-
-        # Приоритет 2: oauth_yandex
-        if not cookies:
-            try:
-                if await self.runtime.service_registry.has_service("oauth_yandex.get_cookies"):
-                    cookies = await self.runtime.service_registry.call("oauth_yandex.get_cookies")
-                    if not isinstance(cookies, dict):
-                        cookies = {}
-            except Exception:
-                pass
-
-        # Приоритет 3: прямое хранилище
-        if not cookies:
-            stored = await self.runtime.storage.get("yandex", "cookies")
-            if isinstance(stored, dict) and stored:
-                cookies = stored
+        # Capability yandex:session_cookies — единая точка через фасад oauth_provider
+        cookies = await oauth_get_cookies(self.runtime) or {}
 
         if not cookies:
-            raise RuntimeError("Cookies required for Quasar API. Use yandex_device_auth or oauth_yandex with cookies.")
+            raise RuntimeError("Cookies required for Quasar API. Configure capability yandex:session_cookies (device auth or OAuth with cookies).")
 
         # Создаем CookieJar
         jar = aiohttp.CookieJar()
