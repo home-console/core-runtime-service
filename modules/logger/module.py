@@ -195,11 +195,8 @@ class LoggerModule(RuntimeModule):
                 if has_request_logger:
                     # Используем operation_id из параметров или из контекста выполнения
                     if not operation_id:
-                        try:
-                            from modules.request_logger.middleware import get_operation_id
-                            operation_id = get_operation_id()
-                        except ImportError:
-                            pass
+                        from core.operation_context import get_operation_id
+                        operation_id = get_operation_id()
                     
                     if operation_id:
                         await self.runtime.service_registry.call(

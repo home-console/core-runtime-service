@@ -8,7 +8,7 @@ import uuid
 from contextlib import asynccontextmanager
 from typing import Optional, Any
 
-from modules.request_logger.middleware import get_operation_id, set_operation_id
+from core.operation_context import get_operation_id, set_operation_id
 
 
 @asynccontextmanager

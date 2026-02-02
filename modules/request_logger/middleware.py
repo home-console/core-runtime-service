@@ -50,6 +50,19 @@ def set_operation_id(operation_id: str) -> None:
     _operation_id_var.set(operation_id)
 
 
+class RequestLoggerOperationContext:
+    """
+    Адаптер для Core: реализует OperationContextProvider, делегируя в ContextVar.
+    Регистрируется в core.operation_context при старте RequestLoggerModule.
+    """
+
+    def get_operation_id(self) -> Optional[str]:
+        return get_operation_id()
+
+    def set_operation_id(self, value: str) -> None:
+        set_operation_id(value)
+
+
 async def request_logger_middleware(request: Request, call_next: Callable) -> Response:
     """
     Middleware для перехвата HTTP запросов и записи логов.

@@ -60,6 +60,9 @@ class RequestLoggerModule(RuntimeModule):
 
     async def start(self) -> None:
         """Запуск модуля."""
+        from core.operation_context import set_operation_context_provider
+        from modules.request_logger.middleware import RequestLoggerOperationContext
+        set_operation_context_provider(RequestLoggerOperationContext())
         try:
             await self.runtime.service_registry.call(
                 "logger.log",
@@ -72,6 +75,8 @@ class RequestLoggerModule(RuntimeModule):
 
     async def stop(self) -> None:
         """Остановка модуля."""
+        from core.operation_context import set_operation_context_provider
+        set_operation_context_provider(None)
         try:
             await self.runtime.service_registry.call(
                 "logger.log",
