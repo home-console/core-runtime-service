@@ -12,7 +12,8 @@
 | Core operations.py — только регистрация/диспетчеризация | `core/operations.py` | `register_handler`, `list_handler_types`, `create`, `get`, `list`, `execute` — нет вызовов доменных сервисов, только `storage.set/get/list_keys` и вызов handler по типу (строки 169–281). |
 | CapabilityRegistry — только метаданные | `core/capability_registry.py` | Только `register_provider`, `register_consumer`, `unregister_plugin`, `get_providers`, `get_required_capabilities`, `validate_plugin_requirements`. Нет call/resolve/invoke (строки 34–78). |
 | Operations регистрируются в плагинах/модулях, не в admin | `plugins/oauth_yandex/plugin.py:882`, `plugins/yandex_smart_home/operations.py:50-51`, `modules/devices/operations.py:106-109` | `register_handler` вызывается только в oauth_yandex on_start, yandex_smart_home (operations.py), devices/operations.py (DevicesModule). В `modules/admin/module.py` вызовов `register_handler` нет. |
-| Inspector list_operations_available — только list_handler_types | `modules/admin/services/introspection.py:218-227` | `ops.list_handler_types()`; нет `service_registry.call`, нет доменных имён в логике. |
+| Inspector list_operations_available — только list_handler_types | `modules/admin/services/introspection.py` | `ops.list_handler_types()`; нет `service_registry.call`, нет доменных имён в логике. |
+| Inspector без service_registry.call и доменной агрегации (C3) | `modules/admin/services/introspection.py` | Нет get_inventory, _inventory_external_providers, get_dashboard; только runtime metadata (plugin_manager, list_services, http.list, event_bus, state, storage, operations.list_handler_types). |
 | AdminModule не регистрирует operation handlers | `modules/admin/module.py` | По всему файлу: нет вызовов `runtime.operations.register_handler`. |
 | Product API — только доменные сервисы, /api/v1/* | `modules/product_api/module.py` | Сервисы вызывают только `devices.list`, `devices.get` (строки 36, 40). Пути только `/api/v1/devices`, `/api/v1/devices/{id}`. Нет Inspector, нет operations. |
 | Product API optional | `core/module_manager.py:62` | `ModuleSpec("product_api", required=False)`. |
@@ -26,21 +27,24 @@
 
 | Что | Файл:строка | Объяснение | Критичность |
 |-----|-------------|------------|--------------|
-| AdminModule регистрирует POST /admin/v1/devices/{id}/state и сервис admin.v1.devices.set_state | `modules/admin/module.py:190-239` | Мутация вне Operations: прямой вызов `service_registry.call("devices.set_state", ...)`. Legacy-путь для совместимости. | P2 |
-| Inspector get_inventory вызывает service_registry.call | `modules/admin/services/introspection.py:238,244,253` | Вызовы `admin.v1.devices.list`, `admin.v1.devices.list_mappings`, `admin.v1.devices.list_external`. Документированное исключение: Control Plane собирает snapshot из своих read-only сервисов. | P3 |
-| Admin UI вызывает /oauth/yandex/* и /yandex/auth/device/* | `admin-ui-service/src/api/oauth.ts`, `admin-ui-service/src/hooks/useYandexDeviceAuth.ts`, `admin-ui-service/src/components/YandexDeviceAuthDialog.tsx` | OAuth/Session конфигурация и device auth — не через Inspector/Operations. Исключение для flow конфигурации. | P2 |
-| Admin UI хардкодит типы операций в createOperation | `admin-ui-service/src/pages/DevicesPage.tsx:253,286`, `MappingPage.tsx:69`, и т.д. | Типы `yandex.sync_devices`, `yandex.check_devices_online`, `device.set_state`, `device.mapping.*` заданы в коде, а не только из getOperationsAvailable(). Кнопки Sync/Check Online/Set state/Mapping строятся с известными типами. | P3 |
-| AdminModule регистрирует GET /admin/v1/devices* (read-only) | `modules/admin/module.py:191-214` | Legacy read-пути вне префикса /admin/v1/inspector/. Дублируют данные, доступные через Inspector inventory. | P3 |
+| AdminModule регистрирует POST /admin/v1/devices/{id}/state и сервис admin.v1.devices.set_state | `modules/admin/module.py` | Мутация вне Operations: прямой вызов `service_registry.call("devices.set_state", ...)`. Legacy-путь для совместимости. | P2 |
+| Admin UI вызывает /oauth/yandex/* и /yandex/auth/device/* | `admin-ui-service/src/api/oauth.ts`, useYandexDeviceAuth, YandexDeviceAuthDialog | OAuth/Session конфигурация и device auth — не через Inspector/Operations. Исключение для flow конфигурации. | P2 |
+| Admin UI хардкодит типы операций в createOperation | `admin-ui-service/src/pages/DevicesPage.tsx`, MappingPage.tsx, и т.д. | Типы заданы в коде, а не только из getOperationsAvailable(). Кнопки Sync/Check Online/Set state/Mapping строятся с известными типами. | P3 |
+| AdminModule регистрирует GET /admin/v1/devices* (read-only) | `modules/admin/module.py` | Legacy read-пути вне префикса /admin/v1/inspector/. | P3 |
 
 ---
 
-## 3. ❌ Violations
+## 3. ❌ Violations (актуальные)
 
 | Нарушение | Файл:строка | Объяснение | Критичность |
 |-----------|-------------|------------|--------------|
 | Core импортирует modules | `core/utils/operation.py:11` | `from modules.request_logger.middleware import get_operation_id, set_operation_id`. Core не должен зависеть от modules. | P1 |
-| Inspector знает доменное имя в коде | `modules/admin/services/introspection.py:261-264` | `_inventory_external_providers()` возвращает `["yandex"]` — явное имя провайдера. Документ: «Inspector не знает доменных имён». | P2 |
-| Core plugin_manager содержит доменную логику по "oauth" | `core/plugin_manager.py:715-721` | Флаги интеграции: проверка `"oauth" in name_lower or "oauth" in desc_lower` и `"oauth" in dep.lower()`. Доменный термин в core. | P2 |
+| ~~Inspector знает доменное имя в коде~~ | **Исправлено в C3** | get_inventory и _inventory_external_providers удалены; доменных имён в Inspector нет. | — |
+
+**Исправлено в C2 (доменно-агностичный Core):**
+- ~~Core plugin_manager доменная логика по "oauth"~~ — флаги берутся только из `manifest.get("integration_flags", [])`; эвристик по имени/описанию нет.
+- ~~Core service_registry fallback по префиксам (yandex_device_auth., oauth_yandex., …)~~ — удалён; admin_only задаётся явно при регистрации (oauth_yandex передаёт `admin_only=True` для чувствительных сервисов).
+- ~~core/utils/operation.py спец-кейсы по "oauth.refresh_token"~~ — убраны; все операции логируются одинаково.
 
 ---
 
@@ -48,7 +52,7 @@
 
 | Риск | Где | Почему |
 |------|-----|--------|
-| Удаление admin.v1.devices.* сломает get_inventory | `modules/admin/services/introspection.py:238-253` | get_inventory дергает admin.v1.devices.list/list_mappings/list_external. Если убрать эти сервисы из AdminModule, Inspector inventory перестанет работать. |
+| ~~Удаление admin.v1.devices.* сломает Inspector~~ | **Снято в C3** | Inspector не вызывает admin.v1.devices.*; удаление read-API devices не ломает Inspector. |
 | request_logger обязателен для core/utils/operation.py | `core/utils/operation.py:11` | При отключении request_logger импорт core.utils.operation упадёт. |
 | OAuth/device auth UI не переведены на Inspector/Operations | admin-ui-service oauth.ts, useYandexDeviceAuth, YandexDeviceAuthDialog | При удалении плагинов oauth_yandex / yandex_device_auth экраны OAuth/Session останутся, но запросы к /oauth/yandex/* и /yandex/auth/device/* дадут 404. |
 
@@ -62,7 +66,9 @@
 - Блокеры для Stage D:
   - **P1:** убрать зависимость core от modules (`core/utils/operation.py` → вынести get_operation_id/set_operation_id в абстракцию или в модуль, который не импортируется из core).
 - Желательно до Stage D:
-  - **P2:** убрать или пометить legacy POST /admin/v1/devices/{id}/state и пути GET /admin/v1/devices*; убрать доменное имя "yandex" из _inventory_external_providers (например, получать список провайдеров из state или из списка плагинов без имён); ослабить или вынести в конфиг проверки "oauth" в plugin_manager.
+  - **P2:** убрать или пометить legacy POST /admin/v1/devices/{id}/state и пути GET /admin/v1/devices*.
+- **C2 выполнено:** доменные эвристики и проверки по именам/описаниям плагинов в Core убраны; флаги интеграции только из `integration_flags` в манифесте; admin_only только явно при регистрации.
+- **C3 выполнено:** Inspector затверждён: нет service_registry.call(), нет доменных терминов (get_inventory, _inventory_external_providers, dashboard удалены); Inspector читает только runtime metadata; удаление admin.v1.devices.* не ломает Inspector.
 
 ---
 
@@ -71,7 +77,7 @@
 | Проверка | Результат | Деталь |
 |----------|-----------|--------|
 | core/* не импортирует modules/plugins | **VIOLATION** | `core/utils/operation.py:11` — `from modules.request_logger.middleware`. |
-| В core нет доменных терминов | **VIOLATION** | `core/plugin_manager.py:715-721` — "oauth" в логике флагов. Остальное — примеры в docstring, имена модулей (devices), конфиг (pg_user). |
+| В core нет доменных терминов в логике решений | **OK (после C2)** | Эвристики по имени/описанию плагинов убраны; флаги только из `integration_flags` в манифесте; admin_only только явно при регистрации. Остались: имена модулей (BUILTIN_MODULES), enum/API (IntegrationFlag.REQUIRES_OAUTH), env, docstrings — не логика решений. |
 | core/operations.py без доменной логики | **OK** | Только регистрация handlers, диспетчеризация, storage для операций. |
 | CapabilityRegistry только метаданные | **OK** | Нет call/resolve/invoke. |
 
@@ -97,11 +103,11 @@ capabilities_provided/required заданы в metadata (oauth_yandex:92, yandex
 
 ---
 
-## Часть 4. Inspector — сводка
+## Часть 4. Inspector — сводка (после C3)
 
-- В `modules/admin/services/introspection.py`: все функции кроме get_inventory не вызывают `service_registry.call`. Используются plugin_manager, list_services(), http.list(), event_bus.list_subscriptions(), state, storage, operations.list_handler_types().
-- get_inventory: вызывает `service_registry.call("admin.v1.devices.list")` и т.д. — документированное исключение.
-- Нарушение: _inventory_external_providers() возвращает `["yandex"]` (строка 264) — доменное имя в Inspector.
+- В `modules/admin/services/introspection.py`: все функции читают только runtime metadata. Нет `service_registry.call()`. Используются: plugin_manager, service_registry.list_services(), http.list(), event_bus.list_subscriptions(), state, storage, operations.list_handler_types().
+- get_inventory, _inventory_external_providers, get_dashboard удалены. Endpoints: runtime, plugins, services, http, events, storage, state, state/keys, state/{key}, operations.
+- Удаление admin.v1.devices.* или доменных модулей не ломает Inspector. Inspector = чистый runtime snapshot.
 
 ---
 
@@ -141,7 +147,7 @@ capabilities_provided/required заданы в metadata (oauth_yandex:92, yandex
 **Ответ: ДА.**
 
 - Core: yandex_smart_home не в BUILTIN_MODULES; плагины подгружаются отдельно. Удаление плагина не мешает старту Core.
-- Admin UI: не импортирует плагины по имени; читает данные через Inspector (getPlugins, getOperationsAvailable, getInventory). Список плагинов и операций станет меньше; кнопки, зависящие от getOperationsAvailable(), покажут только оставшиеся типы. Строк с обязательным вызовом сервисов yandex_smart_home в UI нет — только вызовы createOperation({ type: "..." }), а типы либо из Inspector, либо захардкожены; при отсутствии handler операция завершится с ошибкой «unknown operation», а не runtime error при загрузке страницы.
+- Admin UI: не импортирует плагины по имени; читает данные через Inspector (getPlugins, getOperationsAvailable и др.). Список плагинов и операций станет меньше; кнопки, зависящие от getOperationsAvailable(), покажут только оставшиеся типы. Inventory убран из Inspector (C3); при необходимости UI должен брать данные устройств из Product API или иного источника. Строк с обязательным вызовом сервисов yandex_smart_home в UI нет — только вызовы createOperation({ type: "..." }), а типы либо из Inspector, либо захардкожены; при отсутствии handler операция завершится с ошибкой «unknown operation», а не runtime error при загрузке страницы.
 - Страницы OAuth/Session (/oauth/yandex/*, /yandex/auth/device/*) при отключённых плагинах могут давать 404 при действиях пользователя, но не падение приложения при открытии UI.
 
 Итог: архитектура выдерживает сценарий «удалить yandex_smart_home → запустить Core → открыть Admin UI» без runtime error.

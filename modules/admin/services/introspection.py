@@ -1,16 +1,15 @@
 """
-Inspector: read-only runtime snapshot.
+Inspector: read-only runtime snapshot (runtime mirror).
 
 Читает ТОЛЬКО: plugin_manager, service_registry.list_services(), http.list(),
 event_bus.list_subscriptions(), state, storage, operations.list_handler_types().
-Не вызывает service_registry.call(), не знает домены, не содержит if plugin_loaded.
+НЕ вызывает service_registry.call(). НЕ знает домены. НЕ агрегирует бизнес-модели.
 
-Исключение: get_inventory собирает snapshot из read-only сервисов admin.v1.devices.*
-(Control Plane Host собирает данные для UI; контракт для UI — ключи items, mappings, external).
+Правило: если Inspector вызывает сервис — это баг.
+Inspector = memory dump runtime, не API.
 """
 
 from typing import Any, Dict, List
-import asyncio
 import time
 
 
@@ -121,56 +120,6 @@ async def list_events(runtime: Any) -> List[Dict[str, Any]]:
     return result
 
 
-async def get_dashboard(runtime: Any, admin_started_at: float | None) -> Dict[str, Any]:
-    """Aggregated endpoint for dashboard - returns all main data in one request."""
-    try:
-        # Parallel fetch of all data
-        plugins_task = list_plugins(runtime)
-        services_task = list_services(runtime)
-        http_task = list_http_endpoints(runtime)
-        state_keys_task = list_state_keys(runtime)
-        runtime_info_task = get_runtime_info(runtime, admin_started_at)
-        
-        # Wait for all results
-        plugins, services, http_endpoints, state_keys_data, runtime_info = await asyncio.gather(
-            plugins_task,
-            services_task,
-            http_task,
-            state_keys_task,
-            runtime_info_task,
-            return_exceptions=True
-        )
-        
-        # Process possible errors
-        result = {
-            "ok": True,
-            "summary": {
-                "plugins": len(plugins) if not isinstance(plugins, Exception) else 0,
-                "services": len(services) if not isinstance(services, Exception) else 0,
-                "http_endpoints": len(http_endpoints) if not isinstance(http_endpoints, Exception) else 0,
-                "state_keys": len(state_keys_data) if not isinstance(state_keys_data, Exception) else 0,
-            },
-            "runtime": runtime_info if not isinstance(runtime_info, Exception) else {"error": str(runtime_info)},
-            "plugins": plugins if not isinstance(plugins, Exception) else [],
-            "services": services if not isinstance(services, Exception) else [],
-            "http_endpoints": http_endpoints if not isinstance(http_endpoints, Exception) else [],
-            "state_keys": state_keys_data if not isinstance(state_keys_data, Exception) else [],
-        }
-        
-        return result
-    except Exception as e:
-        return {
-            "ok": False,
-            "error": str(e),
-            "summary": {
-                "plugins": 0,
-                "services": 0,
-                "http_endpoints": 0,
-                "state_keys": 0,
-            }
-        }
-
-
 async def list_storage_namespaces(runtime: Any) -> List[Dict[str, Any]]:
     """List all storage namespaces with key counts."""
     namespaces = await runtime.storage.list_namespaces()
@@ -218,46 +167,10 @@ async def get_state_value(runtime: Any, key: str) -> Any:
 async def list_operations_available(runtime: Any) -> List[Dict[str, Any]]:
     """
     Inspector view: list available operation types (read-only).
-    Source: runtime.operations.list_handler_types(). No service_registry.call, no domain logic.
+    Source: runtime.operations.list_handler_types() only. No service_registry.call, no domain logic.
     """
     ops = getattr(runtime, "operations", None)
     if not ops or not hasattr(ops, "list_handler_types"):
         return []
     types = ops.list_handler_types()
     return [{"type": t} for t in types]
-
-
-async def get_inventory(runtime: Any) -> Dict[str, Any]:
-    """
-    Inspector view: read-only snapshot of inventory (items, mappings, external).
-    Assembled by Control Plane from its own read-only services (admin.v1.devices.*).
-    For UI only; keys are "items", "mappings", "external" (external is dict keyed by provider id).
-    """
-    result: Dict[str, Any] = {"items": [], "mappings": [], "external": {}}
-    try:
-        items = await runtime.service_registry.call("admin.v1.devices.list")
-        if isinstance(items, list):
-            result["items"] = items
-    except Exception:
-        pass
-    try:
-        mappings = await runtime.service_registry.call("admin.v1.devices.list_mappings")
-        if isinstance(mappings, list):
-            result["mappings"] = mappings
-    except Exception:
-        pass
-    # External lists by provider; provider ids are opaque to UI (no domain names in UI)
-    try:
-        # Providers that expose list_external; backend knows ids, UI just iterates
-        for provider_id in _inventory_external_providers():
-            ext = await runtime.service_registry.call("admin.v1.devices.list_external", provider_id)
-            if isinstance(ext, list):
-                result["external"][provider_id] = ext
-    except Exception:
-        pass
-    return result
-
-
-def _inventory_external_providers() -> List[str]:
-    """Provider ids that have list_external; used only for Inspector inventory assembly."""
-    return ["yandex"]

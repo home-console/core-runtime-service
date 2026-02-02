@@ -829,13 +829,13 @@ class OAuthYandexPlugin(BasePlugin):
         await self.runtime.service_registry.register("oauth_yandex.get_status", get_status)
         await self.runtime.service_registry.register("oauth_yandex.get_access_token", get_access_token)
 
-        # INTERNAL / admin / legacy surface — оставлено для обратной совместимости:
-        await self.runtime.service_registry.register("oauth_yandex.configure", configure)
-        await self.runtime.service_registry.register("oauth_yandex.get_authorize_url", get_authorize_url)
-        await self.runtime.service_registry.register("oauth_yandex.exchange_code", exchange_code)
-        await self.runtime.service_registry.register("oauth_yandex.get_tokens", get_tokens)
-        await self.runtime.service_registry.register("oauth_yandex.validate_token", validate_token)
-        await self.runtime.service_registry.register("oauth_yandex.set_tokens", set_tokens)
+        # INTERNAL / admin / legacy surface — только для админов (явно admin_only):
+        await self.runtime.service_registry.register_with_acl("oauth_yandex.configure", configure, admin_only=True)
+        await self.runtime.service_registry.register_with_acl("oauth_yandex.get_authorize_url", get_authorize_url, admin_only=True)
+        await self.runtime.service_registry.register_with_acl("oauth_yandex.exchange_code", exchange_code, admin_only=True)
+        await self.runtime.service_registry.register_with_acl("oauth_yandex.get_tokens", get_tokens, admin_only=True)
+        await self.runtime.service_registry.register_with_acl("oauth_yandex.validate_token", validate_token, admin_only=True)
+        await self.runtime.service_registry.register_with_acl("oauth_yandex.set_tokens", set_tokens, admin_only=True)
 
         async def set_cookies(cookies: Dict[str, str]) -> Dict[str, Any]:
             """Сохранить cookies сессии Яндекса для Quasar API.
@@ -869,9 +869,9 @@ class OAuthYandexPlugin(BasePlugin):
                 pass
             return None
 
-        await self.runtime.service_registry.register("oauth_yandex.clear_tokens", clear_tokens)
-        await self.runtime.service_registry.register("oauth_yandex.set_cookies", set_cookies)
-        await self.runtime.service_registry.register("oauth_yandex.get_cookies", get_cookies)
+        await self.runtime.service_registry.register_with_acl("oauth_yandex.clear_tokens", clear_tokens, admin_only=True)
+        await self.runtime.service_registry.register_with_acl("oauth_yandex.set_cookies", set_cookies, admin_only=True)
+        await self.runtime.service_registry.register_with_acl("oauth_yandex.get_cookies", get_cookies, admin_only=True)
 
         # Register operation handler for oauth.refresh_token so operations API can invoke refresh
         try:
@@ -895,8 +895,8 @@ class OAuthYandexPlugin(BasePlugin):
         async def yandex_login_status() -> Dict[str, Any]:
             return await self._login_service.status()
 
-        await self.runtime.service_registry.register("yandex.login.start", yandex_login_start)
-        await self.runtime.service_registry.register("yandex.login.status", yandex_login_status)
+        await self.runtime.service_registry.register_with_acl("yandex.login.start", yandex_login_start, admin_only=True)
+        await self.runtime.service_registry.register_with_acl("yandex.login.status", yandex_login_status, admin_only=True)
 
         # Регистрируем HTTP-контракты через runtime.http.register().
         #

@@ -11,13 +11,11 @@ from modules.admin.services.introspection import (
     list_services,
     list_http_endpoints,
     list_events,
-    get_dashboard,
     list_storage_namespaces,
     get_state,
     list_state_keys,
     get_state_value,
     list_operations_available,
-    get_inventory,
 )
 
 __all__ = [
@@ -26,11 +24,9 @@ __all__ = [
     "list_services",
     "list_http_endpoints",
     "list_events",
-    "get_dashboard",
     "list_storage_namespaces",
     "get_state",
     "list_state_keys",
     "get_state_value",
     "list_operations_available",
-    "get_inventory",
 ]

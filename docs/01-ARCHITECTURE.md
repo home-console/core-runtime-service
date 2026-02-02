@@ -210,9 +210,12 @@ Inspector — это **read-only способ наблюдать уже суще
 
 Inspector — тупой. И в этом его ценность: он только отражает то, что уже есть.
 
+**Правило:** Если Inspector вызывает сервис — это баг. Inspector = memory dump runtime, не API.
+
 ### Определение
 
 - **Inspector** — зеркало runtime: только читает метаданные и снимки состояния, ничего не меняет и не вызывает доменные сервисы.
+- Inspector ≠ API, Inspector ≠ BFF, Inspector ≠ read model.
 - Реализация Inspector-views в коде может называться **Introspection** (например, `modules/admin/introspection.py`). Допустимые термины: Inspector, Snapshot, Runtime View, Introspection. Запрещённые: «read api», «readonly api», «query api».
 
 ### Inspector endpoints: контракт для UI
@@ -226,7 +229,6 @@ Inspector — тупой. И в этом его ценность: он толь�
 | GET /admin/v1/inspector/services | все зарегистрированные сервисы | Да | Да | service_registry.list_services() |
 | GET /admin/v1/inspector/http | все HTTP endpoints (method, path, service, description) | Да | Да | http.list() |
 | GET /admin/v1/inspector/events | подписки на события (event_name, subscribers) | Да | Да | event_bus.list_subscriptions() |
-| GET /admin/v1/inspector/dashboard | сводка: plugins, services, http, state_keys + runtime | Да | Да | агрегация других Inspector-views (параллельно) |
 | GET /admin/v1/inspector/storage | namespaces и keys_count | Да | Да | storage.list_namespaces(), storage.list_keys(ns) |
 | GET /admin/v1/inspector/state | все ключи и значения state | Да | Да | state.list_keys(), state.get(key) |
 | GET /admin/v1/inspector/state/keys | список ключей state | Да | Да | state.list_keys() |
@@ -258,7 +260,19 @@ Inspector **не имеет права**:
 
 При отсутствии плагина Inspector просто показывает меньше данных (меньше записей в списках). Без fallback-логики и без проверок имён плагинов.
 
-### Inspector vs Operations
+### Inspector vs Product API vs Operations
+
+| | Inspector | Product API | Operations |
+|---|-----------|-------------|------------|
+| **Назначение** | Runtime mirror (debug, CLI, Admin UI read) | User read (BFF) | Write-контур (Admin UI actions) |
+| **Вызов сервисов** | ❌ Запрещён (`service_registry.call` = баг) | ✅ Разрешён | Только выполнение handler по типу |
+| **Домены** | ❌ Не знает (yandex, device, oauth и т.п.) | ✅ Знает, агрегирует | Регистрируют плагины/модули |
+| **Источники** | Только plugin_manager, list_services, http.list, event_bus, state, storage, operations.list_handler_types | Доменные сервисы через service_registry.call | Handlers по типу операции |
+| **Удаление admin.v1.devices.* / доменных модулей** | Inspector не ломается | Product API может потерять ручки | Меньше типов операций |
+
+Inspector = чистый runtime snapshot. Product API = пользовательский read. Operations = единственный способ мутации из Control Plane.
+
+### Inspector vs Operations (действия)
 
 **Правило:** любой endpoint, который **может** изменить систему, **не может** быть Inspector.
 
@@ -266,7 +280,7 @@ Inspector **не имеет права**:
 |----------|-----|
 | Посмотреть plugins, services, http, events | Inspector |
 | Посмотреть state, storage (read-only) | Inspector |
-| Посмотреть список зарегистрированных интеграций (метаданные) | Inspector |
+| Посмотреть список зарегистрированных типов операций | Inspector |
 | Синхронизировать устройства, проверить online, set_state и т.п. | Operation |
 
 Все мутации системы — **только** через Operations (POST /admin/v1/operations). Inspector только читает.
@@ -327,7 +341,7 @@ AdminModule = Control Plane Host + Inspector Host. Inspector-часть не в�
 
 ### Пути Inspector (справочно)
 
-`/admin/v1/inspector/runtime`, `/admin/v1/inspector/plugins`, `/admin/v1/inspector/services`, `/admin/v1/inspector/http`, `/admin/v1/inspector/events`, `/admin/v1/inspector/dashboard`, `/admin/v1/inspector/storage`, `/admin/v1/inspector/state`, `/admin/v1/inspector/state/keys`, `/admin/v1/inspector/state/{key}`, `/admin/v1/inspector/operations`.
+`/admin/v1/inspector/runtime`, `/admin/v1/inspector/plugins`, `/admin/v1/inspector/services`, `/admin/v1/inspector/http`, `/admin/v1/inspector/events`, `/admin/v1/inspector/storage`, `/admin/v1/inspector/state`, `/admin/v1/inspector/state/keys`, `/admin/v1/inspector/state/{key}`, `/admin/v1/inspector/operations`.
 
 ### Definition of Done (модель Control Plane)
 

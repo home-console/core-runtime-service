@@ -7,9 +7,8 @@ IntegrationRegistry — минимальный реестр интеграций
 - In-memory, только {id, name, flags}
 
 Критерии определения интеграции:
-1. Явная пометка в plugin.json: "is_integration": true
-2. Автоматически: плагин публикует события "external.*"
-3. По паттернам (fallback): имя/описание содержат ключевые слова
+- Только явная пометка в plugin.json: "is_integration": true
+- Флаги только из manifest: "integration_flags": ["requires_oauth", "requires_config", ...]
 
 Архитектура:
 - IntegrationRegistry НЕ управляет lifecycle плагинов

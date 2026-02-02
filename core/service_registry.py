@@ -161,24 +161,14 @@ class ServiceRegistry:
                     effective_admin_only = False
                 else:
                     effective_admin_only = True
-            # Чтение/очистка логов запросов — только для админов
+            # Чтение/очистка логов запросов — только для админов (инфра)
             elif service_name in {
                 "request_logger.get_request_logs",
                 "request_logger.list_requests",
                 "request_logger.clear_logs",
             }:
                 effective_admin_only = True
-            # Чувствительные интеграции Яндекса (сессии/куки/устройства) — тоже под админом
-            elif service_name.startswith(
-                (
-                    "yandex_device_auth.",
-                    "oauth_yandex.",
-                    "yandex.sync_",
-                    "yandex.check_devices_online",
-                    "yandex.subscribe_device_updates",
-                )
-            ):
-                effective_admin_only = True
+            # Остальное: admin_only задаётся явно при регистрации (плагины передают admin_only=True)
             else:
                 effective_admin_only = False
 

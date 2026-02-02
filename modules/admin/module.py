@@ -21,13 +21,11 @@ from .introspection import (
     list_services,
     list_http_endpoints,
     list_events,
-    get_dashboard,
     list_storage_namespaces,
     get_state,
     list_state_keys,
     get_state_value,
     list_operations_available,
-    get_inventory,
 )
 from .operations import (
     admin_operations_create,
@@ -81,12 +79,10 @@ class AdminModule(RuntimeModule):
             ("/admin/v1/inspector/services", "admin.v1.services", "Inspector: list services"),
             ("/admin/v1/inspector/http", "admin.v1.http", "Inspector: list HTTP endpoints"),
             ("/admin/v1/inspector/events", "admin.v1.events", "Inspector: list event subscriptions"),
-            ("/admin/v1/inspector/dashboard", "admin.v1.dashboard", "Inspector: dashboard snapshot"),
             ("/admin/v1/inspector/storage", "admin.v1.storage", "Inspector: list storage namespaces"),
             ("/admin/v1/inspector/state", "admin.v1.state", "Inspector: get all state"),
             ("/admin/v1/inspector/state/keys", "admin.v1.state.keys", "Inspector: list state keys"),
             ("/admin/v1/inspector/operations", "admin.v1.inspector.operations", "Inspector: available operation types"),
-            ("/admin/v1/inspector/inventory", "admin.v1.inspector.inventory", "Inspector: inventory snapshot (items, mappings)"),
         ]
         for path, service, description in inspector_endpoints:
             self.runtime.http.register(HttpEndpoint(
@@ -137,13 +133,11 @@ class AdminModule(RuntimeModule):
             ("admin.v1.services", wrap_introspection(list_services)),
             ("admin.v1.http", wrap_introspection(list_http_endpoints)),
             ("admin.v1.events", wrap_introspection(list_events)),
-            ("admin.v1.dashboard", wrap_introspection(get_dashboard, with_started_at=True)),
             ("admin.v1.storage", wrap_introspection(list_storage_namespaces)),
             ("admin.v1.state", wrap_introspection(get_state)),
             ("admin.v1.state.keys", wrap_introspection(list_state_keys)),
             ("admin.v1.state.get", wrap_state_get()),
             ("admin.v1.inspector.operations", wrap_introspection(list_operations_available)),
-            ("admin.v1.inspector.inventory", wrap_introspection(get_inventory)),
             # Admin devices read-only proxy services (kept for Admin UI compatibility)
             ("admin.v1.devices.list", wrap_domain(__import__("modules.admin.devices", fromlist=["admin_devices_list"]).admin_devices_list)),
             ("admin.v1.devices.get", wrap_domain(__import__("modules.admin.devices", fromlist=["admin_devices_get"]).admin_devices_get)),

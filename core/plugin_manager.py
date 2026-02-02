@@ -252,7 +252,7 @@ class PluginManager:
             RuntimeError: если перезагрузка не удалась
         
         Пример:
-            await plugin_manager.reload_plugin("yandex_smart_home")
+            await plugin_manager.reload_plugin("example_plugin")
         """
         # Проверяем, что плагин существует
         if plugin_name not in self._plugins:
@@ -706,26 +706,22 @@ class PluginManager:
         if not is_integration:
             return
         
-        # Определяем флаги интеграции
+        # Флаги только из явных полей manifest (Core не интерпретирует имена/описания)
         flags = set()
-        
-        name_lower = plugin_name.lower()
-        desc_lower = (plugin_description + " " + metadata.description).lower()
-        
-        # REQUIRES_OAUTH: если имя содержит "oauth" или есть зависимость на oauth плагин
-        if "oauth" in name_lower or "oauth" in desc_lower:
-            flags.add(IntegrationFlag.REQUIRES_OAUTH)
-        
-        # Проверяем зависимости на oauth плагины
-        dependencies = manifest.get("dependencies", [])
-        if any("oauth" in dep.lower() for dep in dependencies):
-            flags.add(IntegrationFlag.REQUIRES_OAUTH)
-        
-        # REQUIRES_CONFIG: если в описании упоминается конфигурация
-        if "config" in desc_lower or "configure" in desc_lower or "settings" in desc_lower:
-            flags.add(IntegrationFlag.REQUIRES_CONFIG)
-        
-        # BETA/EXPERIMENTAL: если явно указано в manifest
+        integration_flags = manifest.get("integration_flags", [])
+        if isinstance(integration_flags, list):
+            for flag_name in integration_flags:
+                if not isinstance(flag_name, str):
+                    continue
+                fn = flag_name.strip().lower()
+                if fn == "requires_oauth":
+                    flags.add(IntegrationFlag.REQUIRES_OAUTH)
+                elif fn == "requires_config":
+                    flags.add(IntegrationFlag.REQUIRES_CONFIG)
+                elif fn == "beta":
+                    flags.add(IntegrationFlag.BETA)
+                elif fn == "experimental":
+                    flags.add(IntegrationFlag.EXPERIMENTAL)
         if manifest.get("beta", False):
             flags.add(IntegrationFlag.BETA)
         if manifest.get("experimental", False):

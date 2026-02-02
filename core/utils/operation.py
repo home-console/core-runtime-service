@@ -28,13 +28,13 @@ async def operation(name: str, source: str, runtime: Optional[Any] = None):
     - Пробрасывает исключение дальше
     
     Args:
-        name: имя операции (например, "yandex.check_online")
-        source: источник операции (например, "yandex_smart_home")
+        name: имя операции (например, "example.op")
+        source: источник операции (имя плагина/модуля)
         runtime: экземпляр CoreRuntime (опционально, для логирования)
     
     Example:
-        async with operation("yandex.check_online", "yandex_smart_home", runtime):
-            await check_devices_online()
+        async with operation("example.op", "example_plugin", runtime):
+            await do_work()
     """
     # ВСЕГДА создаем новый operation_id для system операций
     # Даже если operation() вызывается внутри HTTP запроса,
@@ -69,11 +69,7 @@ async def operation(name: str, source: str, runtime: Optional[Any] = None):
             except Exception:
                 pass  # Игнорируем ошибки создания метаданных
             
-            # Специальные сообщения для oauth.refresh_token
-            if name == "oauth.refresh_token":
-                message = "Refreshing OAuth token"
-            else:
-                message = "operation.start"
+            message = "operation.start"
             await runtime.service_registry.call(
                 "logger.log",
                 level="info",
@@ -92,11 +88,7 @@ async def operation(name: str, source: str, runtime: Optional[Any] = None):
         # Успешное завершение
         if runtime:
             try:
-                # Специальные сообщения для oauth.refresh_token
-                if name == "oauth.refresh_token":
-                    message = "OAuth token refreshed"
-                else:
-                    message = "operation.ok"
+                message = "operation.ok"
                 await runtime.service_registry.call(
                     "logger.log",
                     level="info",
@@ -113,11 +105,7 @@ async def operation(name: str, source: str, runtime: Optional[Any] = None):
         # Ошибка при выполнении операции
         if runtime:
             try:
-                # Специальные сообщения для oauth.refresh_token
-                if name == "oauth.refresh_token":
-                    message = "OAuth token refresh failed"
-                else:
-                    message = "operation.error"
+                message = "operation.error"
                 await runtime.service_registry.call(
                     "logger.log",
                     level="error",
