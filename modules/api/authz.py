@@ -82,22 +82,13 @@ ACTION_SCOPE_MAP: Dict[str, str] = {
     "admin.v1.state": "admin.read",
     "admin.v1.integrations": "admin.read",
     
-    # Admin basic services
-    "admin.list_plugins": "admin.read",
-    "admin.list_services": "admin.read",
-    "admin.list_http": "admin.read",
-    "admin.state_keys": "admin.read",
-    "admin.state_get": "admin.read",
-    
-    # Admin devices proxy services
-    "admin.devices.list": "admin.devices.read",
-    "admin.devices.get": "admin.devices.read",
-    "admin.devices.set_state": "admin.devices.write",
-    "admin.devices.list_external": "admin.devices.read",
-    "admin.devices.list_mappings": "admin.devices.read",
-    "admin.devices.create_mapping": "admin.devices.write",
-    "admin.devices.delete_mapping": "admin.devices.write",
-    "admin.devices.auto_map": "admin.devices.write",
+    # Admin basic services (legacy names removed — use admin.v1.* services)
+    # NOTE: legacy admin.* entries like "admin.list_plugins" and the
+    # admin.devices.* proxy services were removed to avoid dead/misleading
+    # mappings. Inspector read-only services live under admin.v1.*.
+
+    # Explicitly add inspector operations mapping for clarity
+    "admin.v1.inspector.operations": "admin.read",
     
     # Admin (wildcard - все остальные admin.* действия требуют admin.*)
     # Проверяется отдельно через action.startswith("admin.")

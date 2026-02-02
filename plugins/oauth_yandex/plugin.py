@@ -873,6 +873,17 @@ class OAuthYandexPlugin(BasePlugin):
         await self.runtime.service_registry.register("oauth_yandex.set_cookies", set_cookies)
         await self.runtime.service_registry.register("oauth_yandex.get_cookies", get_cookies)
 
+        # Register operation handler for oauth.refresh_token so operations API can invoke refresh
+        try:
+            from modules.operations.handlers import handle_oauth_refresh
+            ops = getattr(self.runtime, "operations", None)
+            if ops:
+                # register_handler is synchronous
+                ops.register_handler("oauth.refresh_token", handle_oauth_refresh)
+        except Exception:
+            # Best-effort: failure to register should not block plugin load
+            pass
+
         # Дополнительно: единый login entrypoint через контролируемый WebView
         # (новая архитектура). Сервисы: yandex.login.start / yandex.login.status
         from .login_flow import YandexLoginService

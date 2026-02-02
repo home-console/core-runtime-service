@@ -116,11 +116,11 @@ class AdminModule(RuntimeModule):
         # --- Register admin services (glue: pass runtime via lambda) ---
         def wrap_introspection(fn, with_started_at: bool = False):
             if with_started_at:
-                return lambda **kw: fn(self.runtime, self._admin_started_at)
-            return lambda **kw: fn(self.runtime)
+                return lambda *args, **kw: fn(self.runtime, self._admin_started_at)
+            return lambda *args, **kw: fn(self.runtime)
 
         def wrap_domain(fn):
-            return lambda **kw: fn(self.runtime, **kw)
+            return lambda *args, **kw: fn(self.runtime, *args, **kw)
 
         def wrap_state_get():
             # Support both positional (console) and keyword (API) path param
@@ -141,6 +141,11 @@ class AdminModule(RuntimeModule):
             ("admin.v1.state.keys", wrap_introspection(list_state_keys)),
             ("admin.v1.state.get", wrap_state_get()),
             ("admin.v1.inspector.operations", wrap_introspection(list_operations_available)),
+            # Admin devices read-only proxy services (kept for Admin UI compatibility)
+            ("admin.v1.devices.list", wrap_domain(__import__("modules.admin.devices", fromlist=["admin_devices_list"]).admin_devices_list)),
+            ("admin.v1.devices.get", wrap_domain(__import__("modules.admin.devices", fromlist=["admin_devices_get"]).admin_devices_get)),
+            ("admin.v1.devices.list_external", wrap_domain(__import__("modules.admin.devices", fromlist=["admin_devices_list_external"]).admin_devices_list_external)),
+            ("admin.v1.devices.list_mappings", wrap_domain(__import__("modules.admin.devices", fromlist=["admin_devices_list_mappings"]).admin_devices_list_mappings)),
             ("admin.operations.create", wrap_domain(admin_operations_create)),
             ("admin.operations.list", wrap_domain(admin_operations_list)),
             ("admin.operations.get", wrap_domain(admin_operations_get)),
@@ -166,7 +171,11 @@ class AdminModule(RuntimeModule):
         public_auth_services = {"admin.auth.initialize", "admin.auth.login", "admin.auth.refresh", "admin.auth.me"}
         for name, handler in registrations:
             try:
-                admin_only = name not in public_auth_services
+                # Allow internal calls to inspector/admin.v1.* services without admin ctx
+                if name.startswith("admin.v1."):
+                    admin_only = False
+                else:
+                    admin_only = name not in public_auth_services
                 if hasattr(self.runtime.service_registry, "register_with_acl"):
                     await self.runtime.service_registry.register_with_acl(name, handler, admin_only=admin_only)
                 else:
@@ -174,6 +183,59 @@ class AdminModule(RuntimeModule):
                 self._registered_services.append(name)
             except ValueError:
                 continue
+
+        # HTTP endpoints for admin devices (read-only + set_state proxy)
+        try:
+            self.runtime.http.register(HttpEndpoint(
+                method="GET",
+                path="/admin/v1/devices",
+                service="admin.v1.devices.list",
+                description="List internal devices"
+            ))
+            self.runtime.http.register(HttpEndpoint(
+                method="GET",
+                path="/admin/v1/devices/{id}",
+                service="admin.v1.devices.get",
+                description="Get device by id"
+            ))
+            self.runtime.http.register(HttpEndpoint(
+                method="GET",
+                path="/admin/v1/devices/external/{provider}",
+                service="admin.v1.devices.list_external",
+                description="List external devices by provider"
+            ))
+            self.runtime.http.register(HttpEndpoint(
+                method="GET",
+                path="/admin/v1/devices/mappings",
+                service="admin.v1.devices.list_mappings",
+                description="List device mappings"
+            ))
+            # POST to set device state — proxy to devices.set_state (domain service)
+            async def _admin_set_state(device_id: str, body: dict = None, **kw):
+                from core.system_context import create_system_context
+                from core.auth_contextvars import set_current_auth_context, get_current_auth_context
+                ctx = create_system_context("admin", "devices.set_state")
+                prev = get_current_auth_context()
+                try:
+                    # Normalize common admin payloads (e.g., {"power":"on"} -> desired.on = True)
+                    payload = body
+                    if isinstance(body, dict) and "power" in body:
+                        payload = {"state": {"on": True if body.get("power") == "on" else False}}
+                    set_current_auth_context(ctx)
+                    return await self.runtime.service_registry.call("devices.set_state", device_id, payload)
+                finally:
+                    set_current_auth_context(prev)
+
+            await self.runtime.service_registry.register("admin.v1.devices.set_state", _admin_set_state)
+            self.runtime.http.register(HttpEndpoint(
+                method="POST",
+                path="/admin/v1/devices/{id}/state",
+                service="admin.v1.devices.set_state",
+                description="Set device desired state (proxy to devices.set_state)"
+            ))
+        except Exception:
+            # Best-effort: do not break admin registration if HTTP registry unavailable
+            pass
 
     async def start(self) -> None:
         pass

@@ -51,9 +51,10 @@ SERVICE_BODY_MODELS: Dict[str, Type[BaseModel]] = {
     "admin.auth.login": AdminAuthLoginBody,
     "admin.auth.refresh": AdminAuthRefreshBody,
     "admin.auth.initialize": AdminAuthInitializeBody,
-    "admin.devices.set_state": AdminDevicesSetStateBody,
     "devices.set_state": AdminDevicesSetStateBody,
 }
+    # NOTE: "admin.devices.set_state" removed — admin devices proxy services
+    # are deprecated in favor of domain operations (e.g., "devices.set_state").
 
 
 def _model_dump(m: BaseModel) -> Dict[str, Any]:

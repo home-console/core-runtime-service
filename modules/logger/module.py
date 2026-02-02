@@ -53,7 +53,12 @@ class LoggerModule(RuntimeModule):
             self._log_format = "text"
 
         # Регистрируем сервис logger.log (ACL обвязка в ядре — без ограничений)
-        await self.runtime.service_registry.register_with_acl("logger.log", self._log_service)
+        # Поддерживаем старые FakeRegistry объекты в тестах, поэтому используем
+        # register_with_acl если доступен, иначе падаем back на register().
+        if hasattr(self.runtime.service_registry, "register_with_acl"):
+            await self.runtime.service_registry.register_with_acl("logger.log", self._log_service)
+        else:
+            await self.runtime.service_registry.register("logger.log", self._log_service)
 
     async def start(self) -> None:
         """

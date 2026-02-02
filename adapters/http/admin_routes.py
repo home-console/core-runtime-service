@@ -16,15 +16,9 @@ def create_admin_router(runtime: Any) -> APIRouter:
     """Создаёт FastAPI router для admin endpoints."""
     router = APIRouter(prefix="/admin/v1", tags=["admin"])
     
-    # Регистрируем HTTP контракты в HttpRegistry
-    runtime.http.register(
-        HttpEndpoint(
-            method="GET",
-            path="/admin/v1/integrations",
-            service="admin.v1.integrations",
-            description="List registered integrations"
-        )
-    )
+    # NOTE: IntegrationsModule already registers the /admin/v1/integrations
+    # HttpEndpoint and the service `admin.v1.integrations`. Avoid duplicate
+    # registration here to prevent double routes when both are enabled.
     
     @router.get("/integrations")
     async def get_integrations(request: Request):

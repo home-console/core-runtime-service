@@ -50,11 +50,24 @@ async def audit_log_auth_event(
             "success": success,
             "details": safe_details
         }
-        
-        # Сохраняем в audit log
-        # subject_bytes = safe_subject.encode() if isinstance(safe_subject, str) else str(safe_subject).encode()
-        # audit_key = f"{int(time.time() * 1000)}_{hashlib.sha256(subject_bytes).hexdigest()[:16]}"
-        # await runtime.storage.set(AUTH_AUDIT_LOG_NAMESPACE, audit_key, audit_entry)
+
+        # Сохраняем в audit log (key: timestamp + hash of subject)
+        try:
+            subject_bytes = safe_subject.encode() if isinstance(safe_subject, str) else str(safe_subject).encode()
+            audit_key = f"{int(time.time() * 1000)}_{hashlib.sha256(subject_bytes).hexdigest()[:16]}"
+            await runtime.storage.set(AUTH_AUDIT_LOG_NAMESPACE, audit_key, audit_entry)
+        except Exception:
+            # Best-effort: if storage is not available, fallback to logger
+            try:
+                await runtime.service_registry.call(
+                    "logger.log",
+                    level="warning",
+                    message="Failed to write audit entry to storage",
+                    module="auth",
+                    context={"event_type": event_type, "subject": safe_subject}
+                )
+            except Exception:
+                pass
     
     except Exception as e:
         # Не падаем при ошибке audit logging

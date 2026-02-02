@@ -29,7 +29,8 @@ class IdempotencyStore:
             entry = self._store[key]
             # Проверяем, не истек ли TTL
             if time.time() - entry.get("timestamp", 0) < self.ttl:
-                return entry
+                # Возвращаем оригинальное сохранённое значение (tests expect stored value)
+                return entry.get("value")
             else:
                 # Удаляем истекший ключ
                 del self._store[key]
@@ -37,8 +38,9 @@ class IdempotencyStore:
     
     async def set(self, key: str, response_data: Dict[str, Any]) -> None:
         """Сохранить результат запроса."""
+        # Store the original response_data under "value" and metadata separately
         self._store[key] = {
-            "response": response_data,
+            "value": response_data,
             "timestamp": time.time()
         }
     

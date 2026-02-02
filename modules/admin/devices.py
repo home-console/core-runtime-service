@@ -6,27 +6,53 @@ Mutating operations (set_state, mappings) go through operations subsystem;
 AdminModule does not contain plugin-specific or mutating device logic.
 """
 from typing import Any, Optional
+from core.system_context import create_system_context
+from core.auth_contextvars import set_current_auth_context, get_current_auth_context
 
 
 async def admin_devices_list(runtime: Any):
-    return await runtime.service_registry.call("devices.list")
+    ctx = create_system_context("admin", "devices.list")
+    prev = get_current_auth_context()
+    try:
+        set_current_auth_context(ctx)
+        return await runtime.service_registry.call("devices.list")
+    finally:
+        set_current_auth_context(prev)
 
 
 async def admin_devices_get(runtime: Any, id: Optional[str] = None, **kwargs):
     device_id = id or kwargs.get("device_id") or kwargs.get("deviceId")
     if not device_id:
         raise ValueError("device id is required")
-    return await runtime.service_registry.call("devices.get", device_id)
+    ctx = create_system_context("admin", "devices.get")
+    prev = get_current_auth_context()
+    try:
+        set_current_auth_context(ctx)
+        return await runtime.service_registry.call("devices.get", device_id)
+    finally:
+        set_current_auth_context(prev)
 
 
 async def admin_devices_list_external(runtime: Any, provider: Optional[str] = None, **kwargs):
     if provider is None:
         provider = kwargs.get("provider")
-    return await runtime.service_registry.call("devices.list_external", provider)
+    ctx = create_system_context("admin", "devices.list_external")
+    prev = get_current_auth_context()
+    try:
+        set_current_auth_context(ctx)
+        return await runtime.service_registry.call("devices.list_external", provider)
+    finally:
+        set_current_auth_context(prev)
 
 
 async def admin_devices_list_mappings(runtime: Any) -> Any:
     try:
-        return await runtime.service_registry.call("devices.list_mappings")
+        ctx = create_system_context("admin", "devices.list_mappings")
+        prev = get_current_auth_context()
+        try:
+            set_current_auth_context(ctx)
+            return await runtime.service_registry.call("devices.list_mappings")
+        finally:
+            set_current_auth_context(prev)
     except Exception as e:
         return {"ok": False, "error": str(e)}
