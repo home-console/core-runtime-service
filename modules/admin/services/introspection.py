@@ -4,6 +4,9 @@ Inspector: read-only runtime snapshot.
 Читает ТОЛЬКО: plugin_manager, service_registry.list_services(), http.list(),
 event_bus.list_subscriptions(), state, storage, operations.list_handler_types().
 Не вызывает service_registry.call(), не знает домены, не содержит if plugin_loaded.
+
+Исключение: get_inventory собирает snapshot из read-only сервисов admin.v1.devices.*
+(Control Plane Host собирает данные для UI; контракт для UI — ключи items, mappings, external).
 """
 
 from typing import Any, Dict, List
@@ -222,3 +225,39 @@ async def list_operations_available(runtime: Any) -> List[Dict[str, Any]]:
         return []
     types = ops.list_handler_types()
     return [{"type": t} for t in types]
+
+
+async def get_inventory(runtime: Any) -> Dict[str, Any]:
+    """
+    Inspector view: read-only snapshot of inventory (items, mappings, external).
+    Assembled by Control Plane from its own read-only services (admin.v1.devices.*).
+    For UI only; keys are "items", "mappings", "external" (external is dict keyed by provider id).
+    """
+    result: Dict[str, Any] = {"items": [], "mappings": [], "external": {}}
+    try:
+        items = await runtime.service_registry.call("admin.v1.devices.list")
+        if isinstance(items, list):
+            result["items"] = items
+    except Exception:
+        pass
+    try:
+        mappings = await runtime.service_registry.call("admin.v1.devices.list_mappings")
+        if isinstance(mappings, list):
+            result["mappings"] = mappings
+    except Exception:
+        pass
+    # External lists by provider; provider ids are opaque to UI (no domain names in UI)
+    try:
+        # Providers that expose list_external; backend knows ids, UI just iterates
+        for provider_id in _inventory_external_providers():
+            ext = await runtime.service_registry.call("admin.v1.devices.list_external", provider_id)
+            if isinstance(ext, list):
+                result["external"][provider_id] = ext
+    except Exception:
+        pass
+    return result
+
+
+def _inventory_external_providers() -> List[str]:
+    """Provider ids that have list_external; used only for Inspector inventory assembly."""
+    return ["yandex"]

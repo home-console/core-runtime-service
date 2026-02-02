@@ -59,6 +59,7 @@ BUILTIN_MODULES = [
     ModuleSpec("devices", required=True),     # DevicesModule
     ModuleSpec("automation", required=True),  # AutomationModule
     ModuleSpec("presence", required=True),    # PresenceModule
+    ModuleSpec("product_api", required=False),  # ProductApiModule (BFF для пользовательских клиентов)
 ]
 
 # Удобные списки для обратной совместимости и проверок

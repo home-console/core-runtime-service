@@ -17,6 +17,7 @@ from modules.admin.services.introspection import (
     list_state_keys,
     get_state_value,
     list_operations_available,
+    get_inventory,
 )
 
 __all__ = [
@@ -31,4 +32,5 @@ __all__ = [
     "list_state_keys",
     "get_state_value",
     "list_operations_available",
+    "get_inventory",
 ]

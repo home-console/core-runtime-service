@@ -27,6 +27,7 @@ from .introspection import (
     list_state_keys,
     get_state_value,
     list_operations_available,
+    get_inventory,
 )
 from .operations import (
     admin_operations_create,
@@ -85,6 +86,7 @@ class AdminModule(RuntimeModule):
             ("/admin/v1/inspector/state", "admin.v1.state", "Inspector: get all state"),
             ("/admin/v1/inspector/state/keys", "admin.v1.state.keys", "Inspector: list state keys"),
             ("/admin/v1/inspector/operations", "admin.v1.inspector.operations", "Inspector: available operation types"),
+            ("/admin/v1/inspector/inventory", "admin.v1.inspector.inventory", "Inspector: inventory snapshot (items, mappings)"),
         ]
         for path, service, description in inspector_endpoints:
             self.runtime.http.register(HttpEndpoint(
@@ -141,6 +143,7 @@ class AdminModule(RuntimeModule):
             ("admin.v1.state.keys", wrap_introspection(list_state_keys)),
             ("admin.v1.state.get", wrap_state_get()),
             ("admin.v1.inspector.operations", wrap_introspection(list_operations_available)),
+            ("admin.v1.inspector.inventory", wrap_introspection(get_inventory)),
             # Admin devices read-only proxy services (kept for Admin UI compatibility)
             ("admin.v1.devices.list", wrap_domain(__import__("modules.admin.devices", fromlist=["admin_devices_list"]).admin_devices_list)),
             ("admin.v1.devices.get", wrap_domain(__import__("modules.admin.devices", fromlist=["admin_devices_get"]).admin_devices_get)),

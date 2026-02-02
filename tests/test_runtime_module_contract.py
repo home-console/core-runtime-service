@@ -279,11 +279,11 @@ async def test_builtin_modules_order_logger_first(memory_adapter):
 
 
 @pytest.mark.asyncio
-async def test_all_builtin_modules_required(memory_adapter):
-    """Тест: все BUILTIN_MODULES являются REQUIRED."""
-    # Проверяем, что все модули в BUILTIN_MODULES являются REQUIRED
-    for spec in BUILTIN_MODULES:
-        assert spec.required is True, f"Module '{spec.name}' must be REQUIRED"
+async def test_builtin_modules_spec():
+    """Тест: у всех BUILTIN_MODULES задан флаг required; хотя бы один REQUIRED."""
+    required_names = [s.name for s in BUILTIN_MODULES if s.required]
+    assert len(required_names) >= 1, "At least one builtin module must be REQUIRED"
+    assert "logger" in required_names, "logger must be REQUIRED"
 
 
 @pytest.mark.asyncio

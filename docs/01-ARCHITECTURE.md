@@ -215,6 +215,26 @@ Inspector — тупой. И в этом его ценность: он толь�
 - **Inspector** — зеркало runtime: только читает метаданные и снимки состояния, ничего не меняет и не вызывает доменные сервисы.
 - Реализация Inspector-views в коде может называться **Introspection** (например, `modules/admin/introspection.py`). Допустимые термины: Inspector, Snapshot, Runtime View, Introspection. Запрещённые: «read api», «readonly api», «query api».
 
+### Inspector endpoints: контракт для UI
+
+Каждый endpoint — **runtime mirror**: только чтение метаданных и снимков, без `service_registry.call()`, без знания доменов. Отсутствие плагина = меньше записей в ответе.
+
+| Endpoint | Что читает UI | Snapshot (read-only, без сайд-эффектов)? | Вызов 1000 раз без вреда? | Источник данных в коде |
+|----------|----------------|------------------------------------------|----------------------------|-------------------------|
+| GET /admin/v1/inspector/runtime | version, started_at, uptime | Да | Да | admin_started_at, importlib.metadata |
+| GET /admin/v1/inspector/plugins | список плагинов, loaded, started, services_count, http_count, event_subscriptions | Да | Да | plugins.list_plugins(), service_registry.list_services(), http.list(), event_bus.list_subscriptions() |
+| GET /admin/v1/inspector/services | все зарегистрированные сервисы | Да | Да | service_registry.list_services() |
+| GET /admin/v1/inspector/http | все HTTP endpoints (method, path, service, description) | Да | Да | http.list() |
+| GET /admin/v1/inspector/events | подписки на события (event_name, subscribers) | Да | Да | event_bus.list_subscriptions() |
+| GET /admin/v1/inspector/dashboard | сводка: plugins, services, http, state_keys + runtime | Да | Да | агрегация других Inspector-views (параллельно) |
+| GET /admin/v1/inspector/storage | namespaces и keys_count | Да | Да | storage.list_namespaces(), storage.list_keys(ns) |
+| GET /admin/v1/inspector/state | все ключи и значения state | Да | Да | state.list_keys(), state.get(key) |
+| GET /admin/v1/inspector/state/keys | список ключей state | Да | Да | state.list_keys() |
+| GET /admin/v1/inspector/state/{key} | значение по ключу | Да | Да | state.get(key) |
+| GET /admin/v1/inspector/operations | список доступных типов операций (type) | Да | Да | operations.list_handler_types() |
+
+**Итог:** Inspector = runtime mirror, не логика. Ни один из этих endpoints не вызывает `service_registry.call()`, не знает доменов (devices, yandex, oauth), не содержит `if plugin_loaded`.
+
 ### Допустимые источники данных Inspector
 
 Inspector **имеет право** читать **только**:
@@ -227,6 +247,7 @@ Inspector **имеет право** читать **только**:
 | `runtime.event_bus.list_subscriptions()` | ✅ |
 | `runtime.state.list_keys()` / `runtime.state.get(key)` | ✅ |
 | `runtime.storage.list_namespaces()` / `runtime.storage.list_keys(ns)` / `runtime.storage.get(ns, key)` | ✅ (read-only) |
+| `runtime.operations.list_handler_types()` | ✅ (read-only, список типов операций) |
 
 Inspector **не имеет права**:
 
@@ -252,10 +273,15 @@ Inspector **не имеет права**:
 
 ### AdminModule как Control Plane Host + Inspector Host
 
+AdminModule — это **не** админ-бизнес-логика. Это **Control Plane Host**. Он не знает домены. Он не эволюционирует вместе с фичами. Это архитектурный замок, не комментарий.
+
 После рефакторинга AdminModule:
 
 - **не содержит** доменной логики, интеграционной логики, operations handlers;
 - **только:** собирает Inspector views (introspection), проксирует operations (POST /admin/v1/operations), auth / ACL / CSRF.
+
+**Контрольный вопрос:** если завтра появится новый плагин, надо ли менять AdminModule, чтобы он появился в UI?  
+**Правильный ответ:** НЕТ. Плагин регистрирует свои операции в `on_start()`; Inspector подхватывает их через `operations.list_handler_types()`; UI рендерит кнопки из GET /admin/v1/inspector/operations. AdminModule остаётся неизменным.
 
 AdminModule = Control Plane Host + Inspector Host. Inspector-часть не вызывает `service_registry.call()`, не знает имён плагинов/интеграций, не содержит `if plugin_loaded`.
 
@@ -269,15 +295,85 @@ AdminModule = Control Plane Host + Inspector Host. Inspector-часть не в�
 - При отсутствии плагина Inspector просто показывает меньше данных;
 - Все мутации системы идут только через Operations.
 
-### UI / CLI / Debug читают только через Inspector
+### Правило UI / CLI / Debug (ключевой инвариант)
 
-**Правило:** любой UI, CLI или отладочный инструмент читает состояние системы **только** через Inspector (GET /admin/v1/inspector/*). Не через вызовы сервисов (`service_registry.call()` ради чтения), не через доменные API.
+**UI, CLI и отладочные инструменты НИКОГДА не читают данные через сервисы или плагины. Они читают ТОЛЬКО через Inspector.**
 
-- **Inspector** — единственный источник read-only данных о runtime (plugins, services, http, events, state, storage, **available operation types**).
-- Доступные операции UI узнаёт из GET /admin/v1/inspector/operations; кнопки действий → POST /admin/v1/operations.
-- Если операции нет в списке — кнопки нет. UI не проверяет плагины, не знает домены.
+- **Читать** — только GET /admin/v1/inspector/* (см. таблицу выше).
+- **Мутировать** — только POST /admin/v1/operations с `{ type, params }`.
 
-Пути Inspector (read-only): `/admin/v1/inspector/runtime`, `/admin/v1/inspector/plugins`, `/admin/v1/inspector/services`, `/admin/v1/inspector/http`, `/admin/v1/inspector/events`, `/admin/v1/inspector/dashboard`, `/admin/v1/inspector/storage`, `/admin/v1/inspector/state`, `/admin/v1/inspector/state/keys`, `/admin/v1/inspector/state/{key}`, `/admin/v1/inspector/operations`.
+**Запрещено в UI/CLI:**
+- GET /devices, GET /admin/v1/devices, GET /admin/v1/devices/* (доменный read — не Inspector).
+- GET /yandex/*, GET /admin/v1/yandex/*, GET /plugins/* вне префикса /admin/v1/inspector/.
+- Проверки вида «if plugin_loaded» или «if integration X» для отображения экранов.
+- Знание названий доменов (yandex, devices, oauth) в логике отображения: UI не должен ветвить по домену.
+
+**UI не умный и не адаптивный:** реагирует только на snapshot. Если операции нет в GET /admin/v1/inspector/operations — кнопки нет; UI не думает.
+
+### Модель Control Plane (Inspector → Operations)
+
+Финальная модель взаимодействия UI и backend:
+
+1. **Inspector даёт:**
+   - список доступных типов операций (GET /admin/v1/inspector/operations);
+   - статусы runtime (plugins, services, http, events, state, storage);
+   - snapshot состояния системы.
+
+2. **UI рендерит кнопки/действия ТОЛЬКО из:** GET /admin/v1/inspector/operations. Никаких захардкоженных списков операций по доменам.
+
+3. **Любое действие пользователя:** POST /admin/v1/operations с `{ type, params }`. UI не знает, что именно делает операция, не знает, синхронная она или нет, не ждёт результат сразу (операция может быть асинхронной, статус — через GET /admin/v1/operations/{id}).
+
+Это и есть модель Control Plane: чтение только через Inspector, мутация только через Operations.
+
+### Пути Inspector (справочно)
+
+`/admin/v1/inspector/runtime`, `/admin/v1/inspector/plugins`, `/admin/v1/inspector/services`, `/admin/v1/inspector/http`, `/admin/v1/inspector/events`, `/admin/v1/inspector/dashboard`, `/admin/v1/inspector/storage`, `/admin/v1/inspector/state`, `/admin/v1/inspector/state/keys`, `/admin/v1/inspector/state/{key}`, `/admin/v1/inspector/operations`.
+
+### Definition of Done (модель Control Plane)
+
+Шаг фиксации модели считается завершённым, когда:
+
+- Inspector используется как **единственный** read-контур для UI/CLI (чтение только через GET /admin/v1/inspector/*).
+- Все мутации идут **только** через POST /admin/v1/operations (никаких POST /admin/v1/devices/*/state, POST /admin/v1/yandex/* и т.п. из UI).
+- UI не знает домены и плагины (нет ветвлений по имени домена, нет проверок «if plugin_loaded»).
+- AdminModule не меняется при добавлении нового плагина (новый плагин регистрирует операции сам; Inspector и UI подхватывают автоматически).
+- Архитектурное правило зафиксировано документально (настоящий раздел).
+
+Текущие расхождения с этой моделью (legacy-пути, UI на старых путях) описаны в [ARCHITECTURE-AUDIT-DESYNCS.md](ARCHITECTURE-AUDIT-DESYNCS.md); целевое состояние — миграция на Inspector-only read и Operations-only mutations.
+
+---
+
+## Control Plane vs Product API
+
+**Статус:** Stable
+
+Два независимых API-слоя:
+
+| | Control Plane (Admin) | Product API (BFF) |
+|---|------------------------|-------------------|
+| **Кто** | Админы, дебаг, Admin UI | Пользовательские клиенты (User UI, Mobile, Mini-app) |
+| **Read** | Только Inspector (GET /admin/v1/inspector/*) | Доменные ручки (напр. GET /api/v1/devices) |
+| **Actions** | Только Operations (POST /admin/v1/operations) | По контракту BFF (напр. POST /api/v1/... по необходимости) |
+| **Данные** | Runtime mirror: plugins, services, state, operations list | Агрегация из доменных сервисов через service_registry.call() |
+| **Правила** | Inspector не вызывает service_registry.call(); не знает домены | Product API МОЖЕТ вызывать service_registry.call(); МОЖЕТ агрегировать сервисы |
+| **Модуль** | AdminModule (Inspector Host + Operations proxy) | ProductApiModule (BFF) |
+
+### Правило
+
+- **Product API = для пользователей.** Доменные ручки вида /api/v1/devices, /api/v1/... — для User UI, мобильных приложений, мини-приложений. Product API НЕ использует Inspector. Product API МОЖЕТ вызывать service_registry.call() и агрегировать данные из нескольких доменных сервисов.
+- **Inspector = для админов/дебага.** Admin UI и CLI читают только через Inspector; мутации только через Operations. Добавление нового домена не требует правок Inspector — только регистрация операций плагином/модулем и при необходимости расширение Product API (новые ручки /api/v1/...).
+
+### ProductApiModule
+
+- Отдельный модуль (`modules/product_api`), опциональный (OPTIONAL в BUILTIN_MODULES). Отключение Product API не ломает Core и Admin UI.
+- Регистрирует BFF-сервисы (напр. `product_api.v1.devices.list`, `product_api.v1.devices.get`), которые внутри вызывают доменные сервисы (`devices.list`, `devices.get`). Состояние не читается напрямую — только через доменные сервисы.
+- НЕ регистрирует operations handlers. НЕ использует Inspector.
+
+### Критерий готовности
+
+- Admin UI продолжает работать без изменений (читает только Inspector, действует через Operations).
+- Product API можно отключить (модуль optional) — Core не ломается.
+- Добавление нового домена не требует правок Inspector; при необходимости добавляются только ручки Product API и доменные сервисы.
 
 ---
 
