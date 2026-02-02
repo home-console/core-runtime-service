@@ -1,10 +1,9 @@
 """
-Admin introspection services - runtime metadata.
+Inspector: read-only runtime snapshot.
 
-Сервисы для получения информации о состоянии runtime:
-- plugins, services, http endpoints
-- state, storage
-- runtime info (uptime, version)
+Читает ТОЛЬКО: plugin_manager, service_registry.list_services(), http.list(),
+event_bus.list_subscriptions(), state, storage, operations.list_handler_types().
+Не вызывает service_registry.call(), не знает домены, не содержит if plugin_loaded.
 """
 
 from typing import Any, Dict, List
@@ -211,3 +210,15 @@ async def get_state_value(runtime: Any, key: str) -> Any:
     if not hasattr(runtime, "state") or runtime.state is None:
         raise ValueError("State engine not available")
     return await runtime.state.get(key)
+
+
+async def list_operations_available(runtime: Any) -> List[Dict[str, Any]]:
+    """
+    Inspector view: list available operation types (read-only).
+    Source: runtime.operations.list_handler_types(). No service_registry.call, no domain logic.
+    """
+    ops = getattr(runtime, "operations", None)
+    if not ops or not hasattr(ops, "list_handler_types"):
+        return []
+    types = ops.list_handler_types()
+    return [{"type": t} for t in types]

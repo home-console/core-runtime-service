@@ -110,12 +110,12 @@ class YandexSmartHomeRealPlugin(BasePlugin):
 
         await self.runtime.service_registry.register_with_acl("yandex.subscribe_device_updates", _subscribe_device_updates, admin_only=True)
 
-        # HTTP endpoint регистрируется в AdminModule (admin.v1.yandex.sync)
-        # для правильной обработки ошибок и формата ответа
-
     async def on_start(self) -> None:
-        """Запуск: логируем инициализацию и подписываемся на события."""
+        """Запуск: регистрируем операции, логируем и подписываемся на события."""
         await super().on_start()
+
+        from .operations import register_yandex_operations
+        register_yandex_operations(self.runtime)
 
         try:
             await self.runtime.service_registry.call(

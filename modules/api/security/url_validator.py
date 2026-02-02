@@ -10,7 +10,7 @@ URL validator для защиты от SSRF атак.
 
 import ipaddress
 from typing import Optional
-from urllib.parse import urlparse, scheme
+from urllib.parse import urlparse
 
 from core.errors import BadRequestError
 

@@ -175,10 +175,15 @@ Core не содержит доменной логики; он только пр
 - При загрузке плагина PluginManager регистрирует в CapabilityRegistry: `capabilities_provided`, `capabilities_required`.
 - При старте плагина проверяется: все ли требуемые capabilities имеют хотя бы одного provider. Если нет — плагин **не стартует** (состояние остаётся LOADED), причина доступна через `plugin_manager.get_plugin_block_reason(plugin_name)` (например `{"missing_capabilities": ["oauth:yandex"]}`). Это управляемое состояние (misconfigured/blocked), а не исключение рантайма.
 
+### Operations и интеграции (правило)
+
+- **Любая интеграция** (плагин или модуль) **регистрирует свои операции сама** в `on_start()` / `start()` через `runtime.operations.register_handler(op_type, handler)`.
+- **Admin** не содержит интеграционной логики: не знает домены (Yandex, devices и т.д.), не регистрирует handlers, не вызывает `service_registry.call("yandex.*")` и т.п. Единственный mutating API для Admin UI — **POST /admin/v1/operations** с `{ "type": "...", "params": {...} }`.
+- **Отсутствие плагина = отсутствие операций:** если плагин не загружен, его типы операций не зарегистрированы; POST /admin/v1/operations с таким типом возвращает ошибку (unknown operation). Это ожидаемое поведение.
+
 ### Legacy / Transitional
 
 - Прямые вызовы `service_registry.call("oauth_yandex.*")` вне фасада считаются **legacy**.
-- AdminModule и операции могут вызывать сервисы плагинов по имени (`yandex.sync_devices`) — **transitional**.
 
 ### Карта capability → provider → consumers
 
@@ -188,6 +193,91 @@ Core не содержит доменной логики; он только пр
 | `yandex:session_cookies` | oauth_yandex, yandex_device_auth | yandex_smart_home |
 
 Контракты (документация/типизация): `plugins/oauth_yandex/capability.py`, `docs/capabilities/`. Consumer знает capability только по ID (строка); контракты не импортируются из consumer'а.
+
+---
+
+## Inspector
+
+**Статус:** Stable
+
+Inspector — это **read-only способ наблюдать уже существующее состояние runtime**, не влияя на систему и не зная доменов.
+
+**Inspector — это НЕ API, НЕ модуль, НЕ слой бизнес-логики.**
+
+- Inspector ≠ Operations  
+- Inspector ≠ Admin logic (мутирующая часть)  
+- Inspector ≠ Plugin logic  
+
+Inspector — тупой. И в этом его ценность: он только отражает то, что уже есть.
+
+### Определение
+
+- **Inspector** — зеркало runtime: только читает метаданные и снимки состояния, ничего не меняет и не вызывает доменные сервисы.
+- Реализация Inspector-views в коде может называться **Introspection** (например, `modules/admin/introspection.py`). Допустимые термины: Inspector, Snapshot, Runtime View, Introspection. Запрещённые: «read api», «readonly api», «query api».
+
+### Допустимые источники данных Inspector
+
+Inspector **имеет право** читать **только**:
+
+| Источник | Разрешено |
+|----------|-----------|
+| `runtime.plugin_manager` (list, метаданные) | ✅ |
+| `runtime.service_registry.list_services()` | ✅ |
+| `runtime.http.list()` | ✅ |
+| `runtime.event_bus.list_subscriptions()` | ✅ |
+| `runtime.state.list_keys()` / `runtime.state.get(key)` | ✅ |
+| `runtime.storage.list_namespaces()` / `runtime.storage.list_keys(ns)` / `runtime.storage.get(ns, key)` | ✅ (read-only) |
+
+Inspector **не имеет права**:
+
+- вызывать `service_registry.call()`;
+- создавать или выполнять operations;
+- знать о доменах (devices, yandex, integrations) или проверять «если плагин загружен»;
+- выполнять бизнес-логику или делать внешний IO.
+
+При отсутствии плагина Inspector просто показывает меньше данных (меньше записей в списках). Без fallback-логики и без проверок имён плагинов.
+
+### Inspector vs Operations
+
+**Правило:** любой endpoint, который **может** изменить систему, **не может** быть Inspector.
+
+| Действие | Где |
+|----------|-----|
+| Посмотреть plugins, services, http, events | Inspector |
+| Посмотреть state, storage (read-only) | Inspector |
+| Посмотреть список зарегистрированных интеграций (метаданные) | Inspector |
+| Синхронизировать устройства, проверить online, set_state и т.п. | Operation |
+
+Все мутации системы — **только** через Operations (POST /admin/v1/operations). Inspector только читает.
+
+### AdminModule как Control Plane Host + Inspector Host
+
+После рефакторинга AdminModule:
+
+- **не содержит** доменной логики, интеграционной логики, operations handlers;
+- **только:** собирает Inspector views (introspection), проксирует operations (POST /admin/v1/operations), auth / ACL / CSRF.
+
+AdminModule = Control Plane Host + Inspector Host. Inspector-часть не вызывает `service_registry.call()`, не знает имён плагинов/интеграций, не содержит `if plugin_loaded`.
+
+### Критерий корректности (Definition of Done)
+
+Система считается корректной, если:
+
+- Inspector endpoints не вызывают `service_registry.call`;
+- Inspector не знает ни одного plugin name / integration в логике;
+- Inspector не содержит `if plugin_loaded`;
+- При отсутствии плагина Inspector просто показывает меньше данных;
+- Все мутации системы идут только через Operations.
+
+### UI / CLI / Debug читают только через Inspector
+
+**Правило:** любой UI, CLI или отладочный инструмент читает состояние системы **только** через Inspector (GET /admin/v1/inspector/*). Не через вызовы сервисов (`service_registry.call()` ради чтения), не через доменные API.
+
+- **Inspector** — единственный источник read-only данных о runtime (plugins, services, http, events, state, storage, **available operation types**).
+- Доступные операции UI узнаёт из GET /admin/v1/inspector/operations; кнопки действий → POST /admin/v1/operations.
+- Если операции нет в списке — кнопки нет. UI не проверяет плагины, не знает домены.
+
+Пути Inspector (read-only): `/admin/v1/inspector/runtime`, `/admin/v1/inspector/plugins`, `/admin/v1/inspector/services`, `/admin/v1/inspector/http`, `/admin/v1/inspector/events`, `/admin/v1/inspector/dashboard`, `/admin/v1/inspector/storage`, `/admin/v1/inspector/state`, `/admin/v1/inspector/state/keys`, `/admin/v1/inspector/state/{key}`, `/admin/v1/inspector/operations`.
 
 ---
 

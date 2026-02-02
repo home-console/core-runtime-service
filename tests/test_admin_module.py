@@ -39,15 +39,15 @@ async def test_admin_endpoints_registered(memory_adapter):
     
     # Проверяем наличие основных endpoints
     paths = [ep.path for ep in admin_endpoints]
-    assert any("/admin/v1/runtime" in path for path in paths)
-    assert any("/admin/v1/devices" in path for path in paths)
+    assert any("/admin/v1/inspector/runtime" in path for path in paths)
+    assert any("/admin/v1/inspector/operations" in path for path in paths)
     
     await runtime.stop()
 
 
 @pytest.mark.asyncio
 async def test_admin_runtime_endpoint(memory_adapter):
-    """Тест: GET /admin/v1/runtime возвращает информацию о runtime."""
+    """Тест: GET /admin/v1/inspector/runtime возвращает информацию о runtime."""
     runtime = CoreRuntime(memory_adapter)
     await runtime.start()
     
@@ -55,7 +55,7 @@ async def test_admin_runtime_endpoint(memory_adapter):
     try:
         result = await runtime.service_registry.call("admin.v1.runtime")
         assert isinstance(result, dict)
-        assert "status" in result or "modules" in result or "plugins" in result
+        assert "version" in result or "uptime" in result or "started_at" in result
     except ValueError:
         # Сервис может быть не зарегистрирован в тестовой среде
         pass

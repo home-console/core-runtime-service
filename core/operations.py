@@ -177,7 +177,11 @@ class OperationManager:
         Handler signature: async def handler(runtime, operation) -> Dict[str, Any]
         """
         self._handlers[op_type] = handler
-    
+
+    def list_handler_types(self) -> List[str]:
+        """Return list of registered operation type names (read-only, for Inspector)."""
+        return list(self._handlers.keys())
+
     async def create(
         self,
         op_type: str,

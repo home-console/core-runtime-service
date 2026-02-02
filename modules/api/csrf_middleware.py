@@ -129,7 +129,7 @@ async def rate_limit_middleware(request: Request, call_next: Callable) -> Respon
     rate_limits = {
         "/admin/v1/yandex/sync": {"max_calls": 5, "window_sec": 60},
         "/admin/v1/devices": {"max_calls": 100, "window_sec": 60},
-        "/admin/v1/storage": {"max_calls": 100, "window_sec": 60},
+        "/admin/v1/inspector/storage": {"max_calls": 100, "window_sec": 60},
         "default": {"max_calls": 200, "window_sec": 60},
     }
     
