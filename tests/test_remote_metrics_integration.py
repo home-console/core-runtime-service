@@ -111,6 +111,10 @@ def mock_remote_server():
     try:
         sock.bind(("127.0.0.1", 0))
     except PermissionError:
+        # В среде с ограниченными сетевыми вызовами `bind` может выбросить PermissionError.
+        # Нужно обязательно закрыть сокет перед тем, как прервать тест через pytest.skip,
+        # иначе файловый дескриптор останется открытым.
+        sock.close()
         pytest.skip("Network syscalls are not permitted in this environment (sandbox).")
     addr, port = sock.getsockname()
     sock.close()

@@ -220,7 +220,10 @@ ExecutionBackend (in_process / process / container)
 - `execution/`:
   - `controller.py`: `ExecutionControllerImpl` — принимает только operation metadata и делегирует в backend по policy
   - `policy.py`: `StateExecutionPolicy` — policy хранится **в storage** и читается на каждый `execute()` (можно менять без рестарта)
-  - `backend.py`: `InProcessBackend` (реально работает) + `ProcessBackend`/`ContainerBackend` (контрактные заглушки)
+  - `backend.py`: `InProcessBackend` (in-process), `ProcessBackend` (local subprocess runner), `ContainerBackend` (docker runner)
+  - `backends/process.py`: `ProcessBackend` — запускает общий runner как `python -m execution.runner.homeconsole_runner` (тот же протокол, что и container)
+  - `backends/container.py`: `ContainerBackend` — запускает тот же runner через `docker run ...`
+  - `runner/`: `ExecutionAdapter` и `homeconsole_runner` — единая execution-среда, не знающая Core/Automation/Plugins/Admin/UI; протокол описан в `docs/EXECUTION-PROTOCOL.md`
 - `modules/execution/`:
   - `ExecutionModule` — подключается через bootstrap приложения и делает единственную интеграцию:
     перехватывает `runtime.operations.execute()` и делегирует в `execution_controller`.

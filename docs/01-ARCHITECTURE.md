@@ -96,6 +96,24 @@ Core Runtime — **kernel**, а не приложение. Какие модул
 
 ---
 
+## Execution Runner (D3)
+
+Runner — это минимальная **execution-среда** (execution boundary), которая существует, чтобы:
+- изолировать выполнение операций от Core Runtime;
+- одинаково исполнять operations в разных средах: **process / container / remote / wasm**;
+- обеспечить единый протокол ввода/вывода, независимый от транспорта.
+
+**Runner не знает:**
+- доменов / модулей
+- плагинов / capabilities
+- admin / UI / automation
+- execution mode / policy
+
+**Runner знает только протокол**: читает JSON envelope из stdin и пишет JSON result в stdout.  
+Единый источник истины: `docs/EXECUTION-PROTOCOL.md`.
+
+---
+
 ## Plugin — контракт и lifecycle
 
 **Статус:** Stable
