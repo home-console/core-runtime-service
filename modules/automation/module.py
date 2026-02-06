@@ -1,8 +1,8 @@
 """
 AutomationModule — встроенный модуль автоматизации.
 
-Обязательный домен системы, который регистрируется автоматически
-при создании CoreRuntime через ModuleManager.
+Доменный оркестратор (Automation / Flows), который подключается на уровне приложения
+через bootstrap и может быть отключён/удалён без влияния на Core.
 """
 
 from core.runtime_module import RuntimeModule
@@ -13,8 +13,11 @@ class AutomationModule(RuntimeModule):
     """
     Модуль автоматизации.
 
-    Подписывается на события external.device_state_reported и логирует
-    изменения состояния устройств через service_registry.
+    D2 контракт:
+    - automation не является частью Core
+    - automation не вызывает доменные сервисы напрямую
+    - automation использует ТОЛЬКО EventBus + Operations (+ storage/state при необходимости)
+    - automation не знает, где/как исполняются операции
     """
 
     @property
@@ -27,6 +30,7 @@ class AutomationModule(RuntimeModule):
         Регистрация модуля в CoreRuntime.
 
         Подписывается на событие external.device_state_reported.
+        Дальше — только оркестрация через создание operations.
         """
         # Подписываем обработчик события
         await self.runtime.event_bus.subscribe(

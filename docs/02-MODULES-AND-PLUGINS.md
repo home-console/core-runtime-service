@@ -84,7 +84,7 @@ await self.runtime.service_registry.call(
 | `plugins/test/system_logger_plugin.py` | Plugin | Тестовый, DEPRECATED |
 | `plugins/test/automation_stub_plugin.py` | Plugin | Тестовый, для демонстрации |
 
-**Будущее:** `modules/automation/` — когда automation станет stable, переместим в modules.
+**Automation:** уже в `modules/automation/` как доменный оркестратор. По D2 он должен оставаться отключаемым (OPTIONAL) и не становиться зависимостью Core.
 
 ---
 

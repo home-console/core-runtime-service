@@ -39,6 +39,25 @@ Core не содержит доменной логики; он только пр
 
 ---
 
+## Core vs Application
+
+**Статус:** Stable (D0)
+
+Core Runtime — **kernel**, а не приложение. Какие модули и плагины загружать, решает **приложение** (Application Bootstrap).
+
+| Слой | Ответственность |
+|------|-----------------|
+| **Core Runtime** | Kernel: registries (services, http, events, operations), lifecycle (ModuleManager, PluginManager), state, storage. Не знает имён модулей. |
+| **Application** | Какие модули и (опционально) плагины грузить. Список модулей задаётся в `app/bootstrap.py` (APP_MODULES). |
+| **Modules** | Доменная логика (devices, admin, automation и т.д.). Регистрируются приложением через bootstrap. |
+| **Plugins** | Расширения. Загружаются Core (auto_load или явно); состав не задаётся списком в Core. |
+
+**Инвариант:** Core никогда не знает, что он запускает. Он только предоставляет среду. Список модулей передаётся снаружи через `module_manager.register_module_specs(runtime, specs)` перед `runtime.start()`.
+
+**Точка входа:** `main.py` создаёт `CoreRuntime`, `ApplicationBootstrap(APP_MODULES)`, вызывает `await bootstrap.start(runtime)` (регистрация модулей), затем `await runtime.start()` (запуск модулей и плагинов). Один Core → много приложений (разные bootstrap с разными наборами модулей).
+
+---
+
 ## Компоненты и роли
 
 ### Core Runtime
@@ -379,7 +398,7 @@ AdminModule = Control Plane Host + Inspector Host. Inspector-часть не в�
 
 ### ProductApiModule
 
-- Отдельный модуль (`modules/product_api`), опциональный (OPTIONAL в BUILTIN_MODULES). Отключение Product API не ломает Core и Admin UI.
+- Отдельный модуль (`modules/product_api`), опциональный (в APP_MODULES приложения `required=False`). Отключение Product API не ломает Core и Admin UI.
 - Регистрирует BFF-сервисы (напр. `product_api.v1.devices.list`, `product_api.v1.devices.get`), которые внутри вызывают доменные сервисы (`devices.list`, `devices.get`). Состояние не читается напрямую — только через доменные сервисы.
 - НЕ регистрирует operations handlers. НЕ использует Inspector.
 

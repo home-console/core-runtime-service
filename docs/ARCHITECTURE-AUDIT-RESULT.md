@@ -77,7 +77,7 @@
 | Проверка | Результат | Деталь |
 |----------|-----------|--------|
 | core/* не импортирует modules/plugins | **VIOLATION** | `core/utils/operation.py:11` — `from modules.request_logger.middleware`. |
-| В core нет доменных терминов в логике решений | **OK (после C2)** | Эвристики по имени/описанию плагинов убраны; флаги только из `integration_flags` в манифесте; admin_only только явно при регистрации. Остались: имена модулей (BUILTIN_MODULES), enum/API (IntegrationFlag.REQUIRES_OAUTH), env, docstrings — не логика решений. |
+| В core нет доменных терминов в логике решений | **OK (после C2, D0)** | Эвристики убраны; флаги только из `integration_flags`; admin_only явно. Core не знает списка модулей (BUILTIN_MODULES удалён в D0; список задаётся приложением в app/bootstrap.py). |
 | core/operations.py без доменной логики | **OK** | Только регистрация handlers, диспетчеризация, storage для операций. |
 | CapabilityRegistry только метаданные | **OK** | Нет call/resolve/invoke. |
 
@@ -146,7 +146,7 @@ capabilities_provided/required заданы в metadata (oauth_yandex:92, yandex
 
 **Ответ: ДА.**
 
-- Core: yandex_smart_home не в BUILTIN_MODULES; плагины подгружаются отдельно. Удаление плагина не мешает старту Core.
+- Core: не знает списка модулей (D0); плагины подгружаются отдельно. Удаление плагина не мешает старту Core.
 - Admin UI: не импортирует плагины по имени; читает данные через Inspector (getPlugins, getOperationsAvailable и др.). Список плагинов и операций станет меньше; кнопки, зависящие от getOperationsAvailable(), покажут только оставшиеся типы. Inventory убран из Inspector (C3); при необходимости UI должен брать данные устройств из Product API или иного источника. Строк с обязательным вызовом сервисов yandex_smart_home в UI нет — только вызовы createOperation({ type: "..." }), а типы либо из Inspector, либо захардкожены; при отсутствии handler операция завершится с ошибкой «unknown operation», а не runtime error при загрузке страницы.
 - Страницы OAuth/Session (/oauth/yandex/*, /yandex/auth/device/*) при отключённых плагинах могут давать 404 при действиях пользователя, но не падение приложения при открытии UI.
 

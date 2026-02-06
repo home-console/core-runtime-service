@@ -4,17 +4,24 @@
 Проверяют:
 - Регистрация модуля
 - Обработка событий автоматизации
-- Интеграция с devices модулем
+- Границы D2 (automation не дергает доменные сервисы напрямую)
 """
 
 import pytest
 from core.runtime import CoreRuntime
+from core.module_manager import ModuleSpec
 
 
 @pytest.mark.asyncio
 async def test_automation_module_registered(memory_adapter):
-    """Тест: AutomationModule регистрируется автоматически."""
+    """Тест: AutomationModule регистрируется через bootstrap (а не автоматически ядром)."""
     runtime = CoreRuntime(memory_adapter)
+    await runtime.module_manager.register_module_specs(
+        runtime,
+        [
+            ModuleSpec("automation", required=False),
+        ],
+    )
     await runtime.start()
     
     # Проверяем, что модуль зарегистрирован
@@ -29,14 +36,20 @@ async def test_automation_module_registered(memory_adapter):
 async def test_automation_subscribes_to_events(memory_adapter):
     """Тест: AutomationModule подписывается на события."""
     runtime = CoreRuntime(memory_adapter)
+    await runtime.module_manager.register_module_specs(
+        runtime,
+        [
+            ModuleSpec("automation", required=False),
+        ],
+    )
     await runtime.start()
     
     # Публикуем событие изменения состояния устройства
     await runtime.event_bus.publish(
-        "internal.device_state_changed",
+        "external.device_state_reported",
         {
-            "internal_id": "test_device",
-            "state": {"on": True}
+            "external_id": "ext-1",
+            "state": {"on": True},
         }
     )
     
@@ -47,27 +60,27 @@ async def test_automation_subscribes_to_events(memory_adapter):
 
 
 @pytest.mark.asyncio
-async def test_automation_handles_device_events(memory_adapter):
-    """Тест: AutomationModule обрабатывает события устройств."""
+async def test_automation_creates_only_operations(memory_adapter):
+    """Тест: automation не вызывает доменные сервисы напрямую (только создаёт operations)."""
     runtime = CoreRuntime(memory_adapter)
+    await runtime.module_manager.register_module_specs(
+        runtime,
+        [
+            ModuleSpec("automation", required=False),
+        ],
+    )
     await runtime.start()
     
-    # Создаем устройство
-    await runtime.service_registry.call(
-        "devices.create",
-        "test_auto_device",
-        name="Test Device",
-        device_type="light"
+    # Подготовим mapping в storage, чтобы automation создала operation
+    await runtime.storage.set("devices_mappings", "ext-2", {"internal_id": "int-2"})
+
+    await runtime.event_bus.publish(
+        "external.device_state_reported",
+        {"external_id": "ext-2", "state": {"on": True}},
     )
-    
-    # Изменяем состояние устройства
-    await runtime.service_registry.call(
-        "devices.set_state",
-        "test_auto_device",
-        {"on": True}
-    )
-    
-    # Событие должно быть опубликовано и обработано automation модулем
-    # В реальной реализации здесь можно проверить, что автоматизация сработала
+
+    # Проверяем, что создалась operation automation.run (а не прямой вызов services)
+    ops = await runtime.operations.list(limit=50)
+    assert any(op.type == "automation.run" for op in ops)
     
     await runtime.stop()

@@ -41,30 +41,9 @@ from dataclasses import dataclass
 
 @dataclass
 class ModuleSpec:
-    """Спецификация модуля с флагом обязательности."""
+    """Спецификация модуля с флагом обязательности. Используется на уровне приложения (bootstrap)."""
     name: str
     required: bool = True
-
-
-# Список встроенных модулей с явным указанием обязательности
-# ВАЖНО: logger должен быть первым, так как он нужен для логирования других модулей!
-BUILTIN_MODULES = [
-    ModuleSpec("logger", required=True),      # LoggerModule (инфраструктурный, должен быть первым)
-    ModuleSpec("request_logger", required=True),  # RequestLoggerModule (инфраструктурный)
-    ModuleSpec("api", required=True),         # ApiModule (HTTP API Gateway)
-    ModuleSpec("admin", required=True),       # AdminModule (административные endpoints)
-    ModuleSpec("auth", required=True),        # AuthModule (HTTP endpoints для аутентификации)
-    ModuleSpec("operations", required=True),  # OperationsModule (HTTP endpoints для операций)
-    ModuleSpec("integrations", required=True), # IntegrationModule (HTTP endpoints для интеграций)
-    ModuleSpec("devices", required=True),     # DevicesModule
-    ModuleSpec("automation", required=True),  # AutomationModule
-    ModuleSpec("presence", required=True),    # PresenceModule
-    ModuleSpec("product_api", required=False),  # ProductApiModule (BFF для пользовательских клиентов)
-]
-
-# Удобные списки для обратной совместимости и проверок
-REQUIRED_MODULES = [spec.name for spec in BUILTIN_MODULES if spec.required]
-OPTIONAL_MODULES = [spec.name for spec in BUILTIN_MODULES if not spec.required]
 
 
 class ModuleManager:
@@ -84,6 +63,8 @@ class ModuleManager:
         """
         self._modules: Dict[str, RuntimeModule] = {}
         self._runtime = runtime
+        # Имена модулей, помеченных как required при последнем register_module_specs (задаётся приложением)
+        self._required_names: set = set()
 
     async def register(self, module: RuntimeModule) -> None:
         """
@@ -157,12 +138,12 @@ class ModuleManager:
 
     def get_required_modules(self) -> List[str]:
         """
-        Возвращает список имён обязательных модулей.
+        Возвращает список имён обязательных модулей (заданных при последнем register_module_specs).
         
         Returns:
             список имён REQUIRED модулей
         """
-        return REQUIRED_MODULES.copy()
+        return list(self._required_names)
 
     def check_required_modules_registered(self) -> None:
         """
@@ -171,11 +152,7 @@ class ModuleManager:
         Raises:
             RuntimeError: если какой-то REQUIRED модуль не зарегистрирован
         """
-        missing = []
-        for module_name in REQUIRED_MODULES:
-            if module_name not in self._modules:
-                missing.append(module_name)
-        
+        missing = [n for n in self._required_names if n not in self._modules]
         if missing:
             raise RuntimeError(
                 f"Required modules not registered: {missing}. "
@@ -198,7 +175,7 @@ class ModuleManager:
         failed_required = []
         
         for module in self._modules.values():
-            is_required = module.name in REQUIRED_MODULES
+            is_required = module.name in self._required_names
             try:
                 await module.start()
             except Exception as e:
@@ -255,41 +232,41 @@ class ModuleManager:
                     print(f"[ModuleManager] Ошибка при остановке модуля '{module.name}': {e}", file=sys.stderr)
 
     def clear(self) -> None:
-        """Очищает все зарегистрированные модули."""
+        """Очищает все зарегистрированные модули и список required."""
         self._modules.clear()
+        self._required_names.clear()
 
-    async def register_builtin_modules(self, runtime: Any) -> None:
+    async def register_module_specs(self, runtime: Any, specs: List[ModuleSpec]) -> None:
         """
-        Регистрирует все встроенные модули из BUILTIN_MODULES.
+        Регистрирует модули по списку спецификаций (вызывается приложением / bootstrap).
+
+        Core не знает, какие модули загружать — список передаётся снаружи.
 
         ИДЕМПОТЕНТНОСТЬ:
-        - Если модуль уже зарегистрирован, он пропускается (идемпотентность)
-        - Это позволяет тестам регистрировать модули вручную перед вызовом start()
+        - Если модуль уже зарегистрирован, он пропускается.
 
         REQUIRED модули должны быть успешно зарегистрированы, иначе RuntimeError.
         OPTIONAL модули могут быть пропущены при ошибках.
 
         Args:
-            runtime: экземпляр CoreRuntime (используется для создания модулей)
+            runtime: экземпляр CoreRuntime
+            specs: список ModuleSpec (определяется приложением)
 
         Raises:
-            RuntimeError: если REQUIRED модуль не найден, не импортирован или не является RuntimeModule
+            RuntimeError: если REQUIRED модуль не найден или не зарегистрировался
         """
+        self._required_names = {s.name for s in specs if s.required}
         failed_required = []
-        
-        for module_spec in BUILTIN_MODULES:
-            # Пропускаем уже зарегистрированные модули (идемпотентность)
+
+        for module_spec in specs:
             if module_spec.name in self._modules:
                 continue
-                
             try:
                 await self._register_module_by_name(runtime, module_spec.name, module_spec.required)
             except RuntimeError as e:
-                # Для REQUIRED модулей ошибки не глотаются
                 if module_spec.required:
                     failed_required.append((module_spec.name, str(e)))
                 else:
-                    # Для OPTIONAL модулей логируем ошибки, но не останавливаем runtime
                     try:
                         await log_error(
                             self._runtime,
@@ -300,11 +277,9 @@ class ModuleManager:
                     except Exception:
                         print(f"[ModuleManager] Ошибка при регистрации optional модуля '{module_spec.name}': {e}", file=sys.stderr)
             except Exception as e:
-                # Неожиданные ошибки для REQUIRED модулей также не глотаются
                 if module_spec.required:
                     failed_required.append((module_spec.name, f"Unexpected error: {e}"))
                 else:
-                    # Для OPTIONAL модулей логируем ошибки, но не останавливаем runtime
                     try:
                         await log_error(
                             self._runtime,
@@ -314,7 +289,7 @@ class ModuleManager:
                         )
                     except Exception:
                         print(f"[ModuleManager] Неожиданная ошибка при регистрации optional модуля '{module_spec.name}': {e}", file=sys.stderr)
-        
+
         if failed_required:
             failed_names = [name for name, _ in failed_required]
             errors = "\n".join(f"  - {name}: {error}" for name, error in failed_required)

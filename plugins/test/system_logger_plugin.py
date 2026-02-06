@@ -6,7 +6,7 @@ DEPRECATED: Этот плагин заменён модулем modules.logger.L
 
 Вся логика логирования теперь в modules/logger/module.py.
 LoggerModule регистрируется автоматически при создании CoreRuntime
-через ModuleManager (первым в списке BUILTIN_MODULES).
+через ModuleManager (первым в APP_MODULES приложения).
 
 Этот плагин больше не нужен и может быть удалён.
 """

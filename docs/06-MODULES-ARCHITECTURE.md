@@ -162,28 +162,18 @@ class SomePlugin(BasePlugin):
 
 Модули регистрируются автоматически при создании CoreRuntime:
 
+Модули регистрируются **приложением** через bootstrap до вызова `runtime.start()` (D0). Core не содержит списка модулей.
+
 ```python
-# core/runtime.py
-class CoreRuntime:
-    def __init__(self, storage_adapter):
-        # ... инициализация компонентов
-        self.module_manager = ModuleManager()
-        
-        # Регистрация встроенных модулей
-        self.module_manager.register_builtin_modules(self)
+# main.py или точка входа приложения
+bootstrap = ApplicationBootstrap(APP_MODULES)
+await bootstrap.start(runtime)  # register_module_specs(runtime, APP_MODULES)
+await runtime.start()
 ```
 
 ### Список модулей
 
-Список обязательных модулей определён в `core/module_manager.py`:
-
-```python
-BUILTIN_MODULES = [
-    "devices",     # DevicesModule
-    "automation",  # AutomationModule
-    "presence",    # PresenceModule
-]
-```
+Список модулей приложения задаётся в `app/bootstrap.py` (APP_MODULES). Core не знает имён модулей; один Core → много приложений (разные bootstrap).
 
 ### Идемпотентность
 

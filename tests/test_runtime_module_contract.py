@@ -9,8 +9,9 @@ import pytest
 from unittest.mock import patch, MagicMock
 
 from core.runtime import CoreRuntime
-from core.module_manager import ModuleManager, ModuleSpec, BUILTIN_MODULES
+from core.module_manager import ModuleManager, ModuleSpec
 from core.runtime_module import RuntimeModule
+from app.bootstrap import ApplicationBootstrap, APP_MODULES
 
 
 class DummyModule(RuntimeModule):
@@ -69,26 +70,24 @@ class FailingStopModule(DummyModule):
 
 
 @pytest.mark.asyncio
-async def test_builtin_modules_auto_registration(memory_adapter):
-    """Тест: BUILTIN_MODULES регистрируются автоматически при runtime.start()."""
+async def test_app_modules_registration_via_bootstrap(memory_adapter):
+    """Тест: модули приложения регистрируются через bootstrap, затем runtime.start()."""
     runtime = CoreRuntime(memory_adapter)
-    
-    # До старта модули не зарегистрированы
+    bootstrap = ApplicationBootstrap(APP_MODULES)
+
     assert len(runtime.module_manager.list_modules()) == 0
-    
-    # После старта все BUILTIN_MODULES должны быть зарегистрированы
+
+    await bootstrap.start(runtime)
     await runtime.start()
-    
+
     registered_modules = runtime.module_manager.list_modules()
-    
-    # Проверяем, что все REQUIRED модули зарегистрированы
-    for spec in BUILTIN_MODULES:
+    for spec in APP_MODULES:
         if spec.required:
             assert spec.name in registered_modules, f"Required module '{spec.name}' not registered"
             module = runtime.module_manager.get_module(spec.name)
             assert module is not None
             assert module.name == spec.name
-    
+
     await runtime.stop()
 
 
@@ -148,32 +147,16 @@ async def test_required_module_fails_start_runtime_not_starts(memory_adapter):
     runtime = CoreRuntime(memory_adapter)
     manager = runtime.module_manager
     
-    # Создаём failing REQUIRED модуль
-    # ВАЖНО: имя должно быть в REQUIRED_MODULES, чтобы модуль считался required
-    # Используем патчинг, чтобы добавить модуль в REQUIRED_MODULES временно
-    from core.module_manager import REQUIRED_MODULES
-    
+    # Модуль считается required, если его имя в _required_names (задаётся приложением при register_module_specs)
     failing_module = FailingStartModule(runtime, "failing_required", required=True)
-    
-    # Временно добавляем модуль в REQUIRED_MODULES для теста
-    original_required = list(REQUIRED_MODULES)  # Копируем список
-    REQUIRED_MODULES.append("failing_required")
-    
-    try:
-        # Регистрируем модуль
-        await manager.register(failing_module)
-        
-        # Пытаемся запустить - должен упасть
-        with pytest.raises(RuntimeError, match="Failed to start required modules"):
-            await manager.start_all()
-        
-        # Проверяем, что модуль был зарегистрирован и попытка запуска была
-        assert failing_module.register_called is True
-        assert failing_module.start_called is True
-    finally:
-        # Восстанавливаем оригинальный список
-        REQUIRED_MODULES.clear()
-        REQUIRED_MODULES.extend(original_required)
+    await manager.register(failing_module)
+    manager._required_names.add("failing_required")
+
+    with pytest.raises(RuntimeError, match="Failed to start required modules"):
+        await manager.start_all()
+
+    assert failing_module.register_called is True
+    assert failing_module.start_called is True
 
 
 @pytest.mark.asyncio
@@ -270,19 +253,18 @@ async def test_register_idempotent(memory_adapter):
 
 
 @pytest.mark.asyncio
-async def test_builtin_modules_order_logger_first(memory_adapter):
-    """Тест: logger должен быть первым в BUILTIN_MODULES."""
-    # Проверяем, что logger действительно первый в списке
-    assert len(BUILTIN_MODULES) > 0
-    assert BUILTIN_MODULES[0].name == "logger", "logger must be first in BUILTIN_MODULES"
-    assert BUILTIN_MODULES[0].required is True, "logger must be REQUIRED"
+async def test_app_modules_order_logger_first():
+    """Тест: logger должен быть первым в APP_MODULES приложения."""
+    assert len(APP_MODULES) > 0
+    assert APP_MODULES[0].name == "logger", "logger must be first in APP_MODULES"
+    assert APP_MODULES[0].required is True, "logger must be REQUIRED"
 
 
 @pytest.mark.asyncio
-async def test_builtin_modules_spec():
-    """Тест: у всех BUILTIN_MODULES задан флаг required; хотя бы один REQUIRED."""
-    required_names = [s.name for s in BUILTIN_MODULES if s.required]
-    assert len(required_names) >= 1, "At least one builtin module must be REQUIRED"
+async def test_app_modules_spec():
+    """Тест: у APP_MODULES задан флаг required; хотя бы один REQUIRED."""
+    required_names = [s.name for s in APP_MODULES if s.required]
+    assert len(required_names) >= 1, "At least one app module must be REQUIRED"
     assert "logger" in required_names, "logger must be REQUIRED"
 
 
@@ -291,15 +273,17 @@ async def test_module_manager_check_required_modules(memory_adapter):
     """Тест: check_required_modules_registered() проверяет наличие всех REQUIRED модулей."""
     runtime = CoreRuntime(memory_adapter)
     manager = runtime.module_manager
-    
-    # До регистрации модулей - должна быть ошибка
+
+    # Когда _required_names задан, но модуль не зарегистрирован — должна быть ошибка
+    manager._required_names.add("missing_required")
     with pytest.raises(RuntimeError, match="Required modules not registered"):
         manager.check_required_modules_registered()
-    
-    # Регистрируем все BUILTIN_MODULES
-    await runtime.start()
-    
-    # После регистрации - не должно быть ошибки
+    manager._required_names.clear()
+
+    # После bootstrap все required модули зарегистрированы — проверка проходит
+    bootstrap = ApplicationBootstrap(APP_MODULES)
+    await bootstrap.start(runtime)
     manager.check_required_modules_registered()
-    
+
+    await runtime.start()
     await runtime.stop()

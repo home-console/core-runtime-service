@@ -1,19 +1,18 @@
 """
 Базовый класс и интерфейс для плагинов.
 
-Все плагины должны наследоваться от BasePlugin.
+Наследует контракт от sdk.BasePlugin; добавляет хелперы (register_service, get_env_config).
+Плагины могут наследоваться от core.base_plugin.BasePlugin или от sdk.BasePlugin.
 
-NOTE: В будущем, когда появится отдельный SDK пакет (homeconsole-sdk),
-этот модуль будет перемещён туда. Сейчас он находится в core/,
-так как все плагины находятся в том же репозитории.
-
-Подробный контракт: docs/08-PLUGIN-CONTRACT.md
+Контракт: sdk/README.md, docs/08-PLUGIN-CONTRACT.md
 """
 
 import os
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Optional, Awaitable, Callable, Any
+
+from sdk.plugin import BasePlugin as SDKBasePlugin
 
 if TYPE_CHECKING:
     from core.runtime import CoreRuntime
@@ -36,46 +35,16 @@ class PluginMetadata:
     capabilities_required: list[str] | None = field(default_factory=list)  # ["oauth:yandex", "yandex:session_cookies"]
 
 
-class BasePlugin(ABC):
+class BasePlugin(SDKBasePlugin):
     """
-    Базовый класс для всех плагинов.
-    
-    Lifecycle методы вызываются в следующем порядке:
-    1. __init__() - конструктор
-    2. on_load() - загрузка плагина
-    3. on_start() - запуск плагина
-    4. on_stop() - остановка плагина
-    5. on_unload() - выгрузка плагина
+    Базовый класс для всех плагинов (расширяет sdk.BasePlugin).
+    Lifecycle: on_load → on_start → on_stop → on_unload.
     """
-    
-    # Приватное хранилище runtime; позволяет принимать Optional при записи
-    # и возвращать `CoreRuntime` при чтении (через TYPE_CHECKING контракт).
-    _runtime: Optional["CoreRuntime"] = None
-
-    # Contract: `runtime` гарантирован менеджером плагинов при вызове lifecycle-методов.
-
-    @property
-    def runtime(self) -> "CoreRuntime":
-        # Возвращаем runtime как ненулевой (контракт архитектуры).
-        assert self._runtime is not None
-        return self._runtime
-
-    @runtime.setter
-    def runtime(self, value: Optional["CoreRuntime"]) -> None:
-        # Позволяем записывать Optional для поддержки lifecycle (unload обнуляет runtime).
-        self._runtime = value
+    _loaded: bool = False
+    _started: bool = False
 
     def __init__(self, runtime: Optional["CoreRuntime"] = None) -> None:
-        """
-        Инициализация плагина.
-
-        `runtime` не передаётся в конструктор и по-умолчанию равен None.
-        PluginManager устанавливает ссылку на `runtime` перед вызовом lifecycle методов.
-        """
-        # runtime будет установлен PluginManager'ом при загрузке плагина
-        # Записываем во внутреннее поле; используем property setter, который
-        # принимает Optional (чтобы плагины могли обнулять runtime при unload).
-        self._runtime = runtime
+        super().__init__(runtime)
         self._loaded = False
         self._started = False
 
@@ -214,10 +183,9 @@ class BasePlugin(ABC):
     def metadata(self) -> PluginMetadata:
         """
         Метаданные плагина.
-        
         Должен быть реализован в каждом плагине.
         """
-        pass
+        ...
 
     @property
     def is_loaded(self) -> bool:

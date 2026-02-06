@@ -20,6 +20,7 @@ from enum import Enum
 
 from core.base_plugin import BasePlugin, PluginMetadata
 from core.logger_helper import warning, info
+from sdk.plugin import BasePlugin as SDKBasePlugin
 from core.integration_registry import IntegrationRegistry, IntegrationFlag
 from dataclasses import replace
 
@@ -120,9 +121,12 @@ class PluginManager:
             if plugin_name in self._plugins:
                 raise ValueError(f"Плагин '{plugin_name}' уже загружен")
 
-            # Проверить зависимости, указанные в metadata после on_load
-            if metadata.dependencies:
-                for dep_name in metadata.dependencies:
+            # Зависимости: из манифеста (_manifest_dependencies) или из metadata (core.PluginMetadata)
+            deps = getattr(plugin, "_manifest_dependencies", None)
+            if deps is None:
+                deps = getattr(metadata, "dependencies", []) or []
+            if deps:
+                for dep_name in deps:
                     if dep_name not in self._plugins:
                         raise ValueError(
                             f"Плагин '{plugin_name}' требует плагин '{dep_name}', "
@@ -450,8 +454,8 @@ class PluginManager:
                 )
                 return False
             
-            # Проверяем, что это класс BasePlugin
-            if not isinstance(plugin_class, type) or not issubclass(plugin_class, BasePlugin):
+            # Проверяем, что это класс плагина (sdk.BasePlugin или core.BasePlugin)
+            if not isinstance(plugin_class, type) or not issubclass(plugin_class, SDKBasePlugin):
                 await actual_logger_func(
                     self._runtime,
                     f"Класс '{class_path}' из манифеста плагина '{plugin_name}' не является подклассом BasePlugin",
@@ -463,31 +467,27 @@ class PluginManager:
             try:
                 plugin_instance = plugin_class(self._runtime)
                 
-                # Обновляем metadata плагина зависимостями из манифеста
-                # Это нужно, чтобы проверка зависимостей в load_plugin() работала корректно
+                # Зависимости из манифеста: передаём в load_plugin через атрибут (для sdk.PluginMetadata нет merge)
                 manifest_dependencies = manifest.get("dependencies", [])
-                if manifest_dependencies:
-                    # Получаем текущий metadata
-                    current_metadata = plugin_instance.metadata
-                    # Обновляем metadata с зависимостями из манифеста
-                    updated_metadata = replace(
-                        current_metadata,
-                        dependencies=manifest_dependencies if isinstance(manifest_dependencies, list) else []
-                    )
-                    # Сохраняем обновлённый metadata в приватном атрибуте через setattr
-                    setattr(plugin_instance, '_manifest_metadata', updated_metadata)
-                    # Временно переопределяем property metadata для этого экземпляра
-                    # Используем type() для установки property на уровне класса экземпляра
-                    original_metadata = type(plugin_instance).metadata
-                    # Создаём новый property, который возвращает обновлённый metadata
-                    def get_updated_metadata(self):
-                        if hasattr(self, '_manifest_metadata'):
-                            return getattr(self, '_manifest_metadata')
-                        return original_metadata.__get__(self, type(self))
-                    
-                    # Устанавливаем property на уровне класса экземпляра
-                    setattr(type(plugin_instance), 'metadata', property(get_updated_metadata))
-                
+                if isinstance(manifest_dependencies, list) and manifest_dependencies:
+                    setattr(plugin_instance, "_manifest_dependencies", manifest_dependencies)
+                # Для core.PluginMetadata можно обновить metadata.dependencies (mutable)
+                if manifest_dependencies and hasattr(plugin_instance.metadata, "__dataclass_fields__") and "dependencies" in getattr(plugin_instance.metadata, "__dataclass_fields__", {}):
+                    try:
+                        current_metadata = plugin_instance.metadata
+                        updated_metadata = replace(
+                            current_metadata,
+                            dependencies=manifest_dependencies if isinstance(manifest_dependencies, list) else []
+                        )
+                        setattr(plugin_instance, "_manifest_metadata", updated_metadata)
+                        original_metadata = type(plugin_instance).metadata
+                        def get_updated_metadata(self):
+                            if hasattr(self, "_manifest_metadata"):
+                                return getattr(self, "_manifest_metadata")
+                            return original_metadata.__get__(self, type(self))
+                        setattr(type(plugin_instance), "metadata", property(get_updated_metadata))
+                    except Exception:
+                        pass
                 await self.load_plugin(plugin_instance)
                 
                 # Автоопределение интеграций (если runtime доступен)

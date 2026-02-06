@@ -12,7 +12,7 @@ async def handle_external_state_reported(runtime, data: Dict[str, Any]) -> None:
     Поведение:
     - Проверяет наличие external_id в payload
     - Ищет mapping для external_id через storage (devices_mappings namespace)
-    - Если mapping найден, логирует сообщение через service_registry
+    - Если mapping найден, создаёт operation (оркестрация), не вызывая доменные сервисы напрямую
 
     Args:
         runtime: экземпляр CoreRuntime
@@ -37,16 +37,27 @@ async def handle_external_state_reported(runtime, data: Dict[str, Any]) -> None:
     else:
         internal_id = None
 
-    # Если соответствие найдено — логируем факт получения изменения состояния
+    # Если соответствие найдено — создаём operation (D2: automation = orchestration)
     if internal_id:
         try:
-            await runtime.service_registry.call(
-                "logger.log",
-                level="info",
-                message=f"automation: internal device {internal_id} received state change",
-                plugin="automation_module",
-                context={"external_event": data},
+            ops_mgr = getattr(runtime, "operations", None)
+            if not ops_mgr:
+                return
+
+            from core.operations import OperationInitiator, OperationInitiatorKind
+
+            # Automation не исполняет действия сама — только описывает intent через operations.
+            await ops_mgr.create(
+                op_type="automation.run",
+                params={
+                    "source_event": "external.device_state_reported",
+                    "external_id": external_id,
+                    "internal_id": internal_id,
+                    "reported_state": data.get("state"),
+                    "raw": data,
+                },
+                initiator=OperationInitiator(kind=OperationInitiatorKind.SYSTEM),
             )
         except Exception:
-            # В логах ошибок нет необходимости ломать поток
+            # Automation best-effort: не ломаем event loop из-за ошибок оркестрации
             pass

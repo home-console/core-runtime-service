@@ -2,7 +2,8 @@
 
 > **Статус:** Stable (v0.2.0)  
 > **Версия контракта:** 1.0  
-> **Breaking changes:** Любые изменения контракта считаются breaking
+> **Breaking changes:** Любые изменения контракта считаются breaking  
+> **SDK v0 (D1):** Канонический контракт — пакет `sdk/`; эталонный плагин — `examples/example_plugin/`. Плагин можно писать, импортируя только `sdk`.
 
 ---
 
@@ -87,7 +88,13 @@ Manifest — JSON файл (`plugin.json` или `manifest.json`) со след�
 
 ### Базовый класс
 
+Плагин может наследоваться от `sdk.BasePlugin` (только SDK) или от `core.base_plugin.BasePlugin` (SDK + хелперы). Core принимает оба.
+
 ```python
+# Вариант 1: только SDK (см. sdk/README.md, examples/example_plugin/)
+from sdk import BasePlugin, PluginMetadata
+
+# Вариант 2: Core с хелперами (register_service, get_env_config)
 from core.base_plugin import BasePlugin, PluginMetadata
 
 class MyPlugin(BasePlugin):

@@ -112,12 +112,8 @@ class CoreRuntime:
                     # Логируем ошибку для отладки
                     await warning(self, f"Ошибка автозагрузки плагинов: {e}", component="runtime")
 
-            # Регистрация встроенных модулей (обязательные домены)
-            # register_builtin_modules() выбросит RuntimeError если REQUIRED модуль не зарегистрировался
-            await self.module_manager.register_builtin_modules(self)
-            
-            # Проверка, что все REQUIRED модули зарегистрированы
-            # Это дополнительная проверка на случай, если register_builtin_modules() не выбросил ошибку
+            # Модули регистрируются приложением (bootstrap) через register_module_specs() до вызова start().
+            # Проверка, что все REQUIRED модули зарегистрированы (список required задаётся приложением)
             self.module_manager.check_required_modules_registered()
             
             # Логирование зарегистрированных модулей

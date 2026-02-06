@@ -194,33 +194,29 @@ async def test_clear_modules():
 
 
 @pytest.mark.asyncio
-async def test_register_builtin_modules(memory_adapter):
-    """Тест автоматической регистрации встроенных модулей."""
+async def test_register_app_modules_via_bootstrap(memory_adapter):
+    """Тест регистрации модулей приложения через bootstrap."""
     from core.runtime import CoreRuntime
+    from app.bootstrap import ApplicationBootstrap, APP_MODULES
 
     runtime = CoreRuntime(memory_adapter)
+    bootstrap = ApplicationBootstrap(APP_MODULES)
+    await bootstrap.start(runtime)
+    await runtime.start()
     manager = runtime.module_manager
 
-    # Модули регистрируются при вызове start()
-    await runtime.start()
-
-    # Модули должны быть зарегистрированы автоматически
     modules = manager.list_modules()
     assert "devices" in modules
     assert "automation" in modules
     assert "presence" in modules
+    # D2: automation должна быть удаляемой — значит не REQUIRED по умолчанию
+    assert "automation" not in manager.get_required_modules()
 
-    # Проверяем, что модули действительно зарегистрированы
-    devices_module = manager.get_module("devices")
-    assert devices_module is not None
-    assert devices_module.name == "devices"
-
-    automation_module = manager.get_module("automation")
-    assert automation_module is not None
-    assert automation_module.name == "automation"
-
-    presence_module = manager.get_module("presence")
-    assert presence_module is not None
-    assert presence_module.name == "presence"
+    assert manager.get_module("devices") is not None
+    assert manager.get_module("devices").name == "devices"
+    assert manager.get_module("automation") is not None
+    assert manager.get_module("automation").name == "automation"
+    assert manager.get_module("presence") is not None
+    assert manager.get_module("presence").name == "presence"
 
     await runtime.stop()

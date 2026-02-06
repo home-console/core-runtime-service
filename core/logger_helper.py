@@ -18,7 +18,7 @@ Logger Helper - простой wrapper для логирования в core к�
 - service_registry.call("logger.log") - это публичный API, доступный всем
 
 Использует встроенный LoggerModule через service_registry.
-LoggerModule всегда доступен (регистрируется первым в BUILTIN_MODULES),
+LoggerModule всегда доступен (приложение регистрирует его первым в APP_MODULES),
 поэтому fallback'и минимальны - только для случаев до инициализации runtime.
 
 Реальная логика логирования находится в modules/logger/module.py.
