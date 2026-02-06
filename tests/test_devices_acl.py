@@ -4,11 +4,14 @@ from core.runtime import CoreRuntime
 from core.errors import NotFoundError
 from modules.api.auth.context import RequestContext
 from modules.api.auth.contextvars import set_current_request_context
+from app.bootstrap import ApplicationBootstrap, APP_MODULES
 
 
 @pytest.mark.asyncio
 async def test_devices_acl_enforced_on_services(memory_adapter):
     runtime = CoreRuntime(memory_adapter)
+    bootstrap = ApplicationBootstrap(APP_MODULES)
+    await bootstrap.start(runtime)
     await runtime.start()
 
     # Create device owned by user_a

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional, Protocol
 
-from .backend import BackendId, ExecutionBackend, InProcessBackend, ProcessBackend, ContainerBackend, OperationEnvelope, OperationResult
+from .backend import BackendId, ExecutionBackend, InProcessBackend, ProcessBackend, ContainerBackend, OperationResult
 from .policy import ExecutionPolicy, StateExecutionPolicy
 
 
@@ -91,12 +91,17 @@ class ExecutionControllerImpl:
                 backend=str(backend_id),
             )
 
-        envelope = OperationEnvelope(
-            operation_id=operation_id,
+        # Backend работает только с envelope операции (operation_type/params/context).
+        # Policy dict прокидываем через context, чтобы backend мог (опционально) читать свои настройки,
+        # не делая запросов к storage и не ломая границы слоёв.
+        ctx = dict(context or {})
+        ctx.setdefault("operation_id", operation_id)
+        ctx.setdefault("_execution_policy", policy_dict)
+
+        return await backend.execute(
             operation_type=operation_type,
             params=params or {},
-            context=context or {},
-            metadata=metadata,
+            context=ctx,
+            timeout=None,
         )
-        return await backend.execute(envelope)
 

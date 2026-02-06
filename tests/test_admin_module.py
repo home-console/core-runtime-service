@@ -9,12 +9,15 @@
 
 import pytest
 from core.runtime import CoreRuntime
+from app.bootstrap import ApplicationBootstrap, APP_MODULES
 
 
 @pytest.mark.asyncio
 async def test_admin_module_registered(memory_adapter):
-    """Тест: AdminModule регистрируется автоматически."""
+    """Тест: AdminModule регистрируется через bootstrap приложения."""
     runtime = CoreRuntime(memory_adapter)
+    bootstrap = ApplicationBootstrap(APP_MODULES)
+    await bootstrap.start(runtime)
     await runtime.start()
     
     # Проверяем, что модуль зарегистрирован
@@ -29,6 +32,8 @@ async def test_admin_module_registered(memory_adapter):
 async def test_admin_endpoints_registered(memory_adapter):
     """Тест: Admin endpoints регистрируются в HttpRegistry."""
     runtime = CoreRuntime(memory_adapter)
+    bootstrap = ApplicationBootstrap(APP_MODULES)
+    await bootstrap.start(runtime)
     await runtime.start()
     
     # Проверяем, что admin endpoints зарегистрированы
@@ -49,6 +54,8 @@ async def test_admin_endpoints_registered(memory_adapter):
 async def test_admin_runtime_endpoint(memory_adapter):
     """Тест: GET /admin/v1/inspector/runtime возвращает информацию о runtime."""
     runtime = CoreRuntime(memory_adapter)
+    bootstrap = ApplicationBootstrap(APP_MODULES)
+    await bootstrap.start(runtime)
     await runtime.start()
     
     # Вызываем сервис напрямую (имитация HTTP запроса)

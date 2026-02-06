@@ -108,7 +108,10 @@ if TYPE_CHECKING:
 def mock_remote_server():
     # Поднять простой HTTP сервер на свободном порту
     sock = socket.socket()
-    sock.bind(("127.0.0.1", 0))
+    try:
+        sock.bind(("127.0.0.1", 0))
+    except PermissionError:
+        pytest.skip("Network syscalls are not permitted in this environment (sandbox).")
     addr, port = sock.getsockname()
     sock.close()
 

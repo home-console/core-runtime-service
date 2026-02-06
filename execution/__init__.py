@@ -13,7 +13,6 @@ from .backend import (
     InProcessBackend,
     ProcessBackend,
     ContainerBackend,
-    OperationEnvelope,
     OperationResult,
 )
 
@@ -26,7 +25,6 @@ __all__ = [
     "InProcessBackend",
     "ProcessBackend",
     "ContainerBackend",
-    "OperationEnvelope",
     "OperationResult",
 ]
 

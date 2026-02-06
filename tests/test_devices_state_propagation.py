@@ -12,6 +12,7 @@ Scenario:
 import asyncio
 import pytest
 from core.runtime import CoreRuntime
+from app.bootstrap import ApplicationBootstrap, APP_MODULES
 
 
 @pytest.mark.asyncio
@@ -19,6 +20,8 @@ async def test_state_propagation_via_event_bus(memory_adapter):
     """Test that external device state propagates to internal device via event_bus."""
 
     runtime = CoreRuntime(memory_adapter)
+    bootstrap = ApplicationBootstrap(APP_MODULES)
+    await bootstrap.start(runtime)
     await runtime.start()
     # give plugins a moment to finish initialization/subscriptions
     await asyncio.sleep(0.01)
@@ -101,6 +104,8 @@ async def test_state_propagation_no_mapping(memory_adapter):
     """Test that unmapped external state is ignored."""
 
     runtime = CoreRuntime(memory_adapter)
+    bootstrap = ApplicationBootstrap(APP_MODULES)
+    await bootstrap.start(runtime)
     await runtime.start()
     await asyncio.sleep(0.01)
 
@@ -137,6 +142,8 @@ async def test_state_propagation_merge(memory_adapter):
     """Test that external state merges with existing internal state."""
 
     runtime = CoreRuntime(memory_adapter)
+    bootstrap = ApplicationBootstrap(APP_MODULES)
+    await bootstrap.start(runtime)
     await runtime.start()
     await asyncio.sleep(0.01)
 
