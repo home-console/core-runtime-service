@@ -29,6 +29,11 @@ from .introspection import (
     list_execution_traces,
     get_execution_trace,
     list_operation_executions,
+    list_execution_retries,
+    get_execution_tree,
+    list_schedules,
+    get_schedule,
+    list_operation_schedules,
 )
 from .operations import (
     admin_operations_create,
@@ -113,6 +118,37 @@ class AdminModule(RuntimeModule):
             service="admin.v1.inspector.operations.executions",
             description="Inspector: list executions for operation",
         ))
+        self.runtime.http.register(HttpEndpoint(
+            method="GET",
+            path="/admin/v1/inspector/executions/{execution_id}/retries",
+            service="admin.v1.inspector.executions.retries",
+            description="Inspector: list retries for execution",
+        ))
+        self.runtime.http.register(HttpEndpoint(
+            method="GET",
+            path="/admin/v1/inspector/executions/{execution_id}/tree",
+            service="admin.v1.inspector.executions.tree",
+            description="Inspector: execution retry tree",
+        ))
+        # Schedules inspector
+        self.runtime.http.register(HttpEndpoint(
+            method="GET",
+            path="/admin/v1/inspector/schedules",
+            service="admin.v1.inspector.schedules",
+            description="Inspector: list execution schedules",
+        ))
+        self.runtime.http.register(HttpEndpoint(
+            method="GET",
+            path="/admin/v1/inspector/schedules/{schedule_id}",
+            service="admin.v1.inspector.schedules.get",
+            description="Inspector: get execution schedule by id",
+        ))
+        self.runtime.http.register(HttpEndpoint(
+            method="GET",
+            path="/admin/v1/inspector/operations/{operation_id}/schedules",
+            service="admin.v1.inspector.operations.schedules",
+            description="Inspector: list schedules for operation",
+        ))
 
         # --- Webhook demo (C4) ---
         async def webhook_test_service(payload, **kwargs):
@@ -157,6 +193,37 @@ class AdminModule(RuntimeModule):
 
             return handler
 
+        def wrap_execution_retries():
+            async def handler(execution_id=None, **kw):
+                eid = execution_id if execution_id is not None else kw.get("execution_id") or kw.get("id")
+                return await list_execution_retries(self.runtime, eid)
+
+            return handler
+
+        def wrap_execution_tree():
+            async def handler(execution_id=None, **kw):
+                eid = execution_id if execution_id is not None else kw.get("execution_id") or kw.get("id")
+                return await get_execution_tree(self.runtime, eid)
+
+            return handler
+
+        def wrap_schedules():
+            return lambda *args, **kw: list_schedules(self.runtime)
+
+        def wrap_schedule_get():
+            async def handler(schedule_id=None, **kw):
+                sid = schedule_id if schedule_id is not None else kw.get("schedule_id") or kw.get("id")
+                return await get_schedule(self.runtime, sid)
+
+            return handler
+
+        def wrap_operation_schedules():
+            async def handler(operation_id=None, **kw):
+                oid = operation_id if operation_id is not None else kw.get("operation_id") or kw.get("id")
+                return await list_operation_schedules(self.runtime, oid)
+
+            return handler
+
         registrations = [
             ("admin.v1.runtime", wrap_introspection(get_runtime_info, with_started_at=True)),
             ("admin.v1.plugins", wrap_introspection(list_plugins)),
@@ -171,6 +238,11 @@ class AdminModule(RuntimeModule):
             ("admin.v1.inspector.executions", wrap_introspection(list_execution_traces)),
             ("admin.v1.inspector.executions.get", wrap_execution_get()),
             ("admin.v1.inspector.operations.executions", wrap_operation_executions()),
+            ("admin.v1.inspector.executions.retries", wrap_execution_retries()),
+            ("admin.v1.inspector.executions.tree", wrap_execution_tree()),
+            ("admin.v1.inspector.schedules", wrap_schedules()),
+            ("admin.v1.inspector.schedules.get", wrap_schedule_get()),
+            ("admin.v1.inspector.operations.schedules", wrap_operation_schedules()),
             # Admin devices read-only proxy services (kept for Admin UI compatibility)
             ("admin.v1.devices.list", wrap_domain(__import__("modules.admin.devices", fromlist=["admin_devices_list"]).admin_devices_list)),
             ("admin.v1.devices.get", wrap_domain(__import__("modules.admin.devices", fromlist=["admin_devices_get"]).admin_devices_get)),

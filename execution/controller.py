@@ -120,8 +120,28 @@ class ExecutionControllerImpl:
                         "started_at": trace.started_at.isoformat(),
                         "finished_at": trace.finished_at.isoformat() if trace.finished_at else None,
                         "duration_ms": trace.duration_ms,
+                        "parent_execution_id": trace.parent_execution_id,
+                        "retry_index": trace.retry_index,
                     },
                 )
+                # Lineage index (by_parent) — только если есть родитель
+                if trace.parent_execution_id:
+                    parent_key = f"by_parent/{trace.parent_execution_id}/{trace.execution_id}"
+                    await storage.set(
+                        "execution",
+                        parent_key,
+                        {
+                            "execution_id": trace.execution_id,
+                            "operation_id": trace.operation_id,
+                            "operation_type": trace.operation_type,
+                            "backend": trace.backend,
+                            "status": trace.status,
+                            "started_at": trace.started_at.isoformat(),
+                            "finished_at": trace.finished_at.isoformat() if trace.finished_at else None,
+                            "duration_ms": trace.duration_ms,
+                            "retry_index": trace.retry_index,
+                        },
+                    )
             except Exception:
                 # Observability не должен ломать execution
                 pass
@@ -167,8 +187,27 @@ class ExecutionControllerImpl:
                         "started_at": trace.started_at.isoformat(),
                         "finished_at": trace.finished_at.isoformat() if trace.finished_at else None,
                         "duration_ms": trace.duration_ms,
+                        "parent_execution_id": trace.parent_execution_id,
+                        "retry_index": trace.retry_index,
                     },
                 )
+                if trace.parent_execution_id:
+                    parent_key = f"by_parent/{trace.parent_execution_id}/{trace.execution_id}"
+                    await storage.set(
+                        "execution",
+                        parent_key,
+                        {
+                            "execution_id": trace.execution_id,
+                            "operation_id": trace.operation_id,
+                            "operation_type": trace.operation_type,
+                            "backend": trace.backend,
+                            "status": trace.status,
+                            "started_at": trace.started_at.isoformat(),
+                            "finished_at": trace.finished_at.isoformat() if trace.finished_at else None,
+                            "duration_ms": trace.duration_ms,
+                            "retry_index": trace.retry_index,
+                        },
+                    )
             except Exception:
                 pass
 
@@ -261,7 +300,16 @@ class ExecutionControllerImpl:
         # Лимиты concurrency (D3.4). Для служебных операций (execution.*) не применяем.
         limits = (policy_dict.get("limits") or {}) if isinstance(policy_dict, dict) else {}
         max_running = limits.get("max_running")
-        execution_id = self._generate_execution_id()
+        # Lineage / overrides (для retry/replay)
+        parent_execution_id = (context or {}).get("_parent_execution_id")
+        retry_index_raw = (context or {}).get("_retry_index")
+        try:
+            retry_index = int(retry_index_raw) if retry_index_raw is not None else 0
+        except (TypeError, ValueError):
+            retry_index = 0
+
+        forced_execution_id = (context or {}).get("_execution_id_override")
+        execution_id = forced_execution_id or self._generate_execution_id()
 
         if not operation_type.startswith("execution.") and isinstance(max_running, int):
             async with self._running_lock:
@@ -310,7 +358,30 @@ class ExecutionControllerImpl:
             error_code=None,
             error_message=None,
             stderr_tail=None,
+            parent_execution_id=parent_execution_id,
+            retry_index=retry_index,
         )
+
+        # Сохраняем envelope для последующих retry/replay (D3.5).
+        storage = getattr(self._runtime, "storage", None)
+        if storage is not None:
+            try:
+                replay_ctx = {
+                    "request_id": (context or {}).get("request_id"),
+                    "caller": (context or {}).get("caller"),
+                    "metadata": (context or {}).get("metadata") if isinstance((context or {}).get("metadata"), dict) else {},
+                }
+                await storage.set(
+                    "execution",
+                    f"envelopes/{execution_id}",
+                    {
+                        "operation_type": operation_type,
+                        "params": params or {},
+                        "context": replay_ctx,
+                    },
+                )
+            except Exception:
+                pass
 
         await self.on_execution_start(trace)
 
@@ -430,4 +501,115 @@ class ExecutionControllerImpl:
                 pass
 
         return accepted
+
+    # --- Retry / Replay (D3.5) ---
+
+    def _can_retry(self, trace: ExecutionTrace, policy: Dict[str, Any]) -> tuple[bool, Optional[str], int]:
+        """
+        Проверяет policy.retry и возвращает (can_retry, error_code, next_retry_index).
+        """
+        cfg = (policy.get("retry") or {}) if isinstance(policy, dict) else {}
+        max_attempts = cfg.get("max_attempts")
+        retry_on = cfg.get("retry_on") or ["error", "timeout"]
+        allowed_statuses = set(str(s) for s in retry_on)
+
+        if trace.status not in allowed_statuses and trace.status != "cancelled":
+            return False, "retry_not_allowed", trace.retry_index
+
+        next_index = trace.retry_index + 1
+
+        if isinstance(max_attempts, int) and max_attempts > 0:
+            # attempts считаем как retry_index+1 (текущая попытка) + 1 (новая)
+            if next_index + 1 > max_attempts:
+                return False, "retry_limit_exceeded", next_index
+
+        return True, None, next_index
+
+    async def retry_execution(self, execution_id: str, reason: str = "retry") -> OperationResult:
+        """
+        Retry существующего execution:
+          - только для статусов error/timeout/cancelled;
+          - каждый retry = новый execution_id;
+          - новый trace ссылается на previous через parent_execution_id и retry_index.
+        """
+        policy = await self._load_policy()
+
+        trace = await self._load_execution_trace(execution_id)
+        if trace is None:
+            return OperationResult(
+                ok=False,
+                error={"code": "retry_not_allowed", "message": "Execution not found"},
+                backend=None,
+            )
+
+        if trace.status not in ("error", "timeout", "cancelled"):
+            return OperationResult(
+                ok=False,
+                error={"code": "retry_not_allowed", "message": f"Cannot retry execution in status={trace.status}"},
+                backend=trace.backend,
+            )
+
+        can, err_code, next_index = self._can_retry(trace, policy)
+        if not can:
+            return OperationResult(
+                ok=False,
+                error={"code": err_code or "retry_not_allowed", "message": "Retry is not allowed by policy"},
+                backend=trace.backend,
+            )
+
+        storage = getattr(self._runtime, "storage", None)
+        if storage is None:
+            return OperationResult(
+                ok=False,
+                error={"code": "execution_envelope_not_found", "message": "Storage not available for replay"},
+                backend=trace.backend,
+            )
+
+        envelope = await storage.get("execution", f"envelopes/{execution_id}")
+        if not isinstance(envelope, dict):
+            return OperationResult(
+                ok=False,
+                error={"code": "execution_envelope_not_found", "message": "Cannot replay execution without envelope"},
+                backend=trace.backend,
+            )
+
+        op_type = str(envelope.get("operation_type") or trace.operation_type)
+        params = envelope.get("params") or {}
+        base_ctx = envelope.get("context") or {}
+
+        new_execution_id = self._generate_execution_id()
+        ctx = dict(base_ctx)
+        ctx["_parent_execution_id"] = execution_id
+        ctx["_retry_index"] = next_index
+        ctx["_execution_id_override"] = new_execution_id
+
+        res = await self.execute_operation(
+            operation_id=trace.operation_id,
+            operation_type=op_type,
+            params=params,
+            context=ctx,
+        )
+
+        # Событие execution.retried
+        try:
+            new_trace = await self._load_execution_trace(new_execution_id)
+        except Exception:
+            new_trace = None
+
+        event_bus = getattr(self._runtime, "event_bus", None)
+        if event_bus is not None and hasattr(event_bus, "publish"):
+            try:
+                await event_bus.publish(
+                    "execution.retried",
+                    {
+                        "parent_execution_id": execution_id,
+                        "execution_id": new_execution_id,
+                        "retry_index": next_index,
+                        "backend": (new_trace.backend if new_trace else trace.backend),
+                    },
+                )
+            except Exception:
+                pass
+
+        return res
 

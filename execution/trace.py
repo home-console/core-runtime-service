@@ -38,6 +38,10 @@ class ExecutionTrace:
 
     stderr_tail: Optional[str]  # max N chars
 
+    # Lineage metadata (D3.5)
+    parent_execution_id: Optional[str] = None
+    retry_index: int = 0
+
     # Cancellation metadata (D3.4)
     cancelled_at: Optional[datetime] = None
     cancel_reason: Optional[str] = None
@@ -47,6 +51,8 @@ class ExecutionTrace:
             "execution_id": self.execution_id,
             "operation_id": self.operation_id,
             "operation_type": self.operation_type,
+            "parent_execution_id": self.parent_execution_id,
+            "retry_index": self.retry_index,
             "backend": self.backend,
             "status": self.status,
             "started_at": self.started_at.isoformat(),
@@ -65,6 +71,8 @@ class ExecutionTrace:
             execution_id=str(data["execution_id"]),
             operation_id=str(data["operation_id"]),
             operation_type=str(data["operation_type"]),
+            parent_execution_id=data.get("parent_execution_id"),
+            retry_index=int(data.get("retry_index") or 0),
             backend=_parse_backend(data.get("backend")),
             status=_parse_status(data.get("status")),
             started_at=_parse_datetime(data.get("started_at")),

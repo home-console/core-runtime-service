@@ -49,6 +49,9 @@ async def test_admin_endpoints_registered(memory_adapter):
     assert any("/admin/v1/inspector/executions" in path for path in paths)
     assert any("/admin/v1/inspector/executions/{execution_id}" in path for path in paths)
     assert any("/admin/v1/inspector/operations/{operation_id}/executions" in path for path in paths)
+    assert any("/admin/v1/inspector/schedules" in path for path in paths)
+    assert any("/admin/v1/inspector/schedules/{schedule_id}" in path for path in paths)
+    assert any("/admin/v1/inspector/operations/{operation_id}/schedules" in path for path in paths)
     
     await runtime.stop()
 

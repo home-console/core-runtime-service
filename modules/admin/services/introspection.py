@@ -245,3 +245,157 @@ async def list_operation_executions(runtime: Any, operation_id: str) -> List[Dic
         except Exception:
             continue
     return result
+
+
+# --- Execution schedules (D3.6) ---
+
+
+async def list_schedules(runtime: Any) -> List[Dict[str, Any]]:
+    """
+    Inspector view: список всех расписаний execution.
+
+    Источник: runtime.storage, namespace \"execution\", ключи schedules/{schedule_id}.
+    """
+    try:
+        keys = await runtime.storage.list_keys("execution")
+    except Exception:
+        return []
+
+    result: List[Dict[str, Any]] = []
+    for key in keys:
+        if not key.startswith("schedules/"):
+            continue
+        try:
+            data = await runtime.storage.get("execution", key)
+            if isinstance(data, dict):
+                result.append(data)
+        except Exception:
+            continue
+    return result
+
+
+async def get_schedule(runtime: Any, schedule_id: str) -> Dict[str, Any] | None:
+    """
+    Inspector view: получить одно расписание по schedule_id.
+    """
+    if not schedule_id:
+        return None
+    key = f"schedules/{schedule_id}"
+    try:
+        data = await runtime.storage.get("execution", key)
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        return None
+    return None
+
+
+async def list_operation_schedules(runtime: Any, operation_id: str) -> List[Dict[str, Any]]:
+    """
+    Inspector view: список расписаний для operation (operation_type).
+
+    Источник: execution/schedules_by_operation/{operation_id}/{schedule_id}.
+    """
+    if not operation_id:
+        return []
+
+    try:
+        keys = await runtime.storage.list_keys("execution")
+    except Exception:
+        return []
+
+    prefix = f"schedules_by_operation/{operation_id}/"
+    result: List[Dict[str, Any]] = []
+    for key in keys:
+        if not key.startswith(prefix):
+            continue
+        try:
+            idx = await runtime.storage.get("execution", key)
+            if not isinstance(idx, dict):
+                continue
+            sched_id = idx.get("schedule_id")
+            if not sched_id:
+                continue
+            sched = await runtime.storage.get("execution", f"schedules/{sched_id}")
+            if isinstance(sched, dict):
+                result.append(sched)
+        except Exception:
+            continue
+    return result
+
+
+async def list_execution_retries(runtime: Any, execution_id: str) -> List[Dict[str, Any]]:
+    """
+    Inspector view: список retry-исполнений для заданного execution_id.
+
+    Источник: namespace \"execution\", ключи by_parent/{execution_id}/{child_execution_id}.
+    """
+    if not execution_id:
+        return []
+
+    try:
+        keys = await runtime.storage.list_keys("execution")
+    except Exception:
+        return []
+
+    prefix = f"by_parent/{execution_id}/"
+    result: List[Dict[str, Any]] = []
+    for key in keys:
+        if not key.startswith(prefix):
+            continue
+        try:
+            idx = await runtime.storage.get("execution", key)
+            if not isinstance(idx, dict):
+                continue
+            child_id = idx.get("execution_id")
+            if not child_id:
+                continue
+            trace = await runtime.storage.get("execution", f"traces/{child_id}")
+            if isinstance(trace, dict):
+                result.append(trace)
+        except Exception:
+            continue
+
+    # Сортируем по retry_index для предсказуемого порядка
+    result.sort(key=lambda t: t.get("retry_index", 0))
+    return result
+
+
+async def get_execution_tree(runtime: Any, execution_id: str) -> Dict[str, Any] | None:
+    """
+    Inspector view: дерево retry для execution.
+
+    Node:
+      {
+        execution_id,
+        retry_index,
+        status,
+        backend,
+        children: [...],
+      }
+    """
+    if not execution_id:
+        return None
+
+    async def _build(node_id: str) -> Dict[str, Any] | None:
+        tr = await runtime.storage.get("execution", f"traces/{node_id}")
+        if not isinstance(tr, dict):
+            return None
+        children = await list_execution_retries(runtime, node_id)
+        child_nodes: List[Dict[str, Any]] = []
+        for ch in children:
+            cid = ch.get("execution_id")
+            if not cid:
+                continue
+            node = await _build(cid)
+            if node:
+                child_nodes.append(node)
+        return {
+            "execution_id": tr.get("execution_id"),
+            "retry_index": tr.get("retry_index", 0),
+            "status": tr.get("status"),
+            "backend": tr.get("backend"),
+            "children": child_nodes,
+        }
+
+    return await _build(execution_id)

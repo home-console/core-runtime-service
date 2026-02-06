@@ -19,6 +19,11 @@ from modules.admin.services.introspection import (
     list_execution_traces,
     get_execution_trace,
     list_operation_executions,
+    list_execution_retries,
+    get_execution_tree,
+    list_schedules,
+    get_schedule,
+    list_operation_schedules,
 )
 
 __all__ = [
@@ -35,4 +40,9 @@ __all__ = [
     "list_execution_traces",
     "get_execution_trace",
     "list_operation_executions",
+    "list_execution_retries",
+    "get_execution_tree",
+    "list_schedules",
+    "get_schedule",
+    "list_operation_schedules",
 ]

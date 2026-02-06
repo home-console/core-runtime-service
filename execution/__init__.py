@@ -16,6 +16,7 @@ from .backend import (
     OperationResult,
 )
 from .trace import ExecutionTrace
+from .scheduler import ExecutionScheduler, ExecutionSchedule
 
 __all__ = [
     "ExecutionControllerImpl",
@@ -28,5 +29,7 @@ __all__ = [
     "ContainerBackend",
     "OperationResult",
     "ExecutionTrace",
+    "ExecutionScheduler",
+    "ExecutionSchedule",
 ]
 
