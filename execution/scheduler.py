@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, UTC
 from typing import Any, Dict, Optional, Literal, List
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 
 ScheduleTriggerType = Literal["delay", "interval", "cron"]
@@ -32,7 +33,11 @@ class ExecutionSchedule:
     trigger_type: ScheduleTriggerType
     trigger_at: Optional[datetime] = None        # delay
     trigger_every_seconds: Optional[int] = None  # interval
-    trigger_cron: Optional[str] = None           # cron expression (D3.7+)
+    trigger_cron: Optional[str] = None           # legacy cron field (D3.6)
+
+    # Cron trigger metadata (D3.7)
+    cron_expr: Optional[str] = None
+    cron_timezone: Optional[str] = "UTC"
 
     enabled: bool = True
     max_runs: Optional[int] = None
@@ -53,7 +58,8 @@ class ExecutionSchedule:
                 "type": self.trigger_type,
                 "at": self.trigger_at.isoformat() if self.trigger_at else None,
                 "every_seconds": self.trigger_every_seconds,
-                "cron": self.trigger_cron,
+                "cron": self.cron_expr or self.trigger_cron,
+                "timezone": self.cron_timezone,
             },
             "enabled": self.enabled,
             "max_runs": self.max_runs,
@@ -66,6 +72,8 @@ class ExecutionSchedule:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ExecutionSchedule":
         trigger = data.get("trigger") or {}
+        cron = trigger.get("cron")
+        tz = trigger.get("timezone") or "UTC"
         return cls(
             schedule_id=str(data["schedule_id"]),
             operation_type=str(data["operation_type"]),
@@ -74,7 +82,9 @@ class ExecutionSchedule:
             trigger_type=str(trigger.get("type") or "interval"),  # default interval
             trigger_at=_parse_datetime_optional(trigger.get("at")),
             trigger_every_seconds=_parse_int_optional(trigger.get("every_seconds")),
-            trigger_cron=trigger.get("cron"),
+            trigger_cron=cron,
+            cron_expr=cron,
+            cron_timezone=str(tz),
             enabled=bool(data.get("enabled", True)),
             max_runs=_parse_int_optional(data.get("max_runs")),
             run_count=int(data.get("run_count") or 0),
@@ -104,8 +114,25 @@ class ExecutionSchedule:
                 self.next_run_at = None
             else:
                 self.next_run_at = now + timedelta(seconds=sec)
+        elif self.trigger_type == "cron":
+            expr = self.cron_expr or self.trigger_cron
+            if not expr:
+                self.enabled = False
+                self.next_run_at = None
+                return
+            try:
+                self.next_run_at = compute_next_run(
+                    cron_expr=expr,
+                    timezone=self.cron_timezone or "UTC",
+                    last_run_at=self.last_run_at,
+                    now=now,
+                )
+            except Exception:
+                # Некорректное cron-выражение — отключаем расписание.
+                self.enabled = False
+                self.next_run_at = None
         else:
-            # cron-поддержка появится в D3.7; до этого считаем расписание неактивным.
+            # Неизвестный trigger_type — отключаем.
             self.enabled = False
             self.next_run_at = None
 
@@ -124,8 +151,23 @@ class ExecutionSchedule:
                 self.next_run_at = None
             else:
                 self.next_run_at = now + timedelta(seconds=sec)
+        elif self.trigger_type == "cron":
+            expr = self.cron_expr or self.trigger_cron
+            if not expr:
+                self.enabled = False
+                self.next_run_at = None
+                return
+            try:
+                self.next_run_at = compute_next_run(
+                    cron_expr=expr,
+                    timezone=self.cron_timezone or "UTC",
+                    last_run_at=now,
+                    now=now,
+                )
+            except Exception:
+                self.enabled = False
+                self.next_run_at = None
         else:
-            # cron будет реализован позже; пока просто отключаем.
             self.enabled = False
             self.next_run_at = None
 
@@ -160,6 +202,80 @@ def _parse_int_optional(value: Any) -> Optional[int]:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def compute_next_run(
+    *,
+    cron_expr: str,
+    timezone: str,
+    last_run_at: Optional[datetime],
+    now: datetime,
+) -> datetime:
+    """
+    Вычисляет следующий cron-tick по выражению вида \"*/N * * * *\" или \"* * * * *\".
+
+    Ограничения (MVP D3.7):
+    - поддерживается только минутное поле:
+      - \"*\"       → каждую минуту
+      - \"*/N\"    → каждые N минут
+      - \"M\" (int) → конкретная минута в часе
+    - остальные поля должны быть \"*\"
+
+    now и last_run_at — timezone-aware; возвращаемое значение тоже timezone-aware.
+    """
+    parts = cron_expr.split()
+    if len(parts) != 5:
+        raise ValueError(f"Unsupported cron expression: {cron_expr}")
+
+    minute_field, hour_field, dom_field, month_field, dow_field = parts
+    if hour_field != "*" or dom_field != "*" or month_field != "*" or dow_field != "*":
+        raise ValueError(f"Unsupported cron expression (only minute-level '*' supported): {cron_expr}")
+
+    # Разбираем минутное поле
+    step: Optional[int] = None
+    exact_minute: Optional[int] = None
+
+    if minute_field == "*":
+        step = 1
+    elif minute_field.startswith("*/"):
+        try:
+            step = int(minute_field[2:])
+            if step <= 0:
+                raise ValueError
+        except Exception:
+            raise ValueError(f"Invalid minute step in cron expression: {cron_expr}") from None
+    else:
+        try:
+            exact_minute = int(minute_field)
+            if not (0 <= exact_minute < 60):
+                raise ValueError
+        except Exception:
+            raise ValueError(f"Invalid minute field in cron expression: {cron_expr}") from None
+
+    try:
+        tz = ZoneInfo(timezone)
+    except Exception:
+        raise ValueError(f"Invalid timezone for cron expression: {timezone}") from None
+
+    base = last_run_at or now
+    if base.tzinfo is None:
+        base = base.replace(tzinfo=tz)
+    else:
+        base = base.astimezone(tz)
+
+    # Ищем первый tick строго ПОСЛЕ base
+    candidate = base.replace(second=0, microsecond=0) + timedelta(minutes=1)
+
+    while True:
+        m = candidate.minute
+        if exact_minute is not None:
+            if m == exact_minute:
+                return candidate
+        else:
+            # Каждые step минут (по умолчанию step=1 → каждую минуту)
+            if step is None or step == 1 or m % step == 0:
+                return candidate
+        candidate += timedelta(minutes=1)
 
 
 class ExecutionScheduler:
@@ -243,6 +359,8 @@ class ExecutionScheduler:
                 continue
 
             if now < sched.next_run_at:
+                # next_run_at уже посчитан — сохраняем состояние и ждём следующего tick.
+                await self.save_schedule(sched)
                 continue
 
             # Проверка max_runs

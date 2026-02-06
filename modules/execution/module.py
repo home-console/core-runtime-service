@@ -99,7 +99,7 @@ class ExecutionModule(RuntimeModule):
                 }
 
             trigger_type = (trigger.get("type") or "interval").lower()
-            if trigger_type not in ("delay", "interval"):
+            if trigger_type not in ("delay", "interval", "cron"):
                 return {
                     "status": "error",
                     "error": {"code": "unsupported_trigger_type", "message": f"Unsupported trigger type: {trigger_type}"},
@@ -111,13 +111,48 @@ class ExecutionModule(RuntimeModule):
             every_seconds = trigger.get("every_seconds")
             at_raw = trigger.get("at")
 
+            from execution.scheduler import _parse_datetime_optional, compute_next_run  # type: ignore[attr-defined]
+
             trigger_at = None
             if at_raw is not None:
-                from execution.scheduler import _parse_datetime_optional  # type: ignore[attr-defined]
-
                 trigger_at = _parse_datetime_optional(at_raw)
 
-            if trigger_type == "delay":
+            cron_expr = None
+            cron_tz = "UTC"
+
+            if trigger_type == "cron":
+                # Для cron запрещаем at/every_seconds.
+                if every_seconds is not None or at_raw is not None:
+                    return {
+                        "status": "error",
+                        "error": {
+                            "code": "invalid_cron_trigger",
+                            "message": "at/every_seconds must not be set for cron trigger",
+                        },
+                    }
+                cron_expr = trigger.get("expr") or trigger.get("cron")
+                if not isinstance(cron_expr, str) or not cron_expr.strip():
+                    return {
+                        "status": "error",
+                        "error": {"code": "invalid_cron_expr", "message": "cron expr is required for cron trigger"},
+                    }
+                cron_tz = trigger.get("timezone") or "UTC"
+                # Проверяем cron expr/таймзону через compute_next_run (pure).
+                try:
+                    _ = compute_next_run(
+                        cron_expr=cron_expr,
+                        timezone=cron_tz,
+                        last_run_at=None,
+                        now=now,
+                    )
+                except Exception as e:
+                    return {
+                        "status": "error",
+                        "error": {"code": "invalid_cron_expr", "message": str(e)},
+                    }
+                # next_run_at будет вычислен ExecutionSchedule.ensure_next_run_at
+                next_run_at = None
+            elif trigger_type == "delay":
                 # Один запуск в момент at (или сразу, если не задан).
                 next_run_at = trigger_at or now
             else:
@@ -147,7 +182,9 @@ class ExecutionModule(RuntimeModule):
                 trigger_type=trigger_type,  # type: ignore[arg-type]
                 trigger_at=trigger_at,
                 trigger_every_seconds=int(every_seconds) if every_seconds is not None else None,
-                trigger_cron=None,
+                trigger_cron=cron_expr,
+                cron_expr=cron_expr,
+                cron_timezone=cron_tz,
                 enabled=True,
                 max_runs=params.get("max_runs"),
                 run_count=0,

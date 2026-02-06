@@ -6,7 +6,7 @@ from modules.execution.module import ExecutionModule
 from core.operations import OperationInitiator, OperationInitiatorKind
 from execution.controller import ExecutionControllerImpl
 from execution.backend import ExecutionBackend, OperationResult
-from execution.scheduler import ExecutionScheduler, ExecutionSchedule
+from execution.scheduler import ExecutionScheduler, ExecutionSchedule, compute_next_run
 from typing import Any, Dict
 import asyncio
 
@@ -546,6 +546,80 @@ async def test_scheduler_max_runs_disables_schedule(memory_adapter):
     stored = await runtime.storage.get("execution", f"schedules/{sched.schedule_id}")
     assert stored["run_count"] == 2
     assert stored["enabled"] is False
+
+
+def test_cron_next_run_every_minute():
+    """
+    D3.7: compute_next_run для */1 * * * *.
+    """
+    from datetime import datetime, UTC
+
+    now = datetime(2026, 2, 1, 10, 0, 30, tzinfo=UTC)
+    next_run = compute_next_run(
+        cron_expr="*/1 * * * *",
+        timezone="UTC",
+        last_run_at=None,
+        now=now,
+    )
+    assert next_run == datetime(2026, 2, 1, 10, 1, 0, tzinfo=UTC)
+
+
+@pytest.mark.asyncio
+async def test_scheduler_cron_schedule_runs_on_tick(memory_adapter):
+    """
+    D3.7: cron */1 * * * * → запуск по tick, без sleep.
+    """
+    runtime = CoreRuntime(memory_adapter)
+    controller = ExecutionControllerImpl(runtime)
+    scheduler = ExecutionScheduler(runtime, controller)
+
+    calls = {"value": 0}
+
+    async def handle_job(params, context):
+        calls["value"] += 1
+        return {"calls": calls["value"]}
+
+    runtime.operations.register_handler("test.cron", handle_job)
+
+    from datetime import datetime, UTC
+
+    # now0 = 10:00:30, потом 10:01:01
+    now0 = datetime(2026, 2, 1, 10, 0, 30, tzinfo=UTC)
+    sched = ExecutionSchedule(
+        schedule_id="sched-test-cron",
+        operation_type="test.cron",
+        params={},
+        context={},
+        trigger_type="cron",
+        trigger_at=None,
+        trigger_every_seconds=None,
+        trigger_cron="*/1 * * * *",
+        cron_expr="*/1 * * * *",
+        cron_timezone="UTC",
+        enabled=True,
+        max_runs=None,
+        run_count=0,
+        last_run_at=None,
+        next_run_at=None,
+        created_at=now0,
+    )
+    await scheduler.save_schedule(sched)
+
+    # Первый tick до первой минуты — только вычисляет next_run_at.
+    await scheduler.tick(now=now0)
+
+    stored1 = await runtime.storage.get("execution", "schedules/sched-test-cron")
+    assert stored1["run_count"] == 0
+    # next_run_at должен быть 10:01:00
+    assert stored1["next_run_at"].startswith("2026-02-01T10:01:00")
+
+    # Tick после 10:01:00 — один запуск.
+    now1 = datetime(2026, 2, 1, 10, 1, 1, tzinfo=UTC)
+    await scheduler.tick(now=now1)
+
+    stored2 = await runtime.storage.get("execution", "schedules/sched-test-cron")
+    assert stored2["run_count"] == 1
+    assert calls["value"] == 1
 
 
 @pytest.mark.asyncio
