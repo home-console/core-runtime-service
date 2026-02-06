@@ -40,6 +40,24 @@ class ExecutionModule(RuntimeModule):
         if ops_mgr is None:
             return
 
+        # Operation: execution.cancel (D3.4)
+        async def _handle_execution_cancel(params: dict, context: dict) -> dict:
+            execution_id = params.get("execution_id")
+            if not execution_id:
+                return {"status": "error", "error": {"code": "missing_execution_id", "message": "execution_id is required"}}
+
+            controller: ExecutionControllerImpl = getattr(self.runtime, "execution_controller", None)
+            if controller is None:
+                return {"status": "error", "error": {"code": "no_execution_controller", "message": "Execution controller not available"}}
+
+            accepted = await controller.cancel_execution(execution_id=str(execution_id), reason="user")
+            return {
+                "status": "cancelled" if accepted else "noop",
+                "execution_id": str(execution_id),
+            }
+
+        ops_mgr.register_handler("execution.cancel", _handle_execution_cancel)
+
         if self._original_execute is None:
             self._original_execute = ops_mgr.execute
 

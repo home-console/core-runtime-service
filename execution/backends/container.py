@@ -33,6 +33,9 @@ class ContainerBackendConfig:
 class ContainerBackend:
     def __init__(self, config: Optional[ContainerBackendConfig] = None) -> None:
         self._cfg = config or ContainerBackendConfig()
+        # execution_id -> (container_id | None пока неизвестен)
+        self._containers: Dict[str, Optional[str]] = {}
+        self._lock = asyncio.Lock()
 
     def _get_policy_overrides(self, context: Dict[str, Any]) -> Dict[str, Any]:
         try:
@@ -121,84 +124,108 @@ class ContainerBackend:
                 backend="container",
             )
 
+        exec_id = raw_ctx.get("execution_id")
+        if isinstance(exec_id, str):
+            async with self._lock:
+                # Пока мы не знаем container_id, но фиксируем факт запущенного контейнера.
+                self._containers[exec_id] = None
+
         try:
-            communicate_coro = proc.communicate(stdin_bytes)
-            if timeout is not None:
-                out, err = await asyncio.wait_for(communicate_coro, timeout=timeout)
-            else:
-                out, err = await communicate_coro
-        except asyncio.TimeoutError:
             try:
-                proc.kill()
-            except Exception:
-                pass
-            return OperationResult(
-                ok=False,
-                error={"code": "timeout", "message": "Container execution timed out"},
-                backend="container",
-                killed=True,
-                timed_out=True,
-            )
-        except Exception as e:
-            return OperationResult(
-                ok=False,
-                error={"code": "container_io_failed", "message": str(e), "type": type(e).__name__},
-                backend="container",
-            )
+                communicate_coro = proc.communicate(stdin_bytes)
+                if timeout is not None:
+                    out, err = await asyncio.wait_for(communicate_coro, timeout=timeout)
+                else:
+                    out, err = await communicate_coro
+            except asyncio.TimeoutError:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+                return OperationResult(
+                    ok=False,
+                    error={"code": "timeout", "message": "Container execution timed out"},
+                    backend="container",
+                    killed=True,
+                    timed_out=True,
+                )
+            except Exception as e:
+                return OperationResult(
+                    ok=False,
+                    error={"code": "container_io_failed", "message": str(e), "type": type(e).__name__},
+                    backend="container",
+                )
 
-        stdout_text = (out or b"").decode("utf-8", errors="replace").strip()
-        stderr_text = (err or b"").decode("utf-8", errors="replace").strip()
+            stdout_text = (out or b"").decode("utf-8", errors="replace").strip()
+            stderr_text = (err or b"").decode("utf-8", errors="replace").strip()
 
-        if proc.returncode != 0:
+            if proc.returncode != 0:
+                return OperationResult(
+                    ok=False,
+                    error={
+                        "code": "container_exit_nonzero",
+                        "message": f"Container exited with code {proc.returncode}",
+                        "details": {"stderr": stderr_text, "stdout": stdout_text, "returncode": proc.returncode},
+                    },
+                    backend="container",
+                    stderr=stderr_text or None,
+                )
+
+            try:
+                res = json.loads(stdout_text) if stdout_text else {}
+            except Exception as e:
+                return OperationResult(
+                    ok=False,
+                    error={
+                        "code": "invalid_container_output",
+                        "message": f"Failed to parse container stdout as JSON: {e}",
+                        "details": {"stdout": stdout_text, "stderr": stderr_text},
+                    },
+                    backend="container",
+                    stderr=stderr_text or None,
+                )
+
+            # Transport contract: only status/result/error (do not implement fallback execution logic).
+            status = res.get("status")
+            if status == "ok":
+                result = res.get("result")
+                if not isinstance(result, dict):
+                    result = {"value": result}
+                return OperationResult(ok=True, result=result, backend="container")
+
+            if status == "error":
+                err_obj = res.get("error") or {}
+                if not isinstance(err_obj, dict):
+                    err_obj = {"code": "execution_error", "message": str(err_obj)}
+                # attach stderr for debugging, но не ломаем контракт
+                if stderr_text and "details" not in err_obj:
+                    err_obj["details"] = {"stderr": stderr_text}
+                return OperationResult(ok=False, error=err_obj, backend="container", stderr=stderr_text or None)
+
             return OperationResult(
                 ok=False,
                 error={
-                    "code": "container_exit_nonzero",
-                    "message": f"Container exited with code {proc.returncode}",
-                    "details": {"stderr": stderr_text, "stdout": stdout_text, "returncode": proc.returncode},
+                    "code": "unknown_container_response",
+                    "message": "Container response must have status=ok|error",
+                    "details": {"stdout": res, "stderr": stderr_text},
                 },
                 backend="container",
-                stderr=stderr_text or None,
             )
+        finally:
+            if isinstance(exec_id, str):
+                async with self._lock:
+                    self._containers.pop(exec_id, None)
 
-        try:
-            res = json.loads(stdout_text) if stdout_text else {}
-        except Exception as e:
-            return OperationResult(
-                ok=False,
-                error={
-                    "code": "invalid_container_output",
-                    "message": f"Failed to parse container stdout as JSON: {e}",
-                    "details": {"stdout": stdout_text, "stderr": stderr_text},
-                },
-                backend="container",
-                stderr=stderr_text or None,
-            )
+    async def cancel(self, execution_id: str) -> bool:
+        """
+        Best-effort завершение container execution по execution_id.
 
-        # Transport contract: only status/result/error (do not implement fallback execution logic).
-        status = res.get("status")
-        if status == "ok":
-            result = res.get("result")
-            if not isinstance(result, dict):
-                result = {"value": result}
-            return OperationResult(ok=True, result=result, backend="container")
-
-        if status == "error":
-            err_obj = res.get("error") or {}
-            if not isinstance(err_obj, dict):
-                err_obj = {"code": "execution_error", "message": str(err_obj)}
-            # attach stderr for debugging, но не ломаем контракт
-            if stderr_text and "details" not in err_obj:
-                err_obj["details"] = {"stderr": stderr_text}
-            return OperationResult(ok=False, error=err_obj, backend="container", stderr=stderr_text or None)
-
-        return OperationResult(
-            ok=False,
-            error={
-                "code": "unknown_container_response",
-                "message": "Container response must have status=ok|error",
-                "details": {"stdout": res, "stderr": stderr_text},
-            },
-            backend="container",
-        )
+        В минимальной реализации мы не знаем container_id, поэтому просто возвращаем False,
+        если нет запущенного процесса под этим execution_id. Расширение до docker kill
+        возможно в будущем без изменения контракта.
+        """
+        async with self._lock:
+            exists = execution_id in self._containers
+        #TODO Здесь можно будет вызвать `docker kill` по container_id, если он известен.
+        return exists
 

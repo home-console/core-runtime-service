@@ -6,6 +6,7 @@ from core.operations import OperationInitiator, OperationInitiatorKind
 from execution.controller import ExecutionControllerImpl
 from execution.backend import ExecutionBackend, OperationResult
 from typing import Any, Dict
+import asyncio
 
 
 @pytest.mark.asyncio
@@ -205,4 +206,137 @@ async def test_execution_trace_status_timeout_and_killed(memory_adapter):
     trace_data = await runtime.storage.get("execution", trace_keys[0])
     assert trace_data.get("status") == "timeout"
 
+
+@pytest.mark.asyncio
+async def test_cancel_running_execution_marks_trace_cancelled_and_calls_backend(memory_adapter):
+    """
+    D3.4: cancel running execution → status=cancelled, backend.cancel вызывается.
+    """
+    runtime = CoreRuntime(memory_adapter)
+    await runtime.module_manager.register_module_specs(
+        runtime,
+        [
+            ModuleSpec("execution", required=True),
+        ],
+    )
+    await runtime.start()
+
+    # Долгая операция, которую можно отменить.
+    started = asyncio.Event()
+    never_finish = asyncio.Event()
+
+    async def handle_sleep(params, context):
+        started.set()
+        try:
+            await never_finish.wait()
+        except asyncio.CancelledError:
+            raise
+
+    runtime.operations.register_handler("test.sleep", handle_sleep)
+
+    op = await runtime.operations.create(
+        op_type="test.sleep",
+        params={},
+        initiator=OperationInitiator(kind=OperationInitiatorKind.SYSTEM),
+    )
+
+    # Запускаем выполнение операции (через ExecutionModule + InProcessBackend).
+    execute_task = asyncio.create_task(runtime.operations.execute(op))
+
+    # Ждём, пока handler стартует.
+    await started.wait()
+
+    # Находим execution_id по следу в storage.
+    execution_id = None
+    for _ in range(10):
+        keys = await runtime.storage.list_keys("execution")
+        trace_keys = [k for k in keys if k.startswith("traces/")]
+        for key in trace_keys:
+            data = await runtime.storage.get("execution", key)
+            if data and data.get("operation_id") == op.operation_id:
+                execution_id = data["execution_id"]
+                break
+        if execution_id:
+            break
+        await asyncio.sleep(0.05)
+
+    assert execution_id is not None
+
+    # Вызываем отмену через operation execution.cancel.
+    cancel_op = await runtime.operations.create(
+        op_type="execution.cancel",
+        params={"execution_id": execution_id},
+        initiator=OperationInitiator(kind=OperationInitiatorKind.SYSTEM),
+    )
+    cancel_res = await runtime.operations.execute(cancel_op)
+    assert cancel_res.status.value in ("success", "failed")
+
+    # Дожидаемся завершения исходной операции.
+    await execute_task
+
+    # Проверяем, что trace помечен как cancelled.
+    keys = await runtime.storage.list_keys("execution")
+    trace_keys = [k for k in keys if k.startswith("traces/")]
+    matching = []
+    for key in trace_keys:
+        data = await runtime.storage.get("execution", key)
+        if data and data.get("execution_id") == execution_id:
+            matching.append(data)
+
+    assert len(matching) == 1
+    trace = matching[0]
+    assert trace.get("status") == "cancelled"
+    assert trace.get("cancelled_at") is not None
+    assert trace.get("cancel_reason") == "user"
+
+    await runtime.stop()
+
+
+@pytest.mark.asyncio
+async def test_concurrency_limit_prevents_start_and_sets_error_status(memory_adapter):
+    """
+    D3.4: при превышении limits.max_running execution не стартует и trace получает error с execution_limit_exceeded.
+    """
+    runtime = CoreRuntime(memory_adapter)
+    await runtime.module_manager.register_module_specs(
+        runtime,
+        [
+            ModuleSpec("execution", required=True),
+        ],
+    )
+    await runtime.start()
+
+    # limits.max_running = 0 → все новые execution должны немедленно падать.
+    await runtime.storage.set(
+        "execution",
+        "policy",
+        {
+            "default": "in_process",
+            "limits": {"max_running": 0},
+        },
+    )
+
+    async def handle_ping(params, context):
+        return {"pong": True}
+
+    runtime.operations.register_handler("test.ping", handle_ping)
+
+    op = await runtime.operations.create(
+        op_type="test.ping",
+        params={},
+        initiator=OperationInitiator(kind=OperationInitiatorKind.SYSTEM),
+    )
+    res = await runtime.operations.execute(op)
+
+    # Операция через execution layer должна зафиксировать ошибку лимита в trace,
+    # но OperationManager может считать её "успешно завершённой" с error в payload.
+    # Поэтому проверяем именно trace.
+    keys = await runtime.storage.list_keys("execution")
+    trace_keys = [k for k in keys if k.startswith("traces/")]
+    assert len(trace_keys) == 1
+    data = await runtime.storage.get("execution", trace_keys[0])
+    assert data.get("status") == "error"
+    assert data.get("error_code") == "execution_limit_exceeded"
+
+    await runtime.stop()
 

@@ -6,7 +6,7 @@ from typing import Any, Dict, Literal, Optional
 
 
 ExecutionBackendId = Literal["in_process", "process", "container"]
-ExecutionStatus = Literal["running", "ok", "error", "timeout", "killed"]
+ExecutionStatus = Literal["running", "ok", "error", "timeout", "killed", "cancelled"]
 
 
 @dataclass
@@ -38,6 +38,10 @@ class ExecutionTrace:
 
     stderr_tail: Optional[str]  # max N chars
 
+    # Cancellation metadata (D3.4)
+    cancelled_at: Optional[datetime] = None
+    cancel_reason: Optional[str] = None
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "execution_id": self.execution_id,
@@ -51,6 +55,8 @@ class ExecutionTrace:
             "error_code": self.error_code,
             "error_message": self.error_message,
             "stderr_tail": self.stderr_tail,
+            "cancelled_at": self.cancelled_at.isoformat() if self.cancelled_at else None,
+            "cancel_reason": self.cancel_reason,
         }
 
     @classmethod
@@ -67,6 +73,8 @@ class ExecutionTrace:
             error_code=data.get("error_code"),
             error_message=data.get("error_message"),
             stderr_tail=data.get("stderr_tail"),
+            cancelled_at=_parse_datetime_optional(data.get("cancelled_at")),
+            cancel_reason=data.get("cancel_reason"),
         )
 
 
@@ -102,7 +110,7 @@ def _parse_backend(value: Any) -> ExecutionBackendId:
 
 
 def _parse_status(value: Any) -> ExecutionStatus:
-    if value in ("running", "ok", "error", "timeout", "killed"):
+    if value in ("running", "ok", "error", "timeout", "killed", "cancelled"):
         return value  # type: ignore[return-value]
     return "error"
 

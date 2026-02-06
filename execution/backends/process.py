@@ -31,6 +31,9 @@ class ProcessBackendConfig:
 class ProcessBackend:
     def __init__(self, config: Optional[ProcessBackendConfig] = None) -> None:
         self._cfg = config or ProcessBackendConfig()
+        # execution_id -> Process
+        self._procs: Dict[str, asyncio.subprocess.Process] = {}
+        self._lock = asyncio.Lock()
 
     async def execute(
         self,
@@ -40,7 +43,7 @@ class ProcessBackend:
         context: Dict[str, Any],
         timeout: int | None = None,
     ) -> OperationResult:
-        # Execution protocol envelope (identичен ContainerBackend / runner).
+        # Execution protocol envelope (идентичен ContainerBackend / runner).
         raw_ctx = context or {}
         ctx = {
             "request_id": raw_ctx.get("request_id"),
@@ -83,95 +86,135 @@ class ProcessBackend:
                 backend="process",
             )
 
+        exec_id = raw_ctx.get("execution_id")
+        if isinstance(exec_id, str):
+            async with self._lock:
+                self._procs[exec_id] = proc
+
         try:
-            communicate_coro = proc.communicate(stdin_bytes)
-            if timeout is not None:
-                out, err = await asyncio.wait_for(communicate_coro, timeout=timeout)
-            else:
-                out, err = await communicate_coro
+            try:
+                communicate_coro = proc.communicate(stdin_bytes)
+                if timeout is not None:
+                    out, err = await asyncio.wait_for(communicate_coro, timeout=timeout)
+                else:
+                    out, err = await communicate_coro
+            except asyncio.TimeoutError:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+                return OperationResult(
+                    ok=False,
+                    error={"code": "timeout", "message": "Process execution timed out"},
+                    backend="process",
+                    killed=True,
+                    timed_out=True,
+                )
+            except Exception as e:
+                return OperationResult(
+                    ok=False,
+                    error={"code": "process_io_failed", "message": str(e), "type": type(e).__name__},
+                    backend="process",
+                )
+
+            stdout_text = (out or b"").decode("utf-8", errors="replace").strip()
+            stderr_text = (err or b"").decode("utf-8", errors="replace").strip()
+
+            if proc.returncode != 0:
+                # Runner всегда пишет корректный JSON, но transport не делает предположений
+                return OperationResult(
+                    ok=False,
+                    error={
+                        "code": "process_exit_nonzero",
+                        "message": f"Runner process exited with code {proc.returncode}",
+                        "details": {"stderr": stderr_text, "stdout": stdout_text, "returncode": proc.returncode},
+                    },
+                    backend="process",
+                    stderr=stderr_text or None,
+                )
+
+            if not stdout_text:
+                return OperationResult(
+                    ok=False,
+                    error={
+                        "code": "empty_runner_output",
+                        "message": "Runner produced empty stdout",
+                        "details": {"stderr": stderr_text},
+                    },
+                    backend="process",
+                    stderr=stderr_text or None,
+                )
+
+            try:
+                res = json.loads(stdout_text)
+            except Exception as e:
+                return OperationResult(
+                    ok=False,
+                    error={
+                        "code": "invalid_runner_output",
+                        "message": f"Failed to parse runner stdout as JSON: {e}",
+                        "details": {"stdout": stdout_text, "stderr": stderr_text},
+                    },
+                    backend="process",
+                    stderr=stderr_text or None,
+                )
+
+            status = res.get("status")
+            if status == "ok":
+                result = res.get("result")
+                if not isinstance(result, dict):
+                    result = {"value": result}
+                return OperationResult(ok=True, result=result, backend="process")
+
+            if status == "error":
+                err_obj = res.get("error") or {}
+                if not isinstance(err_obj, dict):
+                    err_obj = {"code": "execution_error", "message": str(err_obj)}
+                if stderr_text and "details" not in err_obj:
+                    err_obj["details"] = {"stderr": stderr_text}
+                return OperationResult(ok=False, error=err_obj, backend="process", stderr=stderr_text or None)
+
+            return OperationResult(
+                ok=False,
+                error={
+                    "code": "unknown_runner_response",
+                    "message": "Runner response must have status=ok|error",
+                    "details": {"stdout": res, "stderr": stderr_text},
+                },
+                backend="process",
+            )
+        finally:
+            if isinstance(exec_id, str):
+                async with self._lock:
+                    self._procs.pop(exec_id, None)
+
+    async def cancel(self, execution_id: str) -> bool:
+        """
+        Best-effort завершение процесса по execution_id.
+        """
+        async with self._lock:
+            proc = self._procs.get(execution_id)
+        if proc is None:
+            return False
+        try:
+            proc.terminate()
+        except ProcessLookupError:
+            return False
+        except Exception:
+            # Пытаемся убить процесс жёстко
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            return True
+
+        # Даём немного времени на мягкое завершение
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=5)
         except asyncio.TimeoutError:
             try:
                 proc.kill()
             except Exception:
                 pass
-            return OperationResult(
-                ok=False,
-                error={"code": "timeout", "message": "Process execution timed out"},
-                backend="process",
-                killed=True,
-                timed_out=True,
-            )
-        except Exception as e:
-            return OperationResult(
-                ok=False,
-                error={"code": "process_io_failed", "message": str(e), "type": type(e).__name__},
-                backend="process",
-            )
-
-        stdout_text = (out or b"").decode("utf-8", errors="replace").strip()
-        stderr_text = (err or b"").decode("utf-8", errors="replace").strip()
-
-        if proc.returncode != 0:
-            # Runner всегда пишет корректный JSON, но transport не делает предположений
-            return OperationResult(
-                ok=False,
-                error={
-                    "code": "process_exit_nonzero",
-                    "message": f"Runner process exited with code {proc.returncode}",
-                    "details": {"stderr": stderr_text, "stdout": stdout_text, "returncode": proc.returncode},
-                },
-                backend="process",
-                stderr=stderr_text or None,
-            )
-
-        if not stdout_text:
-            return OperationResult(
-                ok=False,
-                error={
-                    "code": "empty_runner_output",
-                    "message": "Runner produced empty stdout",
-                    "details": {"stderr": stderr_text},
-                },
-                backend="process",
-                stderr=stderr_text or None,
-            )
-
-        try:
-            res = json.loads(stdout_text)
-        except Exception as e:
-            return OperationResult(
-                ok=False,
-                error={
-                    "code": "invalid_runner_output",
-                    "message": f"Failed to parse runner stdout as JSON: {e}",
-                    "details": {"stdout": stdout_text, "stderr": stderr_text},
-                },
-                backend="process",
-                stderr=stderr_text or None,
-            )
-
-        status = res.get("status")
-        if status == "ok":
-            result = res.get("result")
-            if not isinstance(result, dict):
-                result = {"value": result}
-            return OperationResult(ok=True, result=result, backend="process")
-
-        if status == "error":
-            err_obj = res.get("error") or {}
-            if not isinstance(err_obj, dict):
-                err_obj = {"code": "execution_error", "message": str(err_obj)}
-            if stderr_text and "details" not in err_obj:
-                err_obj["details"] = {"stderr": stderr_text}
-            return OperationResult(ok=False, error=err_obj, backend="process", stderr=stderr_text or None)
-
-        return OperationResult(
-            ok=False,
-            error={
-                "code": "unknown_runner_response",
-                "message": "Runner response must have status=ok|error",
-                "details": {"stdout": res, "stderr": stderr_text},
-            },
-            backend="process",
-        )
+        return True
 

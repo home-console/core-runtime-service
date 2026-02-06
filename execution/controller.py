@@ -12,8 +12,9 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional, Protocol
 from uuid import uuid4
-from datetime import datetime
+from datetime import datetime, UTC
 import time
+import asyncio
 
 from .backend import BackendId, ExecutionBackend, InProcessBackend, ProcessBackend, ContainerBackend, OperationResult
 from .policy import ExecutionPolicy, StateExecutionPolicy
@@ -53,6 +54,9 @@ class ExecutionControllerImpl:
 
         # Конфигурация observability (можно сделать настраиваемой позднее)
         self._stderr_tail_max_chars: int = 4000
+        # Простой счетчик для ограничений concurrency (D3.4)
+        self._running: int = 0
+        self._running_lock = asyncio.Lock()
 
     async def _load_policy(self) -> Dict[str, Any]:
         """
@@ -76,6 +80,20 @@ class ExecutionControllerImpl:
         Важно: execution_id ≠ operation_id. Одна операция может иметь несколько execution'ов.
         """
         return f"exec-{uuid4().hex[:12]}"
+
+    async def _load_execution_trace(self, execution_id: str) -> Optional[ExecutionTrace]:
+        storage = getattr(self._runtime, "storage", None)
+        if storage is None:
+            return None
+        try:
+            keys = make_execution_namespace_keys("", execution_id)
+            data = await storage.get("execution", keys["trace_key"])
+            if isinstance(data, dict):
+                # operation_id внутри trace, поэтому operation_id в keys здесь не нужен
+                return ExecutionTrace.from_dict(data)
+        except Exception:
+            return None
+        return None
 
     async def on_execution_start(self, trace: ExecutionTrace) -> None:
         """
@@ -181,6 +199,8 @@ class ExecutionControllerImpl:
         code = err.get("code")
         if code == "timeout":
             return "timeout"
+        if code == "cancelled":
+            return "cancelled"
         return "error"
 
     def _extract_error_fields(self, res: OperationResult) -> Dict[str, Optional[str]]:
@@ -238,8 +258,44 @@ class ExecutionControllerImpl:
                 backend=str(backend_id),
             )
 
+        # Лимиты concurrency (D3.4). Для служебных операций (execution.*) не применяем.
+        limits = (policy_dict.get("limits") or {}) if isinstance(policy_dict, dict) else {}
+        max_running = limits.get("max_running")
         execution_id = self._generate_execution_id()
-        started_at_dt = datetime.utcnow()
+
+        if not operation_type.startswith("execution.") and isinstance(max_running, int):
+            async with self._running_lock:
+                if max_running <= 0 or self._running >= max_running:
+                    # Не стартуем execution, сразу фиксируем ошибку.
+                    now = datetime.now(UTC)
+                    trace = ExecutionTrace(
+                        execution_id=execution_id,
+                        operation_id=operation_id,
+                        operation_type=operation_type,
+                        backend=backend_id,
+                        status="error",
+                        started_at=now,
+                        finished_at=now,
+                        duration_ms=0,
+                        error_code="execution_limit_exceeded",
+                        error_message="Execution concurrency limit exceeded",
+                        stderr_tail=None,
+                    )
+                    await self.on_execution_finish(trace)
+                    return OperationResult(
+                        ok=False,
+                        error={
+                            "code": "execution_limit_exceeded",
+                            "message": "Execution concurrency limit exceeded",
+                        },
+                        backend=str(backend_id),
+                    )
+                self._running += 1
+        else:
+            async with self._running_lock:
+                self._running += 1
+
+        started_at_dt = datetime.now(UTC)
         started_monotonic = time.monotonic()
 
         trace = ExecutionTrace(
@@ -267,46 +323,111 @@ class ExecutionControllerImpl:
         ctx.setdefault("execution_id", execution_id)
 
         try:
-            res = await backend.execute(
-                operation_type=operation_type,
-                params=params or {},
-                context=ctx,
-                timeout=None,
-            )
-        except Exception as e:
-            # Любая ошибка бэкенда тоже должна отражаться в трассе
-            finished_at_dt = datetime.utcnow()
+            try:
+                res = await backend.execute(
+                    operation_type=operation_type,
+                    params=params or {},
+                    context=ctx,
+                    timeout=None,
+                )
+            except Exception as e:
+                # Любая ошибка бэкенда тоже должна отражаться в трассе
+                finished_at_dt = datetime.now(UTC)
+                duration_ms = int((time.monotonic() - started_monotonic) * 1000)
+                trace.status = "error"
+                trace.finished_at = finished_at_dt
+                trace.duration_ms = duration_ms
+                trace.error_code = "backend_exception"
+                trace.error_message = str(e)
+                trace.stderr_tail = None
+                await self.on_execution_finish(trace)
+
+                return OperationResult(
+                    ok=False,
+                    error={"code": "backend_exception", "message": str(e), "type": type(e).__name__},
+                    backend=str(backend_id),
+                )
+
+            # Успешное завершение backend'а (ok или ошибка уровня исполнения)
+            finished_at_dt = datetime.now(UTC)
             duration_ms = int((time.monotonic() - started_monotonic) * 1000)
-            trace.status = "error"
+
+            status: ExecutionStatus = self._map_status_from_result(res)
+            err_fields = self._extract_error_fields(res)
+            stderr_tail = self._extract_stderr_tail(res)
+
+            # Если до этого был вызван cancel_execution и trace уже помечен как cancelled,
+            # сохраняем cancel-маркеры (cancelled_at/cancel_reason).
+            try:
+                existing = await self._load_execution_trace(execution_id)
+            except Exception:
+                existing = None
+
+            if existing is not None and existing.cancelled_at is not None:
+                trace.cancelled_at = existing.cancelled_at
+                trace.cancel_reason = existing.cancel_reason
+                if existing.status == "cancelled":
+                    status = "cancelled"
+
+            trace.status = status
             trace.finished_at = finished_at_dt
             trace.duration_ms = duration_ms
-            trace.error_code = "backend_exception"
-            trace.error_message = str(e)
-            trace.stderr_tail = None
+            trace.error_code = err_fields["code"]
+            trace.error_message = err_fields["message"]
+            trace.stderr_tail = stderr_tail
+
             await self.on_execution_finish(trace)
 
-            return OperationResult(
-                ok=False,
-                error={"code": "backend_exception", "message": str(e), "type": type(e).__name__},
-                backend=str(backend_id),
-            )
+            return res
+        finally:
+            async with self._running_lock:
+                self._running = max(0, self._running - 1)
 
-        # Успешное завершение backend'а (ok или ошибка уровня исполнения)
-        finished_at_dt = datetime.utcnow()
-        duration_ms = int((time.monotonic() - started_monotonic) * 1000)
+    async def cancel_execution(self, execution_id: str, reason: str = "user") -> bool:
+        """
+        Cancel flow (D3.4):
+          1) читаем trace;
+          2) если status != running → no-op;
+          3) вызываем backend.cancel(execution_id);
+          4) обновляем trace: status=cancelled, cancelled_at, cancel_reason;
+          5) пишем в storage + публикуем execution.cancelled.
+        """
+        trace = await self._load_execution_trace(execution_id)
+        if trace is None or trace.status != "running":
+            return False
 
-        status: ExecutionStatus = self._map_status_from_result(res)
-        err_fields = self._extract_error_fields(res)
-        stderr_tail = self._extract_stderr_tail(res)
+        backend = self._backends.get(trace.backend)
+        accepted = False
+        if backend is not None and hasattr(backend, "cancel"):
+            try:
+                accepted = await backend.cancel(execution_id)
+            except Exception:
+                accepted = False
 
-        trace.status = status
-        trace.finished_at = finished_at_dt
-        trace.duration_ms = duration_ms
-        trace.error_code = err_fields["code"]
-        trace.error_message = err_fields["message"]
-        trace.stderr_tail = stderr_tail
+        now = datetime.now(UTC)
+        trace.status = "cancelled"
+        trace.finished_at = now
+        trace.duration_ms = trace.duration_ms or 0
+        trace.cancelled_at = now
+        trace.cancel_reason = reason
 
         await self.on_execution_finish(trace)
 
-        return res
+        # Отдельное событие execution.cancelled
+        event_bus = getattr(self._runtime, "event_bus", None)
+        if event_bus is not None and hasattr(event_bus, "publish"):
+            try:
+                await event_bus.publish(
+                    "execution.cancelled",
+                    {
+                        "execution_id": trace.execution_id,
+                        "operation_id": trace.operation_id,
+                        "backend": trace.backend,
+                        "reason": reason,
+                    },
+                )
+            except Exception:
+                pass
+
+        return accepted
 

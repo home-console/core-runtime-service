@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Protocol, Literal
+import asyncio
 
 
 BackendId = Literal["in_process", "process", "container"]
@@ -44,6 +45,8 @@ class ExecutionBackend(Protocol):
         timeout: int | None = None,
     ) -> OperationResult: ...
 
+    async def cancel(self, execution_id: str) -> bool: ...
+
 
 class InProcessBackend:
     """
@@ -52,6 +55,9 @@ class InProcessBackend:
 
     def __init__(self, runtime: Any):
         self._runtime = runtime
+        # execution_id -> asyncio.Task
+        self._tasks: Dict[str, asyncio.Task] = {}
+        self._lock = asyncio.Lock()
 
     async def execute(
         self,
@@ -82,23 +88,62 @@ class InProcessBackend:
                 backend="in_process",
             )
 
+        exec_id = (context or {}).get("execution_id")
+
+        async def _run() -> OperationResult:
+            try:
+                result = await handler(
+                    params,
+                    {"runtime": self._runtime, **(context or {})},
+                )
+                if not isinstance(result, Dict):
+                    result = {"value": result}
+                return OperationResult(ok=True, result=result, backend="in_process")
+            except asyncio.CancelledError:
+                # Пользовательский cancel через ExecutionController.cancel_execution
+                return OperationResult(
+                    ok=False,
+                    error={"code": "cancelled", "message": "Execution cancelled"},
+                    backend="in_process",
+                )
+            except Exception as e:
+                return OperationResult(
+                    ok=False,
+                    error={"code": "execution_error", "message": str(e), "type": type(e).__name__},
+                    backend="in_process",
+                )
+
+        task = asyncio.create_task(_run())
+        if isinstance(exec_id, str):
+            async with self._lock:
+                self._tasks[exec_id] = task
+
         try:
-            result = await handler(
-                params,
-                {"runtime": self._runtime, **(context or {})},
-            )
-            if not isinstance(result, dict):
-                result = {"value": result}
-            return OperationResult(ok=True, result=result, backend="in_process")
-        except Exception as e:
-            return OperationResult(
-                ok=False,
-                error={"code": "execution_error", "message": str(e), "type": type(e).__name__},
-                backend="in_process",
-            )
+            return await task
+        finally:
+            if isinstance(exec_id, str):
+                async with self._lock:
+                    self._tasks.pop(exec_id, None)
+
+    async def cancel(self, execution_id: str) -> bool:
+        """
+        Best-effort отмена in-process исполнения по execution_id.
+        """
+        async with self._lock:
+            task = self._tasks.get(execution_id)
+        if task is None:
+            return False
+        task.cancel()
+        return True
 
 
 class ProcessBackend:
+    def __init__(self) -> None:
+        # Один реальный backend на все вызовы, чтобы можно было управлять процессами.
+        from .backends.process import ProcessBackend as RealProcessBackend  # локальный импорт — это не Core
+
+        self._real = RealProcessBackend()
+
     async def execute(
         self,
         *,
@@ -107,15 +152,15 @@ class ProcessBackend:
         context: Dict[str, Any],
         timeout: int | None = None,
     ) -> OperationResult:
-        # Реализация живёт в execution/backends/process.py, чтобы backend слой был расширяемым.
-        from .backends.process import ProcessBackend as RealProcessBackend  # локальный импорт — это не Core
-
-        return await RealProcessBackend().execute(
+        return await self._real.execute(
             operation_type=operation_type,
             params=params,
             context=context,
             timeout=timeout,
         )
+
+    async def cancel(self, execution_id: str) -> bool:
+        return await self._real.cancel(execution_id)
 
 
 class ContainerBackend:
@@ -126,6 +171,11 @@ class ContainerBackend:
     docker/podman/k8s драйвера и протокола передачи operation envelope.
     """
 
+    def __init__(self) -> None:
+        from .backends.container import ContainerBackend as RealContainerBackend  # локальный импорт — это не Core
+
+        self._real = RealContainerBackend()
+
     async def execute(
         self,
         *,
@@ -134,13 +184,13 @@ class ContainerBackend:
         context: Dict[str, Any],
         timeout: int | None = None,
     ) -> OperationResult:
-        # Реализация живёт в execution/backends/container.py (чтобы было проще расширять бэкенды).
-        from .backends.container import ContainerBackend as RealContainerBackend  # локальный импорт — это не Core
-
-        return await RealContainerBackend().execute(
+        return await self._real.execute(
             operation_type=operation_type,
             params=params,
             context=context,
             timeout=timeout,
         )
+
+    async def cancel(self, execution_id: str) -> bool:
+        return await self._real.cancel(execution_id)
 
