@@ -67,6 +67,19 @@ class StorageAdapter(ABC):
         pass
 
     @abstractmethod
+    async def list_namespaces(self) -> list[str]:
+        """
+        Получить список всех namespace, присутствующих в хранилище.
+
+        Returns:
+            Отсортированный список уникальных namespace.
+
+        NOTE: это API используется только для introspection/inspector
+        (админский read‑only просмотр), не для бизнес‑логики плагинов.
+        """
+        pass
+
+    @abstractmethod
     async def clear_namespace(self, namespace: str) -> None:
         """
         Очистить все записи в namespace.

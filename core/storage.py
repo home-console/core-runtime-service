@@ -128,6 +128,18 @@ class Storage:
             )
         return await self._adapter.list_keys(namespace)
 
+    async def list_namespaces(self) -> list[str]:
+        """
+        Получить список всех namespace, присутствующих в хранилище.
+
+        Используется инспектором (`admin/introspection`) ТОЛЬКО для
+        read-only просмотра persistent storage.
+
+        Returns:
+            Отсортированный список уникальных namespace.
+        """
+        return await self._adapter.list_namespaces()
+
     async def clear_namespace(self, namespace: str) -> None:
         """Очистить все записи в namespace."""
         await self._adapter.clear_namespace(namespace)

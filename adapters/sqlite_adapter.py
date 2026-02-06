@@ -166,6 +166,16 @@ class SQLiteAdapter(StorageAdapter):
 
         return await asyncio.to_thread(_list_keys_sync, namespace)
 
+    async def list_namespaces(self) -> list[str]:
+        """Получить список всех namespace (выполняется в threadpool)."""
+
+        def _list_namespaces_sync():
+            conn = self._get_connection()
+            cursor = conn.execute("SELECT DISTINCT namespace FROM storage")
+            return sorted(row[0] for row in cursor.fetchall())
+
+        return await asyncio.to_thread(_list_namespaces_sync)
+
     async def clear_namespace(self, namespace: str) -> None:
         """Очистить все записи в namespace (выполняется в threadpool)."""
 

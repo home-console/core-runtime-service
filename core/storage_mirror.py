@@ -116,6 +116,17 @@ class StorageWithStateMirror:
         """
         return await self._storage.list_keys(namespace)
 
+    async def list_namespaces(self) -> list[str]:
+        """
+        Получить список всех namespace в persistent storage.
+
+        NOTE: используется только для introspection (admin/inspector),
+        не для бизнес-логики. StateEngine здесь не участвует, т.к.
+        source of truth для namespace — именно storage.
+        """
+        # Делегируем в базовый Storage, который в свою очередь обращается к адаптеру.
+        return await self._storage.list_namespaces()
+
     async def clear_namespace(self, namespace: str) -> None:
         """
         Очистить все записи в namespace.

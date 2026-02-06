@@ -156,6 +156,15 @@ class PostgreSQLAdapter(StorageAdapter):
             )
             return [row["key"] for row in rows]
 
+    async def list_namespaces(self) -> list[str]:
+        """Получить список всех namespace."""
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT DISTINCT namespace FROM storage"
+            )
+            return sorted(row["namespace"] for row in rows)
+
     async def clear_namespace(self, namespace: str) -> None:
         """Очистить все записи в namespace."""
         pool = await self._get_pool()
