@@ -1,25 +1,14 @@
 from __future__ import annotations
 
 """
-Container execution backend (D3.1 MVP).
+Container execution backend (D3.1+).
 
 Правила:
 - Core не знает, что такое Docker.
 - Operations/Automation/SDK/Plugins не знают про container mode.
 - Вся работа с docker CLI сосредоточена ТОЛЬКО здесь.
 
-Протокол (MVP):
-stdin  -> JSON payload:
-  {
-    "operation_type": "...",
-    "params": {...},
-    "context": {...}
-  }
-
-stdout -> JSON result:
-  { "status": "ok", "result": {...} }
-  или
-  { "status": "error", "error": { "code": "...", "message": "..." } }
+Протокол: docs/EXECUTION-PROTOCOL.md
 """
 
 import asyncio
@@ -72,18 +61,28 @@ class ContainerBackend:
         context: Dict[str, Any],
         timeout: int | None = None,
     ) -> OperationResult:
+        # Execution protocol envelope (runner side). Context is opaque for the runner,
+        # but we keep stable shape: {request_id, caller, metadata}.
+        raw_ctx = context or {}
+        ctx = {
+            "request_id": raw_ctx.get("request_id"),
+            "caller": raw_ctx.get("caller"),
+            "metadata": raw_ctx.get("metadata") if isinstance(raw_ctx.get("metadata"), dict) else dict(raw_ctx),
+        }
+
         payload = {
             "operation_type": operation_type,
             "params": params or {},
-            "context": context or {},
+            "context": ctx,
+            "timeout": timeout,
         }
 
         image = self._resolve_image(context)
 
-        # Minimal env: duplicate context for convenience (debugging), but основной канал — stdin.
+        # Env is optional for debugging; stdin is the canonical channel.
         env = os.environ.copy()
         try:
-            env["OPERATION_CONTEXT"] = json.dumps(context or {}, ensure_ascii=False)
+            env["OPERATION_CONTEXT"] = json.dumps(ctx, ensure_ascii=False)
         except Exception:
             env["OPERATION_CONTEXT"] = "{}"
 
@@ -137,6 +136,8 @@ class ContainerBackend:
                 ok=False,
                 error={"code": "timeout", "message": "Container execution timed out"},
                 backend="container",
+                killed=True,
+                timed_out=True,
             )
         except Exception as e:
             return OperationResult(
@@ -157,6 +158,7 @@ class ContainerBackend:
                     "details": {"stderr": stderr_text, "stdout": stdout_text, "returncode": proc.returncode},
                 },
                 backend="container",
+                stderr=stderr_text or None,
             )
 
         try:
@@ -170,8 +172,10 @@ class ContainerBackend:
                     "details": {"stdout": stdout_text, "stderr": stderr_text},
                 },
                 backend="container",
+                stderr=stderr_text or None,
             )
 
+        # Transport contract: only status/result/error (do not implement fallback execution logic).
         status = res.get("status")
         if status == "ok":
             result = res.get("result")
@@ -186,7 +190,7 @@ class ContainerBackend:
             # attach stderr for debugging, но не ломаем контракт
             if stderr_text and "details" not in err_obj:
                 err_obj["details"] = {"stderr": stderr_text}
-            return OperationResult(ok=False, error=err_obj, backend="container")
+            return OperationResult(ok=False, error=err_obj, backend="container", stderr=stderr_text or None)
 
         return OperationResult(
             ok=False,

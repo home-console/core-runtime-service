@@ -26,6 +26,9 @@ from .introspection import (
     list_state_keys,
     get_state_value,
     list_operations_available,
+    list_execution_traces,
+    get_execution_trace,
+    list_operation_executions,
 )
 from .operations import (
     admin_operations_create,
@@ -83,6 +86,7 @@ class AdminModule(RuntimeModule):
             ("/admin/v1/inspector/state", "admin.v1.state", "Inspector: get all state"),
             ("/admin/v1/inspector/state/keys", "admin.v1.state.keys", "Inspector: list state keys"),
             ("/admin/v1/inspector/operations", "admin.v1.inspector.operations", "Inspector: available operation types"),
+            ("/admin/v1/inspector/executions", "admin.v1.inspector.executions", "Inspector: list execution traces"),
         ]
         for path, service, description in inspector_endpoints:
             self.runtime.http.register(HttpEndpoint(
@@ -96,6 +100,18 @@ class AdminModule(RuntimeModule):
             path="/admin/v1/inspector/state/{key}",
             service="admin.v1.state.get",
             description="Inspector: get state value by key"
+        ))
+        self.runtime.http.register(HttpEndpoint(
+            method="GET",
+            path="/admin/v1/inspector/executions/{execution_id}",
+            service="admin.v1.inspector.executions.get",
+            description="Inspector: get execution trace by id",
+        ))
+        self.runtime.http.register(HttpEndpoint(
+            method="GET",
+            path="/admin/v1/inspector/operations/{operation_id}/executions",
+            service="admin.v1.inspector.operations.executions",
+            description="Inspector: list executions for operation",
         ))
 
         # --- Webhook demo (C4) ---
@@ -127,6 +143,20 @@ class AdminModule(RuntimeModule):
                 return await get_state_value(self.runtime, k)
             return handler
 
+        def wrap_execution_get():
+            async def handler(execution_id=None, **kw):
+                eid = execution_id if execution_id is not None else kw.get("execution_id") or kw.get("id")
+                return await get_execution_trace(self.runtime, eid)
+
+            return handler
+
+        def wrap_operation_executions():
+            async def handler(operation_id=None, **kw):
+                oid = operation_id if operation_id is not None else kw.get("operation_id") or kw.get("id")
+                return await list_operation_executions(self.runtime, oid)
+
+            return handler
+
         registrations = [
             ("admin.v1.runtime", wrap_introspection(get_runtime_info, with_started_at=True)),
             ("admin.v1.plugins", wrap_introspection(list_plugins)),
@@ -138,6 +168,9 @@ class AdminModule(RuntimeModule):
             ("admin.v1.state.keys", wrap_introspection(list_state_keys)),
             ("admin.v1.state.get", wrap_state_get()),
             ("admin.v1.inspector.operations", wrap_introspection(list_operations_available)),
+            ("admin.v1.inspector.executions", wrap_introspection(list_execution_traces)),
+            ("admin.v1.inspector.executions.get", wrap_execution_get()),
+            ("admin.v1.inspector.operations.executions", wrap_operation_executions()),
             # Admin devices read-only proxy services (kept for Admin UI compatibility)
             ("admin.v1.devices.list", wrap_domain(__import__("modules.admin.devices", fromlist=["admin_devices_list"]).admin_devices_list)),
             ("admin.v1.devices.get", wrap_domain(__import__("modules.admin.devices", fromlist=["admin_devices_get"]).admin_devices_get)),

@@ -16,10 +16,22 @@ BackendId = Literal["in_process", "process", "container"]
 
 @dataclass(frozen=True)
 class OperationResult:
+    """
+    Результат исполнения операции backend'ом.
+
+    Помимо бизнес-результата (result/error) содержит минимальные execution-метаданные,
+    необходимые для observability-слоя (D3.3), но не тянет домен.
+    """
+
     ok: bool
     result: Optional[Dict[str, Any]] = None
     error: Optional[Dict[str, Any]] = None
     backend: Optional[str] = None  # for debugging/inspector logs if needed
+
+    # Observability metadata (D3.3)
+    stderr: Optional[str] = None
+    killed: bool = False
+    timed_out: bool = False
 
 
 class ExecutionBackend(Protocol):
@@ -87,13 +99,6 @@ class InProcessBackend:
 
 
 class ProcessBackend:
-    """
-    Separate-process execution.
-
-    В рамках D3 это backend-контракт + заглушка. Реальная реализация потребует
-    рабочего процесса с загрузкой runtime/handlers и IPC протокола.
-    """
-
     async def execute(
         self,
         *,
@@ -102,13 +107,14 @@ class ProcessBackend:
         context: Dict[str, Any],
         timeout: int | None = None,
     ) -> OperationResult:
-        return OperationResult(
-            ok=False,
-            error={
-                "code": "not_implemented",
-                "message": "Process backend is a D3 integration point; implementation is not shipped yet.",
-            },
-            backend="process",
+        # Реализация живёт в execution/backends/process.py, чтобы backend слой был расширяемым.
+        from .backends.process import ProcessBackend as RealProcessBackend  # локальный импорт — это не Core
+
+        return await RealProcessBackend().execute(
+            operation_type=operation_type,
+            params=params,
+            context=context,
+            timeout=timeout,
         )
 
 

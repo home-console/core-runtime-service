@@ -174,3 +174,74 @@ async def list_operations_available(runtime: Any) -> List[Dict[str, Any]]:
         return []
     types = ops.list_handler_types()
     return [{"type": t} for t in types]
+
+
+# --- Execution observability (D3.3) ---
+
+async def list_execution_traces(runtime: Any) -> List[Dict[str, Any]]:
+    """
+    Inspector view: список всех execution traces (read-only).
+
+    Источник: runtime.storage, namespace \"execution\", ключи traces/{execution_id}.
+    Никаких service_registry.call(), только прямое чтение storage.
+    """
+    try:
+        keys = await runtime.storage.list_keys("execution")
+    except Exception:
+        return []
+
+    result: List[Dict[str, Any]] = []
+    for key in keys:
+        if not key.startswith("traces/"):
+            continue
+        try:
+            data = await runtime.storage.get("execution", key)
+            if isinstance(data, dict):
+                result.append(data)
+        except Exception:
+            continue
+    return result
+
+
+async def get_execution_trace(runtime: Any, execution_id: str) -> Dict[str, Any] | None:
+    """
+    Inspector view: получить одну трассу исполнения по execution_id.
+    """
+    if not execution_id:
+        return None
+    key = f"traces/{execution_id}"
+    try:
+        data = await runtime.storage.get("execution", key)
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        return None
+    return None
+
+
+async def list_operation_executions(runtime: Any, operation_id: str) -> List[Dict[str, Any]]:
+    """
+    Inspector view: список execution'ов для конкретной операции.
+
+    Источник: runtime.storage, namespace \"execution\", ключи by_operation/{operation_id}/{execution_id}.
+    """
+    if not operation_id:
+        return []
+
+    try:
+        keys = await runtime.storage.list_keys("execution")
+    except Exception:
+        return []
+
+    prefix = f"by_operation/{operation_id}/"
+    result: List[Dict[str, Any]] = []
+    for key in keys:
+        if not key.startswith(prefix):
+            continue
+        try:
+            data = await runtime.storage.get("execution", key)
+            if isinstance(data, dict):
+                result.append(data)
+        except Exception:
+            continue
+    return result
