@@ -34,7 +34,6 @@ __all__ = [
     "PluginManager",
     "HttpRegistry",
     "ModuleManager",
-    "PluginManager",
     "RuntimeModule",
     "create_storage_adapter",
 ]

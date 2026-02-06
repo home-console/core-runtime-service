@@ -26,6 +26,8 @@ from .introspection import (
     list_state_keys,
     get_state_value,
     list_operations_available,
+    list_auth_flows,
+    list_integrations,
     list_execution_traces,
     get_execution_trace,
     list_operation_executions,
@@ -92,6 +94,9 @@ class AdminModule(RuntimeModule):
             ("/admin/v1/inspector/state/keys", "admin.v1.state.keys", "Inspector: list state keys"),
             ("/admin/v1/inspector/operations", "admin.v1.inspector.operations", "Inspector: available operation types"),
             ("/admin/v1/inspector/executions", "admin.v1.inspector.executions", "Inspector: list execution traces"),
+            ("/admin/v1/inspector/auth", "admin.v1.inspector.auth", "Inspector: auth flows (OAuth/device auth, etc.)"),
+            ("/admin/v1/inspector/integrations", "admin.v1.inspector.integrations", "Inspector: integrations (connect/disconnect state, actions)"),
+            ("/admin/v1/inspector/inventory", "admin.v1.inspector.inventory", "Inspector: devices inventory (items, mappings, external by provider)"),
         ]
         for path, service, description in inspector_endpoints:
             self.runtime.http.register(HttpEndpoint(
@@ -224,6 +229,29 @@ class AdminModule(RuntimeModule):
 
             return handler
 
+        async def _auth_inspector_response(runtime):
+            flows = await list_auth_flows(runtime)
+            return {"auth_flows": flows}
+
+        async def _integrations_inspector_response(runtime):
+            integrations = await list_integrations(runtime)
+            return {"integrations": integrations}
+
+        async def _inventory_inspector_response(runtime):
+            """Aggregate devices list, mappings, and external per provider for Inspector."""
+            items = await runtime.service_registry.call("admin.v1.devices.list")
+            mappings_raw = await runtime.service_registry.call("admin.v1.devices.list_mappings")
+            mappings = mappings_raw if isinstance(mappings_raw, list) else []
+            external: dict = {}
+            for provider in ["yandex"]:
+                try:
+                    external[provider] = await runtime.service_registry.call(
+                        "admin.v1.devices.list_external", provider
+                    )
+                except Exception:
+                    external[provider] = []
+            return {"items": items, "mappings": mappings, "external": external}
+
         registrations = [
             ("admin.v1.runtime", wrap_introspection(get_runtime_info, with_started_at=True)),
             ("admin.v1.plugins", wrap_introspection(list_plugins)),
@@ -235,6 +263,9 @@ class AdminModule(RuntimeModule):
             ("admin.v1.state.keys", wrap_introspection(list_state_keys)),
             ("admin.v1.state.get", wrap_state_get()),
             ("admin.v1.inspector.operations", wrap_introspection(list_operations_available)),
+            ("admin.v1.inspector.auth", wrap_introspection(_auth_inspector_response)),
+            ("admin.v1.inspector.integrations", wrap_introspection(_integrations_inspector_response)),
+            ("admin.v1.inspector.inventory", wrap_introspection(_inventory_inspector_response)),
             ("admin.v1.inspector.executions", wrap_introspection(list_execution_traces)),
             ("admin.v1.inspector.executions.get", wrap_execution_get()),
             ("admin.v1.inspector.operations.executions", wrap_operation_executions()),

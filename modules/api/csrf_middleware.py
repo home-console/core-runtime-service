@@ -53,18 +53,21 @@ async def csrf_protection_middleware(request: Request, call_next: Callable) -> R
     if request.url.path.startswith("/admin/v1/auth/"):
         return await call_next(request)
     
-    # Get CSRF token from header
-    csrf_token = request.headers.get("X-CSRF-Token")
-    if not csrf_token:
-        return JSONResponse(status_code=403, content={"detail": "CSRF token required"})
-    
-    # Get session from request context populated by auth middleware.
-    # NOTE: auth middleware stores context in `request.state.auth_context`.
-    # Older code used `request.state.context` which caused CSRF checks to
-    # always fail (no context) and return 403 even for authenticated sessions.
+    # Get session from request context populated by auth middleware (must run before this middleware).
     ctx = getattr(request.state, "auth_context", None)
     if not ctx:
         return JSONResponse(status_code=403, content={"detail": "Authentication required for CSRF validation"})
+    
+    # JWT и API key (Bearer в заголовке) не уязвимы к CSRF — токен не отправляется браузером автоматически.
+    # CSRF обязателен только для cookie-based сессий.
+    source = getattr(ctx, "source", None) or ""
+    if source in ("jwt", "api_key"):
+        return await call_next(request)
+    
+    # Для session/cookie — требуем X-CSRF-Token
+    csrf_token = request.headers.get("X-CSRF-Token")
+    if not csrf_token:
+        return JSONResponse(status_code=403, content={"detail": "CSRF token required"})
     
     # Get session_id for CSRF validation
     session_id = getattr(ctx, "session_id", None) or getattr(ctx, "user_id", None)

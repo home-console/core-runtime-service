@@ -223,11 +223,16 @@ class YandexQuasarWS:
                 if resp.status != 200:
                     raise RuntimeError(f"Quasar devices HTTP {resp.status}: {text[:500]}. Hint: Quasar API requires valid Yandex session cookies, not OAuth token.")
                 try:
-                    data = await resp.json()
+                    data = json.loads(text)
                 except Exception as parse_err:
                     raise RuntimeError(f"Quasar devices parse error: {parse_err} — {text[:200]}")
         updates_url = data.get("updates_url")
-        devices = data.get("devices") or []
+        # Устройства из того же ответа, откуда берётся ссылка на WS: верхний "devices" или households[].all
+        devices = list(data.get("devices") or [])
+        if not devices and data.get("status") == "ok":
+            for house in data.get("households") or []:
+                devices.extend(house.get("all") or [])
+            await self._log("info", f"Quasar WS: loaded {len(devices)} devices from households", device_count=len(devices))
         if not updates_url:
             raise RuntimeError("updates_url missing in Quasar response")
         

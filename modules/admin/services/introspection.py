@@ -12,6 +12,8 @@ Inspector = memory dump runtime, не API.
 from typing import Any, Dict, List
 import time
 
+from core.plugin_manager import PluginState
+
 
 async def get_runtime_info(runtime: Any, admin_started_at: float | None) -> Dict[str, Any]:
     """Get runtime info: uptime, version, started_at."""
@@ -37,44 +39,47 @@ async def get_runtime_info(runtime: Any, admin_started_at: float | None) -> Dict
 
 async def list_plugins(runtime: Any) -> List[Dict[str, Any]]:
     """List all loaded plugins with metadata."""
-    plugins = runtime.plugins.list_plugins()
+    pm = runtime.plugin_manager
+    plugin_names = pm.list_plugins()
     result = []
-    for p in plugins:
+    for name in plugin_names:
         services = []
         http_endpoints = []
         event_subscriptions = []
-        
+        state = pm.get_plugin_state(name)
+        started = state == PluginState.STARTED
+
         try:
             all_services = await runtime.service_registry.list_services()
-            services = [s for s in all_services if s.startswith(f"{p.name}.")]
+            services = [s for s in all_services if s.startswith(f"{name}.")]
         except Exception:
             pass
-        
+
         try:
             all_http = runtime.http.list()
-            http_endpoints = [ep for ep in all_http if ep.service.startswith(f"{p.name}.")]
+            http_endpoints = [ep for ep in all_http if ep.service.startswith(f"{name}.")]
         except Exception:
             pass
-        
+
         try:
             if hasattr(runtime, "event_bus") and runtime.event_bus:
                 all_events = runtime.event_bus.list_subscriptions()
                 for event_name, subs in all_events.items():
-                    plugin_subs = [s for s in subs if s.get("plugin") == p.name]
+                    plugin_subs = [s for s in subs if s.get("plugin") == name]
                     if plugin_subs:
                         event_subscriptions.append(event_name)
         except Exception:
             pass
-        
+
         result.append({
-            "name": p.name,
+            "name": name,
             "loaded": True,
-            "started": p.started,
+            "started": started,
             "services_count": len(services),
             "http_count": len(http_endpoints),
             "event_subscriptions": event_subscriptions,
         })
-    
+
     return result
 
 
@@ -174,6 +179,59 @@ async def list_operations_available(runtime: Any) -> List[Dict[str, Any]]:
         return []
     types = ops.list_handler_types()
     return [{"type": t} for t in types]
+
+
+async def list_auth_flows(runtime: Any) -> List[Dict[str, Any]]:
+    """
+    Inspector view: list auth flows (read-only).
+    Source: runtime.state["auth_inspector.flows"] only. No service_registry.call.
+    Plugins (OAuth, device auth, etc.) write to this state; Inspector only reads.
+    Returns list of { id, state, message?, actions: [{ type, label, params? }] }.
+    """
+    try:
+        if not hasattr(runtime, "state") or runtime.state is None:
+            return []
+        raw = await runtime.state.get("auth_inspector.flows")
+        if not isinstance(raw, list):
+            return []
+        result = []
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            flow = {
+                "id": item.get("id"),
+                "state": item.get("state"),
+                "actions": item.get("actions") if isinstance(item.get("actions"), list) else [],
+            }
+            if "message" in item and item["message"] is not None:
+                flow["message"] = item["message"]
+            if "qr_url" in item and item["qr_url"] is not None:
+                flow["qr_url"] = item["qr_url"]
+            if "qr_svg" in item and item["qr_svg"] is not None:
+                flow["qr_svg"] = item["qr_svg"]
+            result.append(flow)
+        return result
+    except Exception:
+        return []
+
+
+async def list_integrations(runtime: Any) -> List[Dict[str, Any]]:
+    """
+    Inspector view: list integrations (read-only).
+    Source: runtime.state["integration_inspector.integrations"] only.
+    No service_registry.call, no domain/plugin knowledge.
+    Plugins write their integration state; Inspector only reads.
+    Returns list of { id, state, message?, actions: [{ type, label, params? }] }.
+    """
+    try:
+        if not hasattr(runtime, "state") or runtime.state is None:
+            return []
+        data = await runtime.state.get("integration_inspector.integrations")
+        if not isinstance(data, list):
+            return []
+        return data
+    except Exception:
+        return []
 
 
 # --- Execution observability (D3.3) ---

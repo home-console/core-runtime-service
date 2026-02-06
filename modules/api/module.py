@@ -74,18 +74,25 @@ class ApiModule(RuntimeModule):
         # Добавляем CORS middleware для работы с frontend
         # В production задаётся через Config.cors_allowed_origins / env RUNTIME_CORS_ALLOWED_ORIGINS
         cors_allowed = None
+        is_dev = False
         try:
             cfg = getattr(self.runtime, "_config", None)
-            cors_allowed = getattr(cfg, "cors_allowed_origins", None) if cfg else None
+            if cfg:
+                cors_allowed = getattr(cfg, "cors_allowed_origins", None)
+                is_dev = getattr(cfg, "env", "production") == "development"
         except Exception:
             cors_allowed = None
-        self.app.add_middleware(
-            CORSMiddleware,
-            allow_origins=cors_allowed or ["http://localhost:3000", "http://127.0.0.1:3000"],
-            allow_credentials=True,
-            allow_methods=["*"],
-            allow_headers=["*"],
-        )
+            is_dev = True
+        cors_kw: Dict[str, Any] = {
+            "allow_origins": cors_allowed or ["http://localhost:3000", "http://127.0.0.1:3000"],
+            "allow_credentials": True,
+            "allow_methods": ["*"],
+            "allow_headers": ["*"],
+        }
+        # В dev разрешаем любой порт на localhost (Flutter web, Vite и т.д.)
+        if is_dev:
+            cors_kw["allow_origin_regex"] = r"^http://(localhost|127\.0\.0\.1)(:\d+)?$"
+        self.app.add_middleware(CORSMiddleware, **cors_kw)
         
         # ВАЖНО: Порядок выполнения middleware в FastAPI обратный порядку добавления
         # Последний добавленный выполняется первым
@@ -99,20 +106,18 @@ class ApiModule(RuntimeModule):
             # RequestLoggerModule может быть не установлен - это нормально
             pass
         
-        # Добавляем auth middleware (boundary-layer)
-        self.app.middleware("http")(require_auth_middleware)
-        
-        # SECURITY P0: Add CSRF protection and rate limiting for admin API
-        # ВАЖНО: добавляем ПОСЛЕ auth middleware в коде, но они выполнятся РАНЬШЕ
-        # из-за обратного порядка выполнения FastAPI middleware
+        # SECURITY P0: CSRF и rate limit — добавляем ПЕРВЫМИ, чтобы выполнились ПОСЛЕ auth
+        # (в FastAPI последний добавленный middleware выполняется первым)
         try:
             from modules.api.csrf_middleware import csrf_protection_middleware, rate_limit_middleware
             self.app.middleware("http")(csrf_protection_middleware)
             self.app.middleware("http")(rate_limit_middleware)
         except ImportError:
-            # CSRF middleware not available - log warning
-            import logging
-            logging.warning("CSRF middleware not available - admin API vulnerable to CSRF attacks")
+            pass
+        
+        # Auth middleware — добавляем после CSRF/rate_limit, чтобы выполнился ПЕРВЫМ для запроса
+        # и заполнил request.state.auth_context до проверки CSRF
+        self.app.middleware("http")(require_auth_middleware)
         
         # Добавляем admin access middleware (должен выполниться раньше auth)
         # Это блокирует доступ к /admin/* из публичного интернета

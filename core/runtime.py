@@ -77,6 +77,11 @@ class CoreRuntime:
         self._start_time: Optional[float] = None
 
     @property
+    def state(self):
+        """Алиас для state_engine. Плагины и Inspector используют runtime.state.get/set."""
+        return self.state_engine
+
+    @property
     def is_running(self) -> bool:
         """Запущен ли runtime."""
         return self._running

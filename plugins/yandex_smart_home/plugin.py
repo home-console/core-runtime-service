@@ -141,25 +141,73 @@ class YandexSmartHomeRealPlugin(BasePlugin):
 
         # Подписываемся на событие успешной device-авторизации
         async def _on_device_auth_linked(event_type: str, data: dict):
-            """Обработчик события yandex.device_auth.linked."""
+            """Обработчик события yandex.device_auth.linked: синхронизация устройств + Quasar WS."""
             try:
-                if data.get("quasar_ready"):
+                if not data.get("quasar_ready"):
+                    return
+                await self.runtime.service_registry.call(
+                    "logger.log",
+                    level="info",
+                    message="Device auth linked, syncing devices and starting Quasar WS",
+                    plugin=self.metadata.name,
+                )
+                # Включаем реальный API после успешного device auth (нужно для sync_devices)
+                await self.runtime.storage.set("yandex", "use_real_api", {"enabled": True})
+                # Синхронизация устройств: подтянуть список из API и опубликовать external.device_discovered
+                try:
+                    await self.runtime.service_registry.call("yandex.sync_devices")
                     await self.runtime.service_registry.call(
                         "logger.log",
                         level="info",
-                        message="Device auth linked, starting Quasar WS",
+                        message="Devices synced after device auth",
                         plugin=self.metadata.name,
                     )
-                    await self.quasar_ws.start()
-                    runner = self.quasar_ws.runner
-                    if runner:
-                        self._tasks.add(runner)
-                        runner.add_done_callback(lambda t, tasks=self._tasks: tasks.discard(t))
+                    # Маппинг: создать внутренние устройства (devices + devices_mappings), чтобы они появились в БД и в UI
+                    try:
+                        from core.system_context import create_system_context
+                        from core.auth_contextvars import set_current_auth_context, get_current_auth_context
+                        ctx = create_system_context(self.metadata.name, "devices.auto_map_external")
+                        prev = get_current_auth_context()
+                        set_current_auth_context(ctx)
+                        try:
+                            map_result = await self.runtime.service_registry.call(
+                                "devices.auto_map_external",
+                                provider="yandex",
+                            )
+                            if isinstance(map_result, dict) and map_result.get("created", 0) > 0:
+                                await self.runtime.service_registry.call(
+                                    "logger.log",
+                                    level="info",
+                                    message=f"Auto-mapped {map_result.get('created')} devices to internal list",
+                                    plugin=self.metadata.name,
+                                )
+                        finally:
+                            set_current_auth_context(prev)
+                    except Exception as map_err:
+                        await self.runtime.service_registry.call(
+                            "logger.log",
+                            level="warning",
+                            message=f"Auto-map after sync failed: {map_err}",
+                            plugin=self.metadata.name,
+                        )
+                except Exception as sync_err:
+                    await self.runtime.service_registry.call(
+                        "logger.log",
+                        level="warning",
+                        message=f"Device sync after auth failed (Quasar WS will still run): {sync_err}",
+                        plugin=self.metadata.name,
+                    )
+                # Realtime-обновления через Quasar WebSocket
+                await self.quasar_ws.start()
+                runner = self.quasar_ws.runner
+                if runner:
+                    self._tasks.add(runner)
+                    runner.add_done_callback(lambda t, tasks=self._tasks: tasks.discard(t))
             except Exception as e:
                 await self.runtime.service_registry.call(
                     "logger.log",
                     level="error",
-                    message=f"Failed to start Quasar WS after device auth: {e}",
+                    message=f"Failed after device auth (sync/Quasar WS): {e}",
                     plugin=self.metadata.name,
                 )
 

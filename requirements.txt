@@ -28,4 +28,3 @@ prometheus-client
 # QR code generation (для yandex_device_auth plugin)
 qrcode[pil]>=7.4.0
 
-asyncpg

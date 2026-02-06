@@ -271,8 +271,16 @@ Inspector — тупой. И в этом его ценность: он толь�
 | GET /admin/v1/inspector/state/keys | список ключей state | Да | Да | state.list_keys() |
 | GET /admin/v1/inspector/state/{key} | значение по ключу | Да | Да | state.get(key) |
 | GET /admin/v1/inspector/operations | список доступных типов операций (type) | Да | Да | operations.list_handler_types() |
+| GET /admin/v1/inspector/integrations | список интеграций (id, state, message?, actions) | Да | Да | state["integration_inspector.integrations"] |
 
-**Итог:** Inspector = runtime mirror, не логика. Ни один из этих endpoints не вызывает `service_registry.call()`, не знает доменов (devices, yandex, oauth), не содержит `if plugin_loaded`.
+**Итог:** Inspector = runtime mirror, не логика.
+
+### Integrations Inspector
+
+- Inspector **не знает**, что такое Yandex, MQTT, Google и т.п. — только читает `runtime.state["integration_inspector.integrations"]`.
+- Интеграции (плагины) **сами публикуют** своё состояние в `runtime.state`; Inspector только отдаёт его в UI.
+- UI управляет интеграциями **только** через Inspector (чтение) + Operations (действия: connect, disconnect, retry, setup).
+- Добавление новой интеграции **не требует** изменения UI или Inspector — плагин пишет в state и регистрирует операции. Ни один из этих endpoints не вызывает `service_registry.call()`, не знает доменов (devices, yandex, oauth), не содержит `if plugin_loaded`.
 
 ### Допустимые источники данных Inspector
 
@@ -378,7 +386,7 @@ AdminModule = Control Plane Host + Inspector Host. Inspector-часть не в�
 
 ### Пути Inspector (справочно)
 
-`/admin/v1/inspector/runtime`, `/admin/v1/inspector/plugins`, `/admin/v1/inspector/services`, `/admin/v1/inspector/http`, `/admin/v1/inspector/events`, `/admin/v1/inspector/storage`, `/admin/v1/inspector/state`, `/admin/v1/inspector/state/keys`, `/admin/v1/inspector/state/{key}`, `/admin/v1/inspector/operations`.
+`/admin/v1/inspector/runtime`, `/admin/v1/inspector/plugins`, `/admin/v1/inspector/services`, `/admin/v1/inspector/http`, `/admin/v1/inspector/events`, `/admin/v1/inspector/storage`, `/admin/v1/inspector/state`, `/admin/v1/inspector/state/keys`, `/admin/v1/inspector/state/{key}`, `/admin/v1/inspector/operations`, `/admin/v1/inspector/auth`, `/admin/v1/inspector/integrations`.
 
 ### Definition of Done (модель Control Plane)
 
