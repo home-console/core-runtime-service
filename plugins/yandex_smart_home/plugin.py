@@ -43,8 +43,7 @@ from __future__ import annotations
 import asyncio
 
 from core.base_plugin import BasePlugin, PluginMetadata
-from .device_sync import DeviceSync
-from .device_status import DeviceStatusChecker
+from .sync import DeviceSync, DeviceStatusChecker
 from .command_handler import CommandHandler
 from .yandex_quasar_ws import YandexQuasarWS
 from .oauth_provider import get_cookies as oauth_get_cookies

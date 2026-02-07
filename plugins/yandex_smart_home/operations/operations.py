@@ -4,7 +4,6 @@
 Handlers вызывают ТОЛЬКО сервисы плагина (yandex.sync_devices, yandex.check_devices_online).
 Не знают про admin, HTTP, ACL.
 """
-
 from typing import Any, Dict
 
 

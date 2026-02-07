@@ -39,8 +39,16 @@ class ProductApiModule(RuntimeModule):
             """BFF: GET /api/v1/devices/{id} → devices.get(id)."""
             return await runtime.service_registry.call("devices.get", id)
 
+        async def _devices_set_state(id: str, body: Any = None, **kwargs: Any) -> Any:
+            """BFF: POST /api/v1/devices/{id}/state → devices.set_state(id, state)."""
+            state = body if isinstance(body, dict) else {}
+            if isinstance(body, dict) and "state" in body and isinstance(body["state"], dict):
+                state = body["state"]
+            return await runtime.service_registry.call("devices.set_state", id, state)
+
         await runtime.service_registry.register("product_api.v1.devices.list", _devices_list)
         await runtime.service_registry.register("product_api.v1.devices.get", _devices_get)
+        await runtime.service_registry.register("product_api.v1.devices.set_state", _devices_set_state)
 
         self.runtime.http.register(HttpEndpoint(
             method="GET",
@@ -54,12 +62,18 @@ class ProductApiModule(RuntimeModule):
             service="product_api.v1.devices.get",
             description="Product API: get device by id (BFF → devices.get)",
         ))
+        self.runtime.http.register(HttpEndpoint(
+            method="POST",
+            path="/api/v1/devices/{id}/state",
+            service="product_api.v1.devices.set_state",
+            description="Product API: set device state (BFF → devices.set_state)",
+        ))
 
     async def start(self) -> None:
         pass
 
     async def stop(self) -> None:
-        for name in ("product_api.v1.devices.list", "product_api.v1.devices.get"):
+        for name in ("product_api.v1.devices.list", "product_api.v1.devices.get", "product_api.v1.devices.set_state"):
             try:
                 await self.runtime.service_registry.unregister(name)
             except Exception:

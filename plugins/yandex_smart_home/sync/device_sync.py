@@ -8,8 +8,8 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from core.utils.operation import operation
-from .api_client import YandexAPIClient
-from .device_transformer import DeviceTransformer
+from ..clients.api_client import YandexAPIClient
+from ..transformers.device_transformer import DeviceTransformer
 
 
 class DeviceSync:

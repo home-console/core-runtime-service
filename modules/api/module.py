@@ -260,8 +260,8 @@ class ApiModule(RuntimeModule):
                     
                     # Только если базовая авторизация прошла, получаем device для ACL проверки
                     # Resource-Based Authorization: подготавливаем resource для проверки ACL
-                    # Для devices.get и devices.set_state - получаем device и проверяем ownership/shared
-                    if endpoint.service in ["devices.get", "devices.set_state"]:
+                    # Для devices.get, devices.set_state и product_api set_state — получаем device и проверяем ownership/shared
+                    if endpoint.service in ["devices.get", "devices.set_state", "product_api.v1.devices.set_state"]:
                         device_id = request.path_params.get("id") or request.path_params.get("device_id")
                         if device_id:
                             try:

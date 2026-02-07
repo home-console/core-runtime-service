@@ -52,6 +52,7 @@ SERVICE_BODY_MODELS: Dict[str, Type[BaseModel]] = {
     "admin.auth.refresh": AdminAuthRefreshBody,
     "admin.auth.initialize": AdminAuthInitializeBody,
     "devices.set_state": AdminDevicesSetStateBody,
+    "product_api.v1.devices.set_state": AdminDevicesSetStateBody,
 }
     # NOTE: "admin.devices.set_state" removed — admin devices proxy services
     # are deprecated in favor of domain operations (e.g., "devices.set_state").

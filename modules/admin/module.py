@@ -317,6 +317,51 @@ class AdminModule(RuntimeModule):
             except ValueError:
                 continue
 
+        # --- Plugin control: unload / reload (admin-only) ---
+        async def _admin_unload_plugin(plugin_name: str, **kw):
+            try:
+                await self.runtime.plugin_manager.unload_plugin(plugin_name)
+                return {"ok": True}
+            except Exception as e:
+                return {"ok": False, "error": str(e)}
+
+        async def _admin_reload_plugin(plugin_name: str, **kw):
+            try:
+                await self.runtime.plugin_manager.reload_plugin(plugin_name)
+                return {"ok": True}
+            except Exception as e:
+                return {"ok": False, "error": str(e)}
+
+        try:
+            # Register services (admin-only)
+            if hasattr(self.runtime.service_registry, "register_with_acl"):
+                await self.runtime.service_registry.register_with_acl("admin.v1.plugins.unload", _admin_unload_plugin, admin_only=True)
+                await self.runtime.service_registry.register_with_acl("admin.v1.plugins.reload", _admin_reload_plugin, admin_only=True)
+            else:
+                await self.runtime.service_registry.register("admin.v1.plugins.unload", _admin_unload_plugin)
+                await self.runtime.service_registry.register("admin.v1.plugins.reload", _admin_reload_plugin)
+            self._registered_services.extend(["admin.v1.plugins.unload", "admin.v1.plugins.reload"])
+        except Exception:
+            # Best-effort: do not break admin registration
+            pass
+
+        # Expose HTTP endpoints for plugin control
+        try:
+            self.runtime.http.register(HttpEndpoint(
+                method="POST",
+                path="/admin/v1/plugins/{name}/unload",
+                service="admin.v1.plugins.unload",
+                description="Unload plugin by name (admin only)"
+            ))
+            self.runtime.http.register(HttpEndpoint(
+                method="POST",
+                path="/admin/v1/plugins/{name}/reload",
+                service="admin.v1.plugins.reload",
+                description="Reload plugin by name (admin only)"
+            ))
+        except Exception:
+            pass
+
         # HTTP endpoints for admin devices (read-only + set_state proxy)
         try:
             self.runtime.http.register(HttpEndpoint(

@@ -32,6 +32,7 @@ ACTION_SCOPE_MAP: Dict[str, str] = {
     "devices.list": "devices.read",
     "devices.get": "devices.read",
     "devices.set_state": "devices.write",
+    "product_api.v1.devices.set_state": "devices.write",
     "devices.list_external": "devices.read",
     "devices.list_mappings": "devices.read",
     "devices.create_mapping": "devices.write",
