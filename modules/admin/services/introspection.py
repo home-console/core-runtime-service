@@ -14,6 +14,8 @@ import time
 
 from core.plugin_manager import PluginState
 
+from core.plugin_manager import PluginState
+
 
 async def get_runtime_info(runtime: Any, admin_started_at: float | None) -> Dict[str, Any]:
     """Get runtime info: uptime, version, started_at."""
@@ -39,16 +41,13 @@ async def get_runtime_info(runtime: Any, admin_started_at: float | None) -> Dict
 
 async def list_plugins(runtime: Any) -> List[Dict[str, Any]]:
     """List all loaded plugins with metadata."""
-    pm = runtime.plugin_manager
-    plugin_names = pm.list_plugins()
+    plugins = runtime.plugins.list_plugins()
     result = []
     for name in plugin_names:
         services = []
         http_endpoints = []
         event_subscriptions = []
-        state = pm.get_plugin_state(name)
-        started = state == PluginState.STARTED
-
+        
         try:
             all_services = await runtime.service_registry.list_services()
             services = [s for s in all_services if s.startswith(f"{name}.")]

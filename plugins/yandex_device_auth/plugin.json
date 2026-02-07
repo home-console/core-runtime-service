@@ -9,6 +9,8 @@
     "requires": [
         "core"
     ],
+    "is_integration": true,
+    "integration_name": "Yandex Device Auth",
     "provides": {
         "services": [
             "yandex_device_auth.start",

@@ -229,29 +229,6 @@ class AdminModule(RuntimeModule):
 
             return handler
 
-        async def _auth_inspector_response(runtime):
-            flows = await list_auth_flows(runtime)
-            return {"auth_flows": flows}
-
-        async def _integrations_inspector_response(runtime):
-            integrations = await list_integrations(runtime)
-            return {"integrations": integrations}
-
-        async def _inventory_inspector_response(runtime):
-            """Aggregate devices list, mappings, and external per provider for Inspector."""
-            items = await runtime.service_registry.call("admin.v1.devices.list")
-            mappings_raw = await runtime.service_registry.call("admin.v1.devices.list_mappings")
-            mappings = mappings_raw if isinstance(mappings_raw, list) else []
-            external: dict = {}
-            for provider in ["yandex"]:
-                try:
-                    external[provider] = await runtime.service_registry.call(
-                        "admin.v1.devices.list_external", provider
-                    )
-                except Exception:
-                    external[provider] = []
-            return {"items": items, "mappings": mappings, "external": external}
-
         registrations = [
             ("admin.v1.runtime", wrap_introspection(get_runtime_info, with_started_at=True)),
             ("admin.v1.plugins", wrap_introspection(list_plugins)),
@@ -274,6 +251,7 @@ class AdminModule(RuntimeModule):
             ("admin.v1.inspector.schedules", wrap_schedules()),
             ("admin.v1.inspector.schedules.get", wrap_schedule_get()),
             ("admin.v1.inspector.operations.schedules", wrap_operation_schedules()),
+            ("admin.v1.inspector.auth", wrap_introspection(_inspector_auth_summary)),
             # Admin devices read-only proxy services (kept for Admin UI compatibility)
             ("admin.v1.devices.list", wrap_domain(__import__("modules.admin.devices", fromlist=["admin_devices_list"]).admin_devices_list)),
             ("admin.v1.devices.get", wrap_domain(__import__("modules.admin.devices", fromlist=["admin_devices_get"]).admin_devices_get)),

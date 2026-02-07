@@ -22,6 +22,16 @@ from starlette.middleware.base import BaseHTTPMiddleware
 CSRF_SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 
 
+def _add_cors_to_response(request: Request, response: Response) -> None:
+    """Добавить CORS-заголовки к ответу для localhost origin (чтобы 403 не блокировался браузером)."""
+    origin = request.headers.get("origin")
+    if not origin:
+        return
+    if origin.startswith("http://localhost") or origin.startswith("http://127.0.0.1"):
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+
+
 async def csrf_protection_middleware(request: Request, call_next: Callable) -> Response:
     """
     Validate CSRF token for admin API mutating operations.
@@ -67,12 +77,26 @@ async def csrf_protection_middleware(request: Request, call_next: Callable) -> R
     # Для session/cookie — требуем X-CSRF-Token
     csrf_token = request.headers.get("X-CSRF-Token")
     if not csrf_token:
-        return JSONResponse(status_code=403, content={"detail": "CSRF token required"})
+        r = JSONResponse(status_code=403, content={"detail": "CSRF token required"})
+        _add_cors_to_response(request, r)
+        return r
+    
+    # Get session from request context populated by auth middleware.
+    # NOTE: auth middleware stores context in `request.state.auth_context`.
+    # Older code used `request.state.context` which caused CSRF checks to
+    # always fail (no context) and return 403 even for authenticated sessions.
+    ctx = getattr(request.state, "auth_context", None)
+    if not ctx:
+        r = JSONResponse(status_code=403, content={"detail": "Authentication required for CSRF validation"})
+        _add_cors_to_response(request, r)
+        return r
     
     # Get session_id for CSRF validation
     session_id = getattr(ctx, "session_id", None) or getattr(ctx, "user_id", None)
     if not session_id:
-        return JSONResponse(status_code=403, content={"detail": "Session required for CSRF validation"})
+        r = JSONResponse(status_code=403, content={"detail": "Session required for CSRF validation"})
+        _add_cors_to_response(request, r)
+        return r
     
     # Validate CSRF token
     try:
@@ -88,7 +112,9 @@ async def csrf_protection_middleware(request: Request, call_next: Callable) -> R
         # Development mode - allow without CSRF
         pass
     except ValueError:
-        return JSONResponse(status_code=403, content={"detail": "Invalid CSRF token"})
+        r = JSONResponse(status_code=403, content={"detail": "Invalid CSRF token"})
+        _add_cors_to_response(request, r)
+        return r
     
     return await call_next(request)
 

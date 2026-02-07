@@ -50,6 +50,46 @@ def set_operation_id(operation_id: str) -> None:
     _operation_id_var.set(operation_id)
 
 
+async def _log_request_to_console(
+    runtime: Any,
+    method: str,
+    path: str,
+    status_code: int,
+    duration_sec: float,
+    client: Optional[str] = None,
+    error: Optional[str] = None,
+) -> None:
+    """
+    Логирует каждый HTTP-запрос в консоль из ядра (одна строка: метод путь статус длительность).
+    Сначала пробует logger.log, при недоступности — print(), чтобы запросы всегда были видны.
+    """
+    duration_ms = int(duration_sec * 1000)
+    client_str = f" {client}" if client else ""
+    err_str = f" {error}" if error else ""
+    message = f"{method} {path} {status_code} {duration_ms}ms{client_str}{err_str}"
+
+    try:
+        if runtime and await runtime.service_registry.has_service("logger.log"):
+            await runtime.service_registry.call(
+                "logger.log",
+                level="info",
+                message=message,
+                component="http",
+                context={
+                    "method": method,
+                    "path": path,
+                    "status_code": status_code,
+                    "duration_ms": duration_ms,
+                    "client": client,
+                    "error": error,
+                },
+            )
+            return
+    except Exception:
+        pass
+    print(f"[http] {message}")
+
+
 class RequestLoggerOperationContext:
     """
     Адаптер для Core: реализует OperationContextProvider, делегируя в ContextVar.
@@ -240,6 +280,16 @@ async def request_logger_middleware(request: Request, call_next: Callable) -> Re
                     "origin": "http",  # HTTP запрос
                 }
             )
+
+        # Логируем каждый запрос в консоль из ядра (один раз на запрос: метод путь статус длительность)
+        await _log_request_to_console(
+            runtime,
+            request.method,
+            request.url.path,
+            response.status_code,
+            duration,
+            request.client.host if request.client else None,
+        )
         
         return response
         
@@ -283,6 +333,17 @@ async def request_logger_middleware(request: Request, call_next: Callable) -> Re
                 )
         except Exception:
             pass
+
+        # Логируем запрос в консоль даже при ошибке
+        await _log_request_to_console(
+            runtime,
+            request.method,
+            request.url.path,
+            500,
+            duration,
+            request.client.host if request.client else None,
+            error=str(e),
+        )
         
         # Пробрасываем исключение дальше
         raise

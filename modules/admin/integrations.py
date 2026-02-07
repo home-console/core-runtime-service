@@ -24,6 +24,7 @@ async def admin_v1_integrations(runtime: Any) -> List[Dict[str, Any]]:
             "name": integration.name,
             "plugin_name": integration.plugin_name,
             "description": integration.description,
+            "type": getattr(integration, "type", "integration"),
             "flags": [flag.value for flag in integration.flags],
             "plugin_state": state_val,
             "plugin_loaded": state_val in ("loaded", "started") if state_val else False,

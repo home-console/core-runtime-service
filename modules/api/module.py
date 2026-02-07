@@ -75,11 +75,15 @@ class ApiModule(RuntimeModule):
         # В production задаётся через Config.cors_allowed_origins / env RUNTIME_CORS_ALLOWED_ORIGINS
         cors_allowed = None
         is_dev = False
+        env = "development"
         try:
             cfg = getattr(self.runtime, "_config", None)
             if cfg:
                 cors_allowed = getattr(cfg, "cors_allowed_origins", None)
                 is_dev = getattr(cfg, "env", "production") == "development"
+            if cfg:
+                cors_allowed = getattr(cfg, "cors_allowed_origins", None)
+                env = getattr(cfg, "env", "development")
         except Exception:
             cors_allowed = None
             is_dev = True
@@ -238,13 +242,24 @@ class ApiModule(RuntimeModule):
                     # SECURITY FIX: Проверяем базовую авторизацию ДО получения device
                     # Это предотвращает Information Disclosure (раскрытие существования device)
                     # Исключение: публичные endpoints не требуют авторизации
+                    # Публичные endpoints: доступ без авторизации (для логина, инициализации, Yandex auth UI)
                     public_endpoints = [
                         "admin.auth.me",
                         "admin.auth.initialize",
+                        "admin.auth.login",
+                        "admin.auth.refresh",
                         "yandex_device_auth.start",
                         "yandex_device_auth.cookies",
                         "yandex_device_auth.status",
                         "yandex_device_auth.get_session",
+                        "yandex_device_auth.cancel",
+                        "oauth_yandex.get_status",
+                        "oauth_yandex.get_authorize_url",
+                        "oauth_yandex.configure",
+                        "oauth_yandex.exchange_code",
+                        "oauth_yandex.clear_tokens",
+                        "yandex.login.start",
+                        "yandex.login.status",
                     ]
                     is_public = endpoint.service in public_endpoints
                     if not is_public:
@@ -525,10 +540,12 @@ class ApiModule(RuntimeModule):
         # Уровень логирования uvicorn: можно изменить через LOG_LEVEL или по умолчанию warning
         # Отключаем access log для uvicorn (используем наш middleware для логирования)
         uvicorn_log_level = os.getenv("UVICORN_LOG_LEVEL", "warning")
+        api_host = os.getenv("API_HOST", "0.0.0.0")
+        api_port = int(os.getenv("API_PORT", "8000"))
         config = uvicorn.Config(
-            self.app, 
-            host="127.0.0.1", 
-            port=8000, 
+            self.app,
+            host=api_host,
+            port=api_port, 
             log_level=uvicorn_log_level,
             access_log=False  # Отключаем access log uvicorn, используем наш middleware
         )

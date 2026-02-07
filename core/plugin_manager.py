@@ -727,16 +727,22 @@ class PluginManager:
         if manifest.get("experimental", False):
             flags.add(IntegrationFlag.EXPERIMENTAL)
         
-        # Регистрируем интеграцию
+        # Регистрируем интеграцию (тип — из манифеста: type, role или integration)
         integration_name = manifest.get("integration_name") or plugin_name.replace("_", " ").title()
-        
+        integration_type = manifest.get("type") or manifest.get("role") or "integration"
+        if isinstance(integration_type, list):
+            integration_type = integration_type[0] if integration_type else "integration"
+        if not isinstance(integration_type, str):
+            integration_type = "integration"
+
         try:
             self._runtime.integrations.register(
                 integration_id=plugin_name,
                 name=integration_name,
                 plugin_name=plugin_name,
                 flags=flags,
-                description=plugin_description or metadata.description
+                description=plugin_description or metadata.description,
+                integration_type=integration_type,
             )
         except Exception:
             # Игнорируем ошибки регистрации интеграций (не критично)

@@ -82,6 +82,7 @@ ACTION_SCOPE_MAP: Dict[str, str] = {
     "admin.v1.storage": "admin.read",
     "admin.v1.state": "admin.read",
     "admin.v1.integrations": "admin.read",
+    "admin.v1.inspector.auth": "admin.read",
     
     # Admin basic services (legacy names removed — use admin.v1.* services)
     # NOTE: legacy admin.* entries like "admin.list_plugins" and the

@@ -124,7 +124,7 @@ class Config:
 
         # cors_allowed_origins
         if self.cors_allowed_origins is None:
-            # Default for dev
+            # Default для dev; в development любой localhost:* доп. разрешается через LocalhostCORSMiddleware
             self.cors_allowed_origins = ["http://localhost:3000", "http://127.0.0.1:3000"]
         if not isinstance(self.cors_allowed_origins, list) or not all(isinstance(x, str) for x in self.cors_allowed_origins):
             raise ValueError("cors_allowed_origins must be list[str]")

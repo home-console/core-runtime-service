@@ -1,12 +1,17 @@
 {
-  "class_path": "plugins.oauth_yandex.plugin.OAuthYandexPlugin",
-  "name": "oauth_yandex",
-  "version": "0.1.0",
-  "description": "OAuth helper для Яндекса: получение и хранение токенов",
-  "author": "Home Console",
-  "dependencies": [],
-
-  "role": "capability_provider",
-  "capability": "oauth:yandex",
-  "user_facing": false
+    "class_path": "plugins.oauth_yandex.plugin.OAuthYandexPlugin",
+    "name": "oauth_yandex",
+    "version": "0.1.0",
+    "description": "OAuth helper для Яндекса: получение и хранение токенов",
+    "author": "Home Console",
+    "dependencies": [],
+    "role": "capability_provider",
+    "capability": "oauth:yandex",
+    "user_facing": false,
+    "is_integration": true,
+    "integration_name": "Yandex OAuth",
+    "integration_flags": [
+        "requires_config"
+    ],
+    "type": "oauth"
 }

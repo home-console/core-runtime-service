@@ -37,6 +37,7 @@ class IntegrationInfo:
     plugin_name: str  # Имя плагина (связь с PluginManager)
     flags: Set[IntegrationFlag]  # Флаги интеграции
     description: str = ""  # Описание (из plugin metadata)
+    type: str = "integration"  # Тип из манифеста: authentication, oauth, capability_provider, integration
 
 
 class IntegrationRegistry:
@@ -57,27 +58,31 @@ class IntegrationRegistry:
         name: str,
         plugin_name: str,
         flags: Optional[Set[IntegrationFlag]] = None,
-        description: str = ""
+        description: str = "",
+        integration_type: Optional[str] = None,
     ) -> None:
         """
         Зарегистрировать интеграцию.
-        
+
         Args:
             integration_id: уникальный идентификатор интеграции
             name: отображаемое имя
             plugin_name: имя плагина (связь с PluginManager)
             flags: опциональные флаги
             description: описание интеграции
+            integration_type: тип из манифеста (authentication, oauth, integration и т.д.)
         """
         if flags is None:
             flags = set()
-        
+        type_val = (integration_type or "integration").strip() or "integration"
+
         self._integrations[integration_id] = IntegrationInfo(
             id=integration_id,
             name=name,
             plugin_name=plugin_name,
             flags=flags,
-            description=description
+            description=description,
+            type=type_val,
         )
     
     def unregister(self, integration_id: str) -> None:
