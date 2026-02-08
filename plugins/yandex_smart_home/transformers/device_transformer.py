@@ -130,3 +130,19 @@ class DeviceTransformer:
                 "state": {"instance": "brightness", "value": params["brightness"]}
             })
         return actions
+
+    @staticmethod
+    def convert_params_to_quasar_states(params: Dict[str, Any]) -> list[Dict[str, Any]]:
+        """Формат для Quasar API: state только с value (без instance), часть клиентов так ожидает."""
+        states = []
+        if "on" in params:
+            states.append({
+                "type": "devices.capabilities.on_off",
+                "state": {"value": bool(params["on"])}
+            })
+        if "brightness" in params:
+            states.append({
+                "type": "devices.capabilities.range",
+                "state": {"instance": "brightness", "value": params["brightness"]}
+            })
+        return states

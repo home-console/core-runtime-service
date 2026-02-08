@@ -217,20 +217,75 @@ async def list_auth_flows(runtime: Any) -> List[Dict[str, Any]]:
 async def list_integrations(runtime: Any) -> List[Dict[str, Any]]:
     """
     Inspector view: list integrations (read-only).
-    Source: runtime.state["integration_inspector.integrations"] only.
-    No service_registry.call, no domain/plugin knowledge.
-    Plugins write their integration state; Inspector only reads.
+    Source: runtime.state["integration_inspector.integrations"] + auth_inspector.flows.
+    Плагины могут писать в integration_inspector.integrations; auth-плагины (yandex_device_auth)
+    пишут в auth_inspector.flows. Для единого списка в UI объединяем оба — тогда в «Интеграциях»
+    видны и обычные интеграции, и привязки авторизаций (Яндекс и т.д.).
     Returns list of { id, state, message?, actions: [{ type, label, params? }] }.
     """
+    result: List[Dict[str, Any]] = []
     try:
         if not hasattr(runtime, "state") or runtime.state is None:
-            return []
+            return result
         data = await runtime.state.get("integration_inspector.integrations")
-        if not isinstance(data, list):
-            return []
-        return data
+        if isinstance(data, list):
+            for item in data:
+                if isinstance(item, dict):
+                    result.append(item)
+        raw_flows = await runtime.state.get("auth_inspector.flows")
+        if isinstance(raw_flows, list):
+            for item in raw_flows:
+                if not isinstance(item, dict):
+                    continue
+                flow = {
+                    "id": item.get("id"),
+                    "state": item.get("state"),
+                    "actions": item.get("actions") if isinstance(item.get("actions"), list) else [],
+                }
+                if "message" in item and item["message"] is not None:
+                    flow["message"] = item["message"]
+                if "qr_url" in item and item["qr_url"] is not None:
+                    flow["qr_url"] = item["qr_url"]
+                if "qr_svg" in item and item["qr_svg"] is not None:
+                    flow["qr_svg"] = item["qr_svg"]
+                result.append(flow)
+        return result
     except Exception:
-        return []
+        return result
+
+
+async def integrations_inspector_response(runtime: Any) -> Dict[str, Any]:
+    """
+    Ответ для GET /admin/v1/inspector/integrations: { "integrations": [...] }.
+    Клиент (Flutter) ожидает именно такой формат.
+    """
+    items = await list_integrations(runtime)
+    return {"integrations": items}
+
+
+async def auth_inspector_response(runtime: Any) -> Dict[str, Any]:
+    """
+    Ответ для GET /admin/v1/inspector/auth: { "auth_flows": [...] }.
+    Клиент ожидает ключ auth_flows.
+    """
+    items = await list_auth_flows(runtime)
+    return {"auth_flows": items}
+
+
+async def inventory_inspector_response(runtime: Any) -> Dict[str, Any]:
+    """
+    Ответ для GET /admin/v1/inspector/inventory.
+    Пока возвращаем пустой список; при появлении источника инвентаря — заполнить.
+    """
+    return {"items": []}
+
+
+async def inspector_auth_summary(runtime: Any) -> Dict[str, Any]:
+    """
+    Краткая сводка auth для Inspector (тот же формат, что auth_inspector_response).
+    Регистрируется вторым handler'ом для admin.v1.inspector.auth — перезаписывает первый.
+    """
+    return await auth_inspector_response(runtime)
 
 
 # --- Execution observability (D3.3) ---

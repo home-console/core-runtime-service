@@ -829,40 +829,64 @@ class YandexAPIClient:
             f"https://iot.quasar.yandex.ru/m/user/devices/{device_id}/actions",
             f"https://iot.quasar.yandex.ru/m/v3/user/devices/{device_id}/actions",
         ]
-        request_body = {"actions": actions}
+        # Варианты тела: часть клиентов Quasar ожидает "actions", часть — "states"; state с value без instance
+        states_fallback = []
+        for a in actions:
+            if isinstance(a, dict):
+                st = a.get("state") or {}
+                states_fallback.append({
+                    "type": a.get("type", "devices.capabilities.on_off"),
+                    "state": {"value": st.get("value")} if "value" in st else st,
+                })
+        bodies_to_try = [
+            {"actions": actions},
+            {"states": actions},
+            {"states": states_fallback} if states_fallback else None,
+        ]
         timeout = aiohttp.ClientTimeout(total=15)
         last_error = None
         async with aiohttp.ClientSession(cookie_jar=jar, timeout=timeout) as session:
-            # CSRF обязателен для POST (как в YandexStation: 403 = no x-csrf-token)
             csrf_token = await self._get_quasar_csrf_token(session)
             if csrf_token:
                 base_headers["x-csrf-token"] = csrf_token
-            for url in urls_to_try:
-                try:
-                    async with session.post(url, headers=base_headers, json=request_body) as resp:
-                        text = await resp.text()
-                        if resp.status < 400:
-                            if not text.strip():
-                                return {}
+            for request_body in bodies_to_try:
+                if request_body is None:
+                    continue
+                for url in urls_to_try:
+                    try:
+                        async with session.post(url, headers=base_headers, json=request_body) as resp:
+                            text = await resp.text()
+                            if resp.status < 400:
+                                try:
+                                    await self.runtime.service_registry.call(
+                                        "logger.log",
+                                        level="info",
+                                        message=f"Quasar command OK for {device_id}",
+                                        plugin=self.plugin_name,
+                                        context={"url": url, "body_key": list(request_body.keys())[0]},
+                                    )
+                                except Exception:
+                                    pass
+                                if not text.strip():
+                                    return {}
+                                try:
+                                    import json as _json
+                                    return _json.loads(text)
+                                except Exception:
+                                    return {}
+                            last_error = (resp.status, text)
                             try:
-                                import json as _json
-                                return _json.loads(text)
+                                await self.runtime.service_registry.call(
+                                    "logger.log",
+                                    level="warning",
+                                    message=f"Quasar {resp.status} for {url}: {text[:500]}",
+                                    plugin=self.plugin_name,
+                                    context={"url": url, "status": resp.status, "body_preview": text[:300]},
+                                )
                             except Exception:
-                                return {}
-                        last_error = (resp.status, text)
-                        # Логируем тело 403 чтобы понять причину (CSRF, permission, etc.)
-                        try:
-                            await self.runtime.service_registry.call(
-                                "logger.log",
-                                level="warning",
-                                message=f"Quasar actions {resp.status} for {url}: {text[:500]}",
-                                plugin=self.plugin_name,
-                                context={"url": url, "status": resp.status, "body_preview": text[:300]},
-                            )
-                        except Exception:
-                            pass
-                except Exception as e:
-                    last_error = (0, str(e))
+                                pass
+                    except Exception as e:
+                        last_error = (0, str(e))
         status, text = last_error or (403, "Forbidden")
         raise RuntimeError(f"Quasar actions HTTP {status}: {text[:400]}")
 

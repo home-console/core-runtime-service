@@ -134,11 +134,10 @@ class CommandHandler:
         # Конвертируем params в действия по Яндекс API
         actions = DeviceTransformer.convert_params_to_actions(params)
 
-        # Логируем исходящий запрос
         await self._log(
-            "debug",
-            "Yandex command request",
-            {"device_id": external_id, "actions": actions, "params": params},
+            "info",
+            f"Sending command to Yandex device (quasar={use_quasar})",
+            {"device_id": external_id, "internal_id": internal_id, "params": params, "actions": actions},
         )
 
         try:

@@ -114,8 +114,19 @@ class CoreRuntime:
                     await self.plugin_manager.auto_load_plugins()
                 except Exception as e:
                     # Не мешаем запуску runtime из-за проблем с автозагрузкой
-                    # Логируем ошибку для отладки
                     await warning(self, f"Ошибка автозагрузки плагинов: {e}", component="runtime")
+            # Принудительно подгрузить yandex_smart_home (команды вкл/выкл идут через него в Quasar)
+            if "yandex_smart_home" not in self.plugin_manager.list_plugins():
+                try:
+                    ok = await self.plugin_manager.load_plugin_by_name("yandex_smart_home", logger_func=info)
+                    if not ok:
+                        await warning(
+                            self,
+                            "Плагин yandex_smart_home не загружен — переключение устройств вкл/выкл через Яндекс не будет работать. Проверьте зависимости (oauth_yandex) и логи выше.",
+                            component="runtime",
+                        )
+                except Exception as e:
+                    await warning(self, f"Не удалось загрузить yandex_smart_home: {e}", component="runtime")
 
             # Модули регистрируются приложением (bootstrap) через register_module_specs() до вызова start().
             # Проверка, что все REQUIRED модули зарегистрированы (список required задаётся приложением)

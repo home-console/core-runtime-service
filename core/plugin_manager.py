@@ -447,10 +447,13 @@ class PluginManager:
                 module = importlib.import_module(module_path)
                 plugin_class = getattr(module, class_name)
             except (ImportError, AttributeError) as e:
+                import traceback
+                tb = traceback.format_exc()
                 await actual_logger_func(
                     self._runtime,
-                    f"Не удалось импортировать класс '{class_path}' из манифеста плагина '{plugin_name}': {e}",
-                    component="plugin_manager"
+                    f"Не удалось импортировать класс '{class_path}' для плагина '{plugin_name}': {e}",
+                    component="plugin_manager",
+                    traceback=tb[:800] if len(tb) > 800 else tb,
                 )
                 return False
             
@@ -531,10 +534,13 @@ class PluginManager:
                 return False
                 
         except Exception as e:
+            import traceback
+            tb = traceback.format_exc()
             await actual_logger_func(
                 self._runtime,
-                f"Ошибка при обработке манифеста плагина: {e}",
-                component="plugin_manager"
+                f"Ошибка загрузки плагина '{plugin_name}': {e}",
+                component="plugin_manager",
+                traceback=tb[:800] if len(tb) > 800 else tb,
             )
             return False
 
@@ -591,6 +597,36 @@ class PluginManager:
                 pass
         
         return result
+
+    async def load_plugin_by_name(
+        self,
+        plugin_name: str,
+        plugins_dir: Optional[Path] = None,
+        logger_func: Optional[Callable[..., Awaitable[None]]] = None,
+    ) -> bool:
+        """Загрузить один плагин по имени из каталога plugins/ (по manifest). Возвращает True если загружен."""
+        if plugin_name in self._plugins:
+            return True
+        if plugins_dir is None:
+            plugins_dir = Path(__file__).parent.parent / "plugins"
+        plugin_dir = plugins_dir / plugin_name
+        if not plugin_dir.is_dir():
+            return False
+        manifest = self._load_plugin_manifest(plugin_dir)
+        if not manifest or manifest.get("name") != plugin_name:
+            return False
+        deps = manifest.get("dependencies", [])
+        missing = [d for d in deps if d not in self._plugins]
+        if missing:
+            if logger_func:
+                await logger_func(
+                    self._runtime,
+                    f"Плагин '{plugin_name}' не загружен: отсутствуют зависимости {missing}",
+                    component="plugin_manager",
+                )
+            return False
+        log_func = logger_func or warning
+        return await self._load_plugin_from_manifest(manifest, plugin_dir, log_func)
 
     async def auto_load_plugins(
         self,

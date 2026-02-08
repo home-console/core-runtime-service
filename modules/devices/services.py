@@ -117,13 +117,17 @@ async def set_state(runtime, device_id: str, state: Dict[str, Any]) -> Dict[str,
 
     current_state = device.get("state", {})
 
-    if not isinstance(current_state, dict) or \
-       not all(k in current_state for k in ["desired", "reported", "pending"]):
-        raise ValueError(
-            f"Device {device_id} has invalid state format. "
-            f"Expected: {{desired, reported, pending}}, "
-            f"got: {current_state}"
-        )
+    # Нормализуем структуру state (устройства из синка/legacy могут не иметь desired/reported/pending)
+    if not isinstance(current_state, dict) or not all(k in current_state for k in ["desired", "reported", "pending"]):
+        reported = current_state if isinstance(current_state, dict) else {}
+        if not isinstance(reported, dict):
+            reported = {}
+        current_state = {
+            "desired": dict(reported),
+            "reported": dict(reported),
+            "pending": False,
+        }
+        device["state"] = current_state
 
     if not isinstance(current_state["desired"], dict) or \
        not isinstance(current_state["reported"], dict) or \
@@ -177,7 +181,11 @@ async def list_devices(runtime) -> List[Dict[str, Any]]:
     for dev_id in keys:
         device = await runtime.storage.get("devices", dev_id)
         if device is not None:
-            devices.append(device)
+            # Гарантируем поле id для клиента (ключ storage может не совпадать с полем в документе)
+            out = dict(device)
+            if "id" not in out:
+                out["id"] = dev_id
+            devices.append(out)
 
     return devices
 
