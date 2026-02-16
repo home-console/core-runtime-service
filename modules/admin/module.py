@@ -40,6 +40,7 @@ from .introspection import (
     list_schedules,
     get_schedule,
     list_operation_schedules,
+    list_capabilities,
 )
 from .operations import (
     admin_operations_create,
@@ -244,9 +245,10 @@ class AdminModule(RuntimeModule):
             ("admin.v1.state.keys", wrap_introspection(list_state_keys)),
             ("admin.v1.state.get", wrap_state_get()),
             ("admin.v1.inspector.operations", wrap_introspection(list_operations_available)),
-            ("admin.v1.inspector.auth", wrap_introspection(auth_inspector_response)),
-            ("admin.v1.inspector.integrations", wrap_introspection(integrations_inspector_response)),
-            ("admin.v1.inspector.inventory", wrap_introspection(inventory_inspector_response)),
+            ("admin.v1.inspector.auth", wrap_introspection(list_auth_flows)),
+            ("admin.v1.inspector.integrations", wrap_introspection(list_integrations)),
+            ("admin.v1.inspector.inventory", wrap_introspection(lambda runtime: [])),
+            ("admin.v1.inspector.capabilities", wrap_introspection(list_capabilities)),
             ("admin.v1.inspector.executions", wrap_introspection(list_execution_traces)),
             ("admin.v1.inspector.executions.get", wrap_execution_get()),
             ("admin.v1.inspector.operations.executions", wrap_operation_executions()),

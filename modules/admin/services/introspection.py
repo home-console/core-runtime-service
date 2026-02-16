@@ -81,7 +81,8 @@ async def list_plugins(runtime: Any) -> List[Dict[str, Any]]:
         
         # Get plugin state
         state = pm.get_plugin_state(name)
-        started = state == "started"
+        # Compare with PluginState enum value
+        started = state == PluginState.STARTED
         
         # Get block reason if plugin is not started
         block_reason = pm.get_plugin_block_reason(name)
@@ -554,3 +555,36 @@ async def get_execution_tree(runtime: Any, execution_id: str) -> Dict[str, Any] 
         }
 
     return await _build(execution_id)
+
+async def list_capabilities(runtime: Any) -> List[Dict[str, Any]]:
+    """
+    List all registered capabilities and their providers.
+    
+    Returns list of capabilities with their providers and availability info.
+    """
+    result = []
+    
+    if not hasattr(runtime, 'capability_registry') or not runtime.capability_registry:
+        return result
+    
+    cap_reg = runtime.capability_registry
+    
+    # Get all capabilities (from providers dict)
+    try:
+        # Iterate through internal providers dict to get all capabilities
+        capabilities = {}
+        for capability_id, providers in cap_reg._providers.items():
+            capabilities[capability_id] = {
+                "id": capability_id,
+                "providers": providers,
+                "primary_provider": providers[0] if providers else None,
+                "provider_count": len(providers),
+            }
+        
+        # Sort by id for stable output
+        for cap_id in sorted(capabilities.keys()):
+            result.append(capabilities[cap_id])
+    except Exception:
+        pass
+    
+    return result

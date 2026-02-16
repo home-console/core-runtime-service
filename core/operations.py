@@ -182,6 +182,57 @@ class OperationManager:
         """Return list of registered operation type names (read-only, for Inspector)."""
         return list(self._handlers.keys())
 
+    def _find_handler(self, operation_type: str) -> Optional[Callable[[Any, Operation], Awaitable[Dict[str, Any]]]]:
+        """
+        Find handler for operation type.
+        
+        Routing strategy:
+        1. Try direct lookup in _handlers (backward compatibility)
+        2. Try capability-based lookup via CapabilityRegistry
+        3. Return None if not found
+        
+        Args:
+            operation_type: Operation type (can be plugin name or capability)
+            
+        Returns:
+            Handler callable or None
+        """
+        # Strategy 1: Direct lookup (backward compatibility)
+        if operation_type in self._handlers:
+            return self._handlers[operation_type]
+        
+        # Strategy 2: Capability-based lookup
+        # Try to find provider through capability registry
+        try:
+            if hasattr(self.runtime, 'capability_registry') and self.runtime.capability_registry:
+                cap_reg = self.runtime.capability_registry
+                providers = cap_reg.get_providers(operation_type)
+                
+                if providers:
+                    # Get primary provider (first one, or could be configurable)
+                    provider_name = providers[0]
+                    
+                    # Try to find handler registered under provider name + capability
+                    # Fallback handler names:
+                    # For capability "client.command.execute" and provider "client_manager":
+                    # Try: "client_manager.client.command.execute" or
+                    #      "client.command.execute" (already tried above)
+                    # The handler should be registered under the capability name, 
+                    # not provider name + capability
+                    # So, if we reached here, handler might not be registered properly
+                    
+                    # Actually, the handler SHOULD be registered under capability name
+                    # in _handlers by the plugin itself. If not found in step 1, it's an error.
+                    # But we could also check if handler exists under provider-namespaced name
+                    fallback_type = f"{provider_name}.{operation_type}"
+                    if fallback_type in self._handlers:
+                        return self._handlers[fallback_type]
+        except Exception:
+            # Capability registry might not be available - continue
+            pass
+        
+        return None
+
     async def create(
         self,
         op_type: str,
@@ -245,10 +296,16 @@ class OperationManager:
         validate → authorize → run → persist.
         
         Operation status is updated in-place, result persisted.
+        
+        Supports two routing modes:
+        1. Direct: operation.type directly matches handler name
+        2. Capability: operation.type is capability, router finds provider plugin
         """
         try:
-            # 1. Validate
-            if operation.type not in self._handlers:
+            # 1. Validate - try to find handler (direct or capability-based)
+            handler = self._find_handler(operation.type)
+            
+            if handler is None:
                 operation.status = OperationStatus.FAILED
                 operation.error = OperationError(
                     code="unknown_operation_type",
@@ -263,7 +320,6 @@ class OperationManager:
             await self._persist(operation)
             
             # 3. Execute handler with context
-            handler = self._handlers[operation.type]
             context = {"runtime": self.runtime, "operation_id": operation.operation_id}
             result = await handler(operation.params, context)
             

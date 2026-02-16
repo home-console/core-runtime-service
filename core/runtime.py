@@ -109,7 +109,9 @@ class CoreRuntime:
         try:
             # Если нет загруженных плагинов (например, в тестах с InMemoryStorageAdapter),
             # попытаться автоматически загрузить плагины из каталога plugins/
-            if not self.plugin_manager.list_plugins():
+            # (unless in TEST_MODE)
+            import os
+            if not self.plugin_manager.list_plugins() and not os.getenv('TEST_MODE'):
                 try:
                     await self.plugin_manager.auto_load_plugins()
                 except Exception as e:

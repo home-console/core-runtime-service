@@ -30,6 +30,7 @@ from modules.admin.services.introspection import (
     list_schedules,
     get_schedule,
     list_operation_schedules,
+    list_capabilities,
 )
 
 __all__ = [
@@ -57,4 +58,5 @@ __all__ = [
     "list_schedules",
     "get_schedule",
     "list_operation_schedules",
+    "list_capabilities",
 ]
