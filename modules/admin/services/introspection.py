@@ -560,7 +560,7 @@ async def list_capabilities(runtime: Any) -> List[Dict[str, Any]]:
     """
     List all registered capabilities and their providers.
     
-    Returns list of capabilities with their providers and availability info.
+    Returns list of capabilities with their providers, types, and remote config.
     """
     result = []
     
@@ -569,16 +569,36 @@ async def list_capabilities(runtime: Any) -> List[Dict[str, Any]]:
     
     cap_reg = runtime.capability_registry
     
-    # Get all capabilities (from providers dict)
+    # Get all capabilities with full provider info
     try:
-        # Iterate through internal providers dict to get all capabilities
         capabilities = {}
         for capability_id, providers in cap_reg._providers.items():
+            # Build provider list with full info
+            provider_list = []
+            for provider_info in providers:
+                provider_dict = {
+                    "name": provider_info.get("name"),
+                    "type": provider_info.get("type", "local"),
+                }
+                # Include remote_config only for remote providers
+                if provider_info.get("type") == "remote" and provider_info.get("remote_config"):
+                    provider_dict["base_url"] = provider_info["remote_config"].get("base_url")
+                    provider_dict["timeout"] = provider_info["remote_config"].get("timeout", 10)
+                
+                provider_list.append(provider_dict)
+            
+            # Determine primary provider (first one, prefer local)
+            local_providers = [p for p in provider_list if p["type"] == "local"]
+            remote_providers = [p for p in provider_list if p["type"] == "remote"]
+            primary = local_providers[0] if local_providers else (remote_providers[0] if remote_providers else None)
+            
             capabilities[capability_id] = {
                 "id": capability_id,
-                "providers": providers,
-                "primary_provider": providers[0] if providers else None,
-                "provider_count": len(providers),
+                "providers": provider_list,
+                "primary_provider": primary,
+                "provider_count": len(provider_list),
+                "local_provider_count": len(local_providers),
+                "remote_provider_count": len(remote_providers),
             }
         
         # Sort by id for stable output

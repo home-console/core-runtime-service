@@ -33,6 +33,9 @@ class PluginMetadata:
     # Capability: плагин объявляет, какие capabilities предоставляет и какие требует.
     capabilities_provided: list[str] | None = field(default_factory=list)  # ["oauth:yandex"]
     capabilities_required: list[str] | None = field(default_factory=list)  # ["oauth:yandex", "yandex:session_cookies"]
+    # Remote configuration для remote capability providers
+    # Если не None, то этот плагин является remote provider
+    remote_config: dict | None = None  # {"base_url": "http://...", "timeout": 10}
 
 
 class BasePlugin(SDKBasePlugin):

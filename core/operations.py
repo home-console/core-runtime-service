@@ -178,6 +178,15 @@ class OperationManager:
         """
         self._handlers[op_type] = handler
 
+    def unregister_handler(self, op_type: str) -> None:
+        """
+        Unregister handler for operation type.
+        
+        Args:
+            op_type: Operation type to unregister
+        """
+        self._handlers.pop(op_type, None)
+
     def list_handler_types(self) -> List[str]:
         """Return list of registered operation type names (read-only, for Inspector)."""
         return list(self._handlers.keys())
@@ -232,6 +241,105 @@ class OperationManager:
             pass
         
         return None
+
+    def _find_remote_provider(self, operation_type: str) -> Optional[Dict[str, Any]]:
+        """
+        Find remote provider for operation type (capability).
+        
+        Args:
+            operation_type: Operation type (should be capability name)
+            
+        Returns:
+            Provider info dict: {"name": "...", "type": "remote", "remote_config": {...}}
+            or None if no remote provider found
+        """
+        try:
+            if hasattr(self.runtime, 'capability_registry') and self.runtime.capability_registry:
+                cap_reg = self.runtime.capability_registry
+                
+                # Get all providers for this capability
+                all_providers = cap_reg.get_all_providers_for_capability(operation_type)
+                
+                # Find remote provider (prefer first remote if multiple exist)
+                for provider_info in all_providers:
+                    if provider_info.get("type") == "remote":
+                        return provider_info
+        except Exception:
+            pass
+        
+        return None
+
+    async def _execute_remote_operation(
+        self,
+        operation: Operation,
+        provider_info: Dict[str, Any]
+    ) -> Operation:
+        """
+        Execute operation on remote provider via HTTP.
+        
+        Args:
+            operation: Operation to execute
+            provider_info: Remote provider metadata
+            
+        Returns:
+            Operation with updated status and result/error
+        """
+        from core.remote_executor import RemoteOperationExecutor
+        
+        # Mark as running
+        operation.status = OperationStatus.RUNNING
+        operation.started_at = time.time()
+        await self._persist(operation)
+        
+        try:
+            # Get remote config
+            remote_config = provider_info.get("remote_config", {})
+            base_url = remote_config.get("base_url")
+            timeout = remote_config.get("timeout", 10)
+            
+            if not base_url:
+                raise ValueError(f"Remote provider missing base_url in config")
+            
+            # Execute remotely
+            context = {
+                "operation_id": operation.operation_id,
+                "initiator": operation.initiator.to_dict() if operation.initiator else None,
+            }
+            
+            response = await RemoteOperationExecutor.execute_remote(
+                base_url=base_url,
+                operation_type=operation.type,
+                params=operation.params,
+                context=context,
+                timeout=timeout
+            )
+            
+            # Check response status
+            if response.get("status") == "success":
+                operation.status = OperationStatus.SUCCESS
+                operation.result = response.get("result", {})
+            else:
+                # Remote returned error
+                error_info = response.get("error", {})
+                operation.status = OperationStatus.FAILED
+                operation.error = OperationError(
+                    code=error_info.get("code", "remote_error"),
+                    message=error_info.get("message", "Remote provider error")
+                )
+            
+            operation.finished_at = time.time()
+        
+        except Exception as e:
+            # Network or execution error
+            operation.status = OperationStatus.FAILED
+            operation.error = OperationError(
+                code="remote_execution_failed",
+                message=f"Remote operation failed: {str(e)}"
+            )
+            operation.finished_at = time.time()
+        
+        await self._persist(operation)
+        return operation
 
     async def create(
         self,
@@ -297,19 +405,26 @@ class OperationManager:
         
         Operation status is updated in-place, result persisted.
         
-        Supports two routing modes:
-        1. Direct: operation.type directly matches handler name
-        2. Capability: operation.type is capability, router finds provider plugin
+        Supports two execution modes:
+        1. Local: operation.type directly matches handler name or local capability provider
+        2. Remote: operation.type is capability with remote provider → HTTP execution
         """
         try:
             # 1. Validate - try to find handler (direct or capability-based)
             handler = self._find_handler(operation.type)
             
+            # If no local handler, try remote provider
             if handler is None:
+                remote_provider_info = self._find_remote_provider(operation.type)
+                if remote_provider_info:
+                    # Will execute remotely
+                    return await self._execute_remote_operation(operation, remote_provider_info)
+                
+                # Neither local nor remote found
                 operation.status = OperationStatus.FAILED
                 operation.error = OperationError(
                     code="unknown_operation_type",
-                    message=f"No handler for operation type: {operation.type}"
+                    message=f"No handler or remote provider for operation type: {operation.type}"
                 )
                 await self._persist(operation)
                 return operation
@@ -319,9 +434,9 @@ class OperationManager:
             operation.started_at = time.time()
             await self._persist(operation)
             
-            # 3. Execute handler with context
+            # 3. Execute local handler with context
             context = {"runtime": self.runtime, "operation_id": operation.operation_id}
-            result = await handler(operation.params, context)
+            result = await handler(context, operation)
             
             # 4. Mark success
             operation.status = OperationStatus.SUCCESS

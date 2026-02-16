@@ -140,7 +140,14 @@ class PluginManager:
             if self._runtime and hasattr(self._runtime, "capability_registry"):
                 reg = self._runtime.capability_registry
                 for cap_id in (metadata.capabilities_provided or []):
-                    reg.register_provider(plugin_name, cap_id)
+                    # Determine if this is a remote provider
+                    provider_type = "remote" if metadata.remote_config else "local"
+                    reg.register_provider(
+                        plugin_name,
+                        cap_id,
+                        provider_type=provider_type,
+                        remote_config=metadata.remote_config
+                    )
                 for cap_id in (metadata.capabilities_required or []):
                     reg.register_consumer(plugin_name, cap_id)
         except Exception as e:
@@ -229,8 +236,23 @@ class PluginManager:
         try:
             await plugin.on_unload()
             self._block_reasons.pop(plugin_name, None)
-            if self._runtime and hasattr(self._runtime, "capability_registry"):
-                self._runtime.capability_registry.unregister_plugin(plugin_name)
+            
+            # Unregister handlers for all capabilities provided by this plugin
+            if self._runtime and hasattr(self._runtime, "capability_registry") and hasattr(self._runtime, "operations"):
+                cap_reg = self._runtime.capability_registry
+                ops_mgr = self._runtime.operations
+                
+                # Get all capabilities provided by this plugin
+                metadata = plugin.metadata
+                for cap_id in metadata.capabilities_provided:
+                    # Unregister direct handler (backward compatibility)
+                    ops_mgr.unregister_handler(cap_id)
+                    # Unregister plugin name as handler (if it was used)
+                    ops_mgr.unregister_handler(plugin_name)
+                
+                # Finally unregister from capability registry
+                cap_reg.unregister_plugin(plugin_name)
+            
             del self._plugins[plugin_name]
             self._states[plugin_name] = PluginState.UNLOADED
             
