@@ -1,0 +1,321 @@
+openapi: 3.0.0
+info:
+  title: HomeConsole Admin API
+  description: Admin API для управления распределённой платформой умного дома
+  version: 1.0.0
+  contact:
+    name: HomeConsole Team
+    url: https://github.com/homeconsole/core-runtime-service
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:8000
+    description: Local development
+  - url: https://api.homeconsole.local
+    description: Production (example)
+
+security:
+  - bearerAuth: []
+  - apiKeyAuth: []
+
+paths:
+  /admin/v1/status:
+    get:
+      summary: Get system status
+      description: Получить текущий статус Core Runtime (healthy check)
+      operationId: getStatus
+      tags:
+        - Admin
+      responses:
+        '200':
+          description: OK - System is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  timestamp:
+                    type: string
+                    format: date-time
+                  modules:
+                    type: array
+                    items:
+                      type: string
+                    example: ["devices", "operations", "automation"]
+                  plugins:
+                    type: array
+                    items:
+                      type: string
+                    example: ["oauth_yandex", "yandex_smart_home"]
+                  storage:
+                    type: object
+                    properties:
+                      connected:
+                        type: boolean
+                      type:
+                        type: string
+                        enum: [sqlite, postgresql]
+        '503':
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /admin/v1/operations:
+    post:
+      summary: Execute operation
+      description: |
+        Выполнить операцию в системе.
+        
+        Примеры:
+        - device.set_state (переключить устройство)
+        - automation.execute (выполнить автоматизацию)
+        - operation.cancel (отменить операцию)
+      operationId: executeOperation
+      tags:
+        - Operations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OperationRequest'
+            example:
+              type: device.set_state
+              params:
+                device_id: "light.kitchen"
+                state: "on"
+                brightness: 80
+      responses:
+        '200':
+          description: Operation executed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
+        '400':
+          description: Invalid operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /admin/v1/inspector/plugins:
+    get:
+      summary: List loaded plugins
+      description: Получить список загруженных плагинов с метаданными
+      operationId: listPlugins
+      tags:
+        - Inspector
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  plugins:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PluginInfo'
+
+  /admin/v1/inspector/services:
+    get:
+      summary: List registered services
+      description: Получить список всех зарегистрированных сервисов
+      operationId: listServices
+      tags:
+        - Inspector
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  services:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ServiceInfo'
+
+  /admin/v1/auth/login:
+    post:
+      summary: Login
+      description: Аутентифицировать пользователя (получить token)
+      operationId: login
+      tags:
+        - Auth
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
+              required:
+                - username
+                - password
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token:
+                    type: string
+                  token_type:
+                    type: string
+                    enum: [bearer]
+                  expires_in:
+                    type: integer
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /admin/v1/auth/logout:
+    post:
+      summary: Logout
+      description: Завершить сессию
+      operationId: logout
+      tags:
+        - Auth
+      responses:
+        '200':
+          description: Logout successful
+
+components:
+  schemas:
+    OperationRequest:
+      type: object
+      properties:
+        type:
+          type: string
+          description: Operation type (e.g., device.set_state, automation.execute)
+          example: device.set_state
+        params:
+          type: object
+          description: Operation parameters (type-specific)
+          example:
+            device_id: "light.kitchen"
+            state: "on"
+        context:
+          type: object
+          description: Optional context (user info, etc.)
+      required:
+        - type
+        - params
+
+    OperationResponse:
+      type: object
+      properties:
+        operation_id:
+          type: string
+          format: uuid
+          description: Unique operation ID for tracking
+        status:
+          type: string
+          enum: [pending, running, completed, failed]
+        result:
+          type: object
+          description: Operation-specific result
+        error:
+          type: object
+          description: Error details (if failed)
+
+    PluginInfo:
+      type: object
+      properties:
+        name:
+          type: string
+        version:
+          type: string
+        description:
+          type: string
+        author:
+          type: string
+        status:
+          type: string
+          enum: [loaded, running, stopped]
+        capabilities_provided:
+          type: array
+          items:
+            type: string
+        capabilities_required:
+          type: array
+          items:
+            type: string
+
+    ServiceInfo:
+      type: object
+      properties:
+        name:
+          type: string
+          example: admin.get_status
+        description:
+          type: string
+        owner:
+          type: string
+          description: Module or plugin that provides this service
+        input_schema:
+          type: object
+        output_schema:
+          type: object
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        code:
+          type: integer
+        details:
+          type: object
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token from /admin/v1/auth/login
+
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API Key for service-to-service auth
+
+tags:
+  - name: Admin
+    description: Admin system endpoints
+  - name: Operations
+    description: Operation execution
+  - name: Inspector
+    description: System introspection (what plugins/services are loaded)
+  - name: Auth
+    description: Authentication and authorization

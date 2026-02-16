@@ -14,21 +14,43 @@ class HttpEndpoint:
     """Описание HTTP-контракта.
 
     Поля:
-      - method: HTTP-метод (GET, POST и т.д.)
       - path: путь, обязательно начинается с '/'
       - service: имя runtime-сервиса (строка)
+      - method: HTTP-метод (GET, POST и т.д.) — обязателен если websocket=False
+      - websocket: флаг WebSocket endpoint — если True, method должен быть None
       - description: необязательное описание
       - version: опциональная версия API (например, "v1", "v2")
       - deprecated: флаг устаревшей версии (True если версия помечена как deprecated)
       - kind: тип endpoint ("api" или "webhook") — определяет обработку и авторизацию
+      - tags: опциональный список тегов для группировки в документации
+
+    Правила валидации:
+      - Если websocket=True → method должен быть None
+      - Если websocket=False → method обязателен (не пустая строка)
     """
-    method: str
     path: str
     service: str
+    method: Optional[str] = None
+    websocket: bool = False
     description: Optional[str] = None
     version: Optional[str] = None
     deprecated: bool = False
     kind: Literal["api", "webhook"] = "api"
+    tags: Optional[list[str]] = None
+
+    def __post_init__(self) -> None:
+        """Валидация endpoint после инициализации."""
+        # Валидация websocket vs method
+        if self.websocket:
+            if self.method is not None:
+                raise ValueError("Если websocket=True → method должен быть None")
+        else:
+            if not self.method or not isinstance(self.method, str):
+                raise ValueError("Если websocket=False → method обязателен (непустая строка)")
+        
+        # Нормализуем tags
+        if self.tags is None:
+            self.tags = []
 
 
 class HttpRegistry:
@@ -46,24 +68,29 @@ class HttpRegistry:
     def register(self, endpoint: HttpEndpoint, version: Optional[str] = None) -> None:
         """Зарегистрировать HTTP-контракт.
 
-        Выполняет валидацию и предотвращает дубли по (method,path).
+        Выполняет валидацию и предотвращает дубли по (method,path) для HTTP или (path) для WebSocket.
         Нормализует path: удаляет завершающий '/' (кроме корня '/'),
         чтобы устранить дублирование путей в Swagger.
         
         Args:
             endpoint: описание HTTP-контракта
             version: опциональная версия API (если не указана в endpoint.version)
+        
+        Raises:
+            ValueError: если endpoint не проходит валидацию или уже зарегистрирован
         """
-        if not isinstance(endpoint.method, str) or not endpoint.method:
-            raise ValueError("method должен быть непустой строкой")
-        method = endpoint.method.upper()
-
         if not isinstance(endpoint.path, str) or not endpoint.path.startswith("/"):
             raise ValueError("path должен быть строкой, начинающейся с '/'")
 
         if not isinstance(endpoint.service, str) or not endpoint.service.strip():
             raise ValueError("service должен быть непустой строкой")
 
+        # For HTTP endpoints: method обязателен и не пустой
+        # For WebSocket: method должен быть None (проверяется в HttpEndpoint.__post_init__)
+        if not endpoint.websocket:
+            if not isinstance(endpoint.method, str) or not endpoint.method:
+                raise ValueError("method должен быть непустой строкой для HTTP endpoints")
+        
         # Используем версию из endpoint или из параметра
         api_version = endpoint.version or version
         
@@ -79,18 +106,30 @@ class HttpRegistry:
             # Добавляем версию к пути: /v1/path или /v2/path
             path = f"/{version_prefix}{path}"
 
-        key = (method, path)
+        # Для HTTP: ключ (method, path), для WebSocket: ключ ("WS", path)
+        if endpoint.websocket:
+            key = ("WS", path)
+        else:
+            # endpoint.method обязателен для HTTP endpoints (проверено в __post_init__)
+            method_str = endpoint.method
+            assert method_str is not None, "HTTP endpoint должен иметь method"
+            method = method_str.upper()
+            key = (method, path)
+
         if key in self._index:
-            raise ValueError(f"Контракт для {method} {path} уже зарегистрирован")
+            key_str = f"WebSocket {path}" if endpoint.websocket else f"{key[0]} {path}"
+            raise ValueError(f"Контракт для {key_str} уже зарегистрирован")
 
         # Нормализуем метод и добавляем запись
         ep = HttpEndpoint(
-            method=method,
             path=path,
             service=endpoint.service,
+            method=endpoint.method.upper() if endpoint.method else None,
+            websocket=endpoint.websocket,
             description=endpoint.description,
             version=api_version,
-            kind=endpoint.kind
+            kind=endpoint.kind,
+            tags=endpoint.tags or []
         )
         self._endpoints.append(ep)
         self._index.add(key)
@@ -223,8 +262,15 @@ class HttpRegistry:
         paths: Dict[str, Dict[str, Any]] = {}
         
         for endpoint in self._endpoints:
+            # Пропускаем WebSocket endpoints — они не поддерживаются в OpenAPI 3.0.x
+            if endpoint.websocket:
+                continue
+            
             path = endpoint.path
-            method = endpoint.method.lower()
+            # endpoint.method обязателен для HTTP endpoints (проверено в __post_init__)
+            method_str = endpoint.method
+            assert method_str is not None, "HTTP endpoint должен иметь method"
+            method = method_str.lower()
             
             # Инициализируем путь, если его ещё нет
             if path not in paths:
@@ -329,11 +375,15 @@ class HttpRegistry:
 
     def list_api_endpoints(self) -> List[HttpEndpoint]:
         """Вернуть список всех API endpoints (kind="api")."""
-        return [ep for ep in self._endpoints if ep.kind == "api"]
+        return [ep for ep in self._endpoints if ep.kind == "api" and not ep.websocket]
 
     def list_webhook_endpoints(self) -> List[HttpEndpoint]:
         """Вернуть список всех webhook endpoints (kind="webhook")."""
-        return [ep for ep in self._endpoints if ep.kind == "webhook"]
+        return [ep for ep in self._endpoints if ep.kind == "webhook" and not ep.websocket]
+
+    def list_websocket_endpoints(self) -> List[HttpEndpoint]:
+        """Вернуть список всех WebSocket endpoints."""
+        return [ep for ep in self._endpoints if ep.websocket]
 
     def list_by_kind(self, kind: Literal["api", "webhook"]) -> List[HttpEndpoint]:
         """Вернуть список endpoints по типу.
@@ -342,6 +392,6 @@ class HttpRegistry:
             kind: "api" или "webhook"
         
         Returns:
-            Список endpoints с указанным kind
+            Список endpoints с указанным kind (WebSocket endpoints исключаются)
         """
-        return [ep for ep in self._endpoints if ep.kind == kind]
+        return [ep for ep in self._endpoints if ep.kind == kind and not ep.websocket]

@@ -9,10 +9,12 @@ from .automation_stub_plugin import AutomationStubPlugin
 from .example_plugin import ExamplePlugin
 from .system_logger_plugin import SystemLoggerPlugin
 from .yandex_smart_home_stub import YandexSmartHomeStubPlugin
+from .websocket_test_plugin import WebSocketTestPlugin
 
 __all__ = [
     "AutomationStubPlugin",
     "ExamplePlugin",
     "SystemLoggerPlugin",
     "YandexSmartHomeStubPlugin",
+    "WebSocketTestPlugin",
 ]

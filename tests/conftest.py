@@ -31,6 +31,10 @@ class InMemoryStorageAdapter(StorageAdapter):
     async def list_keys(self, namespace: str) -> list[str]:
         return list(self._data.get(namespace, {}).keys())
 
+    async def list_namespaces(self) -> list[str]:
+        # Return sorted list of namespaces present in memory
+        return sorted(list(self._data.keys()))
+
     async def clear_namespace(self, namespace: str) -> None:
         self._data.pop(namespace, None)
 

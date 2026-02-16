@@ -17,7 +17,7 @@ import asyncio
 import re
 import inspect
 
-from fastapi import FastAPI, Request, Response, HTTPException, Path, Body, Depends
+from fastapi import FastAPI, Request, Response, HTTPException, Path, Body, Depends, WebSocket, WebSocketDisconnect
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.openapi.utils import get_openapi
 from fastapi.middleware.cors import CORSMiddleware
@@ -503,6 +503,50 @@ class ApiModule(RuntimeModule):
             # Регистрируем webhook как API route (FastAPI будет знать о нём)
             # Но он НЕ будет показан в OpenAPI /docs потому что мы отфильтруем его при генерации schema
             self.app.add_api_route(ep.path, webhook_handler, methods=[ep.method], name=route_name, include_in_schema=False)
+
+        # Регистрируем WebSocket endpoints
+        ws_endpoints = [ep for ep in endpoints if ep.websocket]
+        for ep in ws_endpoints:
+            def make_ws_handler(endpoint):
+                """Фабрика для создания WebSocket handler с правильным биндингом."""
+                async def ws_handler(websocket: WebSocket):
+                    """
+                    WebSocket handler — поддерживает долгоживущие соединения.
+                    
+                    WebSocket endpoint:
+                    - Accept connection
+                    - Call service with websocket object
+                    - Service handle message exchange
+                    - Connection closes when handler completes
+                    """
+                    await websocket.accept()
+                    try:
+                        # Вызываем сервис с объектом WebSocket
+                        # Сервис отвечает за корректное завершение соединения
+                        await self.runtime.service_registry.call(
+                            endpoint.service,
+                            websocket=websocket
+                        )
+                    except WebSocketDisconnect:
+                        # Client disconnected normally
+                        pass
+                    except Exception as e:
+                        import logging
+                        logging.error(f"WebSocket error for {endpoint.service}: {str(e)}")
+                        import traceback
+                        traceback.print_exc()
+                        try:
+                            await websocket.close(code=1011, reason="Internal Server Error")
+                        except Exception:
+                            pass
+                
+                return ws_handler
+            
+            ws_handler = make_ws_handler(ep)
+            route_name = f"ws_{ep.path.replace('/', '_').lstrip('_')}"
+            # Регистрируем WebSocket маршрут
+            # include_in_schema=False потому что WebSocket не в OpenAPI 3.0.x (еще)
+            self.app.websocket(ep.path, name=route_name)(ws_handler)
 
         # Настраиваем OpenAPI схему ПОСЛЕ регистрации всех routes
         def custom_openapi():

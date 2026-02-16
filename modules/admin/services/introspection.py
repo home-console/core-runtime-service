@@ -93,14 +93,16 @@ async def list_services(runtime: Any) -> List[Dict[str, str]]:
 
 
 async def list_http_endpoints(runtime: Any) -> List[Dict[str, Any]]:
-    """List all HTTP endpoints."""
+    """List all HTTP endpoints including WebSocket."""
     endpoints = runtime.http.list()
     return [
         {
-            "method": ep.method,
             "path": ep.path,
+            "method": ep.method,
+            "websocket": ep.websocket,
             "service": ep.service,
             "description": ep.description,
+            "tags": ep.tags or [],
         }
         for ep in endpoints
     ]
