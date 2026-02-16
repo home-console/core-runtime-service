@@ -16,6 +16,7 @@ Plugin Isolation — распределённое выполнение плаг�
 import asyncio
 import json
 import logging
+import threading
 from typing import Any, Callable, Awaitable, Optional, Dict
 from dataclasses import asdict
 
@@ -37,14 +38,21 @@ class ExecutionRouter:
         """Initialize router with runtime context."""
         self.runtime = runtime
         self._local_handlers: Dict[str, Callable[[Dict[str, Any], Operation], Awaitable[Dict[str, Any]]]] = {}
+        self._handler_lock = threading.Lock()  # P0 Hardening: Protect from concurrent access
     
     def register_handler(
         self,
         operation_type: str,
         handler: Callable[[Dict[str, Any], Operation], Awaitable[Dict[str, Any]]]
     ) -> None:
-        """Register local in-process handler."""
-        self._local_handlers[operation_type] = handler
+        """Register local in-process handler (thread-safe)."""
+        with self._handler_lock:
+            self._local_handlers[operation_type] = handler
+    
+    def unregister_handler(self, operation_type: str) -> None:
+        """Unregister handler (thread-safe)."""
+        with self._handler_lock:
+            self._local_handlers.pop(operation_type, None)
     
     async def execute(
         self,
@@ -98,8 +106,9 @@ class ExecutionRouter:
         provider_metadata: Optional[ProviderMetadata]
     ) -> Dict[str, Any]:
         """Execute operation in-process (direct handler call)."""
-        # Find handler
-        handler = self._local_handlers.get(operation.type)
+        # Find handler with lock protection (P0: race condition fix)
+        with self._handler_lock:
+            handler = self._local_handlers.get(operation.type)
         if not handler:
             raise ExecutionRouterError(f"No handler registered for {operation.type}")
         

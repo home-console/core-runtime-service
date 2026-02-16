@@ -14,6 +14,7 @@ PluginManager - управление lifecycle плагинов.
 import importlib
 import json
 import sys
+import threading
 from pathlib import Path
 from typing import Optional, TYPE_CHECKING, Callable, Awaitable, Dict, Any, List
 from enum import Enum
@@ -57,6 +58,8 @@ class PluginManager:
         self._states: dict[str, PluginState] = {}
         # Причина блокировки старта (missing capabilities): plugin_name -> {"missing_capabilities": [...]}
         self._block_reasons: dict[str, dict] = {}
+        # P0 Hardening: Lock for thread-safe access to _plugins and _states
+        self._plugin_lock = threading.Lock()
 
     async def load_plugin(self, plugin: BasePlugin) -> None:
         """
@@ -72,6 +75,11 @@ class PluginManager:
         # Читаем metadata ДО on_load, чтобы иметь plugin_name в случае ошибки
         metadata = plugin.metadata
         plugin_name = metadata.name
+        
+        # P0 Hardening: Check before loading (outside lock for now)
+        with self._plugin_lock:
+            if plugin_name in self._plugins:
+                raise ValueError(f"Плагин '{plugin_name}' уже загружен")
         
         # Установим ссылку на runtime у плагина перед вызовом on_load
         try:
@@ -118,23 +126,25 @@ class PluginManager:
             metadata = plugin.metadata
             plugin_name = metadata.name
 
-            if plugin_name in self._plugins:
-                raise ValueError(f"Плагин '{plugin_name}' уже загружен")
+            # P0 Hardening: Lock for final assignment
+            with self._plugin_lock:
+                if plugin_name in self._plugins:
+                    raise ValueError(f"Плагин '{plugin_name}' уже загружен")
 
-            # Зависимости: из манифеста (_manifest_dependencies) или из metadata (core.PluginMetadata)
-            deps = getattr(plugin, "_manifest_dependencies", None)
-            if deps is None:
-                deps = getattr(metadata, "dependencies", []) or []
-            if deps:
-                for dep_name in deps:
-                    if dep_name not in self._plugins:
-                        raise ValueError(
-                            f"Плагин '{plugin_name}' требует плагин '{dep_name}', "
-                            f"но он не загружен"
-                        )
+                # Зависимости: из манифеста (_manifest_dependencies) или из metadata (core.PluginMetadata)
+                deps = getattr(plugin, "_manifest_dependencies", None)
+                if deps is None:
+                    deps = getattr(metadata, "dependencies", []) or []
+                if deps:
+                    for dep_name in deps:
+                        if dep_name not in self._plugins:
+                            raise ValueError(
+                                f"Плагин '{plugin_name}' требует плагин '{dep_name}', "
+                                f"но он не загружен"
+                            )
 
-            self._plugins[plugin_name] = plugin
-            self._states[plugin_name] = PluginState.LOADED
+                self._plugins[plugin_name] = plugin
+                self._states[plugin_name] = PluginState.LOADED
 
             # CapabilityRegistry: регистрируем provided и required
             if self._runtime and hasattr(self._runtime, "capability_registry"):
@@ -151,8 +161,9 @@ class PluginManager:
                 for cap_id in (metadata.capabilities_required or []):
                     reg.register_consumer(plugin_name, cap_id)
         except Exception as e:
-            # Устанавливаем состояние ERROR
-            self._states[plugin_name] = PluginState.ERROR
+            # Устанавливаем состояние ERROR (with lock protection)
+            with self._plugin_lock:
+                self._states[plugin_name] = PluginState.ERROR
             # Пробросываем оригинальное исключение, чтобы тесты могли его ловить
             raise
 
@@ -169,12 +180,14 @@ class PluginManager:
         Raises:
             ValueError: если плагин не найден или не загружен
         """
-        plugin = self._plugins.get(plugin_name)
-        if plugin is None:
-            raise ValueError(f"Плагин '{plugin_name}' не найден")
-        
-        if self._states[plugin_name] == PluginState.STARTED:
-            return  # Уже запущен
+        # P0: Lock for read operations
+        with self._plugin_lock:
+            plugin = self._plugins.get(plugin_name)
+            if plugin is None:
+                raise ValueError(f"Плагин '{plugin_name}' не найден")
+            
+            if self._states[plugin_name] == PluginState.STARTED:
+                return  # Уже запущен
 
         # Проверка required capabilities: все должны иметь хотя бы одного provider
         self._block_reasons.pop(plugin_name, None)
@@ -186,9 +199,11 @@ class PluginManager:
         
         try:
             await plugin.on_start()
-            self._states[plugin_name] = PluginState.STARTED
+            with self._plugin_lock:
+                self._states[plugin_name] = PluginState.STARTED
         except Exception as e:
-            self._states[plugin_name] = PluginState.ERROR
+            with self._plugin_lock:
+                self._states[plugin_name] = PluginState.ERROR
             raise RuntimeError(f"Ошибка запуска плагина '{plugin_name}': {e}")
 
     async def stop_plugin(self, plugin_name: str) -> None:
@@ -201,18 +216,22 @@ class PluginManager:
         Raises:
             ValueError: если плагин не найден
         """
-        plugin = self._plugins.get(plugin_name)
-        if plugin is None:
-            raise ValueError(f"Плагин '{plugin_name}' не найден")
-        
-        if self._states[plugin_name] != PluginState.STARTED:
-            return  # Не запущен
+        # P0: Lock for read operations
+        with self._plugin_lock:
+            plugin = self._plugins.get(plugin_name)
+            if plugin is None:
+                raise ValueError(f"Плагин '{plugin_name}' не найден")
+            
+            if self._states[plugin_name] != PluginState.STARTED:
+                return  # Не запущен
         
         try:
             await plugin.on_stop()
-            self._states[plugin_name] = PluginState.STOPPED
+            with self._plugin_lock:
+                self._states[plugin_name] = PluginState.STOPPED
         except Exception as e:
-            self._states[plugin_name] = PluginState.ERROR
+            with self._plugin_lock:
+                self._states[plugin_name] = PluginState.ERROR
             raise RuntimeError(f"Ошибка остановки плагина '{plugin_name}': {e}")
 
     async def unload_plugin(self, plugin_name: str) -> None:
@@ -225,12 +244,18 @@ class PluginManager:
         Raises:
             ValueError: если плагин не найден
         """
-        plugin = self._plugins.get(plugin_name)
-        if plugin is None:
-            raise ValueError(f"Плагин '{plugin_name}' не найден")
+        # P0: Lock for read operations
+        with self._plugin_lock:
+            plugin = self._plugins.get(plugin_name)
+            if plugin is None:
+                raise ValueError(f"Плагин '{plugin_name}' не найден")
+            
+            # Сначала остановить, если запущен
+            if self._states[plugin_name] == PluginState.STARTED:
+                pass  # Will call stop_plugin below
         
-        # Сначала остановить, если запущен
-        if self._states[plugin_name] == PluginState.STARTED:
+        # Call stop outside of lock
+        if self._states.get(plugin_name) == PluginState.STARTED:
             await self.stop_plugin(plugin_name)
         
         try:
@@ -253,14 +278,17 @@ class PluginManager:
                 # Finally unregister from capability registry
                 cap_reg.unregister_plugin(plugin_name)
             
-            del self._plugins[plugin_name]
-            self._states[plugin_name] = PluginState.UNLOADED
+            # P0: Lock for final state update
+            with self._plugin_lock:
+                del self._plugins[plugin_name]
+                self._states[plugin_name] = PluginState.UNLOADED
             
             # Удаляем интеграцию из реестра (если была зарегистрирована)
             if self._runtime is not None:
                 self._runtime.integrations.unregister(plugin_name)
         except Exception as e:
-            self._states[plugin_name] = PluginState.ERROR
+            with self._plugin_lock:
+                self._states[plugin_name] = PluginState.ERROR
             raise RuntimeError(f"Ошибка выгрузки плагина '{plugin_name}': {e}")
     
     async def reload_plugin(self, plugin_name: str) -> None:

@@ -60,6 +60,10 @@ class DependencyResolver:
         """
         errors: List[DependencyError] = []
         
+        # P0: Detect circular dependencies first
+        cycle_errors = self._detect_circular_dependencies()
+        errors.extend(cycle_errors)
+        
         # Получаем все loaded plugins
         try:
             loaded_plugins = self.plugin_manager.get_loaded_plugins()
@@ -90,6 +94,83 @@ class DependencyResolver:
         
         # Convert to strings for backward compatibility
         return [f"{e.code}: {e.plugin} - {e.message}" for e in errors]
+    
+    def _detect_circular_dependencies(self) -> List[DependencyError]:
+        """
+        P0 Hardening: Detect circular dependencies using DFS.
+        
+        Returns:
+            List of errors if cycles found.
+        """
+        errors: List[DependencyError] = []
+        
+        try:
+            loaded_plugins = self.plugin_manager.get_loaded_plugins()
+        except Exception:
+            return []
+        
+        # Build dependency graph: plugin -> [plugins providing its required capabilities]
+        plugin_names = {name for name, _ in loaded_plugins}
+        plugin_provides = {}  # plugin_name -> [capabilities it provides]
+        plugin_requires = {}  # plugin_name -> [capabilities it requires]
+        
+        for plugin_name, plugin in loaded_plugins:
+            if not hasattr(plugin, 'metadata'):
+                continue
+            
+            metadata = plugin.metadata
+            plugin_provides[plugin_name] = list(getattr(metadata, 'capabilities_provided', []) or [])
+            plugin_requires[plugin_name] = list(getattr(metadata, 'capabilities_required', []) or [])
+        
+        # Build adjacency list: plugin -> [other plugins providing its requirements]
+        adjacency = {}
+        for plugin_name in plugin_names:
+            adjacency[plugin_name] = []
+            
+            for required_cap in plugin_requires.get(plugin_name, []):
+                # Find which plugins provide this capability
+                for other_name in plugin_names:
+                    if other_name != plugin_name and required_cap in plugin_provides.get(other_name, []):
+                        adjacency[plugin_name].append(other_name)
+        
+        # DFS for cycles
+        visited = set()
+        rec_stack = set()
+        
+        def has_cycle_dfs(node: str, path: List[str]) -> bool:
+            visited.add(node)
+            rec_stack.add(node)
+            path.append(node)
+            
+            for neighbor in adjacency.get(node, []):
+                if neighbor not in visited:
+                    if has_cycle_dfs(neighbor, path):
+                        return True
+                elif neighbor in rec_stack:
+                    # Found cycle
+                    cycle_start = path.index(neighbor)
+                    cycle = path[cycle_start:] + [neighbor]
+                    cycle_str = " → ".join(cycle)
+                    
+                    error = DependencyError(
+                        code="circular_dependency",
+                        plugin=node,
+                        message=f"Circular dependency detected: {cycle_str}",
+                        details={"cycle": cycle_str}
+                    )
+                    errors.append(error)
+                    return True
+            
+            path.pop()
+            rec_stack.remove(node)
+            return False
+        
+        # Run DFS from each unvisited node
+        for plugin_name in plugin_names:
+            if plugin_name not in visited:
+                has_cycle_dfs(plugin_name, [])
+        
+        return errors
     
     def validate_plugin_install(self, metadata: Any) -> List[str]:
         """

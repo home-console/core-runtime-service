@@ -206,6 +206,8 @@ class OperationManager:
             op_type: Operation type to unregister
         """
         self._handlers.pop(op_type, None)
+        # Also unregister from ExecutionRouter (P0: race condition fix)
+        self._execution_router.unregister_handler(op_type)
 
     def list_handler_types(self) -> List[str]:
         """Return list of registered operation type names (read-only, for Inspector)."""

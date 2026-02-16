@@ -102,6 +102,7 @@ class MarketplaceInstaller:
         
         # Extract to temp directory
         temp_dir = None
+        target_dir = None  # P0: Initialize before try block
         try:
             temp_dir = tempfile.mkdtemp(prefix="marketplace_install_")
             self._extract_archive(archive_path, temp_dir)
@@ -182,22 +183,44 @@ class MarketplaceInstaller:
                 try:
                     from core.base_plugin import BasePlugin
                     
-                    # Dynamically import the plugin module
-                    plugin_module = self._load_plugin_module(target_dir, entrypoint)
-                    
-                    # Find BasePlugin subclass
-                    plugin_class = self._find_plugin_class(plugin_module)
-                    if not plugin_class:
-                        raise InstallerError(f"No BasePlugin subclass found in {entrypoint}")
-                    
-                    # Instantiate and load
-                    plugin_instance = plugin_class(runtime)
-                    await runtime.plugin_manager.load_plugin(plugin_instance)
+                    # P0: Wrap load in try-finally for proper cleanup
+                    try:
+                        # Dynamically import the plugin module
+                        plugin_module = self._load_plugin_module(target_dir, entrypoint)
+                        
+                        # Find BasePlugin subclass
+                        plugin_class = self._find_plugin_class(plugin_module)
+                        if not plugin_class:
+                            raise InstallerError(f"No BasePlugin subclass found in {entrypoint}")
+                        
+                        # Instantiate and load
+                        plugin_instance = plugin_class(runtime)
+                        await runtime.plugin_manager.load_plugin(plugin_instance)
+                        
+                        # P0: Post-install activation - start plugin if auto_start=True
+                        try:
+                            metadata = plugin_instance.metadata
+                            # Handle both property and method implementations
+                            if callable(metadata):
+                                metadata = metadata()
+                            auto_start = getattr(metadata, 'auto_start', True)
+                            if auto_start:
+                                await runtime.plugin_manager.start_plugin(metadata.name)
+                        except Exception as e:
+                            # Log activation error but don't fail installation
+                            logger = getattr(runtime, 'logger', None)
+                            if logger:
+                                logger.warning(f"Failed to auto-start plugin: {str(e)}")
+                        
+                    except InstallerError:
+                        raise
+                    except Exception as e:
+                        raise InstallerError(f"Failed to load plugin via PluginManager: {str(e)}")
                     
                 except InstallerError:
                     raise
                 except Exception as e:
-                    raise InstallerError(f"Failed to load plugin via PluginManager: {str(e)}")
+                    raise InstallerError(f"Plugin loading error: {str(e)}")
             
             # Return installation info
             return {
@@ -210,6 +233,12 @@ class MarketplaceInstaller:
                 "capabilities_provided": plugin_data.get("capabilities_provided", []),
                 "capabilities_required": plugin_data.get("capabilities_required", []),
             }
+        
+        except Exception as e:
+            # P0: Cleanup target_dir if load_plugin failed
+            if target_dir and target_dir.exists():
+                shutil.rmtree(target_dir)
+            raise
         
         finally:
             # Clean up temp directory
