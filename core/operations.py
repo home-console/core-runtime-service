@@ -180,6 +180,9 @@ class OperationManager:
         }
         # Health monitor for remote providers (Protocol v1)
         self._health_monitor = ProviderHealthMonitor()
+        # Execution router for plugin isolation
+        from core.execution_router import ExecutionRouter
+        self._execution_router = ExecutionRouter(runtime)
     
     def register_handler(
         self,
@@ -192,6 +195,8 @@ class OperationManager:
         Handler signature: async def handler(runtime, operation) -> Dict[str, Any]
         """
         self._handlers[op_type] = handler
+        # Also register with ExecutionRouter for isolation support
+        self._execution_router.register_handler(op_type, handler)
 
     def unregister_handler(self, op_type: str) -> None:
         """
@@ -484,20 +489,43 @@ class OperationManager:
         
         Operation status is updated in-place, result persisted.
         
-        Supports two execution modes:
-        1. Local: operation.type directly matches handler name or local capability provider
-        2. Remote: operation.type is capability with remote provider → HTTP execution
+        Supports execution modes:
+        1. in_process: direct handler call
+        2. process: subprocess execution
+        3. container: docker/podman execution
+        4. remote: HTTP execution
         """
         try:
             # 1. Validate - try to find handler (direct or capability-based)
             handler = self._find_handler(operation.type)
+            provider_metadata = None  # Get metadata for execution mode decision
             
-            # If no local handler, try remote provider
+            # Try to get provider metadata from CapabilityRegistry
+            try:
+                if hasattr(self.runtime, 'capability_registry') and self.runtime.capability_registry:
+                    all_providers = self.runtime.capability_registry.get_all_providers_for_capability(operation.type)
+                    if all_providers and len(all_providers) > 0:
+                        # Get first provider - could be enhanced to prefer non-remote, etc.
+                        provider_dict = all_providers[0]
+                        # Convert dict to ProviderMetadata using registry method
+                        provider_metadata = self.runtime.capability_registry.provider_info_to_metadata(provider_dict)
+            except Exception:
+                pass  # Failed to get metadata, continue with defaults
+            
+            # Check execution mode for remote delegation
+            execution_mode = "in_process"  # default
+            provider_type = "local"  # default
+            if provider_metadata:
+                execution_mode = provider_metadata.execution_mode
+                provider_type = provider_metadata.provider_type
+            
+            # If no local handler, try remote provider (backward compatible)
             if handler is None:
-                remote_provider_info = self._find_remote_provider(operation.type)
-                if remote_provider_info:
-                    # Will execute remotely
-                    return await self._execute_remote_operation(operation, remote_provider_info)
+                # Check for remote provider (either type="remote" or execution_mode="remote")
+                if provider_type == "remote" or execution_mode == "remote":
+                    remote_provider_info = self._find_remote_provider(operation.type)
+                    if remote_provider_info:
+                        return await self._execute_remote_operation(operation, remote_provider_info)
                 
                 # Neither local nor remote found
                 operation.status = OperationStatus.FAILED
@@ -513,9 +541,8 @@ class OperationManager:
             operation.started_at = time.time()
             await self._persist(operation)
             
-            # 3. Execute local handler with context
-            context = {"runtime": self.runtime, "operation_id": operation.operation_id}
-            result = await handler(context, operation)
+            # 3. Execute via ExecutionRouter (handles execution_mode routing)
+            result = await self._execution_router.execute(operation, provider_metadata)
             
             # 4. Mark success
             operation.status = OperationStatus.SUCCESS

@@ -28,6 +28,7 @@ from core.capability_registry import CapabilityRegistry
 from core.logger_helper import info, warning
 from core.base_plugin import BasePlugin
 from core.operations import OperationManager
+from core.dependency_resolver import DependencyResolver, RuntimeIntegrityError  # Step 10
 
 
 
@@ -69,6 +70,12 @@ class CoreRuntime:
         self.capability_registry = CapabilityRegistry()
         # Operations manager (инфраструктура для всех модулей)
         self.operations = OperationManager(self)
+        # Dependency resolver для проверки integrity (не знает про HTTP/marketplace)
+        self.dependency_resolver = DependencyResolver(
+            self.capability_registry,
+            self.plugin_manager,
+            self.storage
+        )
         
         # Сохраняем config для shutdown_timeout
         self._config = config
@@ -150,6 +157,11 @@ class CoreRuntime:
             await self.plugin_manager.start_all()
             if plugins:
                 await info(self, f"Плагины запущены: {plugins}", component="runtime")
+            
+            # Проверить что система в консистентном состоянии (все dependencies удовлетворены)
+            integrity_errors = self.dependency_resolver.validate_runtime_integrity()
+            if integrity_errors:
+                raise RuntimeIntegrityError(integrity_errors)
             
             # Установить состояние runtime
             await self.state_engine.set("runtime.status", "running")

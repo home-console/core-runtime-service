@@ -60,7 +60,10 @@ class CapabilityRegistry:
         plugin_name: str,
         capability_id: str,
         provider_type: str = "local",
-        remote_config: Optional[Dict[str, Any]] = None
+        remote_config: Optional[Dict[str, Any]] = None,
+        execution_mode: str = "in_process",
+        process_config: Optional[Dict[str, Any]] = None,
+        container_config: Optional[Dict[str, Any]] = None
     ) -> None:
         """
         Зарегистрировать плагин как провайдер capability.
@@ -70,6 +73,9 @@ class CapabilityRegistry:
             capability_id: ID capability
             provider_type: "local" или "remote"
             remote_config: конфиг для remote provider (если type="remote")
+            execution_mode: in_process | process | container | remote
+            process_config: конфиг для process execution (если execution_mode="process")
+            container_config: конфиг для container execution (если execution_mode="container")
         """
         if capability_id not in self._providers:
             self._providers[capability_id] = []
@@ -91,9 +97,14 @@ class CapabilityRegistry:
             "healthy": True,  # По умолчанию здоров
             "timeouts": {},  # Заполняется из manifest
             "capabilities": [],  # Заполняется из manifest
+            "execution_mode": execution_mode,  # Plugin Isolation
         }
         if remote_config:
             provider_info["remote_config"] = remote_config
+        if process_config:
+            provider_info["process_config"] = process_config
+        if container_config:
+            provider_info["container_config"] = container_config
         
         self._providers[capability_id].append(provider_info)
 
@@ -105,9 +116,17 @@ class CapabilityRegistry:
         provider_version: Optional[str] = None,
         capabilities: Optional[List[str]] = None,
         timeouts: Optional[Dict[str, float]] = None,
+        execution_mode: Optional[str] = None,  # Plugin Isolation
+        process_config: Optional[Dict[str, Any]] = None,
+        container_config: Optional[Dict[str, Any]] = None,
     ) -> None:
         """
         Обновить метаданные провайдера после manifest discovery или health check.
+        
+        Args:
+            execution_mode: in_process | process | container | remote 
+            process_config: конфиг для process execution 
+            container_config: конфиг для container execution 
         """
         provider = self._get_provider_entry(capability_id, plugin_name)
         if not provider:
@@ -121,6 +140,12 @@ class CapabilityRegistry:
             provider["capabilities"] = capabilities
         if timeouts is not None:
             provider["timeouts"] = timeouts
+        if execution_mode is not None:  # Step 9
+            provider["execution_mode"] = execution_mode
+        if process_config is not None:  # Step 9
+            provider["process_config"] = process_config
+        if container_config is not None:  # Step 9
+            provider["container_config"] = container_config
 
     def set_provider_health(
         self,
@@ -223,6 +248,26 @@ class CapabilityRegistry:
     def get_required_capabilities(self, plugin_name: str) -> List[str]:
         """Получить список capability, требуемых плагином."""
         return self._consumers.get(plugin_name, [])
+
+    def provider_info_to_metadata(self, provider_info: Dict[str, Any]) -> ProviderMetadata:
+        """
+        Конвертировать provider_info dict в ProviderMetadata dataclass.
+        
+        Используется ExecutionRouter для получения metadata для routing операций.
+        Plugin Isolation — получаем execution_mode и configs отсюда.
+        """
+        return ProviderMetadata(
+            plugin_name=provider_info.get("plugin", ""),
+            provider_type=provider_info.get("type", "local"),
+            protocol_version=provider_info.get("protocol_version", 1),
+            provider_version=provider_info.get("provider_version"),
+            timeouts=provider_info.get("timeouts", {}),
+            capabilities=provider_info.get("capabilities", []),
+            remote_config=provider_info.get("remote_config"),
+            execution_mode=provider_info.get("execution_mode", "in_process"),  # Step 9
+            process_config=provider_info.get("process_config"),  # Step 9
+            container_config=provider_info.get("container_config"),  # Step 9
+        )
 
     def validate_plugin_requirements(self, plugin_name: str) -> Tuple[bool, List[str]]:
         """

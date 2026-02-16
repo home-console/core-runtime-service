@@ -10,7 +10,7 @@
 import os
 from abc import abstractmethod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Optional, Awaitable, Callable, Any
+from typing import TYPE_CHECKING, Optional, Awaitable, Callable, Any, Literal
 
 from sdk.plugin import BasePlugin as SDKBasePlugin
 
@@ -36,6 +36,11 @@ class PluginMetadata:
     # Remote configuration для remote capability providers
     # Если не None, то этот плагин является remote provider
     remote_config: dict | None = None  # {"base_url": "http://...", "timeout": 10}
+    # Plugin execution mode (Step 9: Plugin Isolation)
+    execution_mode: Literal["in_process", "process", "container", "remote"] = "in_process"
+    # Optional configuration for process/container execution
+    process_config: dict | None = None  # {"timeout": 30, "max_memory": "256M"}
+    container_config: dict | None = None  # {"image": "...", "timeout": 30}
 
 
 class BasePlugin(SDKBasePlugin):
