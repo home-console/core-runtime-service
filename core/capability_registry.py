@@ -17,13 +17,53 @@ CapabilityRegistry — метаданный реестр capability → provider
 
 from __future__ import annotations
 
-import threading
+import asyncio
 from typing import Dict, List, Tuple, Optional, Any
 from core.capability_protocol import (
     PROTOCOL_VERSION,
     ProviderMetadata,
     ProviderHealthStatus,
 )
+
+
+class CapabilitySecurityError(Exception):
+    """Capability security violation."""
+    pass
+
+
+# Namespace protection rules
+PROTECTED_NAMESPACES = {
+    "system.": "core",    # Only core can register system.* capabilities
+    "admin.": "admin",    # Only admin module can register admin.* capabilities
+    "runtime.": "core",   # Only core can register runtime.* capabilities
+}
+
+
+def _check_capability_namespace_permission(
+    capability_id: str,
+    plugin_name: str,
+    plugin_privilege: str = "user"
+) -> None:
+    """
+    Check if plugin has permission to register this capability.
+    
+    Args:
+        capability_id: Capability ID (e.g., "system.reboot")
+        plugin_name: Plugin trying to register it
+        plugin_privilege: Plugin privilege level ("core", "admin", "system", "user")
+        
+    Raises:
+        CapabilitySecurityError: If plugin lacks permission
+    """
+    # Check protected namespaces
+    for namespace_prefix, allowed_privilege in PROTECTED_NAMESPACES.items():
+        if capability_id.startswith(namespace_prefix):
+            if plugin_privilege != allowed_privilege:
+                raise CapabilitySecurityError(
+                    f"Plugin '{plugin_name}' (privilege={plugin_privilege}) cannot register "
+                    f"protected capability '{capability_id}' (requires privilege={allowed_privilege})"
+                )
+            break
 
 
 class CapabilityRegistry:
@@ -56,10 +96,10 @@ class CapabilityRegistry:
         # plugin_name -> list of capability_ids that plugin requires
         self._consumers: Dict[str, List[str]] = {}
         
-        # P0 Hardening: Lock for thread-safe access
-        self._lock = threading.RLock()
+        # P0: Async lock for concurrent-safe access (not threading.RLock)
+        self._lock = asyncio.Lock()
 
-    def register_provider(
+    async def register_provider(
         self,
         plugin_name: str,
         capability_id: str,
@@ -67,21 +107,29 @@ class CapabilityRegistry:
         remote_config: Optional[Dict[str, Any]] = None,
         execution_mode: str = "in_process",
         process_config: Optional[Dict[str, Any]] = None,
-        container_config: Optional[Dict[str, Any]] = None
+        container_config: Optional[Dict[str, Any]] = None,
+        plugin_privilege: str = "user"  # Security: Check namespace protection
     ) -> None:
         """
         Зарегистрировать плагин как провайдер capability.
         
         Args:
             plugin_name: имя плагина
-            capability_id: ID capability
+            capability_id: ID capability (e.g., "system.reboot", "custom.weather")
             provider_type: "local" или "remote"
             remote_config: конфиг для remote provider (если type="remote")
             execution_mode: in_process | process | container | remote
             process_config: конфиг для process execution (если execution_mode="process")
             container_config: конфиг для container execution (если execution_mode="container")
+            plugin_privilege: Plugin privilege level for namespace protection ("core", "admin", "user")
+            
+        Raises:
+            CapabilitySecurityError: If plugin lacks permission to register this capability
         """
-        with self._lock:
+        # P0 Security: Check capability namespace protection
+        _check_capability_namespace_permission(capability_id, plugin_name, plugin_privilege)
+        
+        async with self._lock:
             if capability_id not in self._providers:
                 self._providers[capability_id] = []
             
@@ -113,7 +161,7 @@ class CapabilityRegistry:
             
             self._providers[capability_id].append(provider_info)
 
-    def update_provider_metadata(
+    async def update_provider_metadata(
         self,
         plugin_name: str,
         capability_id: str,
@@ -133,7 +181,7 @@ class CapabilityRegistry:
             process_config: конфиг для process execution 
             container_config: конфиг для container execution 
         """
-        with self._lock:
+        async with self._lock:
             provider = self._get_provider_entry(capability_id, plugin_name)
             if not provider:
                 return
@@ -153,7 +201,7 @@ class CapabilityRegistry:
             if container_config is not None:  # Step 9
                 provider["container_config"] = container_config
 
-    def set_provider_health(
+    async def set_provider_health(
         self,
         plugin_name: str,
         capability_id: str,
@@ -163,7 +211,7 @@ class CapabilityRegistry:
         """
         Обновить health status провайдера.
         """
-        with self._lock:
+        async with self._lock:
             provider = self._get_provider_entry(capability_id, plugin_name)
             if not provider:
                 return
@@ -172,17 +220,17 @@ class CapabilityRegistry:
             if version:
                 provider["provider_version"] = version
 
-    def register_consumer(self, plugin_name: str, capability_id: str) -> None:
+    async def register_consumer(self, plugin_name: str, capability_id: str) -> None:
         """Зарегистрировать плагин как потребитель capability."""
-        with self._lock:
+        async with self._lock:
             if plugin_name not in self._consumers:
                 self._consumers[plugin_name] = []
             if capability_id not in self._consumers[plugin_name]:
                 self._consumers[plugin_name].append(capability_id)
 
-    def unregister_plugin(self, plugin_name: str) -> None:
+    async def unregister_plugin(self, plugin_name: str) -> None:
         """Удалить плагин из реестра (как провайдер и как потребитель)."""
-        with self._lock:
+        async with self._lock:
             for cap_id, providers in list(self._providers.items()):
                 # Удаляем провайдер по имени
                 self._providers[cap_id] = [
@@ -283,7 +331,7 @@ class CapabilityRegistry:
             container_config=provider_info.get("container_config"),  # Step 9
         )
 
-    def validate_plugin_requirements(self, plugin_name: str) -> Tuple[bool, List[str]]:
+    async def validate_plugin_requirements(self, plugin_name: str) -> Tuple[bool, List[str]]:
         """
         Проверить, что все требуемые плагину capabilities имеют хотя бы одного provider.
 
@@ -291,7 +339,7 @@ class CapabilityRegistry:
             (True, []) если все требования удовлетворены.
             (False, [missing_capability_id, ...]) если какие-то capabilities отсутствуют.
         """
-        with self._lock:
+        async with self._lock:
             required = self.get_required_capabilities(plugin_name)
             missing: List[str] = []
             for cap_id in required:

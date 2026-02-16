@@ -26,6 +26,35 @@ class ProcessExecutorError(Exception):
     pass
 
 
+class StreamLimitExceededError(ProcessExecutorError):
+    """Stream output exceeded maximum size limit."""
+    pass
+
+
+async def _read_stream_with_limit(stream, max_size: int, stream_name: str):
+    """
+    Async generator to read stream with size limit.
+    
+    Chunks are yielded as they're read. If total > max_size, raises StreamLimitExceededError.
+    """
+    total_read = 0
+    chunk_size = 8192  # 8KB chunks
+    
+    while True:
+        chunk = await stream.read(chunk_size)
+        if not chunk:
+            break
+        
+        total_read += len(chunk)
+        if total_read > max_size:
+            raise StreamLimitExceededError(
+                f"Process {stream_name} exceeded {max_size} bytes limit "
+                f"(read {total_read} bytes)"
+            )
+        
+        yield chunk
+
+
 class ProcessExecutor:
     """Execute operations in isolated subprocess."""
     
@@ -97,7 +126,7 @@ class ProcessExecutor:
         timeout: float
     ) -> Dict[str, Any]:
         """
-        Run process with payload.
+        Run process with payload using streaming stdout read (P0: memory safe).
         
         Args:
             cmd: Command to run (e.g., "python plugin/handler.py")
@@ -108,7 +137,7 @@ class ProcessExecutor:
             Process output as dict
             
         Raises:
-            ProcessExecutorError: on error
+            ProcessExecutorError: on error (including MAX_OUTPUT_SIZE exceeded)
         """
         import shlex
         
@@ -135,40 +164,90 @@ class ProcessExecutor:
             )
             
             try:
-                # Execute with timeout
-                stdout, stderr = await asyncio.wait_for(
-                    process.communicate(input=input_data),
-                    timeout=timeout
-                )
-            except asyncio.TimeoutError:
-                # P0: Kill process group on timeout (not just process)
-                try:
-                    if os.name != 'nt':  # Unix
-                        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
-                    else:  # Windows
-                        process.kill()
-                except Exception as e:
-                    logger.warning(f"Failed to kill process group: {e}")
+                # P0: Stream stdout reading instead of communicate() to enforce MAX_OUTPUT_SIZE
+                stdout_data = b""
+                stderr_data = b""
                 
-                raise ProcessExecutorError(f"Process timeout after {timeout}s")
-            
-            # P0: Check output size limits
-            if len(stdout) > self.MAX_OUTPUT_SIZE:
-                raise ProcessExecutorError(
-                    f"Process stdout exceeds limit: {len(stdout)} > {self.MAX_OUTPUT_SIZE}"
-                )
-            if len(stderr) > self.MAX_OUTPUT_SIZE:
-                raise ProcessExecutorError(
-                    f"Process stderr exceeds limit: {len(stderr)} > {self.MAX_OUTPUT_SIZE}"
-                )
+                # Send input to process
+                process.stdin.write(input_data)
+                await process.stdin.drain()
+                process.stdin.close()
+                
+                # Read stdout with size limit
+                try:
+                    async for chunk in _read_stream_with_limit(
+                        process.stdout,
+                        self.MAX_OUTPUT_SIZE,
+                        "stdout"
+                    ):
+                        stdout_data += chunk
+                except StreamLimitExceededError as e:
+                    # Kill process - it's outputting too much
+                    try:
+                        if os.name != 'nt':
+                            os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                        else:
+                            process.kill()
+                    except Exception:
+                        pass
+                    raise ProcessExecutorError(str(e))
+                
+                # Read stderr (with size limit too)
+                try:
+                    async for chunk in _read_stream_with_limit(
+                        process.stderr,
+                        self.MAX_OUTPUT_SIZE,
+                        "stderr"
+                    ):
+                        stderr_data += chunk
+                except StreamLimitExceededError as e:
+                    try:
+                        if os.name != 'nt':
+                            os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                        else:
+                            process.kill()
+                    except Exception:
+                        pass
+                    raise ProcessExecutorError(str(e))
+                
+                # Wait for process with timeout
+                try:
+                    await asyncio.wait_for(
+                        process.wait(),
+                        timeout=timeout
+                    )
+                except asyncio.TimeoutError:
+                    # Kill process group on timeout
+                    try:
+                        if os.name != 'nt':  # Unix
+                            os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                        else:  # Windows
+                            process.kill()
+                    except Exception as e:
+                        logger.warning(f"Failed to kill process group: {e}")
+                    
+                    raise ProcessExecutorError(f"Process timeout after {timeout}s")
+                
+            except ProcessExecutorError:
+                raise
+            except Exception as e:
+                # Cleanup on error
+                try:
+                    if os.name != 'nt':
+                        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                    else:
+                        process.kill()
+                except Exception:
+                    pass
+                raise ProcessExecutorError(f"Process communication error: {str(e)}")
             
             # Check exit code
             if process.returncode != 0:
-                error_msg = stderr.decode("utf-8", errors="replace")
+                error_msg = stderr_data.decode("utf-8", errors="replace")
                 raise ProcessExecutorError(f"Process failed: {error_msg}")
             
             # Parse output with proper error handling
-            output_data = stdout.decode("utf-8")
+            output_data = stdout_data.decode("utf-8")
             try:
                 result = json.loads(output_data)
             except json.JSONDecodeError as e:

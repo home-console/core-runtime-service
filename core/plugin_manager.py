@@ -84,14 +84,8 @@ class PluginManager:
         # Установим ссылку на runtime у плагина перед вызовом on_load
         try:
             try:
-                # Мgr может хранить Optional runtime; приводим к CoreRuntime
-                # для подавления предупреждений типизации (архитектурный контракт).
-                from typing import cast
-
-                plugin.runtime = cast("CoreRuntime", self._runtime)
-                
-                # SECURITY P0: Setup plugin isolation
-                # Give plugin isolated storage and service access
+                # P0 SECURITY: Do NOT set plugin.runtime directly
+                # Instead, provide only isolated access through proxies
                 from core.plugin_isolation import (
                     StorageProxy, 
                     ServiceProxy, 
@@ -115,9 +109,14 @@ class PluginManager:
                         plugin_name=plugin_name
                     )
                 
-            except Exception:
-                # Установка runtime не должна ломать загрузку
-                pass
+                # Only set runtime as fallback for backward compat, but DON'T
+                # This prevents plugins from accessing runtime.storage directly
+                # If plugin needs something, it should use storage/services proxies
+                # plugin.runtime = cast("CoreRuntime", self._runtime)  # REMOVED for security
+                
+            except Exception as e:
+                # Isolation setup failed - still continue but log
+                warning(f"Plugin isolation setup failed for {plugin_name}: {e}")
 
             # Вызов on_load может обновить metadata (например, remote proxy)
             await plugin.on_load()
