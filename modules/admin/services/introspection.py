@@ -40,10 +40,19 @@ async def get_runtime_info(runtime: Any, admin_started_at: float | None) -> Dict
 
 
 async def list_plugins(runtime: Any) -> List[Dict[str, Any]]:
-    """List all loaded plugins with metadata."""
-    plugins = runtime.plugins.list_plugins()
+    """List all loaded plugins with metadata, including capabilities and block reasons."""
     result = []
-    for name in plugin_names:
+    
+    # Get all loaded plugins
+    pm = runtime.plugin_manager
+    for name in pm.list_plugins():
+        # Get plugin instance
+        plugin = pm.get_plugin(name)
+        if not plugin:
+            continue
+        
+        metadata = plugin.metadata
+        
         services = []
         http_endpoints = []
         event_subscriptions = []
@@ -69,14 +78,46 @@ async def list_plugins(runtime: Any) -> List[Dict[str, Any]]:
                         event_subscriptions.append(event_name)
         except Exception:
             pass
+        
+        # Get plugin state
+        state = pm.get_plugin_state(name)
+        started = state == "started"
+        
+        # Get block reason if plugin is not started
+        block_reason = pm.get_plugin_block_reason(name)
+        error_msg = None
+        unresolved_capabilities = []
+        if block_reason:
+            missing = block_reason.get("missing_capabilities", [])
+            if missing:
+                error_msg = f"Missing capabilities: {', '.join(missing)}"
+                unresolved_capabilities = missing
+        
+        # Get capabilities from metadata
+        capabilities_provided = metadata.capabilities_provided or []
+        capabilities_required = metadata.capabilities_required or []
+        
+        # Calculate truly unresolved
+        if capabilities_required and hasattr(runtime, "capability_registry"):
+            cap_reg = runtime.capability_registry
+            unresolved_capabilities = [
+                cap for cap in capabilities_required
+                if not cap_reg.get_providers(cap)
+            ]
 
         result.append({
             "name": name,
+            "version": metadata.version,
+            "description": metadata.description,
             "loaded": True,
             "started": started,
+            "error": error_msg,
             "services_count": len(services),
             "http_count": len(http_endpoints),
             "event_subscriptions": event_subscriptions,
+            "capabilities_provided": capabilities_provided,
+            "capabilities_required": capabilities_required,
+            "unresolved_capabilities": unresolved_capabilities,
         })
 
     return result
