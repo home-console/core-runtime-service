@@ -406,18 +406,29 @@ class PluginManager:
         Returns:
             Список имён плагинов
         """
-        return list(self._plugins.keys())
+        with self._plugin_lock:
+            return list(self._plugins.keys())
 
     async def start_all(self) -> None:
         """Запустить все загруженные плагины."""
-        for plugin_name in self._plugins.keys():
-            if self._states[plugin_name] == PluginState.LOADED:
+        with self._plugin_lock:
+            plugin_names = list(self._plugins.keys())
+            states = {name: self._states.get(name) for name in plugin_names}
+        
+        # Start plugins outside of lock
+        for plugin_name, state in states.items():
+            if state == PluginState.LOADED:
                 await self.start_plugin(plugin_name)
 
     async def stop_all(self) -> None:
         """Остановить все запущенные плагины."""
-        for plugin_name in self._plugins.keys():
-            if self._states[plugin_name] == PluginState.STARTED:
+        with self._plugin_lock:
+            plugin_names = list(self._plugins.keys())
+            states = {name: self._states.get(name) for name in plugin_names}
+        
+        # Stop plugins outside of lock
+        for plugin_name, state in states.items():
+            if state == PluginState.STARTED:
                 await self.stop_plugin(plugin_name)
 
     def _load_plugin_manifest(self, plugin_path: Path) -> Optional[Dict[str, Any]]:

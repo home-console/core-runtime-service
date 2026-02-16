@@ -235,15 +235,21 @@ class MarketplaceInstaller:
             }
         
         except Exception as e:
-            # P0: Cleanup target_dir if load_plugin failed
-            if target_dir and target_dir.exists():
-                shutil.rmtree(target_dir)
+            # P0: Cleanup target_dir if installation failed
+            try:
+                if target_dir is not None and target_dir.exists():
+                    shutil.rmtree(target_dir)
+            except Exception:
+                pass  # Best effort cleanup
             raise
         
         finally:
             # Clean up temp directory
-            if temp_dir and os.path.exists(temp_dir):
-                shutil.rmtree(temp_dir)
+            try:
+                if temp_dir is not None and os.path.exists(temp_dir):
+                    shutil.rmtree(temp_dir)
+            except Exception:
+                pass  # Best effort cleanup
     
     async def uninstall(
         self,

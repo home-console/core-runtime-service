@@ -12,6 +12,7 @@ All critical actions MUST be executed through operations.
 
 import uuid
 import time
+import threading
 from typing import Any, Dict, Optional, List, Callable, Awaitable
 from enum import Enum
 from dataclasses import dataclass, asdict
@@ -174,6 +175,8 @@ class OperationManager:
         self.runtime = runtime
         # Type name -> handler (async callable)
         self._handlers: Dict[str, Callable[[Any, Operation], Awaitable[Dict[str, Any]]]] = {}
+        # P0 Hardening: Lock for thread-safe access to _handlers
+        self._handlers_lock = threading.RLock()
         # Error codes that allow retry
         self._retryable_errors = {
             "timeout", "transient", "network", "device_offline", "integration_unavailable"
@@ -194,9 +197,10 @@ class OperationManager:
         
         Handler signature: async def handler(runtime, operation) -> Dict[str, Any]
         """
-        self._handlers[op_type] = handler
-        # Also register with ExecutionRouter for isolation support
-        self._execution_router.register_handler(op_type, handler)
+        with self._handlers_lock:
+            self._handlers[op_type] = handler
+            # Also register with ExecutionRouter for isolation support
+            self._execution_router.register_handler(op_type, handler)
 
     def unregister_handler(self, op_type: str) -> None:
         """
@@ -205,13 +209,15 @@ class OperationManager:
         Args:
             op_type: Operation type to unregister
         """
-        self._handlers.pop(op_type, None)
-        # Also unregister from ExecutionRouter (P0: race condition fix)
-        self._execution_router.unregister_handler(op_type)
+        with self._handlers_lock:
+            self._handlers.pop(op_type, None)
+            # Also unregister from ExecutionRouter (P0: race condition fix)
+            self._execution_router.unregister_handler(op_type)
 
     def list_handler_types(self) -> List[str]:
         """Return list of registered operation type names (read-only, for Inspector)."""
-        return list(self._handlers.keys())
+        with self._handlers_lock:
+            return list(self._handlers.keys())
 
     def _find_handler(self, operation_type: str) -> Optional[Callable[[Any, Operation], Awaitable[Dict[str, Any]]]]:
         """
@@ -228,11 +234,12 @@ class OperationManager:
         Returns:
             Handler callable or None
         """
-        # Strategy 1: Direct lookup (backward compatibility)
-        if operation_type in self._handlers:
-            return self._handlers[operation_type]
+        with self._handlers_lock:
+            # Strategy 1: Direct lookup (backward compatibility)
+            if operation_type in self._handlers:
+                return self._handlers[operation_type]
         
-        # Strategy 2: Capability-based lookup
+        # Strategy 2: Capability-based lookup (outside lock, for CapabilityRegistry)
         # Try to find provider through capability registry
         try:
             if hasattr(self.runtime, 'capability_registry') and self.runtime.capability_registry:
@@ -255,9 +262,10 @@ class OperationManager:
                     # Actually, the handler SHOULD be registered under capability name
                     # in _handlers by the plugin itself. If not found in step 1, it's an error.
                     # But we could also check if handler exists under provider-namespaced name
-                    fallback_type = f"{provider_name}.{operation_type}"
-                    if fallback_type in self._handlers:
-                        return self._handlers[fallback_type]
+                    with self._handlers_lock:
+                        fallback_type = f"{provider_name}.{operation_type}"
+                        if fallback_type in self._handlers:
+                            return self._handlers[fallback_type]
         except Exception:
             # Capability registry might not be available - continue
             pass
@@ -502,29 +510,50 @@ class OperationManager:
             handler = self._find_handler(operation.type)
             provider_metadata = None  # Get metadata for execution mode decision
             
-            # Try to get provider metadata from CapabilityRegistry
+            # P0: ATOMIC PROVIDER SELECTION with lock
+            # Lock held only for selection, not during execution
+            provider_dict = None
             try:
                 if hasattr(self.runtime, 'capability_registry') and self.runtime.capability_registry:
-                    all_providers = self.runtime.capability_registry.get_all_providers_for_capability(operation.type)
-                    if all_providers and len(all_providers) > 0:
-                        # Get first provider - could be enhanced to prefer non-remote, etc.
-                        provider_dict = all_providers[0]
-                        # Convert dict to ProviderMetadata using registry method
-                        provider_metadata = self.runtime.capability_registry.provider_info_to_metadata(provider_dict)
+                    cap_reg = self.runtime.capability_registry
+                    # Atomic: hold lock only during selection
+                    with cap_reg._lock:
+                        all_providers = cap_reg.get_all_providers_for_capability(operation.type)
+                        if all_providers and len(all_providers) > 0:
+                            # Take snapshot of first provider
+                            provider_dict = dict(all_providers[0])
+                            # Convert dict to ProviderMetadata using registry method
+                            provider_metadata = cap_reg.provider_info_to_metadata(provider_dict)
             except Exception:
                 pass  # Failed to get metadata, continue with defaults
             
-            # Check execution mode for remote delegation
+            # 2. Verify provider still exists (after releasing lock)
             execution_mode = "in_process"  # default
             provider_type = "local"  # default
             if provider_metadata:
                 execution_mode = provider_metadata.execution_mode
                 provider_type = provider_metadata.provider_type
+                
+                # Check provider still valid
+                if provider_dict and hasattr(self.runtime, 'capability_registry') and self.runtime.capability_registry:
+                    cap_reg = self.runtime.capability_registry
+                    # Try to verify provider with provider_exists check (if available)
+                    try:
+                        if hasattr(cap_reg, 'provider_exists'):
+                            provider_still_exists = cap_reg.provider_exists(
+                                provider_dict[\"plugin\"], 
+                                operation.type
+                            )
+                            if not provider_still_exists:
+                                raise Exception(f\"Provider {provider_dict['plugin']} disappeared during execution setup\")
+                    except (AttributeError, Exception):
+                        # provider_exists might not exist yet, skip this check
+                        pass
             
             # If no local handler, try remote provider (backward compatible)
             if handler is None:
-                # Check for remote provider (either type="remote" or execution_mode="remote")
-                if provider_type == "remote" or execution_mode == "remote":
+                # Check for remote provider (either type=\"remote\" or execution_mode=\"remote\")
+                if provider_type == \"remote\" or execution_mode == \"remote\":
                     remote_provider_info = self._find_remote_provider(operation.type)
                     if remote_provider_info:
                         return await self._execute_remote_operation(operation, remote_provider_info)
@@ -532,21 +561,21 @@ class OperationManager:
                 # Neither local nor remote found
                 operation.status = OperationStatus.FAILED
                 operation.error = OperationError(
-                    code="unknown_operation_type",
-                    message=f"No handler or remote provider for operation type: {operation.type}"
+                    code=\"unknown_operation_type\",
+                    message=f\"No handler or remote provider for operation type: {operation.type}\"
                 )
                 await self._persist(operation)
                 return operation
             
-            # 2. Mark as running
+            # Mark as running
             operation.status = OperationStatus.RUNNING
             operation.started_at = time.time()
             await self._persist(operation)
             
-            # 3. Execute via ExecutionRouter (handles execution_mode routing)
+            # Execute via ExecutionRouter (handles execution_mode routing)
             result = await self._execution_router.execute(operation, provider_metadata)
             
-            # 4. Mark success
+            # Mark success
             operation.status = OperationStatus.SUCCESS
             operation.result = result
             operation.finished_at = time.time()

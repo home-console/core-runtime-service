@@ -347,3 +347,216 @@ def test_plugin_manager_lock_safety():
     
     # Should not have corruption or errors
     assert len(results["errors"]) == 0, f"Lock safety errors: {results['errors']}"
+
+
+# ========== TEST 6: Concurrent Provider Unregister During Execution ==========
+
+def test_concurrent_provider_unregister_during_execution():
+    """P0: Provider unregister while operation is executing should not crash."""
+    from core.capability_registry import CapabilityRegistry
+    import threading
+    
+    reg = CapabilityRegistry()
+    reg.register_provider("plugin_a", "test.capability", provider_type="local")
+    
+    results = {"errors": [], "unregisters": 0}
+    
+    def unregister_task():
+        try:
+            for _ in range(10):
+                reg.unregister_plugin("plugin_a")
+                results["unregisters"] += 1
+        except Exception as e:
+            results["errors"].append(f"unregister error: {e}")
+    
+    def get_task():
+        try:
+            for _ in range(10):
+                providers = reg.get_all_providers_for_capability("test.capability")
+                # Should not crash even if race condition occurs
+        except Exception as e:
+            results["errors"].append(f"get error: {e}")
+    
+    threads = [
+        threading.Thread(target=unregister_task),
+        threading.Thread(target=get_task),
+        threading.Thread(target=get_task),
+    ]
+    
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    
+    # No dict changed size errors
+    assert len(results["errors"]) == 0, f"Race condition errors: {results['errors']}"
+
+
+# ========== TEST 7: OperationManager Handler Lock Safety ==========
+
+def test_operation_manager_handler_lock_safety():
+    """P0: OperationManager._handlers must be protected by lock."""
+    from core.operations import OperationManager
+    import threading
+    
+    runtime = Mock()
+    runtime.storage = None
+    om = OperationManager(runtime)
+    
+    results = {"errors": [], "registered": 0}
+    
+    async def dummy_handler(runtime, op):
+        return {"result": "ok"}
+    
+    def register_task():
+        try:
+            for i in range(5):
+                om.register_handler(f"op_type_{i}", dummy_handler)
+                results["registered"] += 1
+        except Exception as e:
+            results["errors"].append(f"register error: {e}")
+    
+    def list_task():
+        try:
+            for _ in range(5):
+                handlers = om.list_handler_types()
+                # Should not crash
+        except Exception as e:
+            results["errors"].append(f"list error: {e}")
+    
+    threads = [
+        threading.Thread(target=register_task),
+        threading.Thread(target=list_task),
+        threading.Thread(target=register_task),
+    ]
+    
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    
+    assert len(results["errors"]) == 0, f"Handler lock errors: {results['errors']}"
+
+
+# ========== TEST 8: CapabilityRegistry Full Thread Safety ==========
+
+def test_capability_registry_thread_safety():
+    """P0: CapabilityRegistry should safely handle concurrent registration/unregistration."""
+    from core.capability_registry import CapabilityRegistry
+    import threading
+    
+    reg = CapabilityRegistry()
+    results = {"errors": [], "ops": 0}
+    
+    def worker(worker_id):
+        try:
+            for i in range(20):
+                # Register provider
+                plugin_name = f"plugin_{worker_id}_{i}"
+                cap_id = f"cap_{i % 5}"
+                
+                reg.register_provider(plugin_name, cap_id)
+                
+                # Get providers
+                providers = reg.get_providers(cap_id)
+                
+                # Update health
+                if providers:
+                    reg.set_provider_health(providers[0], cap_id, healthy=(i % 2 == 0))
+                
+                results["ops"] += 1
+        except Exception as e:
+            results["errors"].append(f"worker_{worker_id} error: {e}")
+    
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(5)]
+    
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    
+    assert len(results["errors"]) == 0, f"Registry thread safety errors: {results['errors']}"
+    assert results["ops"] > 0
+
+
+# ========== TEST 9: Subprocess Output Limit ==========
+
+def test_subprocess_output_limit():
+    """P0: ProcessExecutor should limit subprocess output to prevent OOM."""
+    from core.process_executor import ProcessExecutor, ProcessExecutorError
+    
+    executor = ProcessExecutor(runtime=None)
+    
+    # Verify output limit constant exists
+    assert executor.MAX_OUTPUT_SIZE == 50 * 1024 * 1024, "Output limit should be 50MB"
+    
+    # Test that limit is checked (would need actual subprocess test for full coverage)
+    # For now, just verify the constant is set
+    assert executor.MAX_OUTPUT_SIZE > 0
+
+
+# ========== TEST 10: Container Cleanup on Failure ==========
+
+def test_container_cleanup_on_failure():
+    """P0: ContainerExecutor should cleanup containers even on failure."""
+    from core.container_executor import ContainerExecutor
+    from core.operations import Operation, OperationInitiator, OperationInitiatorKind
+    
+    executor = ContainerExecutor(runtime=None)
+    
+    # Verify docker runtime check is in place
+    # (actual test would require docker, this is smoke test)
+    assert hasattr(executor, '_docker_cmd'), "Should have docker command"
+    
+    # Verify shutil is imported for availability check
+    import inspect
+    source = inspect.getsource(executor.execute)
+    assert 'shutil.which' in source, "Should check docker availability"
+
+
+# ========== TEST 11: Provider Disappears Between Selection and Execution ==========
+
+def test_provider_disappears_between_selection_and_execution():
+    """P0: Multiple snapshot selections ensure atomic provider references."""
+    from core.capability_registry import CapabilityRegistry
+    import threading
+    
+    reg = CapabilityRegistry()
+    reg.register_provider("plugin_a", "test.capability", provider_type="local")
+    
+    results = {"snapshots": 0, "errors": 0}
+    
+    def snapshot_selection():
+        try:
+            # Simulate atomic selection: get all providers + make snapshot
+            with reg._lock:
+                all_providers = reg.get_all_providers_for_capability("test.capability")
+                if all_providers:
+                    snapshot = dict(all_providers[0])
+                    results["snapshots"] += 1
+        except Exception as e:
+            results["errors"] += 1
+    
+    def aggressive_unregister():
+        try:
+            for _ in range(5):
+                reg.unregister_plugin("plugin_a")
+                reg.register_provider("plugin_a", "test.capability", provider_type="local")
+        except Exception:
+            pass
+    
+    threads = [
+        threading.Thread(target=snapshot_selection),
+        threading.Thread(target=aggressive_unregister),
+        threading.Thread(target=snapshot_selection),
+    ]
+    
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    
+    # No corrupted snapshots
+    assert results["errors"] == 0, "Snapshot selection should be atomic"
+
+

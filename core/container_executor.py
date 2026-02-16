@@ -21,6 +21,8 @@ import json
 import asyncio
 import logging
 import subprocess
+import shutil
+import uuid
 from typing import Any, Optional, Dict
 
 from core.operations import Operation
@@ -82,12 +84,39 @@ class ContainerExecutor:
         """
         config = config or {}
         
+        # P0: Check docker runtime is available before execution
+        if not shutil.which(self._docker_cmd):
+            raise ContainerExecutorError(f"Container runtime '{self._docker_cmd}' not available")
+        
         # Get container image
         image = config.get("image")
         if not image:
             raise ContainerExecutorError("Container config missing 'image' field")
         
         timeout = config.get("timeout", self.DEFAULT_TIMEOUT)
+        
+        try:
+            # Prepare payload
+            payload = {
+                "protocol_version": 1,
+                "capability": operation.type,
+                "operation_id": operation.operation_id,
+                "params": operation.params or {}
+            }
+            
+            # Execute container
+            result = await self._run_container(image, payload, config, timeout)
+            
+            return {
+                "success": True,
+                "result": result
+            }
+        
+        except ContainerExecutorError:
+            raise
+        except Exception as e:
+            logger.error(f"Container execution failed: {str(e)}")
+            raise ContainerExecutorError(f"Container execution failed: {str(e)}")
         
         try:
             # Prepare payload
@@ -134,9 +163,15 @@ class ContainerExecutor:
         Raises:
             ContainerExecutorError: on error
         """
+        # P0: Generate unique container name for tracking
+        container_name = f"hc_exec_{uuid.uuid4().hex[:12]}"
+        
         try:
             # Build docker command
             cmd = [self._docker_cmd, "run", "--rm"]
+            
+            # P0: Add unique container name for tracking
+            cmd.extend(["--name", container_name])
             
             # Add environment variables
             env = config.get("env", {})
@@ -161,7 +196,7 @@ class ContainerExecutor:
             # Prepare input as JSON
             input_data = json.dumps(payload).encode("utf-8")
             
-            logger.info(f"Running container: {' '.join(cmd)}")
+            logger.info(f"Running container: {container_name}")
             
             # Run container asynchronously
             process = await asyncio.create_subprocess_exec(
@@ -171,8 +206,8 @@ class ContainerExecutor:
                 stderr=asyncio.subprocess.PIPE
             )
             
-            # Execute with timeout
             try:
+                # Execute with timeout
                 stdout, stderr = await asyncio.wait_for(
                     process.communicate(input=input_data),
                     timeout=timeout
@@ -180,6 +215,45 @@ class ContainerExecutor:
             except asyncio.TimeoutError:
                 process.kill()
                 raise ContainerExecutorError(f"Container timeout after {timeout}s")
+            
+            # Check exit code
+            if process.returncode != 0:
+                error_msg = stderr.decode("utf-8", errors="replace")
+                raise ContainerExecutorError(f"Container failed: {error_msg}")
+            
+            # Parse output
+            output_data = stdout.decode("utf-8")
+            try:
+                result = json.loads(output_data)
+            except json.JSONDecodeError as e:
+                raise ContainerExecutorError(f"Invalid JSON response: {str(e)}")
+            
+            # Validate response
+            if not isinstance(result, dict):
+                raise ContainerExecutorError("Response must be JSON object")
+            
+            if not result.get("success", False):
+                error = result.get("error", "Unknown error")
+                raise ContainerExecutorError(f"Container error: {error}")
+            
+            return result.get("result", {})
+        
+        except ContainerExecutorError:
+            raise
+        except Exception as e:
+            raise ContainerExecutorError(f"Container execution error: {str(e)}")
+        finally:
+            # P0: Guaranteed cleanup — kill container even if docker daemon crashed
+            try:
+                cleanup_cmd = [self._docker_cmd, "rm", "-f", container_name]
+                cleanup_process = await asyncio.create_subprocess_exec(
+                    *cleanup_cmd,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL
+                )
+                await asyncio.wait_for(cleanup_process.wait(), timeout=5.0)
+            except Exception as e:
+                logger.warning(f"Failed to cleanup container {container_name}: {e}")
             
             # Check exit code
             if process.returncode != 0:

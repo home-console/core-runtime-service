@@ -17,6 +17,7 @@ CapabilityRegistry — метаданный реестр capability → provider
 
 from __future__ import annotations
 
+import threading
 from typing import Dict, List, Tuple, Optional, Any
 from core.capability_protocol import (
     PROTOCOL_VERSION,
@@ -54,6 +55,9 @@ class CapabilityRegistry:
         
         # plugin_name -> list of capability_ids that plugin requires
         self._consumers: Dict[str, List[str]] = {}
+        
+        # P0 Hardening: Lock for thread-safe access
+        self._lock = threading.RLock()
 
     def register_provider(
         self,
@@ -77,36 +81,37 @@ class CapabilityRegistry:
             process_config: конфиг для process execution (если execution_mode="process")
             container_config: конфиг для container execution (если execution_mode="container")
         """
-        if capability_id not in self._providers:
-            self._providers[capability_id] = []
-        
-        # Проверяем, не зарегистрирован ли уже этот провайдер
-        existing = next(
-            (p for p in self._providers[capability_id] if p["plugin"] == plugin_name),
-            None
-        )
-        if existing:
-            return  # Уже есть
-        
-        # Protocol v1: используем новую структуру с метаданными
-        provider_info: Dict[str, Any] = {
-            "plugin": plugin_name,
-            "type": provider_type,
-            "protocol_version": PROTOCOL_VERSION,
-            "provider_version": None,  # Заполняется при manifest discovery
-            "healthy": True,  # По умолчанию здоров
-            "timeouts": {},  # Заполняется из manifest
-            "capabilities": [],  # Заполняется из manifest
-            "execution_mode": execution_mode,  # Plugin Isolation
-        }
-        if remote_config:
-            provider_info["remote_config"] = remote_config
-        if process_config:
-            provider_info["process_config"] = process_config
-        if container_config:
-            provider_info["container_config"] = container_config
-        
-        self._providers[capability_id].append(provider_info)
+        with self._lock:
+            if capability_id not in self._providers:
+                self._providers[capability_id] = []
+            
+            # Проверяем, не зарегистрирован ли уже этот провайдер
+            existing = next(
+                (p for p in self._providers[capability_id] if p["plugin"] == plugin_name),
+                None
+            )
+            if existing:
+                return  # Уже есть
+            
+            # Protocol v1: используем новую структуру с метаданными
+            provider_info: Dict[str, Any] = {
+                "plugin": plugin_name,
+                "type": provider_type,
+                "protocol_version": PROTOCOL_VERSION,
+                "provider_version": None,  # Заполняется при manifest discovery
+                "healthy": True,  # По умолчанию здоров
+                "timeouts": {},  # Заполняется из manifest
+                "capabilities": [],  # Заполняется из manifest
+                "execution_mode": execution_mode,  # Plugin Isolation
+            }
+            if remote_config:
+                provider_info["remote_config"] = remote_config
+            if process_config:
+                provider_info["process_config"] = process_config
+            if container_config:
+                provider_info["container_config"] = container_config
+            
+            self._providers[capability_id].append(provider_info)
 
     def update_provider_metadata(
         self,
@@ -128,24 +133,25 @@ class CapabilityRegistry:
             process_config: конфиг для process execution 
             container_config: конфиг для container execution 
         """
-        provider = self._get_provider_entry(capability_id, plugin_name)
-        if not provider:
-            return
-        
-        if protocol_version is not None:
-            provider["protocol_version"] = protocol_version
-        if provider_version is not None:
-            provider["provider_version"] = provider_version
-        if capabilities is not None:
-            provider["capabilities"] = capabilities
-        if timeouts is not None:
-            provider["timeouts"] = timeouts
-        if execution_mode is not None:  # Step 9
-            provider["execution_mode"] = execution_mode
-        if process_config is not None:  # Step 9
-            provider["process_config"] = process_config
-        if container_config is not None:  # Step 9
-            provider["container_config"] = container_config
+        with self._lock:
+            provider = self._get_provider_entry(capability_id, plugin_name)
+            if not provider:
+                return
+            
+            if protocol_version is not None:
+                provider["protocol_version"] = protocol_version
+            if provider_version is not None:
+                provider["provider_version"] = provider_version
+            if capabilities is not None:
+                provider["capabilities"] = capabilities
+            if timeouts is not None:
+                provider["timeouts"] = timeouts
+            if execution_mode is not None:  # Step 9
+                provider["execution_mode"] = execution_mode
+            if process_config is not None:  # Step 9
+                provider["process_config"] = process_config
+            if container_config is not None:  # Step 9
+                provider["container_config"] = container_config
 
     def set_provider_health(
         self,
@@ -157,31 +163,34 @@ class CapabilityRegistry:
         """
         Обновить health status провайдера.
         """
-        provider = self._get_provider_entry(capability_id, plugin_name)
-        if not provider:
-            return
-        
-        provider["healthy"] = healthy
-        if version:
-            provider["provider_version"] = version
+        with self._lock:
+            provider = self._get_provider_entry(capability_id, plugin_name)
+            if not provider:
+                return
+            
+            provider["healthy"] = healthy
+            if version:
+                provider["provider_version"] = version
 
     def register_consumer(self, plugin_name: str, capability_id: str) -> None:
         """Зарегистрировать плагин как потребитель capability."""
-        if plugin_name not in self._consumers:
-            self._consumers[plugin_name] = []
-        if capability_id not in self._consumers[plugin_name]:
-            self._consumers[plugin_name].append(capability_id)
+        with self._lock:
+            if plugin_name not in self._consumers:
+                self._consumers[plugin_name] = []
+            if capability_id not in self._consumers[plugin_name]:
+                self._consumers[plugin_name].append(capability_id)
 
     def unregister_plugin(self, plugin_name: str) -> None:
         """Удалить плагин из реестра (как провайдер и как потребитель)."""
-        for cap_id, providers in list(self._providers.items()):
-            # Удаляем провайдер по имени
-            self._providers[cap_id] = [
-                p for p in providers if p["plugin"] != plugin_name
-            ]
-            if not self._providers[cap_id]:
-                del self._providers[cap_id]
-        self._consumers.pop(plugin_name, None)
+        with self._lock:
+            for cap_id, providers in list(self._providers.items()):
+                # Удаляем провайдер по имени
+                self._providers[cap_id] = [
+                    p for p in providers if p["plugin"] != plugin_name
+                ]
+                if not self._providers[cap_id]:
+                    del self._providers[cap_id]
+            self._consumers.pop(plugin_name, None)
 
     def get_providers(self, capability_id: str) -> List[str]:
         """
@@ -189,30 +198,32 @@ class CapabilityRegistry:
         
         Приоритет: здоровые провайдеры первыми, локальные перед remote.
         """
-        providers = self._providers.get(capability_id, [])
-        
-        # Сортируем: здоровые первыми, затем локальные перед remote
-        healthy_local = [p for p in providers if p["healthy"] and p["type"] == "local"]
-        healthy_remote = [p for p in providers if p["healthy"] and p["type"] == "remote"]
-        unhealthy = [p for p in providers if not p["healthy"]]
-        
-        result = healthy_local + healthy_remote + unhealthy
-        return [p["plugin"] for p in result]
+        with self._lock:
+            providers = self._providers.get(capability_id, [])
+            
+            # Сортируем: здоровые первыми, затем локальные перед remote
+            healthy_local = [p for p in providers if p["healthy"] and p["type"] == "local"]
+            healthy_remote = [p for p in providers if p["healthy"] and p["type"] == "remote"]
+            unhealthy = [p for p in providers if not p["healthy"]]
+            
+            result = healthy_local + healthy_remote + unhealthy
+            return [p["plugin"] for p in result]
 
     def get_providers_sorted_by_health(self, capability_id: str) -> List[str]:
         """
         Список провайдеров, отсортированные по здоровью (только здоровые).
         Используется при выборе провайдера для операции.
         """
-        providers = self._providers.get(capability_id, [])
-        
-        # Только здоровые: локальные перед remote
-        healthy = [p for p in providers if p["healthy"]]
-        local = [p for p in healthy if p["type"] == "local"]
-        remote = [p for p in healthy if p["type"] == "remote"]
-        
-        result = local + remote
-        return [p["plugin"] for p in result]
+        with self._lock:
+            providers = self._providers.get(capability_id, [])
+            
+            # Только здоровые: локальные перед remote
+            healthy = [p for p in providers if p["healthy"]]
+            local = [p for p in healthy if p["type"] == "local"]
+            remote = [p for p in healthy if p["type"] == "remote"]
+            
+            result = local + remote
+            return [p["plugin"] for p in result]
 
     def _get_provider_entry(
         self,
@@ -232,22 +243,25 @@ class CapabilityRegistry:
         provider_name: str
     ) -> Optional[Dict[str, Any]]:
         """Получить информацию о конкретном провайдере capability."""
-        provider = self._get_provider_entry(capability_id, provider_name)
-        if provider:
-            return dict(provider)  # Copy для безопасности
-        return None
+        with self._lock:
+            provider = self._get_provider_entry(capability_id, provider_name)
+            if provider:
+                return dict(provider)  # Copy для безопасности
+            return None
 
     def get_all_providers_for_capability(
         self,
         capability_id: str
     ) -> List[Dict[str, Any]]:
         """Получить полную информацию всех провайдеров capability."""
-        providers = self._providers.get(capability_id, [])
-        return [dict(p) for p in providers]  # Копируем для безопасности
+        with self._lock:
+            providers = self._providers.get(capability_id, [])
+            return [dict(p) for p in providers]  # Копируем для безопасности
 
     def get_required_capabilities(self, plugin_name: str) -> List[str]:
         """Получить список capability, требуемых плагином."""
-        return self._consumers.get(plugin_name, [])
+        with self._lock:
+            return list(self._consumers.get(plugin_name, []))
 
     def provider_info_to_metadata(self, provider_info: Dict[str, Any]) -> ProviderMetadata:
         """
@@ -277,10 +291,11 @@ class CapabilityRegistry:
             (True, []) если все требования удовлетворены.
             (False, [missing_capability_id, ...]) если какие-то capabilities отсутствуют.
         """
-        required = self.get_required_capabilities(plugin_name)
-        missing: List[str] = []
-        for cap_id in required:
-            if not self.get_providers(cap_id):
-                missing.append(cap_id)
-        return (len(missing) == 0, missing)
+        with self._lock:
+            required = self.get_required_capabilities(plugin_name)
+            missing: List[str] = []
+            for cap_id in required:
+                if not self.get_providers(cap_id):
+                    missing.append(cap_id)
+            return (len(missing) == 0, missing)
 

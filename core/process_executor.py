@@ -12,6 +12,8 @@ import json
 import asyncio
 import logging
 import subprocess
+import os
+import signal
 from typing import Any, Optional, Dict
 
 from core.operations import Operation
@@ -30,6 +32,9 @@ class ProcessExecutor:
     # Default process configuration
     DEFAULT_TIMEOUT = 30  # seconds
     DEFAULT_MAX_RETRIES = 3
+    
+    # P0 Hardening: Maximum output size (50MB)
+    MAX_OUTPUT_SIZE = 50 * 1024 * 1024  # 50MB
     
     def __init__(self, runtime: Any):
         """Initialize executor."""
@@ -114,30 +119,55 @@ class ProcessExecutor:
             # Prepare input as JSON
             input_data = json.dumps(payload).encode("utf-8")
             
+            # P0: Run process with process group (for cleanup)
+            # On Unix systems, preexec_fn=os.setsid creates a new process group
+            preexec_fn = None
+            if os.name != 'nt':  # Not Windows
+                preexec_fn = os.setsid
+            
             # Run process asynchronously
             process = await asyncio.create_subprocess_exec(
                 *cmd_parts,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+                stderr=asyncio.subprocess.PIPE,
+                preexec_fn=preexec_fn
             )
             
-            # Execute with timeout
             try:
+                # Execute with timeout
                 stdout, stderr = await asyncio.wait_for(
                     process.communicate(input=input_data),
                     timeout=timeout
                 )
             except asyncio.TimeoutError:
-                process.kill()
+                # P0: Kill process group on timeout (not just process)
+                try:
+                    if os.name != 'nt':  # Unix
+                        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                    else:  # Windows
+                        process.kill()
+                except Exception as e:
+                    logger.warning(f"Failed to kill process group: {e}")
+                
                 raise ProcessExecutorError(f"Process timeout after {timeout}s")
+            
+            # P0: Check output size limits
+            if len(stdout) > self.MAX_OUTPUT_SIZE:
+                raise ProcessExecutorError(
+                    f"Process stdout exceeds limit: {len(stdout)} > {self.MAX_OUTPUT_SIZE}"
+                )
+            if len(stderr) > self.MAX_OUTPUT_SIZE:
+                raise ProcessExecutorError(
+                    f"Process stderr exceeds limit: {len(stderr)} > {self.MAX_OUTPUT_SIZE}"
+                )
             
             # Check exit code
             if process.returncode != 0:
                 error_msg = stderr.decode("utf-8", errors="replace")
                 raise ProcessExecutorError(f"Process failed: {error_msg}")
             
-            # Parse output
+            # Parse output with proper error handling
             output_data = stdout.decode("utf-8")
             try:
                 result = json.loads(output_data)
