@@ -3,6 +3,11 @@ Operations subsystem — first-class entity for all system-level actions.
 
 Operation is immutable audit trail + execution context.
 All critical actions MUST be executed through operations.
+
+Поддерживает Capability Protocol v1:
+- Remote provider health monitoring
+- Retryable error handling
+- Timeout enforcement
 """
 
 import uuid
@@ -10,6 +15,9 @@ import time
 from typing import Any, Dict, Optional, List, Callable, Awaitable
 from enum import Enum
 from dataclasses import dataclass, asdict
+
+from core.health_monitor import ProviderHealthMonitor
+from core import capability_protocol
 
 
 class OperationStatus(Enum):
@@ -150,6 +158,11 @@ class OperationManager:
     """
     Manages operation lifecycle: create, execute, store, query.
     
+    Поддерживает Capability Protocol v1:
+    - Health monitoring for remote providers
+    - Retryable error handling
+    - Timeout enforcement from manifest
+    
     Coordinates:
     - Operation registry (types)
     - Storage persistence
@@ -165,6 +178,8 @@ class OperationManager:
         self._retryable_errors = {
             "timeout", "transient", "network", "device_offline", "integration_unavailable"
         }
+        # Health monitor for remote providers (Protocol v1)
+        self._health_monitor = ProviderHealthMonitor()
     
     def register_handler(
         self,
@@ -272,19 +287,30 @@ class OperationManager:
     async def _execute_remote_operation(
         self,
         operation: Operation,
-        provider_info: Dict[str, Any]
+        provider_info: Dict[str, Any],
+        retry_count: int = 0
     ) -> Operation:
         """
         Execute operation on remote provider via HTTP.
         
+        Поддерживает Capability Protocol v1:
+        - Protocol version negotiation
+        - Health monitoring and recording
+        - Retryable error handling
+        - Per-capability timeouts from manifest
+        - Auto-retry on transient failures
+        
         Args:
             operation: Operation to execute
-            provider_info: Remote provider metadata
+            provider_info: Remote provider metadata with protocol info
+            retry_count: Current retry attempt (for diagnostics)
             
         Returns:
             Operation with updated status and result/error
         """
         from core.remote_executor import RemoteOperationExecutor
+        
+        provider_name = provider_info.get("plugin")
         
         # Mark as running
         operation.status = OperationStatus.RUNNING
@@ -292,42 +318,91 @@ class OperationManager:
         await self._persist(operation)
         
         try:
-            # Get remote config
+            # Get remote config and timeout
             remote_config = provider_info.get("remote_config", {})
             base_url = remote_config.get("base_url")
-            timeout = remote_config.get("timeout", 10)
+            
+            # Use per-capability timeout from manifest if available, else default
+            timeouts = provider_info.get("timeouts", {})
+            timeout = timeouts.get(operation.type, capability_protocol.DEFAULT_CAPABILITY_TIMEOUT)
             
             if not base_url:
                 raise ValueError(f"Remote provider missing base_url in config")
             
-            # Execute remotely
+            # Prepare execution context
             context = {
                 "operation_id": operation.operation_id,
                 "initiator": operation.initiator.to_dict() if operation.initiator else None,
             }
             
+            # Execute with Protocol v1
             response = await RemoteOperationExecutor.execute_remote(
                 base_url=base_url,
-                operation_type=operation.type,
+                capability=operation.type,
+                operation_id=operation.operation_id,
                 params=operation.params,
                 context=context,
                 timeout=timeout
             )
             
-            # Check response status
+            # Record success in health monitor
+            self._health_monitor.record_success(provider_name)
+            provider_info["healthy"] = True
+            
+            # Handle response
             if response.get("status") == "success":
+                # Success
                 operation.status = OperationStatus.SUCCESS
                 operation.result = response.get("result", {})
             else:
-                # Remote returned error
+                # Remote provider returned error
                 error_info = response.get("error", {})
                 operation.status = OperationStatus.FAILED
+                is_retryable = RemoteOperationExecutor.is_error_retryable(response)
+                
                 operation.error = OperationError(
                     code=error_info.get("code", "remote_error"),
-                    message=error_info.get("message", "Remote provider error")
+                    message=error_info.get("message", "Remote provider error"),
                 )
+                
+                # Record failure for health tracking
+                self._health_monitor.record_failure(
+                    provider_name,
+                    f"{error_info.get('code')}: {error_info.get('message')}"
+                )
+                
+                # If retryable and we haven't exceeded retry limit → try alternative provider
+                if is_retryable and retry_count < capability_protocol.MAX_RETRIES_PER_OPERATION:
+                    # Try next provider from registry
+                    if hasattr(self.runtime, 'capability_registry') and self.runtime.capability_registry:
+                        cap_reg = self.runtime.capability_registry
+                        all_providers = cap_reg.get_all_providers_for_capability(operation.type)
+                        
+                        # Skip current provider and try next healthy one
+                        for alt_provider in all_providers:
+                            if alt_provider["plugin"] != provider_name and alt_provider.get("type") == "remote":
+                                if not self._health_monitor.should_skip_provider(alt_provider["plugin"]):
+                                    # Reset operation status and retry with alternative
+                                    operation.status = OperationStatus.PENDING
+                                    operation.error = None
+                                    return await self._execute_remote_operation(
+                                        operation,
+                                        alt_provider,
+                                        retry_count + 1
+                                    )
             
             operation.finished_at = time.time()
+        
+        except capability_protocol.ProtocolCompatibilityError as e:
+            # Protocol mismatch - this is a permanent failure
+            operation.status = OperationStatus.FAILED
+            operation.error = OperationError(
+                code="protocol_incompatible",
+                message=f"Protocol mismatch with remote provider: {str(e)}"
+            )
+            operation.finished_at = time.time()
+            self._health_monitor.mark_unhealthy(provider_name, "protocol_incompatible")
+            provider_info["healthy"] = False
         
         except Exception as e:
             # Network or execution error
@@ -337,6 +412,10 @@ class OperationManager:
                 message=f"Remote operation failed: {str(e)}"
             )
             operation.finished_at = time.time()
+            
+            # Record failure for health monitoring
+            self._health_monitor.record_failure(provider_name, str(e))
+            provider_info["healthy"] = not self._health_monitor.should_skip_provider(provider_name)
         
         await self._persist(operation)
         return operation

@@ -1,6 +1,13 @@
 """
 CapabilityRegistry — метаданный реестр capability → provider и plugin → required capabilities.
 
+Поддерживает Capability Protocol v1:
+- Tracking protocol_version per provider
+- provider_version from manifest
+- Health status and monitoring
+- Per-capability timeouts
+- Provider metadata
+
 Только декларации, проверки, интроспекция, диагностика.
 НЕ знает о сервисах, ServiceRegistry, конкретных реализациях.
 НЕ имеет методов call / resolve / invoke.
@@ -11,29 +18,40 @@ CapabilityRegistry — метаданный реестр capability → provider
 from __future__ import annotations
 
 from typing import Dict, List, Tuple, Optional, Any
+from core.capability_protocol import (
+    PROTOCOL_VERSION,
+    ProviderMetadata,
+    ProviderHealthStatus,
+)
 
 
 class CapabilityRegistry:
     """
     Реестр метаданных: кто какой capability предоставляет и кто какой требует.
 
-    Поддерживает:
+    Поддерживает Capability Protocol v1:
     - Локальные providers (типовые плагины)
-    - Remote providers (через HTTP)
+    - Remote providers (через HTTP) с protocol versioning
+    - Health monitoring
+    - Per-capability timeouts
 
     API:
     - register_provider(plugin_name, capability_id, provider_type="local", remote_config=None)
     - register_consumer(plugin_name, capability_id)
     - unregister_plugin(plugin_name)
+    - update_provider_metadata(plugin_name, capability_id, protocol_version, provider_version, ...)
+    - set_provider_health(plugin_name, healthy, ...)
     - get_providers(capability_id) -> List[str]
-    - get_provider_info(plugin_name, capability_id) -> {"type": "local"|"remote", ...}
+    - get_provider_info(plugin_name, capability_id) -> ProviderMetadata
     - get_required_capabilities(plugin_name) -> List[str]
     - validate_plugin_requirements(plugin_name) -> (ok: bool, missing: List[str])
     """
 
     def __init__(self) -> None:
-        # capability_id -> [{"name": plugin_name, "type": "local"|"remote", "config": {...}}, ...]
+        # capability_id -> [ProviderMetadata, ...]
+        # Stored as dicts for serialization compatibility
         self._providers: Dict[str, List[Dict[str, Any]]] = {}
+        
         # plugin_name -> list of capability_ids that plugin requires
         self._consumers: Dict[str, List[str]] = {}
 
@@ -58,20 +76,69 @@ class CapabilityRegistry:
         
         # Проверяем, не зарегистрирован ли уже этот провайдер
         existing = next(
-            (p for p in self._providers[capability_id] if p["name"] == plugin_name),
+            (p for p in self._providers[capability_id] if p["plugin"] == plugin_name),
             None
         )
         if existing:
             return  # Уже есть
         
+        # Protocol v1: используем новую структуру с метаданными
         provider_info: Dict[str, Any] = {
-            "name": plugin_name,
+            "plugin": plugin_name,
             "type": provider_type,
+            "protocol_version": PROTOCOL_VERSION,
+            "provider_version": None,  # Заполняется при manifest discovery
+            "healthy": True,  # По умолчанию здоров
+            "timeouts": {},  # Заполняется из manifest
+            "capabilities": [],  # Заполняется из manifest
         }
         if remote_config:
             provider_info["remote_config"] = remote_config
         
         self._providers[capability_id].append(provider_info)
+
+    def update_provider_metadata(
+        self,
+        plugin_name: str,
+        capability_id: str,
+        protocol_version: Optional[int] = None,
+        provider_version: Optional[str] = None,
+        capabilities: Optional[List[str]] = None,
+        timeouts: Optional[Dict[str, float]] = None,
+    ) -> None:
+        """
+        Обновить метаданные провайдера после manifest discovery или health check.
+        """
+        provider = self._get_provider_entry(capability_id, plugin_name)
+        if not provider:
+            return
+        
+        if protocol_version is not None:
+            provider["protocol_version"] = protocol_version
+        if provider_version is not None:
+            provider["provider_version"] = provider_version
+        if capabilities is not None:
+            provider["capabilities"] = capabilities
+        if timeouts is not None:
+            provider["timeouts"] = timeouts
+
+    def set_provider_health(
+        self,
+        plugin_name: str,
+        capability_id: str,
+        healthy: bool,
+        version: Optional[str] = None,
+    ) -> None:
+        """
+        Обновить health status провайдера.
+        """
+        provider = self._get_provider_entry(capability_id, plugin_name)
+        if not provider:
+            return
+        
+        provider["healthy"] = healthy
+        if version:
+            provider["provider_version"] = version
 
     def register_consumer(self, plugin_name: str, capability_id: str) -> None:
         """Зарегистрировать плагин как потребитель capability."""
@@ -85,7 +152,7 @@ class CapabilityRegistry:
         for cap_id, providers in list(self._providers.items()):
             # Удаляем провайдер по имени
             self._providers[cap_id] = [
-                p for p in providers if p["name"] != plugin_name
+                p for p in providers if p["plugin"] != plugin_name
             ]
             if not self._providers[cap_id]:
                 del self._providers[cap_id]
@@ -95,15 +162,44 @@ class CapabilityRegistry:
         """
         Список имён плагинов, предоставляющих capability.
         
-        Приоритет: локальные providers первыми.
+        Приоритет: здоровые провайдеры первыми, локальные перед remote.
         """
         providers = self._providers.get(capability_id, [])
         
-        # Сортируем: локальные первыми
-        local_providers = [p["name"] for p in providers if p["type"] == "local"]
-        remote_providers = [p["name"] for p in providers if p["type"] == "remote"]
+        # Сортируем: здоровые первыми, затем локальные перед remote
+        healthy_local = [p for p in providers if p["healthy"] and p["type"] == "local"]
+        healthy_remote = [p for p in providers if p["healthy"] and p["type"] == "remote"]
+        unhealthy = [p for p in providers if not p["healthy"]]
         
-        return local_providers + remote_providers
+        result = healthy_local + healthy_remote + unhealthy
+        return [p["plugin"] for p in result]
+
+    def get_providers_sorted_by_health(self, capability_id: str) -> List[str]:
+        """
+        Список провайдеров, отсортированные по здоровью (только здоровые).
+        Используется при выборе провайдера для операции.
+        """
+        providers = self._providers.get(capability_id, [])
+        
+        # Только здоровые: локальные перед remote
+        healthy = [p for p in providers if p["healthy"]]
+        local = [p for p in healthy if p["type"] == "local"]
+        remote = [p for p in healthy if p["type"] == "remote"]
+        
+        result = local + remote
+        return [p["plugin"] for p in result]
+
+    def _get_provider_entry(
+        self,
+        capability_id: str,
+        plugin_name: str
+    ) -> Optional[Dict[str, Any]]:
+        """Получить entry провайдера для редактирования."""
+        providers = self._providers.get(capability_id, [])
+        return next(
+            (p for p in providers if p["plugin"] == plugin_name),
+            None
+        )
 
     def get_provider_info(
         self,
@@ -111,11 +207,10 @@ class CapabilityRegistry:
         provider_name: str
     ) -> Optional[Dict[str, Any]]:
         """Получить информацию о конкретном провайдере capability."""
-        providers = self._providers.get(capability_id, [])
-        return next(
-            (p for p in providers if p["name"] == provider_name),
-            None
-        )
+        provider = self._get_provider_entry(capability_id, provider_name)
+        if provider:
+            return dict(provider)  # Copy для безопасности
+        return None
 
     def get_all_providers_for_capability(
         self,
@@ -123,8 +218,7 @@ class CapabilityRegistry:
     ) -> List[Dict[str, Any]]:
         """Получить полную информацию всех провайдеров capability."""
         providers = self._providers.get(capability_id, [])
-        # Копируем для безопасности
-        return [dict(p) for p in providers]
+        return [dict(p) for p in providers]  # Копируем для безопасности
 
     def get_required_capabilities(self, plugin_name: str) -> List[str]:
         """Получить список capability, требуемых плагином."""
@@ -144,3 +238,4 @@ class CapabilityRegistry:
             if not self.get_providers(cap_id):
                 missing.append(cap_id)
         return (len(missing) == 0, missing)
+
