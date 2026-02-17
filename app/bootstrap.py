@@ -19,8 +19,8 @@ APP_MODULES: List[ModuleSpec] = [
     ModuleSpec("admin", required=True),
     ModuleSpec("auth", required=True),
     ModuleSpec("operations", required=True),
-    # Step 15: Agent Control Plane
-    ModuleSpec("agent_control_plane", required=True),
+    # Step 15: Agent Control Plane (optional, but enables distributed agents)
+    ModuleSpec("agent", required=False),
     # Execution Layer (D3): policy + backends, Core об этом не знает.
     ModuleSpec("execution", required=True),
     ModuleSpec("integrations", required=True),

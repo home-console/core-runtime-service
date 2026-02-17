@@ -198,7 +198,7 @@ class PluginManager:
         # Проверка required capabilities: все должны иметь хотя бы одного provider
         self._block_reasons.pop(plugin_name, None)
         if self._runtime and hasattr(self._runtime, "capability_registry"):
-            ok, missing = self._runtime.capability_registry.validate_plugin_requirements(plugin_name)
+            ok, missing = await self._runtime.capability_registry.validate_plugin_requirements(plugin_name)
             if not ok:
                 self._block_reasons[plugin_name] = {"missing_capabilities": missing}
                 return  # Плагин не стартуем — управляемое состояние (blocked), не исключение

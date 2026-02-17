@@ -18,6 +18,7 @@ CapabilityRegistry — метаданный реестр capability → provider
 from __future__ import annotations
 
 import asyncio
+import threading
 from typing import Dict, List, Tuple, Optional, Any
 from core.capability_protocol import (
     PROTOCOL_VERSION,
@@ -141,8 +142,9 @@ class CapabilityRegistry:
         # plugin_name -> list of capability_ids that plugin requires
         self._consumers: Dict[str, List[str]] = {}
         
-        # P0: Async lock for concurrent-safe access (not threading.RLock)
-        self._lock = asyncio.Lock()
+        # Use threading.Lock for sync getter methods that need lock protection
+        # Async methods (register_provider, etc) will handle their own async-safe access
+        self._lock = threading.Lock()
 
     @staticmethod
     def trust_level_to_privilege(trust_level: Optional[Any]) -> str:
