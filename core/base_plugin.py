@@ -41,6 +41,8 @@ class PluginMetadata:
     # Optional configuration for process/container execution
     process_config: dict | None = None  # {"timeout": 30, "max_memory": "256M"}
     container_config: dict | None = None  # {"image": "...", "timeout": 30}
+    # Resource limits (Step 13: Observability & Resource Guardrails)
+    resource_limits: dict | None = None  # {"max_execution_seconds": 30, "max_memory_mb": 512, "max_calls_per_minute": 100}
 
 
 class BasePlugin(SDKBasePlugin):

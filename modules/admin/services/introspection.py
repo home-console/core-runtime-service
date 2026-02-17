@@ -608,3 +608,24 @@ async def list_capabilities(runtime: Any) -> List[Dict[str, Any]]:
         pass
     
     return result
+
+
+async def get_system_health(runtime: Any) -> Dict[str, Any]:
+    """
+    Get system health snapshot including metrics and resource status.
+    
+    Step 13: Observability endpoint for monitoring dashboard.
+    """
+    from core.observability.health_snapshot import HealthSnapshotCollector
+    
+    try:
+        collector = HealthSnapshotCollector(runtime)
+        snapshot = collector.collect()
+        return snapshot.to_dict()
+    except Exception as e:
+        # Return minimal health if collection fails
+        return {
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "error": str(e),
+            "is_healthy": False,
+        }

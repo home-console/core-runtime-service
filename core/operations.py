@@ -18,6 +18,7 @@ from enum import Enum
 from dataclasses import dataclass, asdict
 
 from core.health_monitor import ProviderHealthMonitor
+from core.observability.metrics import get_metrics_registry
 from core import capability_protocol
 
 
@@ -505,6 +506,9 @@ class OperationManager:
         3. container: docker/podman execution
         4. remote: HTTP execution
         """
+        start_time = time.time()
+        metrics = get_metrics_registry()
+        
         try:
             # 1. Validate - try to find handler (direct or capability-based)
             handler = self._find_handler(operation.type)
@@ -565,6 +569,13 @@ class OperationManager:
                     message=f"No handler or remote provider for operation type: {operation.type}"
                 )
                 await self._persist(operation)
+                
+                # Step 13: Record metrics
+                metrics.increment_counter("operations_total", label_value=operation.type)
+                metrics.increment_counter("operations_failed_total", label_value=operation.type)
+                latency = (time.time() - start_time) * 1000  # ms
+                metrics.observe_histogram("operation_latency_seconds", latency / 1000.0)
+                
                 return operation
             
             # Mark as running
@@ -580,6 +591,11 @@ class OperationManager:
             operation.result = result
             operation.finished_at = time.time()
             
+            # Step 13: Record metrics
+            metrics.increment_counter("operations_total", label_value=operation.type)
+            latency = (time.time() - start_time) * 1000  # ms
+            metrics.observe_histogram("operation_latency_seconds", latency / 1000.0)
+            
         except Exception as e:
             # Any exception → failed operation
             operation.status = OperationStatus.FAILED
@@ -588,6 +604,12 @@ class OperationManager:
                 message=str(e)
             )
             operation.finished_at = time.time()
+            
+            # Step 13: Record failure metrics
+            metrics.increment_counter("operations_total", label_value=operation.type)
+            metrics.increment_counter("operations_failed_total", label_value=operation.type)
+            latency = (time.time() - start_time) * 1000  # ms
+            metrics.observe_histogram("operation_latency_seconds", latency / 1000.0)
         
         # Persist final state
         await self._persist(operation)
