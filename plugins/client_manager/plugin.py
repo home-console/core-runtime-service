@@ -10,6 +10,7 @@ Client Manager Plugin — интеграция client-manager-service как п�
 import sys
 import threading
 import asyncio
+import importlib
 from pathlib import Path
 from typing import Optional, Any, Literal
 
@@ -171,32 +172,46 @@ class ClientManagerPlugin(BasePlugin):
             await _safe_log(self.runtime, "error", "uvicorn не установлен. Установите: pip install uvicorn")
             raise ImportError("uvicorn is required for client_manager plugin in standalone mode")
         
-        # Добавляем путь к client-manager-service в sys.path для импортов
-        client_manager_path = Path(__file__).parent.parent / "client-manager-service"
-        if str(client_manager_path) not in sys.path:
-            sys.path.insert(0, str(client_manager_path))
-        
         # В режиме integrated не создаём app здесь, это будет сделано в on_start
         # В режиме standalone создаём app как раньше
         if mode == "standalone":
             try:
-                from app.main import create_app
-                self._app = create_app()
+                # Добавляем путь к client-manager-service в sys.path для импортов
+                client_manager_path = Path(__file__).parent.parent / "client-manager-service"
+                client_manager_str = str(client_manager_path)
                 
-                # Получаем handler для регистрации сервисов
-                from app.dependencies import get_websocket_handler
+                if client_manager_str not in sys.path:
+                    sys.path.insert(0, client_manager_str)
+                
+                # Используем importlib для импорта модулей
                 try:
-                    self._handler = get_websocket_handler()
-                except Exception:
-                    # Handler может быть не инициализирован до старта
-                    self._handler = None
-                
-                await _safe_log(self.runtime, "info", "Client Manager app создан (standalone режим)")
-            except ImportError as e:
-                await _safe_log(self.runtime, "error", f"Не удалось импортировать client-manager app: {e}")
-                raise
+                    app_main = importlib.import_module('app.main')
+                    create_app = getattr(app_main, 'create_app')
+                    self._app = create_app()
+                    
+                    # Получаем handler для регистрации сервисов
+                    try:
+                        app_deps = importlib.import_module('app.dependencies')
+                        get_websocket_handler = getattr(app_deps, 'get_websocket_handler', None)
+                        if get_websocket_handler:
+                            self._handler = get_websocket_handler()
+                        else:
+                            self._handler = None
+                    except Exception:
+                        # Handler может быть не инициализирован до старта
+                        self._handler = None
+                    
+                    await _safe_log(self.runtime, "info", "Client Manager app создан (standalone режим)")
+                except ImportError as e:
+                    await _safe_log(self.runtime, "error", f"Не удалось импортировать client-manager app: {e}")
+                    import traceback
+                    await _safe_log(self.runtime, "error", f"Traceback: {traceback.format_exc()}")
+                    raise
+                    
             except Exception as e:
                 await _safe_log(self.runtime, "error", f"Ошибка при создании Client Manager app: {e}")
+                import traceback
+                await _safe_log(self.runtime, "error", f"Traceback: {traceback.format_exc()}")
                 raise
         else:
             await _safe_log(self.runtime, "info", "Client Manager будет интегрирован в основной API (integrated режим)")
