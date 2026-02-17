@@ -146,19 +146,26 @@ class PluginManager:
                 self._states[plugin_name] = PluginState.LOADED
 
             # CapabilityRegistry: регистрируем provided и required
+            # Step 11: Use trust level to determine privilege level for capability registration
             if self._runtime and hasattr(self._runtime, "capability_registry"):
                 reg = self._runtime.capability_registry
+                
+                # Get trust level from plugin if available (set by MarketplaceInstaller)
+                trust_level = getattr(plugin, '_trust_level', None)
+                plugin_privilege = reg.trust_level_to_privilege(trust_level)
+                
                 for cap_id in (metadata.capabilities_provided or []):
                     # Determine if this is a remote provider
                     provider_type = "remote" if metadata.remote_config else "local"
-                    reg.register_provider(
+                    await reg.register_provider(
                         plugin_name,
                         cap_id,
                         provider_type=provider_type,
-                        remote_config=metadata.remote_config
+                        remote_config=metadata.remote_config,
+                        plugin_privilege=plugin_privilege  # Step 11: Pass trust-based privilege
                     )
                 for cap_id in (metadata.capabilities_required or []):
-                    reg.register_consumer(plugin_name, cap_id)
+                    await reg.register_consumer(plugin_name, cap_id)
         except Exception as e:
             # Устанавливаем состояние ERROR (with lock protection)
             with self._plugin_lock:

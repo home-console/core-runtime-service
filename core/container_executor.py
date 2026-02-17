@@ -254,30 +254,3 @@ class ContainerExecutor:
                 await asyncio.wait_for(cleanup_process.wait(), timeout=5.0)
             except Exception as e:
                 logger.warning(f"Failed to cleanup container {container_name}: {e}")
-            
-            # Check exit code
-            if process.returncode != 0:
-                error_msg = stderr.decode("utf-8", errors="replace")
-                raise ContainerExecutorError(f"Container failed: {error_msg}")
-            
-            # Parse output
-            output_data = stdout.decode("utf-8")
-            try:
-                result = json.loads(output_data)
-            except json.JSONDecodeError as e:
-                raise ContainerExecutorError(f"Invalid JSON response: {str(e)}")
-            
-            # Validate response
-            if not isinstance(result, dict):
-                raise ContainerExecutorError("Response must be JSON object")
-            
-            if not result.get("success", False):
-                error = result.get("error", "Unknown error")
-                raise ContainerExecutorError(f"Container error: {error}")
-            
-            return result.get("result", {})
-        
-        except ContainerExecutorError:
-            raise
-        except Exception as e:
-            raise ContainerExecutorError(f"Container execution error: {str(e)}")

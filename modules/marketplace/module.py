@@ -87,6 +87,32 @@ class MarketplaceModule(RuntimeModule):
             "marketplace.list_installed",
             self._wrap_handler(self.service.handle_list_installed)
         )
+        
+        # Step 12: Register registry-based operations
+        self.runtime.operations.register_handler(
+            "marketplace.install_from_registry",
+            self._wrap_handler(self.service.handle_install_from_registry)
+        )
+        
+        self.runtime.operations.register_handler(
+            "marketplace.search",
+            self._wrap_handler(self.service.handle_search)
+        )
+        
+        self.runtime.operations.register_handler(
+            "marketplace.list_available",
+            self._wrap_handler(self.service.handle_list_available)
+        )
+        
+        self.runtime.operations.register_handler(
+            "marketplace.check_updates",
+            self._wrap_handler(self.service.handle_check_updates)
+        )
+        
+        self.runtime.operations.register_handler(
+            "marketplace.update_all",
+            self._wrap_handler(self.service.handle_update_all)
+        )
     
     async def start(self) -> None:
         """Start marketplace module."""
@@ -101,6 +127,11 @@ class MarketplaceModule(RuntimeModule):
                 ("marketplace.enable", "Enable disabled plugin"),
                 ("marketplace.disable", "Disable plugin without removing"),
                 ("marketplace.list_installed", "List installed marketplace plugins"),
+                ("marketplace.install_from_registry", "Install from remote registry"),
+                ("marketplace.search", "Search plugins in registry"),
+                ("marketplace.list_available", "List available plugins"),
+                ("marketplace.check_updates", "Check for available updates"),
+                ("marketplace.update_all", "Update all plugins"),
             ]
             
             for op_name, description in operations:
@@ -119,6 +150,11 @@ class MarketplaceModule(RuntimeModule):
             "marketplace.enable",
             "marketplace.disable",
             "marketplace.list_installed",
+            "marketplace.install_from_registry",
+            "marketplace.search",
+            "marketplace.list_available",
+            "marketplace.check_updates",
+            "marketplace.update_all",
         ]
         for op_name in operations:
             try:
@@ -156,6 +192,26 @@ class MarketplaceModule(RuntimeModule):
             {
                 "name": "marketplace.list_installed",
                 "description": "List installed marketplace plugins"
+            },
+            {
+                "name": "marketplace.install_from_registry",
+                "description": "Install plugin from remote registry with version resolution"
+            },
+            {
+                "name": "marketplace.search",
+                "description": "Search plugins in registry by name or description"
+            },
+            {
+                "name": "marketplace.list_available",
+                "description": "List all available plugins and versions"
+            },
+            {
+                "name": "marketplace.check_updates",
+                "description": "Check for available updates to installed plugins"
+            },
+            {
+                "name": "marketplace.update_all",
+                "description": "Update all plugins to latest versions"
             },
         ]
     
@@ -200,5 +256,10 @@ class MarketplaceModule(RuntimeModule):
                 "marketplace.enable",
                 "marketplace.disable",
                 "marketplace.list_installed",
+                "marketplace.install_from_registry",
+                "marketplace.search",
+                "marketplace.list_available",
+                "marketplace.check_updates",
+                "marketplace.update_all",
             ]
         }

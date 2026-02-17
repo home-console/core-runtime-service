@@ -24,6 +24,11 @@ from core.capability_protocol import (
     ProviderMetadata,
     ProviderHealthStatus,
 )
+try:
+    from core.trust.trust_store import TrustLevel
+    HAS_TRUST_LAYER = True
+except ImportError:
+    HAS_TRUST_LAYER = False
 
 
 class CapabilitySecurityError(Exception):
@@ -32,10 +37,23 @@ class CapabilitySecurityError(Exception):
 
 
 # Namespace protection rules
+# Step 11: Trust level mapping for capability registration
+# - CORE (3) → can register system.*, admin.*, runtime.*
+# - PUBLISHER (2) → can register admin.* but not system.*, runtime.*
+# - DEVELOPER (1) → cannot register system.*, admin.*, runtime.*
+# 
+# Mapping to privilege levels:
+# - trust_level_to_privilege: TrustLevel → plugin_privilege
+TRUST_LEVEL_TO_PRIVILEGE = {
+    "core": "core",        # TrustLevel.CORE (3) 
+    "publisher": "admin",  # TrustLevel.PUBLISHER (2)
+    "developer": "user",   # TrustLevel.DEVELOPER (1)
+} if HAS_TRUST_LAYER else {}
+
 PROTECTED_NAMESPACES = {
-    "system.": "core",    # Only core can register system.* capabilities
-    "admin.": "admin",    # Only admin module can register admin.* capabilities
-    "runtime.": "core",   # Only core can register runtime.* capabilities
+    "system.": "core",    # Only CORE trust level (core privilege)
+    "admin.": "admin",    # Only PUBLISHER+ trust level (admin privilege)
+    "runtime.": "core",   # Only CORE trust level (core privilege)
 }
 
 
@@ -47,10 +65,20 @@ def _check_capability_namespace_permission(
     """
     Check if plugin has permission to register this capability.
     
+    Step 11: Trust level enforcement for protected capabilities
+    - system.* capabilities: ONLY CORE trusted keys (privilege=core)
+    - admin.* capabilities: PUBLISHER and CORE keys (privilege=admin or core)
+    - runtime.* capabilities: ONLY CORE trusted keys (privilege=core)
+    - Custom capabilities: Any trusted plugin (privilege=admin, core, or user)
+    
     Args:
         capability_id: Capability ID (e.g., "system.reboot")
         plugin_name: Plugin trying to register it
-        plugin_privilege: Plugin privilege level ("core", "admin", "system", "user")
+        plugin_privilege: Plugin privilege level ("core", "admin", "user")
+            Maps from TrustLevel:
+            - "core" ← TrustLevel.CORE
+            - "admin" ← TrustLevel.PUBLISHER
+            - "user" ← TrustLevel.DEVELOPER or unsigned
         
     Raises:
         CapabilitySecurityError: If plugin lacks permission
@@ -58,11 +86,28 @@ def _check_capability_namespace_permission(
     # Check protected namespaces
     for namespace_prefix, allowed_privilege in PROTECTED_NAMESPACES.items():
         if capability_id.startswith(namespace_prefix):
-            if plugin_privilege != allowed_privilege:
-                raise CapabilitySecurityError(
-                    f"Plugin '{plugin_name}' (privilege={plugin_privilege}) cannot register "
-                    f"protected capability '{capability_id}' (requires privilege={allowed_privilege})"
-                )
+            # Step 11: Enhanced checking with trust level clarity
+            if namespace_prefix == "system.":
+                # system.* → only CORE level (privilege="core")
+                if plugin_privilege != "core":
+                    raise CapabilitySecurityError(
+                        f"Plugin '{plugin_name}' cannot register system.* capability '{capability_id}': "
+                        f"requires CORE trust level (current privilege={plugin_privilege})"
+                    )
+            elif namespace_prefix == "admin.":
+                # admin.* → PUBLISHER+ level (privilege="admin" or "core")
+                if plugin_privilege not in ("core", "admin"):
+                    raise CapabilitySecurityError(
+                        f"Plugin '{plugin_name}' cannot register admin.* capability '{capability_id}': "
+                        f"requires PUBLISHER+ trust level (current privilege={plugin_privilege})"
+                    )
+            elif namespace_prefix == "runtime.":
+                # runtime.* → only CORE level (privilege="core")
+                if plugin_privilege != "core":
+                    raise CapabilitySecurityError(
+                        f"Plugin '{plugin_name}' cannot register runtime.* capability '{capability_id}': "
+                        f"requires CORE trust level (current privilege={plugin_privilege})"
+                    )
             break
 
 
@@ -99,6 +144,40 @@ class CapabilityRegistry:
         # P0: Async lock for concurrent-safe access (not threading.RLock)
         self._lock = asyncio.Lock()
 
+    @staticmethod
+    def trust_level_to_privilege(trust_level: Optional[Any]) -> str:
+        """
+        Step 11: Convert TrustLevel enum to privilege level for capability registration.
+        
+        Mapping:
+        - TrustLevel.CORE ("core") → "core"
+        - TrustLevel.PUBLISHER ("publisher") → "admin"
+        - TrustLevel.DEVELOPER ("developer") → "user"
+        - None (unsigned plugin) → "user"
+        
+        Args:
+            trust_level: TrustLevel enum value or None
+            
+        Returns:
+            privilege level string ("core", "admin", or "user")
+        """
+        if not HAS_TRUST_LAYER or trust_level is None:
+            return "user"  # Default for unsigned plugins
+        
+        # TrustLevel enum has values: "core", "publisher", "developer"
+        # Or it could be passed as enum member
+        if hasattr(trust_level, 'value'):
+            level_str = trust_level.value
+        else:
+            level_str = str(trust_level).lower()
+        
+        if level_str == "core":
+            return "core"
+        elif level_str == "publisher":
+            return "admin"
+        else:  # "developer" or anything else
+            return "user"
+
     async def register_provider(
         self,
         plugin_name: str,
@@ -113,6 +192,12 @@ class CapabilityRegistry:
         """
         Зарегистрировать плагин как провайдер capability.
         
+        Step 11: Trust-aware capability registration
+        - Verifies plugin has permission based on trust level (via plugin_privilege)
+        - Prevents system.* registration by non-CORE plugins
+        - Prevents admin.* registration by DEVELOPER-level plugins
+        - Enforces capability security rules from trust store
+        
         Args:
             plugin_name: имя плагина
             capability_id: ID capability (e.g., "system.reboot", "custom.weather")
@@ -121,12 +206,18 @@ class CapabilityRegistry:
             execution_mode: in_process | process | container | remote
             process_config: конфиг для process execution (если execution_mode="process")
             container_config: конфиг для container execution (если execution_mode="container")
-            plugin_privilege: Plugin privilege level for namespace protection ("core", "admin", "user")
+            plugin_privilege: Plugin privilege level for namespace protection.
+                Can be set via trust_level_to_privilege(trust_level):
+                - "core" → TrustLevel.CORE (can register system.*, runtime.*, admin.*)
+                - "admin" → TrustLevel.PUBLISHER (can register admin.* but not system.*)
+                - "user" → TrustLevel.DEVELOPER or unsigned (can only register custom.* or public capabilities)
             
         Raises:
             CapabilitySecurityError: If plugin lacks permission to register this capability
+                based on trust level and capability namespace rules
         """
-        # P0 Security: Check capability namespace protection
+        # Step 11: Trust-based security check
+        # This enforces the capability security rules from the trust layer
         _check_capability_namespace_permission(capability_id, plugin_name, plugin_privilege)
         
         async with self._lock:

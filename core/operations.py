@@ -541,19 +541,19 @@ class OperationManager:
                     try:
                         if hasattr(cap_reg, 'provider_exists'):
                             provider_still_exists = cap_reg.provider_exists(
-                                provider_dict[\"plugin\"], 
+                                provider_dict["plugin"], 
                                 operation.type
                             )
                             if not provider_still_exists:
-                                raise Exception(f\"Provider {provider_dict['plugin']} disappeared during execution setup\")
+                                raise Exception(f"Provider {provider_dict['plugin']} disappeared during execution setup")
                     except (AttributeError, Exception):
                         # provider_exists might not exist yet, skip this check
                         pass
             
             # If no local handler, try remote provider (backward compatible)
             if handler is None:
-                # Check for remote provider (either type=\"remote\" or execution_mode=\"remote\")
-                if provider_type == \"remote\" or execution_mode == \"remote\":
+                # Check for remote provider (either type="remote" or execution_mode="remote")
+                if provider_type == "remote" or execution_mode == "remote":
                     remote_provider_info = self._find_remote_provider(operation.type)
                     if remote_provider_info:
                         return await self._execute_remote_operation(operation, remote_provider_info)
@@ -561,8 +561,8 @@ class OperationManager:
                 # Neither local nor remote found
                 operation.status = OperationStatus.FAILED
                 operation.error = OperationError(
-                    code=\"unknown_operation_type\",
-                    message=f\"No handler or remote provider for operation type: {operation.type}\"
+                    code="unknown_operation_type",
+                    message=f"No handler or remote provider for operation type: {operation.type}"
                 )
                 await self._persist(operation)
                 return operation

@@ -386,3 +386,356 @@ class MarketplaceService:
     def _get_installed_plugins(self) -> Dict[str, Dict[str, Any]]:
         """Get all installed plugins from storage."""
         return self.storage.get("marketplace.installed") or {}
+    
+    
+    # ========== Step 12: Registry-based operations ==========
+    
+    async def handle_install_from_registry(self, operation: Operation) -> Dict[str, Any]:
+        """
+        Install plugin from remote registry.
+        
+        Args:
+            operation.params: {
+                "plugin_name": str,
+                "version_constraint": Optional[str],  # e.g., "^1.2.0", None = latest
+                "channel": str,  # "stable", "beta", default = "stable"
+                "registry_url": str,  # Registry index URL (HTTPS)
+                "force_update": bool,  # Allow downgrade
+            }
+                
+        Returns:
+            Dict with status, data, error
+        """
+        params = operation.params or {}
+        plugin_name = params.get("plugin_name")
+        version_constraint = params.get("version_constraint")
+        channel = params.get("channel", "stable")
+        registry_url = params.get("registry_url")
+        force_update = params.get("force_update", False)
+        
+        if not plugin_name or not registry_url:
+            return {
+                "status": "failure",
+                "error": "plugin_name and registry_url required"
+            }
+        
+        try:
+            from core.marketplace.registry_client import RegistryClient
+            
+            # Resolve version from registry
+            client = RegistryClient(registry_url)
+            release = await client.resolve(
+                plugin_name,
+                version_constraint=version_constraint,
+                channel=channel
+            )
+            
+            # Validate SHA256 after download
+            result = await self.installer.install_from_url(
+                release.url,
+                sha256=release.sha256,
+                signature=release.signature,
+                public_key=release.public_key,
+                runtime=self.runtime,
+                force_update=force_update
+            )
+            
+            # Store with registry metadata
+            self._store_installed_plugin(result)
+            self._store_registry_metadata(
+                plugin_name,
+                release.version,
+                registry_url,
+                channel
+            )
+            
+            return {
+                "status": "success",
+                "data": {
+                    **result,
+                    "registry": registry_url,
+                    "channel": channel
+                }
+            }
+        
+        except Exception as e:
+            return {
+                "status": "failure",
+                "error": str(e)
+            }
+    
+    
+    async def handle_search(self, operation: Operation) -> Dict[str, Any]:
+        """
+        Search registry for plugins.
+        
+        Args:
+            operation.params: {
+                "query": str,  # Name or description search
+                "registry_url": str,
+            }
+                
+        Returns:
+            Dict with matching plugins
+        """
+        params = operation.params or {}
+        query = params.get("query", "")
+        registry_url = params.get("registry_url")
+        
+        if not registry_url:
+            return {
+                "status": "failure",
+                "error": "registry_url required"
+            }
+        
+        try:
+            from core.marketplace.registry_client import RegistryClient
+            
+            client = RegistryClient(registry_url)
+            results = await client.search(query)
+            
+            return {
+                "status": "success",
+                "data": {
+                    "query": query,
+                    "results": results
+                }
+            }
+        
+        except Exception as e:
+            return {
+                "status": "failure",
+                "error": str(e)
+            }
+    
+    
+    async def handle_list_available(self, operation: Operation) -> Dict[str, Any]:
+        """
+        List all available plugins in registry.
+        
+        Args:
+            operation.params: {
+                "registry_url": str,
+            }
+                
+        Returns:
+            Dict with plugin names and versions
+        """
+        params = operation.params or {}
+        registry_url = params.get("registry_url")
+        
+        if not registry_url:
+            return {
+                "status": "failure",
+                "error": "registry_url required"
+            }
+        
+        try:
+            from core.marketplace.registry_client import RegistryClient
+            
+            client = RegistryClient(registry_url)
+            available = await client.list_available()
+            
+            return {
+                "status": "success",
+                "data": {
+                    "count": len(available),
+                    "plugins": available
+                }
+            }
+        
+        except Exception as e:
+            return {
+                "status": "failure",
+                "error": str(e)
+            }
+    
+    
+    async def handle_check_updates(self, operation: Operation) -> Dict[str, Any]:
+        """
+        Check for available updates.
+        
+        Args:
+            operation.params: {
+                "registry_url": str,
+                "channel": str,  # "stable", "beta"
+            }
+                
+        Returns:
+            Dict with available updates
+        """
+        params = operation.params or {}
+        registry_url = params.get("registry_url")
+        channel = params.get("channel", "stable")
+        
+        if not registry_url:
+            return {
+                "status": "failure",
+                "error": "registry_url required"
+            }
+        
+        try:
+            from core.marketplace.registry_client import RegistryClient
+            from core.marketplace.update_validator import PluginUpdateValidator
+            
+            client = RegistryClient(registry_url)
+            validator = PluginUpdateValidator(self.runtime)
+            
+            installed = self._get_installed_plugins()
+            updates = {}
+            
+            # Check each installed plugin
+            for plugin_name, plugin_info in installed.items():
+                try:
+                    # Get available versions
+                    available = await client.list_available()
+                    versions = available.get(plugin_name, [])
+                    
+                    if not versions:
+                        continue
+                    
+                    # Check for update
+                    new_version = await validator.check_for_updates(
+                        plugin_info["version"],
+                        versions,
+                        channel=channel
+                    )
+                    
+                    if new_version:
+                        updates[plugin_name] = {
+                            "current": plugin_info["version"],
+                            "available": new_version
+                        }
+                
+                except Exception as e:
+                    # Log but don't fail
+                    pass
+            
+            return {
+                "status": "success",
+                "data": {
+                    "updates_available": len(updates),
+                    "updates": updates
+                }
+            }
+        
+        except Exception as e:
+            return {
+                "status": "failure",
+                "error": str(e)
+            }
+    
+    
+    async def handle_update_all(self, operation: Operation) -> Dict[str, Any]:
+        """
+        Update all plugins to latest versions.
+        
+        Args:
+            operation.params: {
+                "registry_url": str,
+                "channel": str,
+                "force": bool,
+            }
+                
+        Returns:
+            Dict with update results
+        """
+        params = operation.params or {}
+        registry_url = params.get("registry_url")
+        channel = params.get("channel", "stable")
+        force = params.get("force", False)
+        
+        if not registry_url:
+            return {
+                "status": "failure",
+                "error": "registry_url required"
+            }
+        
+        try:
+            from core.marketplace.registry_client import RegistryClient
+            from core.marketplace.update_validator import PluginUpdateValidator
+            
+            client = RegistryClient(registry_url)
+            validator = PluginUpdateValidator(self.runtime)
+            
+            installed = self._get_installed_plugins()
+            results = {
+                "updated": [],
+                "skipped": [],
+                "errors": []
+            }
+            
+            # Update each plugin
+            for plugin_name, plugin_info in installed.items():
+                try:
+                    release = await client.resolve(plugin_name, channel=channel)
+                    
+                    # Validate update
+                    check = validator.validate_plugin_update(
+                        plugin_info,
+                        {"version": release.version},
+                        force=force
+                    )
+                    
+                    if not check.can_update:
+                        results["skipped"].append({
+                            "plugin": plugin_name,
+                            "reason": check.reason,
+                            "issues": check.blocking_issues
+                        })
+                        continue
+                    
+                    # Install update
+                    result = await self.installer.install_from_url(
+                        release.url,
+                        sha256=release.sha256,
+                        signature=release.signature,
+                        public_key=release.public_key,
+                        runtime=self.runtime,
+                        force_update=force
+                    )
+                    
+                    results["updated"].append({
+                        "plugin": plugin_name,
+                        "version": release.version
+                    })
+                    
+                    self._store_installed_plugin(result)
+                
+                except Exception as e:
+                    results["errors"].append({
+                        "plugin": plugin_name,
+                        "error": str(e)
+                    })
+            
+            return {
+                "status": "success" if not results["errors"] else "partial_failure",
+                "data": results
+            }
+        
+        except Exception as e:
+            return {
+                "status": "failure",
+                "error": str(e)
+            }
+    
+    
+    def _store_registry_metadata(self,
+                                plugin_name: str,
+                                version: str,
+                                registry_url: str,
+                                channel: str) -> None:
+        """Store registry metadata for installed plugin."""
+        registry_meta = self.storage.get("marketplace.registry_meta") or {}
+        
+        if plugin_name not in registry_meta:
+            registry_meta[plugin_name] = {}
+        
+        registry_meta[plugin_name].update({
+            "version": version,
+            "registry_url": registry_url,
+            "channel": channel,
+            "updated_at": datetime.utcnow().isoformat() + "Z"
+        })
+        
+        self.storage.set("marketplace.registry_meta", registry_meta)

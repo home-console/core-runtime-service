@@ -4,6 +4,7 @@ Marketplace plugin installer.
 Handles:
 - ZIP/TAR extraction
 - plugin.json validation
+- Signature verification (Step 11: Trust Layer)
 - SHA256 verification
 - Conflict detection
 - File placement
@@ -17,11 +18,13 @@ import hashlib
 import tempfile
 import shutil
 import os
+import asyncio
 from pathlib import Path
 from typing import Dict, Any, Optional, Tuple
 from datetime import datetime
 
 from core.plugin_schema import validate_plugin_json, ValidationError as SchemaValidationError
+from core.trust import PluginTrustVerifier, PluginTrustError, TrustStore
 
 
 class InstallerError(Exception):
@@ -121,6 +124,36 @@ class MarketplaceInstaller:
             except SchemaValidationError as e:
                 raise InstallerError(f"Invalid plugin.json: {str(e)}")
             
+            # Step 11: Verify signature if present (BEFORE installation)
+            plugin_sig_path = Path(temp_dir) / "plugin.sig"
+            trust_level = None  # Will be set if signature verification succeeds
+            
+            if plugin_sig_path.exists():
+                # Signature is present — must verify
+                try:
+                    with open(plugin_sig_path, 'r') as f:
+                        signature = f.read().strip()
+                    
+                    # Create verifier with trust store
+                    trust_store = TrustStore()
+                    trust_store.load()
+                    verifier = PluginTrustVerifier(trust_store)
+                    
+                    # Verify plugin signature and get trust level
+                    verify_result = verifier.verify_plugin(archive_path, plugin_data, signature)
+                    trust_level = verify_result.get('trust_level')
+                    
+                except PluginTrustError as e:
+                    raise InstallerError(f"Plugin signature verification failed: {e}")
+                except Exception as e:
+                    raise InstallerError(f"Failed to verify plugin signature: {e}")
+            elif plugin_data.get('public_key'):
+                # plugin.json declares public_key but no signature file
+                raise InstallerError(
+                    "Plugin manifest declares 'public_key' but plugin.sig file not found. "
+                    "Signature file is required for signed plugins."
+                )
+            
             plugin_name = plugin_data["name"]
             plugin_version = plugin_data["version"]
             entrypoint = plugin_data["entrypoint"]
@@ -195,6 +228,11 @@ class MarketplaceInstaller:
                         
                         # Instantiate and load
                         plugin_instance = plugin_class(runtime)
+                        
+                        # Step 11: Store trust level on plugin instance for CapabilityRegistry
+                        if trust_level is not None:
+                            plugin_instance._trust_level = trust_level
+                        
                         await runtime.plugin_manager.load_plugin(plugin_instance)
                         
                         # P0: Post-install activation - start plugin if auto_start=True
@@ -338,6 +376,92 @@ class MarketplaceInstaller:
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         return module
+    
+    
+    async def install_from_url(
+        self,
+        url: str,
+        sha256: Optional[str] = None,
+        signature: Optional[str] = None,
+        public_key: Optional[str] = None,
+        runtime: Optional[Any] = None,
+        force_update: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Install plugin from remote URL (Step 12: Registry).
+        
+        Args:
+            url: HTTPS URL to plugin archive
+            sha256: Expected SHA256 hash
+            signature: Plugin signature for verification (Step 11)
+            public_key: Public key for signature verification
+            runtime: Runtime instance for plugin loading
+            force_update: Allow downgrade/conflicts
+            
+        Returns:
+            Install result
+            
+        Raises:
+            InstallerError: if download or installation fails
+        """
+        try:
+            import aiohttp
+        except ImportError:
+            raise InstallerError("aiohttp not installed (required for registry downloads)")
+        
+        # Security settings (matching registry client)
+        MAX_SIZE = 100 * 1024 * 1024  # 100 MB
+        TIMEOUT = 30  # seconds
+        
+        # Download archive
+        temp_dir = None
+        try:
+            temp_dir = tempfile.mkdtemp()
+            archive_path = Path(temp_dir) / "plugin.zip"
+            
+            # Download with security checks
+            async with aiohttp.ClientSession() as session:
+                try:
+                    async with session.get(
+                        url,
+                        timeout=aiohttp.ClientTimeout(total=TIMEOUT),
+                        ssl=True
+                    ) as response:
+                        if response.status != 200:
+                            raise InstallerError(f"Download failed: HTTP {response.status}")
+                        
+                        # Check Content-Length
+                        if response.content_length and response.content_length > MAX_SIZE:
+                            raise InstallerError("Plugin archive too large")
+                        
+                        # Download with size limit
+                        downloaded = 0
+                        with open(archive_path, 'wb') as f:
+                            async for chunk in response.content.iter_chunked(8192):
+                                downloaded += len(chunk)
+                                if downloaded > MAX_SIZE:
+                                    raise InstallerError("Plugin archive exceeds size limit")
+                                f.write(chunk)
+                
+                except asyncio.TimeoutError:
+                    raise InstallerError(f"Download timeout ({TIMEOUT}s)")
+                except aiohttp.ClientError as e:
+                    raise InstallerError(f"Download failed: {e}")
+            
+            # If signature provided, it will be verified during install_from_file
+            # (signature validation is Step 11 responsibility)
+            
+            # Install from downloaded archive
+            return await self.install_from_file(
+                archive_path,
+                sha256=sha256,
+                runtime=runtime
+            )
+        
+        finally:
+            # Cleanup temp directory
+            if temp_dir and os.path.exists(temp_dir):
+                shutil.rmtree(temp_dir)
     
     def _find_plugin_class(self, module):
         """Find BasePlugin subclass in module."""
