@@ -218,11 +218,81 @@ class CoreRuntime:
             if modules:
                 await info(self, f"Модули запущены: {modules}", component="runtime")
             
+            # P0: Auto-load plugins AFTER modules are started
+            # Плагины должны загружаться ПОСЛЕ модулей (модули создают инфраструктуру для плагинов)
+            import os
+            if not self.plugin_manager.list_plugins() and not os.getenv('TEST_MODE'):
+                try:
+                    await self.plugin_manager.auto_load_plugins()
+                except Exception as e:
+                    # Не мешаем запуску runtime из-за проблем с автозагрузкой
+                    # Логируем ошибку для отладки
+                    await warning(self, f"Ошибка автозагрузки плагинов: {e}", component="runtime")
+                # После автозагрузки печатаем список найденных плагинов для видимости
+                try:
+                    loaded = self.plugin_manager.list_plugins()
+                    if loaded:
+                        print("[Runtime] Загруженные плагины:")
+                        for name in loaded:
+                            state = self.plugin_manager.get_plugin_state(name)
+                            state_str = state.value if state is not None else "unknown"
+                            block = self.plugin_manager.get_plugin_block_reason(name)
+                            if block:
+                                print(f"  - {name}: {state_str} (blocked: {block})")
+                            else:
+                                print(f"  - {name}: {state_str}")
+                except Exception:
+                    pass
+            
             # Запустить все плагины
             plugins = self.plugin_manager.list_plugins()
             await self.plugin_manager.start_all()
+            
+            # Логируем как список, так и сводку по количеству и состояниям
             if plugins:
                 await info(self, f"Плагины запущены: {plugins}", component="runtime")
+            
+            # Сводка: сколько реально запущено / заблокировано / с ошибкой
+            if plugins:
+                started = []
+                blocked = []
+                error = []
+                for name in plugins:
+                    state = self.plugin_manager.get_plugin_state(name)
+                    if state == PluginState.STARTED:
+                        started.append(name)
+                    elif state == PluginState.ERROR:
+                        error.append(name)
+                    else:
+                        # LOADED, STOPPED и т.п. считаем "не стартовали до конца"
+                        # В отдельную категорию "заблокировано" относим те, у кого есть block_reason
+                        if self.plugin_manager.get_plugin_block_reason(name):
+                            blocked.append(name)
+                await info(
+                    self,
+                    (
+                        "Сводка плагинов: "
+                        f"всего={len(plugins)}, "
+                        f"запущено={len(started)}, "
+                        f"заблокировано={len(blocked)}, "
+                        f"с ошибкой={len(error)}"
+                    ),
+                    component="runtime",
+                )
+            # Also print plugin list to stdout for quick visibility in console
+            try:
+                if plugins:
+                    print("[Runtime] Плагины:")
+                    for name in plugins:
+                        state = self.plugin_manager.get_plugin_state(name)
+                        block = self.plugin_manager.get_plugin_block_reason(name)
+                        state_str = state.value if state is not None else "unknown"
+                        if block:
+                            print(f"  - {name}: {state_str} (blocked: {block})")
+                        else:
+                            print(f"  - {name}: {state_str}")
+            except Exception:
+                pass
             
             # Проверить что система в консистентном состоянии (все dependencies удовлетворены)
             integrity_errors = self.dependency_resolver.validate_runtime_integrity()

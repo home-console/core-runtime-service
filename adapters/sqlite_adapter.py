@@ -9,7 +9,7 @@ import json
 import sqlite3
 import threading
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, AsyncIterator, Optional
 import asyncio
 from contextlib import asynccontextmanager
 
@@ -258,7 +258,11 @@ class SQLiteAdapter(StorageAdapter):
         """
         
         def _iter_namespace_generator(ns: str, batch: int):
-            """Синхронный генератор для итерации."""
+            """Синхронный генератор для итерации.
+
+            Гарантирует, что value всегда dict[str, Any], как требует интерфейс StorageAdapter.
+            Некорректные JSON‑значения или не‑dict пропускаются.
+            """
             conn = self._get_connection()
             offset = 0
             while True:
@@ -273,7 +277,11 @@ class SQLiteAdapter(StorageAdapter):
                     try:
                         value = json.loads(json_value)
                     except (json.JSONDecodeError, ValueError, TypeError):
-                        value = None
+                        # Пропускаем записи с битым JSON
+                        continue
+                    # Гарантируем dict[str, Any] как контракт интерфейса
+                    if not isinstance(value, dict):
+                        continue
                     yield key, value
                 offset += batch
         
