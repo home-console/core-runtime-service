@@ -244,6 +244,47 @@ class SQLiteAdapter(StorageAdapter):
                 conn.commit()
         
         await asyncio.to_thread(_batch_set_sync, namespace, items, self._get_in_transaction())
+    
+    async def iter_namespace(self, namespace: str, batch_size: int = 100) -> "AsyncIterator[tuple[str, dict[str, Any]]]":
+        """
+        Итерировать по всем ключам в namespace батчами (для efficient streaming больших namespace).
+        
+        Args:
+            namespace: пространство имён
+            batch_size: размер батча для fetch (default 100)
+            
+        Yields:
+            (key, value) кортежи
+        """
+        
+        def _iter_namespace_generator(ns: str, batch: int):
+            """Синхронный генератор для итерации."""
+            conn = self._get_connection()
+            offset = 0
+            while True:
+                cursor = conn.execute(
+                    "SELECT key, value FROM storage WHERE namespace = ? LIMIT ? OFFSET ?",
+                    (ns, batch, offset),
+                )
+                rows = cursor.fetchall()
+                if not rows:
+                    break
+                for key, json_value in rows:
+                    try:
+                        value = json.loads(json_value)
+                    except (json.JSONDecodeError, ValueError, TypeError):
+                        value = None
+                    yield key, value
+                offset += batch
+        
+        # Запустить генератор в threadpool
+        async def _async_iter():
+            for key, value in await asyncio.to_thread(_iter_namespace_generator, namespace, batch_size):
+                yield key, value
+        
+        # Вернуть async iterator
+        async for item in _async_iter():
+            yield item
 
     async def close(self) -> None:
         """Закрыть thread-local соединение с БД (выполняется в threadpool)."""

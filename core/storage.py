@@ -5,7 +5,7 @@ Storage API - единый интерфейс для работы с храни�
 Никакого прямого доступа к БД.
 """
 
-from typing import Any, Optional, Callable, Awaitable
+from typing import Any, Optional, Callable, Awaitable, AsyncIterator
 from contextlib import asynccontextmanager
 
 from adapters.storage_adapter import StorageAdapter
@@ -224,3 +224,32 @@ class Storage:
                 )
         
         await self._adapter.batch_set(namespace, items)
+    
+    async def iter_namespace(self, namespace: str, batch_size: int = 100) -> AsyncIterator[tuple[str, dict[str, Any]]]:
+        """
+        Итерировать по всем ключам в namespace батчами (для efficient streaming больших namespace).
+        
+        Использует потоковую обработку, не загружает весь namespace в памяти.
+        Полезно для миграций, гидратации состояния, экспорта данных.
+        
+        Args:
+            namespace: пространство имён (непустая строка)
+            batch_size: размер батча для fetch (default 100)
+            
+        Yields:
+            (key, value) кортежи для каждого ключа в namespace
+            
+        Raises:
+            ValueError: если namespace пустой или не строка
+            
+        Пример:
+            async for key, value in storage.iter_namespace("devices"):
+                print(f"Processing device {key}")
+        """
+        if not isinstance(namespace, str) or not namespace:
+            raise ValueError(
+                f"namespace must be non-empty string, got {type(namespace).__name__}: {namespace!r}"
+            )
+        
+        async for item in self._adapter.iter_namespace(namespace, batch_size):
+            yield item

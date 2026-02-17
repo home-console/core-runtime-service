@@ -6,7 +6,7 @@ PostgreSQL адаптер для Storage API.
 """
 
 import json
-from typing import Any, Optional
+from typing import Any, Optional, AsyncIterator
 import asyncio
 from contextlib import asynccontextmanager
 
@@ -208,3 +208,31 @@ class PostgreSQLAdapter(StorageAdapter):
                 VALUES ($1, $2, $3::jsonb)
                 ON CONFLICT (namespace, key) DO UPDATE SET value = $3::jsonb
             """, values)
+    
+    async def iter_namespace(self, namespace: str, batch_size: int = 100) -> "AsyncIterator[tuple[str, dict[str, Any]]]":
+        """
+        Итерировать по всем ключам в namespace батчами (для efficient streaming больших namespace).
+        
+        Args:
+            namespace: пространство имён
+            batch_size: размер батча для fetch (default 100)
+            
+        Yields:
+            (key, value) кортежи
+            
+        Пример:
+            async for key, value in adapter.iter_namespace("devices"):
+                print(f"Device {key}: {value}")
+        """
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            # Используем cursor для efficient streaming больших наборов
+            async with conn.cursor("""
+                SELECT key, value FROM storage WHERE namespace = $1
+            """, namespace) as cursor:
+                while True:
+                    rows = await cursor.fetch(batch_size)
+                    if not rows:
+                        break
+                    for row in rows:
+                        yield row["key"], row["value"]

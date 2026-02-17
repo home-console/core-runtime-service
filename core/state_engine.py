@@ -177,3 +177,36 @@ class StateEngine:
         """
         async with self._lock:
             self._state.update(updates)
+    
+    async def dump_snapshot(self) -> dict[str, Any]:
+        """
+        Создать снимок текущего состояния (для checkpoint/сохранения наиболее критичных данных).
+        
+        Returns:
+            Словарь с текущим состоянием (копия без TTL)
+            
+        Пример:
+            snapshot = await state_engine.dump_snapshot()
+            await storage.set("runtime_snapshots", "last", snapshot)
+        """
+        async with self._lock:
+            # Возвращаем копию состояния без TTL информации
+            return dict(self._state)
+    
+    async def restore_snapshot(self, mapping: dict[str, Any]) -> None:
+        """
+        Восстановить состояние из снимка (для гидратации после перезапуска).
+        
+        Args:
+            mapping: словарь с состоянием для восстановления
+            
+        Пример:
+            snapshot = await storage.get("runtime_snapshots", "last")
+            if snapshot:
+                await state_engine.restore_snapshot(snapshot)
+        """
+        async with self._lock:
+            self._state.update(mapping)
+            # Очищаем TTL для восстановленных ключей (они уже могли истечь)
+            for key in mapping.keys():
+                self._ttl.pop(key, None)

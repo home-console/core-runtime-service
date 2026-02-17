@@ -5,7 +5,7 @@ StorageWithStateMirror - обёртка для синхронизации Storag
 и in-memory state_engine (read-only cache).
 """
 
-from typing import Any
+from typing import Any, AsyncIterator
 
 from core.storage import Storage
 from core.state_engine import StateEngine
@@ -139,3 +139,20 @@ class StorageWithStateMirror:
     async def close(self) -> None:
         """Закрыть соединение с storage."""
         return await self._storage.close()
+    
+    async def iter_namespace(self, namespace: str, batch_size: int = 100) -> AsyncIterator[tuple[str, dict[str, Any]]]:
+        """
+        Итерировать по всем ключам в namespace батчами (для efficient streaming).
+        
+        Делегирует в базовый Storage без синхронизации со StateEngine
+        (используется для гидратации и миграций, где синхронизация не требуется).
+        
+        Args:
+            namespace: пространство имён
+            batch_size: размер батча для fetch
+            
+        Yields:
+            (key, value) кортежи
+        """
+        async for item in self._storage.iter_namespace(namespace, batch_size):
+            yield item

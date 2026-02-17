@@ -129,3 +129,23 @@ class StorageAdapter(ABC):
             })
         """
         pass
+    
+    @abstractmethod
+    async def iter_namespace(self, namespace: str, batch_size: int = 100) -> AsyncIterator[tuple[str, dict[str, Any]]]:
+        """
+        Итерировать по всем ключам в namespace батчами (для efficient streaming больших namespace).
+        
+        Args:
+            namespace: пространство имён
+            batch_size: размер батча для fetch (default 100)
+            
+        Yields:
+            (key, value) кортежи
+            
+        Пример:
+            async for key, value in adapter.iter_namespace("devices"):
+                process(key, value)
+        
+        This is efficient for large namespaces and avoids loading everything into memory.
+        """
+        yield None  # pragma: no cover

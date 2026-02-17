@@ -100,6 +100,59 @@ class CoreRuntime:
     def is_running(self) -> bool:
         """Запущен ли runtime."""
         return self._running
+    
+    async def _hydrate_critical_state(self) -> None:
+        """
+        Гидратировать критичные данные из persistent storage в StateEngine.
+        
+        Восстанавливает данные для быстрого доступа при старте без полной загрузки
+        всех данных в память. Критичные namespaces:
+        - plugins.* : метаданные плагинов
+        - agent.* : идентификационные данные агентов
+        - ca.* : CA сертификаты
+        
+        Эта операция выполняется ПЕРЕД запуском модулей, чтобы модули
+        могли сразу использовать восстановленное состояние.
+        """
+        critical_prefixes = ["plugins.", "agent.", "ca.", "runtime.snapshots"]
+        
+        try:
+            # Загружаем все namespaces, которые начинаются с критичных префиксов
+            all_namespaces = await self.storage.list_namespaces()
+            
+            for namespace in all_namespaces:
+                # Проверяем, является ли namespace критичным
+                is_critical = any(namespace.startswith(prefix) for prefix in critical_prefixes)
+                
+                if is_critical:
+                    # Итерируем по ключам в namespace и загружаем в StateEngine
+                    hydrated_count = 0
+                    try:
+                        async for key, value in self.storage.iter_namespace(namespace):
+                            state_key = f"{namespace}.{key}"
+                            await self.state_engine.set(state_key, value)
+                            hydrated_count += 1
+                    except Exception as e:
+                        # Логируем ошибку, но не останавливаем гидратацию
+                        await warning(
+                            self,
+                            f"Ошибка при гидратации namespace '{namespace}': {e}",
+                            component="runtime"
+                        )
+                    
+                    if hydrated_count > 0:
+                        await info(
+                            self,
+                            f"Гидратирован namespace '{namespace}' ({hydrated_count} ключей)",
+                            component="runtime"
+                        )
+        except Exception as e:
+            # Гидратация - опциональная оптимизация, ошибка не должна блокировать старт
+            await warning(
+                self,
+                f"Ошибка гидратации critical state: {e}. Система продолжит работу, но может быть медленнее.",
+                component="runtime"
+            )
 
     async def start(self) -> None:
         """
@@ -153,6 +206,11 @@ class CoreRuntime:
             modules = self.module_manager.list_modules()
             if modules:
                 await info(self, f"Модули зарегистрированы: {modules}", component="runtime")
+            
+            # P0: Hydrate critical state from persistent storage
+            # Восстанавливаем критичные данные из storage в StateEngine для быстрого доступа
+            # (plugins metadata, agent identities, CA certificate)
+            await self._hydrate_critical_state()
 
             # Запустить все модули (обязательные домены)
             # start_all() выбросит RuntimeError если REQUIRED модуль упал в start()
