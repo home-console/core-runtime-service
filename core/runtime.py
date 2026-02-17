@@ -29,7 +29,9 @@ from core.logger_helper import info, warning
 from core.base_plugin import BasePlugin
 from core.operations import OperationManager
 from core.dependency_resolver import DependencyResolver, RuntimeIntegrityError  # Step 10
-
+from core.agent.enrollment import AgentEnrollmentManager
+from core.agent.registry import AgentRegistry
+from core.agent.tls import MTLSCertificateAuthority
 
 
 class CoreRuntime:
@@ -76,6 +78,12 @@ class CoreRuntime:
             self.plugin_manager,
             self.storage
         )
+        
+        # Step 15: Agent Control Plane components
+        # Will be initialized in start() when SecretStore is ready
+        self.agent_manager: Optional[AgentEnrollmentManager] = None
+        self.agent_registry: Optional[AgentRegistry] = None
+        self.mtls_ca: Optional[MTLSCertificateAuthority] = None
         
         # Сохраняем config для shutdown_timeout
         self._config = config
