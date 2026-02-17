@@ -20,6 +20,7 @@ from datetime import datetime, timedelta
 import hashlib
 import re
 import logging
+import base64
 
 from core.marketplace.semver import Version, VersionResolver, VersionConstraintError
 
@@ -101,6 +102,10 @@ class RegistryClient:
         
         self._index: Optional[RegistryIndex] = None
         self._index_fetched_at: Optional[float] = None
+        
+        # Step 12.5: Registry version downgrade protection
+        self._cached_registry_version = self._load_cached_registry_version()
+        self._registry_version_path = self._cache_dir / "registry-version.txt"
     
     @staticmethod
     def _validate_registry_url(url: str):
@@ -270,6 +275,14 @@ class RegistryClient:
         if registry_version != 1:
             raise RegistryError(f"Unsupported registry version: {registry_version}")
         
+        # Step 12.5: Prevent registry downgrade attacks
+        if self._cached_registry_version is not None:
+            if registry_version < self._cached_registry_version:
+                raise RegistrySecurityError(
+                    f"Registry downgrade detected: cached={self._cached_registry_version}, "
+                    f"new={registry_version}"
+                )
+        
         # Check plugins structure
         if "plugins" not in data:
             raise RegistryError("Missing 'plugins' section")
@@ -393,6 +406,17 @@ class RegistryClient:
         except Exception as e:
             raise RegistryError(f"Failed to load cache: {e}")
     
+    def _load_cached_registry_version(self) -> Optional[int]:
+        """Load cached registry version for downgrade detection."""
+        registry_version_path = self._cache_dir / "registry-version.txt"
+        if registry_version_path.exists():
+            try:
+                with open(registry_version_path, 'r') as f:
+                    return int(f.read().strip())
+            except Exception:
+                pass
+        return None
+    
     def _save_cache(self, data: Dict[str, Any]):
         """Save registry index to cache."""
         try:
@@ -400,6 +424,13 @@ class RegistryClient:
                 json.dump(data, f)
             with open(self._cache_time_path, 'w') as f:
                 f.write(str(time.time()))
+            
+            # Step 12.5: Save registry version for downgrade detection
+            registry_version = data.get("registry_version")
+            if registry_version:
+                with open(self._registry_version_path, 'w') as f:
+                    f.write(str(registry_version))
+                self._cached_registry_version = registry_version
         except Exception as e:
             logger.warning(f"Failed to save cache: {e}")
     

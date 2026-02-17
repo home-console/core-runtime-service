@@ -11,10 +11,12 @@ Exposes operations:
 """
 
 from typing import Dict, Any, Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
+from pathlib import Path
 
 from core.operations import Operation
 from modules.marketplace.installer import MarketplaceInstaller, InstallerError
+from core.marketplace.transaction import UpdateTransactionManager, TransactionError, RollbackError
 
 
 class MarketplaceServiceError(Exception):
@@ -40,7 +42,11 @@ class MarketplaceService:
         self.runtime = runtime
         self.storage = runtime.storage
         self.plugin_manager = runtime.plugin_manager
-        self.installer = MarketplaceInstaller(runtime.config.get("plugins_dir", "plugins"))
+        
+        # Initialize installer and transaction manager for atomic updates
+        plugins_dir = Path(runtime.config.get("plugins_dir", "plugins"))
+        self.installer = MarketplaceInstaller(plugins_dir)
+        self.transaction_mgr = UpdateTransactionManager(plugins_dir, runtime)
     
     
     async def handle_install(self, operation: Operation) -> Dict[str, Any]:
@@ -76,12 +82,37 @@ class MarketplaceService:
             # Store installation info
             self._store_installed_plugin(result)
             
+            # Log to audit trail (Step 12.5: Audit logging)
+            plugin_name = result.get("name")
+            plugin_version = result.get("version")
+            audit_entry = {
+                "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
+                "action": "install",
+                "plugin_name": plugin_name,
+                "version": plugin_version,
+                "status": "success",
+                "reason": None,
+                "source": "archive",
+                "archive_hash": result.get("hash"),
+            }
+            self._add_audit_log(audit_entry)
+            
             return {
                 "status": "success",
                 "data": result
             }
         
         except InstallerError as e:
+            # Log failure
+            audit_entry = {
+                "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
+                "action": "install",
+                "status": "failure",
+                "reason": str(e),
+                "source": "archive",
+            }
+            self._add_audit_log(audit_entry)
+            
             return {
                 "status": "failure",
                 "error": str(e)
@@ -187,6 +218,7 @@ class MarketplaceService:
                 }
             
             old_info = installed[plugin_name]
+            old_version = old_info.get("version")
             
             # Remove old version
             await self.installer.uninstall(plugin_name, runtime=self.runtime)
@@ -200,18 +232,42 @@ class MarketplaceService:
             )
             
             self._store_installed_plugin(result)
+            new_version = result["version"]
+            
+            # Log to audit trail (Step 12.5: Audit logging)
+            audit_entry = {
+                "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
+                "action": "update",
+                "plugin_name": plugin_name,
+                "old_version": old_version,
+                "new_version": new_version,
+                "status": "success",
+                "reason": None,
+                "archive_hash": result.get("hash"),
+            }
+            self._add_audit_log(audit_entry)
             
             return {
                 "status": "success",
                 "data": {
                     "plugin_name": plugin_name,
-                    "old_version": old_info.get("version"),
-                    "new_version": result["version"],
-                    "updated_at": datetime.utcnow().isoformat()
+                    "old_version": old_version,
+                    "new_version": new_version,
+                    "updated_at": datetime.now(timezone.utc).isoformat() + "Z"
                 }
             }
         
         except InstallerError as e:
+            # Log failure
+            audit_entry = {
+                "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
+                "action": "update",
+                "plugin_name": plugin_name,
+                "status": "failure",
+                "reason": str(e),
+            }
+            self._add_audit_log(audit_entry)
+            
             return {
                 "status": "failure",
                 "error": str(e)
@@ -254,7 +310,7 @@ class MarketplaceService:
             # Mark as enabled in storage
             plugin_info = installed[plugin_name]
             plugin_info["enabled"] = True
-            plugin_info["enabled_at"] = datetime.utcnow().isoformat()
+            plugin_info["enabled_at"] = datetime.now(timezone.utc).isoformat()
             self._store_installed_plugin(plugin_info)
             
             return {
@@ -318,7 +374,7 @@ class MarketplaceService:
             # Mark as disabled in storage
             plugin_info = installed[plugin_name]
             plugin_info["enabled"] = False
-            plugin_info["disabled_at"] = datetime.utcnow().isoformat()
+            plugin_info["disabled_at"] = datetime.now(timezone.utc).isoformat()
             self._store_installed_plugin(plugin_info)
             
             return {
@@ -449,6 +505,22 @@ class MarketplaceService:
                 channel
             )
             
+            # Log to audit trail (Step 12.5: Audit logging)
+            audit_entry = {
+                "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
+                "action": "install_from_registry",
+                "plugin_name": plugin_name,
+                "version": release.version,
+                "version_constraint": version_constraint,
+                "channel": channel,
+                "registry": registry_url,
+                "status": "success",
+                "reason": None,
+                "archive_hash": result.get("hash"),
+                "registry_downgrade_protection": "enabled",
+            }
+            self._add_audit_log(audit_entry)
+            
             return {
                 "status": "success",
                 "data": {
@@ -459,6 +531,19 @@ class MarketplaceService:
             }
         
         except Exception as e:
+            # Log failure
+            audit_entry = {
+                "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
+                "action": "install_from_registry",
+                "plugin_name": plugin_name,
+                "version_constraint": version_constraint,
+                "channel": channel,
+                "registry": registry_url,
+                "status": "failure",
+                "reason": str(e),
+            }
+            self._add_audit_log(audit_entry)
+            
             return {
                 "status": "failure",
                 "error": str(e)
@@ -720,6 +805,25 @@ class MarketplaceService:
             }
     
     
+    
+    def _add_audit_log(self, audit_entry: Dict[str, Any]) -> None:
+        """Add entry to marketplace audit log (Step 12.5)."""
+        try:
+            audit_log = self.storage.get("marketplace.audit", {})
+            
+            # Generate log ID from timestamp
+            import uuid
+            log_id = str(uuid.uuid4())
+            
+            audit_log[log_id] = audit_entry
+            self.storage.set("marketplace.audit", audit_log)
+        except Exception as e:
+            # Don't fail the main operation if audit logging fails
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Failed to write audit log: {e}")
+    
+    
     def _store_registry_metadata(self,
                                 plugin_name: str,
                                 version: str,
@@ -735,7 +839,7 @@ class MarketplaceService:
             "version": version,
             "registry_url": registry_url,
             "channel": channel,
-            "updated_at": datetime.utcnow().isoformat() + "Z"
+            "updated_at": datetime.now(timezone.utc).isoformat() + "Z"
         })
         
         self.storage.set("marketplace.registry_meta", registry_meta)
