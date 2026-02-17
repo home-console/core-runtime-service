@@ -26,6 +26,19 @@ class Config:
     pg_password: str = ""
     pg_dsn: Optional[str] = None  # Если указан, остальные pg_* игнорируются
 
+    # Storage v3: Dual-mode configuration (physical isolation of vault storage)
+    # "single" (default, backward compatible) or "dual" (separate vault storage)
+    storage_mode: str = "single"
+    
+    # Vault storage type (required in dual mode): "sqlite" or "postgresql"
+    vault_storage_type: Optional[str] = None
+    
+    # Vault SQLite path (used if vault_storage_type == "sqlite")
+    vault_db_path: Optional[str] = None
+    
+    # Vault PostgreSQL DSN (used if vault_storage_type == "postgresql")
+    vault_pg_dsn: Optional[str] = None
+
     # Тайм-аут для shutdown (секунды)
     shutdown_timeout: int = 10
     
@@ -80,6 +93,12 @@ class Config:
         Raises:
             ValueError: если конфигурация невалидна
         """
+        # Валидация storage_mode
+        if self.storage_mode not in ("single", "dual"):
+            raise ValueError(
+                f"storage_mode must be 'single' or 'dual', got: {self.storage_mode!r}"
+            )
+        
         # Валидация storage_type
         if self.storage_type not in ("sqlite", "postgresql"):
             raise ValueError(
@@ -106,6 +125,34 @@ class Config:
                 if not isinstance(self.pg_port, int) or self.pg_port <= 0 or self.pg_port > 65535:
                     raise ValueError(
                         f"pg_port must be integer between 1 and 65535, got: {self.pg_port}"
+                    )
+        
+        # Storage v3: Dual-mode validation
+        if self.storage_mode == "dual":
+            if not self.vault_storage_type:
+                raise ValueError(
+                    "storage_mode='dual' requires vault_storage_type to be set ('sqlite' or 'postgresql')"
+                )
+            
+            if self.vault_storage_type not in ("sqlite", "postgresql"):
+                raise ValueError(
+                    f"vault_storage_type must be 'sqlite' or 'postgresql', got: {self.vault_storage_type!r}"
+                )
+            
+            # Validate vault SQLite config
+            if self.vault_storage_type == "sqlite":
+                if not self.vault_db_path:
+                    raise ValueError(
+                        "storage_mode='dual' with vault_storage_type='sqlite' requires vault_db_path"
+                    )
+                if not isinstance(self.vault_db_path, str):
+                    raise ValueError(f"vault_db_path must be string, got: {type(self.vault_db_path).__name__}")
+            
+            # Validate vault PostgreSQL config
+            if self.vault_storage_type == "postgresql":
+                if not self.vault_pg_dsn:
+                    raise ValueError(
+                        "storage_mode='dual' with vault_storage_type='postgresql' requires vault_pg_dsn"
                     )
         
         # Валидация shutdown_timeout
@@ -155,6 +202,12 @@ class Config:
         """
         Создать конфигурацию из переменных окружения.
         
+        Env vars:
+        - RUNTIME_STORAGE_MODE: "single" (default) or "dual"
+        - RUNTIME_VAULT_STORAGE_TYPE: "sqlite" or "postgresql" (required in dual mode)
+        - RUNTIME_VAULT_DB_PATH: path to vault SQLite file (required if vault_storage_type="sqlite")
+        - RUNTIME_VAULT_PG_DSN: PostgreSQL DSN for vault (required if vault_storage_type="postgresql")
+        
         Raises:
             ValueError: если конфигурация невалидна
         """
@@ -188,6 +241,11 @@ class Config:
             cookies_domain=os.getenv("RUNTIME_COOKIES_DOMAIN", "localhost"),
             csp_mode=os.getenv("RUNTIME_CSP_MODE", "relaxed").lower(),
             log_format=os.getenv("RUNTIME_LOG_FORMAT", "text").lower(),
+            # Storage v3: Dual-mode configuration
+            storage_mode=os.getenv("RUNTIME_STORAGE_MODE", "single").lower(),
+            vault_storage_type=os.getenv("RUNTIME_VAULT_STORAGE_TYPE"),
+            vault_db_path=os.getenv("RUNTIME_VAULT_DB_PATH"),
+            vault_pg_dsn=os.getenv("RUNTIME_VAULT_PG_DSN"),
         )
         config.validate()
         return config

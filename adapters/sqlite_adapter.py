@@ -90,7 +90,8 @@ class SQLiteAdapter(StorageAdapter):
             # synchronous: 0=OFF, 1=NORMAL, 2=FULL, 3=EXTRA
             if sync_mode != 2:
                 import sys
-                import os
+                # `os` is imported at module level; avoid re-importing here which
+                # would make `os` a local variable and cause UnboundLocalError
                 print(
                     f"[SQLiteAdapter] WARNING: PRAGMA synchronous={sync_mode}, expected 2 (FULL). "
                     f"This may result in data loss on crash.",
