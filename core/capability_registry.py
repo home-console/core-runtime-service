@@ -143,7 +143,7 @@ class CapabilityRegistry:
         self._consumers: Dict[str, List[str]] = {}
         
         # Use threading.Lock for sync getter methods that need lock protection
-        # Async methods (register_provider, etc) will handle their own async-safe access
+        # Async methods can also use threading.Lock safely in asyncio
         self._lock = threading.Lock()
 
     @staticmethod
@@ -222,7 +222,7 @@ class CapabilityRegistry:
         # This enforces the capability security rules from the trust layer
         _check_capability_namespace_permission(capability_id, plugin_name, plugin_privilege)
         
-        async with self._lock:
+        with self._lock:
             if capability_id not in self._providers:
                 self._providers[capability_id] = []
             
@@ -274,7 +274,7 @@ class CapabilityRegistry:
             process_config: конфиг для process execution 
             container_config: конфиг для container execution 
         """
-        async with self._lock:
+        with self._lock:
             provider = self._get_provider_entry(capability_id, plugin_name)
             if not provider:
                 return
@@ -304,7 +304,7 @@ class CapabilityRegistry:
         """
         Обновить health status провайдера.
         """
-        async with self._lock:
+        with self._lock:
             provider = self._get_provider_entry(capability_id, plugin_name)
             if not provider:
                 return
@@ -315,7 +315,7 @@ class CapabilityRegistry:
 
     async def register_consumer(self, plugin_name: str, capability_id: str) -> None:
         """Зарегистрировать плагин как потребитель capability."""
-        async with self._lock:
+        with self._lock:
             if plugin_name not in self._consumers:
                 self._consumers[plugin_name] = []
             if capability_id not in self._consumers[plugin_name]:
@@ -323,7 +323,7 @@ class CapabilityRegistry:
 
     async def unregister_plugin(self, plugin_name: str) -> None:
         """Удалить плагин из реестра (как провайдер и как потребитель)."""
-        async with self._lock:
+        with self._lock:
             for cap_id, providers in list(self._providers.items()):
                 # Удаляем провайдер по имени
                 self._providers[cap_id] = [
@@ -432,7 +432,7 @@ class CapabilityRegistry:
             (True, []) если все требования удовлетворены.
             (False, [missing_capability_id, ...]) если какие-то capabilities отсутствуют.
         """
-        async with self._lock:
+        with self._lock:
             required = self.get_required_capabilities(plugin_name)
             missing: List[str] = []
             for cap_id in required:
