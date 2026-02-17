@@ -3,6 +3,13 @@ PostgreSQL адаптер для Storage API.
 
 Использует asyncpg для асинхронной работы с PostgreSQL.
 Та же схема: namespace | key | value (JSON as TEXT).
+
+CRASH SAFETY (Part A):
+- PostgreSQL использует журнал транзакций (WAL)
+- Параметр fsync гарантирует синхронизацию на диск
+- Connection string должен включать SSL для production
+- Transactions гарантируют ACID семантику
+- JSONB автоматически валидирует JSON
 """
 
 import json
@@ -17,6 +24,7 @@ except ImportError:
     ASYNCPG_AVAILABLE = False
 
 from .storage_adapter import StorageAdapter
+from core.storage_exceptions import StorageCorruptionError
 
 
 class PostgreSQLAdapter(StorageAdapter):
@@ -25,6 +33,22 @@ class PostgreSQLAdapter(StorageAdapter):
     Использует asyncpg для асинхронной работы с PostgreSQL.
     Инициализация схемы не выполняется автоматически — отдельный метод
     `initialize_schema()` должен быть вызван явно.
+    
+    CRASH SAFETY CONFIGURATION:
+    
+    Для production, убедитесь что PostgreSQL настроена с:
+    - shared_buffers=256MB (или больше)
+    - wal_level=replica  (for streaming replication)
+    - fsync=on  (default, но проверьте)
+    - synchronous_commit=on  (для гарантии на диск)
+    - max_wal_senders=10  (для backup/replication)
+    
+    Connection string должна включать:
+    - ?sslmode=require (для шифрования)
+    - &connect_timeout=10
+    
+    Пример production строки:
+        postgresql://user:pass@localhost:5432/homeconsole?sslmode=require&connect_timeout=10
     """
 
     def __init__(
@@ -89,7 +113,10 @@ class PostgreSQLAdapter(StorageAdapter):
     async def get(self, namespace: str, key: str) -> Optional[dict[str, Any]]:
         """Получить значение из storage.
         
-        JSONB автоматически валидируется PostgreSQL, поэтому json.loads не нужен.
+        CORRUPTION DETECTION (Part A):
+        - JSONB автоматически валидируется PostgreSQL
+        - Если get вернул не-dict → StorageCorruptionError
+        - asyncpg гарантирует типы безопасности
         """
         pool = await self._get_pool()
         async with pool.acquire() as conn:
@@ -99,7 +126,7 @@ class PostgreSQLAdapter(StorageAdapter):
             )
             if row is None:
                 return None
-            # JSONB уже является dict в asyncpg, но для совместимости возвращаем как dict
+            # JSONB уже является dict в asyncpg, но для совместимости проверяем
             value = row["value"]
             if value is None:
                 return None
@@ -108,16 +135,21 @@ class PostgreSQLAdapter(StorageAdapter):
             # Fallback на json.loads если по какой-то причине вернулся текст
             try:
                 if isinstance(value, (str, bytes, bytearray)):
-                    return json.loads(value)
-                return value
-            except (json.JSONDecodeError, ValueError, TypeError) as e:
-                # Логируем ошибку парсинга, но не падаем
-                import sys
-                print(
-                    f"[PostgreSQLAdapter] Ошибка парсинга JSON для {namespace}.{key}: {e}",
-                    file=sys.stderr
+                    parsed = json.loads(value)
+                    if not isinstance(parsed, dict):
+                        raise StorageCorruptionError(
+                            f"Invalid JSON structure in storage for {namespace}.{key}: "
+                            f"expected dict, got {type(parsed).__name__}"
+                        )
+                    return parsed
+                raise StorageCorruptionError(
+                    f"Invalid value type in storage: expected dict, "
+                    f"got {type(value).__name__} for {namespace}.{key}"
                 )
-                return None
+            except json.JSONDecodeError as e:
+                raise StorageCorruptionError(
+                    f"JSON parsing error for {namespace}.{key}: {e}"
+                )
 
     async def set(self, namespace: str, key: str, value: dict[str, Any]) -> None:
         """Сохранить значение в storage.

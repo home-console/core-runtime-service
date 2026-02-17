@@ -8,12 +8,14 @@ SQLite адаптер для Storage API.
 import json
 import sqlite3
 import threading
+import os
 from pathlib import Path
 from typing import Any, AsyncIterator, Optional
 import asyncio
 from contextlib import asynccontextmanager
 
 from .storage_adapter import StorageAdapter
+from core.storage_exceptions import StorageCorruptionError
 
 
 class SQLiteAdapter(StorageAdapter):
@@ -42,6 +44,13 @@ class SQLiteAdapter(StorageAdapter):
 
         CRITICAL: Каждый поток получает свое собственное соединение, чтобы избежать
         InterfaceError: bad parameter or other API misuse при параллельных запросах.
+        
+        CRASH SAFETY (Part A):
+        - PRAGMA journal_mode=WAL: Write-Ahead Logging для аварийной безопасности
+        - PRAGMA synchronous=FULL: fsync после каждого транзакции (дорого, но безопасно)
+        - PRAGMA cache_size=-64000: 64MB кэш для производительности
+        - PRAGMA foreign_keys=ON: включить проверку foreign keys
+        - PRAGMA wal_autocheckpoint=1000: checkpoints каждые 1000 страниц
         """
         if not hasattr(self._local, 'conn') or self._local.conn is None:
             # Создаем новое соединение для текущего потока
@@ -50,8 +59,58 @@ class SQLiteAdapter(StorageAdapter):
                 check_same_thread=True,  # Теперь каждый поток имеет свое соединение
                 timeout=30.0  # Таймаут для database locked ситуаций
             )
-            # Включаем WAL mode для лучшей параллельной работы
+            
+            # ┌─────────────────────────────────────────────────────────┐
+            # │ CRASH SAFETY PRAGMAS                                    │
+            # └─────────────────────────────────────────────────────────┘
+            
+            # Write-Ahead Logging (WAL mode)
+            # Гарантирует, что читатели не заблокируют писателей
             self._local.conn.execute("PRAGMA journal_mode=WAL")
+            
+            # FULL synchronous mode
+            # Требует fsync после каждого COMMIT
+            # Это гарантирует, что данные на диске даже при крахе ОС
+            self._local.conn.execute("PRAGMA synchronous=FULL")
+            
+            # Большой кэш для производительности (64MB)
+            # Отрицательное число = кэш в килобайтах
+            self._local.conn.execute("PRAGMA cache_size=-64000")
+            
+            # Включить проверку foreign keys
+            self._local.conn.execute("PRAGMA foreign_keys=ON")
+            
+            # WAL checkpoints каждые 1000 страниц (вместо default 1000000)
+            # Меньше означает более частые checkpoints, но более консервативно
+            self._local.conn.execute("PRAGMA wal_autocheckpoint=1000")
+            
+            # Проверить, что synchronous действительно FULL
+            cursor = self._local.conn.execute("PRAGMA synchronous")
+            sync_mode = cursor.fetchone()[0]
+            # synchronous: 0=OFF, 1=NORMAL, 2=FULL, 3=EXTRA
+            if sync_mode != 2:
+                import sys
+                import os
+                print(
+                    f"[SQLiteAdapter] WARNING: PRAGMA synchronous={sync_mode}, expected 2 (FULL). "
+                    f"This may result in data loss on crash.",
+                    file=sys.stderr
+                )
+            
+            # Проверить Docker overlayfs (частая проблема в контейнерах)
+            if self.db_path != ":memory:" and os.path.exists("/proc/mounts"):
+                try:
+                    with open("/proc/mounts", "r") as f:
+                        mounts = f.read()
+                        if "overlay" in mounts and self.db_path in mounts or "/app" in self.db_path:
+                            print(
+                                f"[SQLiteAdapter] WANING: Database may be on Docker overlayfs. "
+                                f"This can cause durability issues. Consider using named volumes.",
+                                file=sys.stderr
+                            )
+                except Exception:
+                    pass
+        
         return self._local.conn
     
     def _get_in_transaction(self) -> bool:
@@ -88,7 +147,13 @@ class SQLiteAdapter(StorageAdapter):
         await asyncio.to_thread(self._create_schema_sync)
 
     async def get(self, namespace: str, key: str) -> Optional[dict[str, Any]]:
-        """Получить значение из storage (выполняется в threadpool)."""
+        """Получить значение из storage (выполняется в threadpool).
+        
+        CORRUPTION DETECTION (Part A):
+        - Если JSON не парсится → StorageCorruptionError
+        - Если значение не dict → StorageCorruptionError
+        - Иначе возвращает dict или None если не найдено
+        """
 
         def _get_sync(ns: str, k: str):
             conn = self._get_connection()
@@ -105,18 +170,22 @@ class SQLiteAdapter(StorageAdapter):
                 return None
             # Проверяем, что это строка перед десериализацией
             if not isinstance(value, (str, bytes, bytearray)):
-                return None
-            try:
-                return json.loads(value)
-            except (json.JSONDecodeError, ValueError, TypeError) as e:
-                # Логируем ошибку парсинга, но не падаем
-                # Возвращаем None, чтобы система могла продолжить работу
-                import sys
-                print(
-                    f"[SQLiteAdapter] Ошибка парсинга JSON для {ns}.{k}: {e}",
-                    file=sys.stderr
+                raise StorageCorruptionError(
+                    f"Invalid value type in storage: expected str/bytes/bytearray, "
+                    f"got {type(value).__name__} for {ns}.{k}"
                 )
-                return None
+            try:
+                parsed = json.loads(value)
+                if not isinstance(parsed, dict):
+                    raise StorageCorruptionError(
+                        f"Invalid JSON structure in storage for {ns}.{k}: "
+                        f"expected dict, got {type(parsed).__name__}"
+                    )
+                return parsed
+            except json.JSONDecodeError as e:
+                raise StorageCorruptionError(
+                    f"JSON parsing error for {ns}.{k}: {e}"
+                )
 
         return await asyncio.to_thread(_get_sync, namespace, key)
 
