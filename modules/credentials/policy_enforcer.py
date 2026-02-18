@@ -4,6 +4,7 @@ Credential RBAC Enforcer
 Enforcement layer that evaluates and enforces access decisions.
 Raises CredentialAccessDenied on policy violation.
 Binds to audit system for tamper-evident violation logging.
+Integrates MFA elevation session validation for zero-trust secret access.
 """
 
 from typing import Optional, TYPE_CHECKING
@@ -11,9 +12,11 @@ from typing import Optional, TYPE_CHECKING
 from core.security.rbac_models import Role, CredentialAccessLevel
 from core.security.policy_engine import CredentialPolicyEngine
 from core.credentials.errors import CredentialAccessDenied
+from core.security.mfa.exceptions import ElevationSessionExpired, ElevationSessionInvalid
 
 if TYPE_CHECKING:
     from core.audit.binder import AuditBinder
+    from core.security.mfa.elevation_session import ElevationSessionManager
 
 
 class CredentialRBACEnforcer:
@@ -24,15 +27,18 @@ class CredentialRBACEnforcer:
     Raises on denial, returns on allow.
     
     All access violations logged through audit binding to P0 storage.
+    Integrates with MFA elevation sessions for zero-trust secret access.
     """
     
     def __init__(
         self,
         policy_engine: CredentialPolicyEngine,
         audit_binder: Optional["AuditBinder"] = None,
+        elevation_session_manager: Optional["ElevationSessionManager"] = None,
     ):
         self.policy_engine = policy_engine
         self.audit_binder = audit_binder
+        self.elevation_session_manager = elevation_session_manager
     
     async def enforce_or_raise(
         self,
@@ -135,15 +141,19 @@ class CredentialRBACEnforcer:
         mfa_verified: bool = False,
     ) -> None:
         """
-        Enforce elevated access (READ_SECRET).
+        Enforce elevated access (READ_SECRET) with MFA gate.
         
-        Future: Can require MFA verification.
+        Requires both:
+        1. RBAC policy allows READ_SECRET
+        2. Valid MFA elevation session exists (TTL not expired)
         
         Raises:
-            CredentialAccessDenied: If access denied or MFA not verified
+            CredentialAccessDenied: If RBAC policy denies access
+            ElevationSessionExpired: If elevation session TTL exceeded
+            ElevationSessionInvalid: If no elevation session found
         """
         
-        # Evaluate for secret read
+        # First: Evaluate RBAC policy
         await self.enforce_or_raise(
             user_id=user_id,
             user_roles=user_roles,
@@ -151,11 +161,17 @@ class CredentialRBACEnforcer:
             access_level=CredentialAccessLevel.READ_SECRET,
         )
         
-        # Future: MFA gate
-        # if requires_mfa and not mfa_verified:
-        #     raise CredentialAccessDenied(
-        #         user_id=user_id,
-        #         credential_id=credential_id,
-        #         access_level=CredentialAccessLevel.READ_SECRET.value,
-        #         reason="MFA verification required for secret access"
-        #     )
+        # Second: Check MFA elevation session (if session manager provided)
+        if self.elevation_session_manager:
+            is_elevated = await self.elevation_session_manager.validate_session(
+                user_id=user_id,
+                elevation_level="secret_read",
+            )
+            
+            if not is_elevated:
+                # No valid elevation session
+                raise ElevationSessionInvalid(
+                    user_id=user_id,
+                    reason="no_elevation_session",
+                )
+

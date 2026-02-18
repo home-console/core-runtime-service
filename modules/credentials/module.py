@@ -6,6 +6,9 @@ RBAC enforcement happens BEFORE service calls.
 No direct HTTP CRUD — all operations routed through OperationManager.
 
 Step 17.5: Tamper-evident audit binding via AuditBinder
+Step 17.6: Zero-trust secret access with MFA elevation
+Step 17.7: Self-defending vault with abuse detection
+Step 17.8: Adaptive risk scoring engine
 """
 
 from typing import Any, Dict, Optional, List, TYPE_CHECKING
@@ -14,11 +17,16 @@ from core.credentials import CredentialRepository
 from core.security.secret_store import SecretStore
 from core.security.rbac_models import Role, CredentialAccessLevel
 from core.security.policy_engine import CredentialPolicyEngine
+from core.security.mfa.service import MFAService
+from core.security.risk.engine import RiskEngine
 from modules.credentials.policy_enforcer import CredentialRBACEnforcer
 from modules.credentials.services import CredentialService
+from modules.credentials.abuse_detection import CredentialAbuseDetector
 from modules.credentials.schemas import (
     CreateCredentialRequest,
     UpdateCredentialRequest,
+    CredentialMetadata,
+    CredentialWithSecretResponse,
 )
 
 if TYPE_CHECKING:
@@ -62,6 +70,9 @@ class CredentialModule(RuntimeModule):
         self._rbac_enforcer: Optional[CredentialRBACEnforcer] = None
         self._repository: Optional[CredentialRepository] = None
         self._audit_binder: Optional["AuditBinder"] = None
+        self._mfa_service: Optional[MFAService] = None
+        self._abuse_detector: Optional[CredentialAbuseDetector] = None
+        self._risk_engine: Optional[RiskEngine] = None
 
     @property
     def name(self) -> str:
@@ -87,6 +98,9 @@ class CredentialModule(RuntimeModule):
         
         Audit:
         All operations logged to P0 protected storage (Step 17.5).
+        
+        Abuse Detection:
+        Secret access validated for behavioral anomalies (Step 17.7).
         """
         # Initialize repository
         self._repository = CredentialRepository(
@@ -103,19 +117,59 @@ class CredentialModule(RuntimeModule):
             from core.audit.binder import AuditBinder
             self._audit_binder = AuditBinder(self.runtime.secure_storage)
         
-        # Create enforcer with audit binder for denial logging
+        # Initialize abuse detector (Step 17.7)
+        self._abuse_detector = CredentialAbuseDetector(
+            audit_binder=self._audit_binder,
+        )
+        
+        # Initialize MFA service (Step 17.6)
+        self._mfa_service = MFAService(
+            secret_store=self.runtime.secret_store,
+            audit_binder=self._audit_binder,
+            abuse_detector=self._abuse_detector,
+            elevation_ttl_seconds=90,
+            max_failed_attempts=5,
+            lockout_seconds=300,
+        )
+        
+        # Create enforcer with audit binder and elevation session manager
         self._rbac_enforcer = CredentialRBACEnforcer(
             policy_engine=policy_engine,
             audit_binder=self._audit_binder,
+            elevation_session_manager=self._mfa_service.elevation_session_manager,
         )
 
-        # Initialize service with enforcer and audit binder
+        # Initialize risk engine (Step 17.8)
+        self._risk_engine = RiskEngine(
+            audit_binder=self._audit_binder,
+        )
+
+        # Initialize service with enforcer, audit binder, MFA service, abuse detector, and risk engine
         self._service = CredentialService(
             repository=self._repository,
             rbac_enforcer=self._rbac_enforcer,
             audit_binder=self._audit_binder,
+            mfa_service=self._mfa_service,
+            abuse_detector=self._abuse_detector,
+            risk_engine=self._risk_engine,
             audit_logger=self.runtime.audit if hasattr(self.runtime, 'audit') else None,
         )
+        
+        # Start background cleanup tasks
+        try:
+            await self._abuse_detector.start()
+        except Exception as e:
+            print(f"[WARNING] Failed to start abuse detector: {e}")
+        
+        try:
+            await self._mfa_service.start()
+        except Exception as e:
+            print(f"[WARNING] Failed to start MFA service: {e}")
+        
+        try:
+            await self._risk_engine.start()
+        except Exception as e:
+            print(f"[WARNING] Failed to start risk engine: {e}")
 
         # Register all 8 operations through service registry
         await self._register_create_operation()

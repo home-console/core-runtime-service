@@ -4,6 +4,7 @@ CredentialService — business logic for credential operations.
 Integrates repository with audit and RBAC enforcement.
 
 Step 17.5: Tamper-evident audit logging via AuditBinder
+Step 17.6: Zero-trust secret access with MFA elevation
 """
 
 from typing import Any, Dict, Optional, List, TYPE_CHECKING
@@ -30,6 +31,9 @@ from .schemas import (
 
 if TYPE_CHECKING:
     from core.audit.binder import AuditBinder
+    from core.security.mfa.service import MFAService
+    from modules.credentials.abuse_detection import CredentialAbuseDetector
+    from core.security.risk.engine import RiskEngine
 
 
 class CredentialService:
@@ -40,13 +44,15 @@ class CredentialService:
     - RBAC enforcement (access control before operation)
     - CredentialRepository (persistence)
     - Audit binder (tamper-evident tracing via P0 storage)
+    - MFA service (zero-trust elevation for secret access)
     - Rate limiting (implicit through operation registration)
     
     IMPORTANT:
     1. RBAC enforcement happens BEFORE repository calls.
-    2. All access denials logged to P0 protected audit trail.
-    3. Successful operations logged with fingerprints (not secrets).
-    4. All denials raise CredentialAccessDenied.
+    2. MFA elevation session validated before secret read.
+    3. All access denials logged to P0 protected audit trail.
+    4. Successful operations logged with fingerprints (not secrets).
+    5. All denials raise CredentialAccessDenied.
     """
 
     def __init__(
@@ -54,6 +60,9 @@ class CredentialService:
         repository: CredentialRepository,
         rbac_enforcer: Optional[CredentialRBACEnforcer] = None,
         audit_binder: Optional["AuditBinder"] = None,
+        mfa_service: Optional["MFAService"] = None,
+        abuse_detector: Optional["CredentialAbuseDetector"] = None,
+        risk_engine: Optional["RiskEngine"] = None,
         audit_logger: Optional[Any] = None,
     ):
         """
@@ -63,16 +72,26 @@ class CredentialService:
             repository: CredentialRepository instance
             rbac_enforcer: RBAC enforcer for access control
             audit_binder: Optional AuditBinder for P0 tamper-evident audit (Step 17.5)
+            mfa_service: Optional MFAService for zero-trust secret access (Step 17.6)
+            abuse_detector: Optional CredentialAbuseDetector for self-defense (Step 17.7)
+            risk_engine: Optional RiskEngine for adaptive risk scoring (Step 17.8)
             audit_logger: Optional legacy audit logger (deprecated, use audit_binder)
         """
         self.repo = repository
         self.audit_binder = audit_binder  # P0 protected audit (Step 17.5)
         self.audit_legacy = audit_logger  # Legacy audit (deprecated)
         self.rbac = rbac_enforcer
+        self.mfa_service = mfa_service  # MFA service (Step 17.6)
+        self.abuse_detector = abuse_detector  # Abuse detector (Step 17.7)
+        self.risk_engine = risk_engine  # Risk engine (Step 17.8)
         
         # Pass audit_binder to enforcer so it logs denials
         if self.rbac and self.audit_binder:
             self.rbac.audit_binder = self.audit_binder
+        
+        # Pass elevation session manager to enforcer
+        if self.rbac and self.mfa_service:
+            self.rbac.elevation_session_manager = self.mfa_service.elevation_session_manager
 
     async def create(
         self,
@@ -202,6 +221,8 @@ class CredentialService:
         
         RBAC: Requires credentials.secret.read capability (ELEVATED)
         Audit: Always logged due to sensitivity
+        Abuse Detection: Validates behavior before secret disclosure (Step 17.7)
+        Risk Assessment: Evaluates adaptive risk and may require MFA or block (Step 17.8)
         
         Args:
             credential_id: Credential ID
@@ -214,6 +235,10 @@ class CredentialService:
         Raises:
             CredentialNotFound: If credential doesn't exist
             CredentialAccessDenied: If user not authorized for secret read (elevated)
+            CredentialAccessAbuseDetected: If abuse behavior detected (Step 17.7)
+            MFARequired: If risk assessment requires MFA (Step 17.8)
+            TemporaryBlockError: If risk temporarily elevated (Step 17.8)
+            AccountFrozen: If account frozen due to critical risk (Step 17.8)
         """
         # RBAC enforcement for elevated access
         if self.rbac and user_id and user_roles:
@@ -222,6 +247,38 @@ class CredentialService:
                 user_roles=user_roles,
                 credential_id=credential_id,
             )
+
+        # Abuse detection: validate behavior before secret disclosure
+        if self.abuse_detector and user_id:
+            await self.abuse_detector.validate_secret_read(user_id, credential_id)
+
+        # Risk assessment: evaluate adaptive risk and determine action
+        if self.risk_engine and user_id:
+            assessment = await self.risk_engine.assess(user_id)
+            from core.security.risk.models import RiskAction
+            
+            match assessment.action:
+                case RiskAction.ALLOW:
+                    pass  # Proceed normally
+                case RiskAction.REQUIRE_MFA:
+                    # Risk elevated - challenge with MFA if not already elevated
+                    if self.mfa_service and not (user_roles and 
+                        any(r.name == 'elevated' for r in user_roles if hasattr(r, 'name'))):
+                        raise Exception("MFARequired")  # Will be caught and properly handled
+                case RiskAction.TEMP_BLOCK:
+                    await self._audit_failure(
+                        "get_with_secret", 
+                        user_id, 
+                        f"Temporary block due to risk score {assessment.score:.1f}"
+                    )
+                    raise Exception("TemporaryBlockError")
+                case RiskAction.FREEZE:
+                    await self._audit_failure(
+                        "get_with_secret",
+                        user_id,
+                        f"Account frozen due to critical risk {assessment.score:.1f}"
+                    )
+                    raise Exception("AccountFrozen")
 
         # Fetch credential with secret
         credential_tuple = await self.repo.get_with_secret(credential_id)

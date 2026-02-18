@@ -46,6 +46,52 @@ class SecurityEventType(str, Enum):
     # Rotation/maintenance
     CREDENTIAL_ROTATED = "credential.rotated"
     CREDENTIAL_EXPIRED = "credential.expired"
+    
+    # MFA authentication (zero-trust secret access)
+    CREDENTIAL_MFA_REQUIRED = "credential.mfa.required"
+    """Challenge: Elevation required for secret access"""
+    
+    CREDENTIAL_MFA_FAILED = "credential.mfa.failed"
+    """Failed MFA verification (invalid TOTP code, WebAuthn failure, etc.)"""
+    
+    CREDENTIAL_MFA_ELEVATED = "credential.mfa.elevated"
+    """Success: User passed MFA, elevation session created"""
+    
+    CREDENTIAL_ELEVATION_EXPIRED = "credential.elevation.expired"
+    """Session TTL exceeded; re-authentication required"""
+    
+    # Self-defending vault (abuse detection)
+    CREDENTIAL_ABUSE_DETECTED = "credential.abuse.detected"
+    """Behavioral anomaly (spike, burst, brute force)"""
+    
+    CREDENTIAL_USER_FROZEN = "credential.user.frozen"
+    """User account frozen due to abuse (requires manual intervention)"""
+    
+    CREDENTIAL_ELEVATION_REVOKED = "credential.elevation.revoked"
+    """Elevation session revoked due to detected abuse"""
+    
+    # Risk scoring (adaptive defense)
+    CREDENTIAL_RISK_EVENT = "credential.risk.event"
+    """Activity contributing to user's risk score"""
+    
+    # Trust management (Step 17.9)
+    TRUST_STATE_CHANGED = "trust.state.changed"
+    """User's trust state transitioned"""
+    
+    TRUST_RESTORED = "trust.restored"
+    """User's trust fully restored to NORMAL"""
+    
+    TRUST_FROZEN = "trust.frozen"
+    """User account frozen due to critical risk"""
+    
+    TRUST_UNFROZEN = "trust.unfrozen"
+    """User account unfrozen after freeze period expired"""
+    
+    TRUST_COOLDOWN_STARTED = "trust.cooldown.started"
+    """User entered cooldown period"""
+    
+    TRUST_COOLDOWN_EXPIRED = "trust.cooldown.expired"
+    """User's cooldown period expired and trust level adjusted"""
 
 
 @dataclass(frozen=True)
@@ -223,6 +269,270 @@ def credential_rotated_event(
             "operation": "rotated",
             "old_fingerprint": old_fingerprint,
             "new_fingerprint": new_fingerprint,
+            **metadata_kwargs
+        }
+    )
+
+
+# MFA-related factory functions (zero-trust secret access)
+
+def credential_mfa_required_event(
+    user_id: str,
+    credential_id: str,
+    mfa_method: str,
+    **metadata_kwargs: Any
+) -> SecurityEvent:
+    """Event: MFA challenge sent for secret elevation."""
+    return SecurityEvent(
+        event_type=SecurityEventType.CREDENTIAL_MFA_REQUIRED,
+        user_id=user_id,
+        credential_id=credential_id,
+        fingerprint="",  # No access yet
+        metadata={
+            "operation": "mfa_required",
+            "mfa_method": mfa_method,
+            **metadata_kwargs
+        }
+    )
+
+
+def credential_mfa_failed_event(
+    user_id: str,
+    credential_id: str,
+    mfa_method: str,
+    reason: str = "verification_failed",
+    **metadata_kwargs: Any
+) -> SecurityEvent:
+    """Event: MFA verification failed (invalid code, expired, etc.)."""
+    return SecurityEvent(
+        event_type=SecurityEventType.CREDENTIAL_MFA_FAILED,
+        user_id=user_id,
+        credential_id=credential_id,
+        fingerprint="",  # No access (failed)
+        metadata={
+            "operation": "mfa_failed",
+            "mfa_method": mfa_method,
+            "reason": reason,
+            **metadata_kwargs
+        }
+    )
+
+
+def credential_mfa_elevated_event(
+    user_id: str,
+    credential_id: str,
+    mfa_method: str,
+    elevation_level: str = "secret_read",
+    ttl_seconds: int = 90,
+    **metadata_kwargs: Any
+) -> SecurityEvent:
+    """Event: User passed MFA, elevation session created."""
+    return SecurityEvent(
+        event_type=SecurityEventType.CREDENTIAL_MFA_ELEVATED,
+        user_id=user_id,
+        credential_id=credential_id,
+        fingerprint="",  # Session, not secret access yet
+        metadata={
+            "operation": "mfa_elevated",
+            "mfa_method": mfa_method,
+            "elevation_level": elevation_level,
+            "ttl_seconds": ttl_seconds,
+            **metadata_kwargs
+        }
+    )
+
+
+def credential_elevation_expired_event(
+    user_id: str,
+    credential_id: str,
+    elevation_level: str = "secret_read",
+    **metadata_kwargs: Any
+) -> SecurityEvent:
+    """Event: Elevation session TTL exceeded."""
+    return SecurityEvent(
+        event_type=SecurityEventType.CREDENTIAL_ELEVATION_EXPIRED,
+        user_id=user_id,
+        credential_id=credential_id,
+        fingerprint="",
+        metadata={
+            "operation": "elevation_expired",
+            "elevation_level": elevation_level,
+            **metadata_kwargs
+        }
+    )
+
+
+# Self-defending vault factory functions (abuse detection & response)
+
+def credential_abuse_detected_event(
+    user_id: str,
+    credential_id: str,
+    reason: str,
+    action: str = "none",
+    threshold_value: float = 0.0,
+    **metadata_kwargs: Any
+) -> SecurityEvent:
+    """Event: Behavioral anomaly detected (spike, burst, brute force)."""
+    return SecurityEvent(
+        event_type=SecurityEventType.CREDENTIAL_ABUSE_DETECTED,
+        user_id=user_id,
+        credential_id=credential_id,
+        fingerprint="",
+        metadata={
+            "operation": "abuse_detected",
+            "reason": reason,
+            "action": action,
+            "threshold_value": threshold_value,
+            **metadata_kwargs
+        }
+    )
+
+
+def credential_user_frozen_event(
+    user_id: str,
+    reason: str,
+    frozen_until: str,
+    **metadata_kwargs: Any
+) -> SecurityEvent:
+    """Event: User account frozen due to detected abuse."""
+    return SecurityEvent(
+        event_type=SecurityEventType.CREDENTIAL_USER_FROZEN,
+        user_id=user_id,
+        credential_id="",
+        fingerprint="",
+        metadata={
+            "operation": "user_frozen",
+            "reason": reason,
+            "frozen_until": frozen_until,
+            **metadata_kwargs
+        }
+    )
+
+
+def credential_elevation_revoked_event(
+    user_id: str,
+    credential_id: str,
+    reason: str,
+    elevation_level: str = "secret_read",
+    **metadata_kwargs: Any
+) -> SecurityEvent:
+    """Event: Elevation session revoked due to detected abuse."""
+    return SecurityEvent(
+        event_type=SecurityEventType.CREDENTIAL_ELEVATION_REVOKED,
+        user_id=user_id,
+        credential_id=credential_id,
+        fingerprint="",
+        metadata={
+            "operation": "elevation_revoked",
+            "reason": reason,
+            "elevation_level": elevation_level,
+            **metadata_kwargs
+        }
+    )
+
+
+# Risk scoring factory function
+
+def credential_risk_event(
+    user_id: str,
+    event_type: str,
+    risk_weight: float,
+    **metadata_kwargs: Any
+) -> SecurityEvent:
+    """Event: Activity logged to risk score."""
+    return SecurityEvent(
+        event_type=SecurityEventType.CREDENTIAL_RISK_EVENT,
+        user_id=user_id,
+        credential_id="",
+        fingerprint="",
+        metadata={
+            "operation": "risk_event",
+            "event_type": event_type,
+            "risk_weight": risk_weight,
+            **metadata_kwargs
+        }
+    )
+
+
+# Trust management factory functions
+
+def trust_state_changed_event(
+    user_id: str,
+    event: str,
+    risk_score: float,
+    new_level: str,
+    **metadata_kwargs: Any
+) -> SecurityEvent:
+    """Event: User's trust state changed."""
+    return SecurityEvent(
+        event_type=SecurityEventType.TRUST_STATE_CHANGED,
+        user_id=user_id,
+        credential_id="",
+        fingerprint="",
+        metadata={
+            "operation": "trust_state_changed",
+            "event": event,
+            "risk_score": risk_score,
+            "new_level": new_level,
+            **metadata_kwargs
+        }
+    )
+
+
+def trust_restored_event(
+    user_id: str,
+    previous_risk: float,
+    **metadata_kwargs: Any
+) -> SecurityEvent:
+    """Event: User's trust fully restored to NORMAL."""
+    return SecurityEvent(
+        event_type=SecurityEventType.TRUST_RESTORED,
+        user_id=user_id,
+        credential_id="",
+        fingerprint="",
+        metadata={
+            "operation": "trust_restored",
+            "previous_risk": previous_risk,
+            **metadata_kwargs
+        }
+    )
+
+
+def trust_frozen_event(
+    user_id: str,
+    risk_score: float,
+    reason: str = "",
+    **metadata_kwargs: Any
+) -> SecurityEvent:
+    """Event: User account frozen due to critical risk."""
+    return SecurityEvent(
+        event_type=SecurityEventType.TRUST_FROZEN,
+        user_id=user_id,
+        credential_id="",
+        fingerprint="",
+        metadata={
+            "operation": "trust_frozen",
+            "risk_score": risk_score,
+            "reason": reason,
+            **metadata_kwargs
+        }
+    )
+
+
+def trust_unfrozen_event(
+    user_id: str,
+    reason: str = "Freeze period expired",
+    **metadata_kwargs: Any
+) -> SecurityEvent:
+    """Event: User account unfrozen."""
+    return SecurityEvent(
+        event_type=SecurityEventType.TRUST_UNFROZEN,
+        user_id=user_id,
+        credential_id="",
+        fingerprint="",
+        metadata={
+            "operation": "trust_unfrozen",
+            "reason": reason,
             **metadata_kwargs
         }
     )
