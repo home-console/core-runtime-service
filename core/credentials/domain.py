@@ -60,6 +60,7 @@ class Credential:
         version: Optimistic version counter (starts at 1)
         created_at: ISO8601 UTC timestamp
         updated_at: ISO8601 UTC timestamp
+        rotation_policy: Optional rotation policy for lifecycle management
     """
 
     id: str
@@ -74,6 +75,7 @@ class Credential:
     version: int
     created_at: str  # ISO8601 UTC
     updated_at: str  # ISO8601 UTC
+    rotation_policy: Optional[dict[str, Any]] = None  # RotationPolicy as dict
 
     def validate(self) -> None:
         """
@@ -167,6 +169,7 @@ class Credential:
         port: Optional[int] = None,
         metadata: Optional[dict[str, Any]] = None,
         tags: Optional[list[str]] = None,
+        rotation_policy: Optional[dict[str, Any]] = None,
     ) -> "Credential":
         """
         Create a new credential with defaults.
@@ -183,6 +186,7 @@ class Credential:
             port: port number (required for DATABASE)
             metadata: arbitrary metadata (default: {})
             tags: list of tags (default: [])
+            rotation_policy: rotation policy dict (optional)
 
         Returns:
             New Credential instance
@@ -205,6 +209,7 @@ class Credential:
             version=1,
             created_at=now,
             updated_at=now,
+            rotation_policy=rotation_policy,
         )
 
         credential.validate()
@@ -233,6 +238,7 @@ class Credential:
             "version": self.version,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "rotation_policy": self.rotation_policy,
         }
 
     @classmethod
@@ -276,6 +282,7 @@ class Credential:
             version=data.get("version", 1),
             created_at=data.get("created_at"),
             updated_at=data.get("updated_at"),
+            rotation_policy=data.get("rotation_policy"),
         )
 
         credential.validate()
