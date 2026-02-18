@@ -34,6 +34,8 @@ if TYPE_CHECKING:
     from core.security.mfa.service import MFAService
     from modules.credentials.abuse_detection import CredentialAbuseDetector
     from core.security.risk.engine import RiskEngine
+    from core.security.trust.trust_engine import TrustEngine
+    from modules.credentials.security_orchestrator import CredentialSecurityOrchestrator
 
 
 class CredentialService:
@@ -63,6 +65,8 @@ class CredentialService:
         mfa_service: Optional["MFAService"] = None,
         abuse_detector: Optional["CredentialAbuseDetector"] = None,
         risk_engine: Optional["RiskEngine"] = None,
+        trust_engine: Optional["TrustEngine"] = None,
+        security_orchestrator: Optional["CredentialSecurityOrchestrator"] = None,
         audit_logger: Optional[Any] = None,
     ):
         """
@@ -75,6 +79,8 @@ class CredentialService:
             mfa_service: Optional MFAService for zero-trust secret access (Step 17.6)
             abuse_detector: Optional CredentialAbuseDetector for self-defense (Step 17.7)
             risk_engine: Optional RiskEngine for adaptive risk scoring (Step 17.8)
+            trust_engine: Optional TrustEngine for automatic trust recovery (Step 17.9)
+            security_orchestrator: Optional SecurityDecisionOrchestrator for unified auth (Step 17.10)
             audit_logger: Optional legacy audit logger (deprecated, use audit_binder)
         """
         self.repo = repository
@@ -84,6 +90,8 @@ class CredentialService:
         self.mfa_service = mfa_service  # MFA service (Step 17.6)
         self.abuse_detector = abuse_detector  # Abuse detector (Step 17.7)
         self.risk_engine = risk_engine  # Risk engine (Step 17.8)
+        self.trust_engine = trust_engine  # Trust engine (Step 17.9)
+        self.security_orchestrator = security_orchestrator  # Security orchestrator (Step 17.10)
         
         # Pass audit_binder to enforcer so it logs denials
         if self.rbac and self.audit_binder:
@@ -219,10 +227,13 @@ class CredentialService:
         """
         Get credential with decrypted secret.
         
-        RBAC: Requires credentials.secret.read capability (ELEVATED)
-        Audit: Always logged due to sensitivity
-        Abuse Detection: Validates behavior before secret disclosure (Step 17.7)
-        Risk Assessment: Evaluates adaptive risk and may require MFA or block (Step 17.8)
+        ORCHESTRATED AUTHORIZATION (Step 17.10):
+        Unified security decision through SecurityDecisionOrchestrator:
+        - Layer 1: Trust state check (frozen = denied)
+        - Layer 2: RBAC enforcement (insufficient privilege = denied)
+        - Layer 3: Abuse detection (pattern detection = denied/blocked)
+        - Layer 4: Risk assessment (adaptive risk scoring)
+        - Layer 5: TrustEngine evaluation (freeze/block/mfa/allow)
         
         Args:
             credential_id: Credential ID
@@ -234,53 +245,71 @@ class CredentialService:
         
         Raises:
             CredentialNotFound: If credential doesn't exist
-            CredentialAccessDenied: If user not authorized for secret read (elevated)
-            CredentialAccessAbuseDetected: If abuse behavior detected (Step 17.7)
-            MFARequired: If risk assessment requires MFA (Step 17.8)
-            TemporaryBlockError: If risk temporarily elevated (Step 17.8)
-            AccountFrozen: If account frozen due to critical risk (Step 17.8)
+            CredentialAccessDenied: If authorization failed (any layer)
+            MFARequired: If MFA elevation required (Step 17.10)
+            TemporaryBlockError: If temporarily blocked
+            AccountFrozen: If account frozen
         """
-        # RBAC enforcement for elevated access
-        if self.rbac and user_id and user_roles:
-            await self.rbac.enforce_or_raise_elevated(
+        # ════════════════════════════════════════════════════
+        # UNIFIED AUTHORIZATION DECISION (Step 17.10)
+        # ════════════════════════════════════════════════════
+        if self.security_orchestrator and user_id:
+            security_decision = await self.security_orchestrator.authorize_secret_access(
                 user_id=user_id,
-                user_roles=user_roles,
                 credential_id=credential_id,
+                user_roles=user_roles,
             )
-
-        # Abuse detection: validate behavior before secret disclosure
-        if self.abuse_detector and user_id:
-            await self.abuse_detector.validate_secret_read(user_id, credential_id)
-
-        # Risk assessment: evaluate adaptive risk and determine action
-        if self.risk_engine and user_id:
-            assessment = await self.risk_engine.assess(user_id)
-            from core.security.risk.models import RiskAction
             
-            match assessment.action:
-                case RiskAction.ALLOW:
-                    pass  # Proceed normally
-                case RiskAction.REQUIRE_MFA:
-                    # Risk elevated - challenge with MFA if not already elevated
-                    if self.mfa_service and not (user_roles and 
-                        any(r.name == 'elevated' for r in user_roles if hasattr(r, 'name'))):
-                        raise Exception("MFARequired")  # Will be caught and properly handled
-                case RiskAction.TEMP_BLOCK:
-                    await self._audit_failure(
-                        "get_with_secret", 
-                        user_id, 
-                        f"Temporary block due to risk score {assessment.score:.1f}"
-                    )
-                    raise Exception("TemporaryBlockError")
-                case RiskAction.FREEZE:
-                    await self._audit_failure(
-                        "get_with_secret",
-                        user_id,
-                        f"Account frozen due to critical risk {assessment.score:.1f}"
-                    )
-                    raise Exception("AccountFrozen")
+            # Handle orchestrator decisions
+            if security_decision.frozen:
+                raise CredentialAccessDenied(
+                    f"Account frozen: {security_decision.reason.value}"
+                )
+            
+            if security_decision.blocked:
+                raise CredentialAccessDenied(
+                    f"Temporarily blocked: {security_decision.reason.value}"
+                )
+            
+            if security_decision.requires_mfa:
+                raise CredentialAccessDenied(
+                    f"MFA elevation required: {security_decision.reason.value}"
+                )
+            
+            if not security_decision.allowed:
+                raise CredentialAccessDenied(
+                    f"Authorization denied: {security_decision.reason.value}"
+                )
+        else:
+            # Fallback if no orchestrator (should not happen in production)
+            # Perform legacy security checks
+            if self.rbac and user_id and user_roles:
+                await self.rbac.enforce_or_raise_elevated(
+                    user_id=user_id,
+                    user_roles=user_roles,
+                    credential_id=credential_id,
+                )
 
-        # Fetch credential with secret
+            if self.abuse_detector and user_id:
+                await self.abuse_detector.validate_secret_read(user_id, credential_id)
+
+            if self.risk_engine and user_id:
+                assessment = await self.risk_engine.assess(user_id)
+                from core.security.risk.models import RiskAction
+                
+                match assessment.action:
+                    case RiskAction.ALLOW:
+                        pass
+                    case RiskAction.REQUIRE_MFA:
+                        raise CredentialAccessDenied("MFA elevation required")
+                    case RiskAction.TEMP_BLOCK:
+                        raise CredentialAccessDenied(f"Temporarily blocked (risk: {assessment.score:.1f})")
+                    case RiskAction.FREEZE:
+                        raise CredentialAccessDenied(f"Account frozen (risk: {assessment.score:.1f})")
+
+        # ════════════════════════════════════════════════════
+        # AUTHORIZATION PASSED - RETURN SECRET
+        # ════════════════════════════════════════════════════
         credential_tuple = await self.repo.get_with_secret(credential_id)
         if not credential_tuple or not credential_tuple[0]:
             await self._audit_failure("get_with_secret", user_id, "Credential not found")

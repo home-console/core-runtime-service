@@ -536,3 +536,24 @@ def trust_unfrozen_event(
             **metadata_kwargs
         }
     )
+
+def credential_access_allowed_event(
+    user_id: str,
+    credential_id: str,
+    risk_score: float = 0.0,
+    events: list = None,
+    **metadata_kwargs: Any
+) -> SecurityEvent:
+    """Event: Secret access allowed (all security checks passed)."""
+    return SecurityEvent(
+        event_type=SecurityEventType.CREDENTIAL_SECRET_READ,
+        user_id=user_id,
+        credential_id=credential_id,
+        fingerprint="authorized",
+        metadata={
+            "operation": "secret_access_allowed",
+            "risk_score": risk_score,
+            "security_events": events or [],
+            **metadata_kwargs
+        }
+    )

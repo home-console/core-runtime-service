@@ -9,6 +9,8 @@ Step 17.5: Tamper-evident audit binding via AuditBinder
 Step 17.6: Zero-trust secret access with MFA elevation
 Step 17.7: Self-defending vault with abuse detection
 Step 17.8: Adaptive risk scoring engine
+Step 17.9: Trust restoration engine
+Step 17.10: Unified security decision orchestrator
 """
 
 from typing import Any, Dict, Optional, List, TYPE_CHECKING
@@ -19,9 +21,12 @@ from core.security.rbac_models import Role, CredentialAccessLevel
 from core.security.policy_engine import CredentialPolicyEngine
 from core.security.mfa.service import MFAService
 from core.security.risk.engine import RiskEngine
+from core.security.trust.trust_engine import TrustEngine
+from core.security.trust.trust_state import TrustConfigs
 from modules.credentials.policy_enforcer import CredentialRBACEnforcer
 from modules.credentials.services import CredentialService
 from modules.credentials.abuse_detection import CredentialAbuseDetector
+from modules.credentials.security_orchestrator import CredentialSecurityOrchestrator
 from modules.credentials.schemas import (
     CreateCredentialRequest,
     UpdateCredentialRequest,
@@ -56,6 +61,14 @@ class CredentialModule(RuntimeModule):
     - Support tamper-evident audit logging (via AuditBinder)
     - Enforce rate limiting
     - Use immutable optimistic locking patterns
+    
+    Security Stack (Step 17.1-17.10):
+    - Step 17.1-5: RBAC enforcement
+    - Step 17.6: MFA elevation
+    - Step 17.7: Abuse detection
+    - Step 17.8: Risk scoring
+    - Step 17.9: Trust restoration
+    - Step 17.10: Unified orchestrator (all 5 layers)
     """
 
     def __init__(self, runtime: Any):
@@ -73,6 +86,8 @@ class CredentialModule(RuntimeModule):
         self._mfa_service: Optional[MFAService] = None
         self._abuse_detector: Optional[CredentialAbuseDetector] = None
         self._risk_engine: Optional[RiskEngine] = None
+        self._trust_engine: Optional[TrustEngine] = None
+        self._security_orchestrator: Optional[CredentialSecurityOrchestrator] = None
 
     @property
     def name(self) -> str:
@@ -144,7 +159,24 @@ class CredentialModule(RuntimeModule):
             audit_binder=self._audit_binder,
         )
 
-        # Initialize service with enforcer, audit binder, MFA service, abuse detector, and risk engine
+        # Initialize trust engine (Step 17.9)
+        self._trust_engine = TrustEngine(
+            config=TrustConfigs.BALANCED,
+            audit_binder=self._audit_binder,
+        )
+
+        # Initialize security decision orchestrator (Step 17.10)
+        # Coordinates all 5 security layers into unified decision path
+        self._security_orchestrator = CredentialSecurityOrchestrator(
+            rbac_enforcer=self._rbac_enforcer,
+            mfa_service=self._mfa_service,
+            abuse_detector=self._abuse_detector,
+            risk_engine=self._risk_engine,
+            trust_engine=self._trust_engine,
+            audit_binder=self._audit_binder,
+        )
+
+        # Initialize service with orchestrator and all security components
         self._service = CredentialService(
             repository=self._repository,
             rbac_enforcer=self._rbac_enforcer,
@@ -152,6 +184,8 @@ class CredentialModule(RuntimeModule):
             mfa_service=self._mfa_service,
             abuse_detector=self._abuse_detector,
             risk_engine=self._risk_engine,
+            trust_engine=self._trust_engine,
+            security_orchestrator=self._security_orchestrator,
             audit_logger=self.runtime.audit if hasattr(self.runtime, 'audit') else None,
         )
         
@@ -170,6 +204,11 @@ class CredentialModule(RuntimeModule):
             await self._risk_engine.start()
         except Exception as e:
             print(f"[WARNING] Failed to start risk engine: {e}")
+        
+        try:
+            self._trust_engine.start()  # Non-async start
+        except Exception as e:
+            print(f"[WARNING] Failed to start trust engine: {e}")
 
         # Register all 8 operations through service registry
         await self._register_create_operation()
