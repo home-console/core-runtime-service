@@ -212,14 +212,14 @@ def compute_next_run(
     now: datetime,
 ) -> datetime:
     """
-    Вычисляет следующий cron-tick по выражению вида \"*/N * * * *\" или \"* * * * *\".
+    Вычисляет следующий cron-tick по выражению вида "*/N * * * *" или "* * * * *".
 
     Ограничения (MVP D3.7):
     - поддерживается только минутное поле:
-      - \"*\"       → каждую минуту
-      - \"*/N\"    → каждые N минут
-      - \"M\" (int) → конкретная минута в часе
-    - остальные поля должны быть \"*\"
+      - "*"       → каждую минуту
+      - "*/N"    → каждые N минут
+      - "M" (int) → конкретная минута в часе
+    - остальные поля должны быть "*"
 
     now и last_run_at — timezone-aware; возвращаемое значение тоже timezone-aware.
     """
@@ -258,176 +258,30 @@ def compute_next_run(
         raise ValueError(f"Invalid timezone for cron expression: {timezone}") from None
 
     base = last_run_at or now
-    if base.tzinfo is None:
-        base = base.replace(tzinfo=tz)
-    else:
-        base = base.astimezone(tz)
+    base = base.astimezone(tz)
 
-    # Ищем первый tick строго ПОСЛЕ base
-    candidate = base.replace(second=0, microsecond=0) + timedelta(minutes=1)
+    # Нормализуем к минуте
+    base = base.replace(second=0, microsecond=0)
 
-    while True:
-        m = candidate.minute
-        if exact_minute is not None:
-            if m == exact_minute:
-                return candidate
+    if exact_minute is not None:
+        # Следующий раз — в ближайший момент, когда минуты == exact_minute.
+        candidate = base
+        if candidate.minute >= exact_minute:
+            candidate = candidate.replace(minute=exact_minute) + timedelta(hours=1)
         else:
-            # Каждые step минут (по умолчанию step=1 → каждую минуту)
-            if step is None or step == 1 or m % step == 0:
-                return candidate
-        candidate += timedelta(minutes=1)
+            candidate = candidate.replace(minute=exact_minute)
+    else:
+        # step mode
+        step = step or 1
+        minute = base.minute
+        # ближайшая минута, кратная step, строго после base
+        next_minute = ((minute // step) + 1) * step
+        add_hours = 0
+        if next_minute >= 60:
+            next_minute = next_minute % 60
+            add_hours = 1
+        candidate = base + timedelta(hours=add_hours)
+        candidate = candidate.replace(minute=next_minute)
 
-
-class ExecutionScheduler:
-    """
-    Scheduler — daemon-логика Execution Layer.
-
-    - читает execution/schedules/*
-    - проверяет next_run_at
-    - вызывает ExecutionController.execute_operation(...)
-    - обновляет run_count / last_run_at / next_run_at / enabled
-    """
-
-    def __init__(self, runtime: Any, controller: Any) -> None:
-        self._runtime = runtime
-        self._controller = controller
-
-    async def list_schedules(self) -> List[ExecutionSchedule]:
-        storage = getattr(self._runtime, "storage", None)
-        if storage is None:
-            return []
-        try:
-            keys = await storage.list_keys("execution")
-        except Exception:
-            return []
-
-        result: List[ExecutionSchedule] = []
-        for key in keys:
-            if not key.startswith("schedules/"):
-                continue
-            try:
-                data = await storage.get("execution", key)
-                if isinstance(data, dict):
-                    result.append(ExecutionSchedule.from_dict(data))
-            except Exception:
-                continue
-        return result
-
-    async def save_schedule(self, schedule: ExecutionSchedule) -> None:
-        storage = getattr(self._runtime, "storage", None)
-        if storage is None:
-            return
-        data = schedule.to_dict()
-        try:
-            await storage.set("execution", f"schedules/{schedule.schedule_id}", data)
-            await storage.set(
-                "execution",
-                f"schedules_by_operation/{schedule.operation_type}/{schedule.schedule_id}",
-                {
-                    "schedule_id": schedule.schedule_id,
-                    "operation_type": schedule.operation_type,
-                    "enabled": schedule.enabled,
-                    "max_runs": schedule.max_runs,
-                    "run_count": schedule.run_count,
-                    "next_run_at": schedule.next_run_at.isoformat() if schedule.next_run_at else None,
-                },
-            )
-        except Exception:
-            pass
-
-    async def tick(self, *, now: Optional[datetime] = None) -> None:
-        """
-        Один планировочный шаг.
-
-        - без while True
-        - без хранения state в памяти (всё в storage)
-        """
-        now = now or datetime.now(UTC)
-        storage = getattr(self._runtime, "storage", None)
-        if storage is None:
-            return
-
-        schedules = await self.list_schedules()
-        for sched in schedules:
-            if not sched.enabled:
-                continue
-
-            sched.ensure_next_run_at(now)
-            if not sched.enabled or sched.next_run_at is None:
-                # Некорректный или уже завершённый график
-                await self.save_schedule(sched)
-                continue
-
-            if now < sched.next_run_at:
-                # next_run_at уже посчитан — сохраняем состояние и ждём следующего tick.
-                await self.save_schedule(sched)
-                continue
-
-            # Проверка max_runs
-            if sched.max_runs is not None and sched.run_count >= sched.max_runs:
-                sched.enabled = False
-                await self.save_schedule(sched)
-                await self._publish_event(
-                    "execution.schedule.completed",
-                    {"schedule_id": sched.schedule_id, "operation_type": sched.operation_type},
-                )
-                await self._publish_event(
-                    "execution.schedule.disabled",
-                    {"schedule_id": sched.schedule_id, "operation_type": sched.operation_type, "reason": "max_runs"},
-                )
-                continue
-
-            # Триггерим execution через ExecutionController.
-            operation_id = f"sched-{sched.schedule_id}-{sched.run_count + 1}"
-            context = dict(sched.context or {})
-            context.setdefault("_schedule_id", sched.schedule_id)
-
-            try:
-                await self._publish_event(
-                    "execution.schedule.run",
-                    {
-                        "schedule_id": sched.schedule_id,
-                        "operation_id": operation_id,
-                        "operation_type": sched.operation_type,
-                    },
-                )
-                await self._controller.execute_operation(
-                    operation_id=operation_id,
-                    operation_type=sched.operation_type,
-                    params=sched.params or {},
-                    context=context,
-                )
-            except Exception:
-                # Scheduler не должен ломать систему; ошибки проглатываем.
-                pass
-
-            sched.run_count += 1
-            sched.last_run_at = now
-            sched.compute_next_after_run(now)
-
-            if sched.max_runs is not None and sched.run_count >= sched.max_runs:
-                sched.enabled = False
-                await self._publish_event(
-                    "execution.schedule.completed",
-                    {"schedule_id": sched.schedule_id, "operation_type": sched.operation_type},
-                )
-                await self._publish_event(
-                    "execution.schedule.disabled",
-                    {"schedule_id": sched.schedule_id, "operation_type": sched.operation_type, "reason": "max_runs"},
-                )
-
-            await self.save_schedule(sched)
-
-    async def _publish_event(self, name: str, payload: Dict[str, Any]) -> None:
-        event_bus = getattr(self._runtime, "event_bus", None)
-        if event_bus is None or not hasattr(event_bus, "publish"):
-            return
-        try:
-            await event_bus.publish(name, payload)
-        except Exception:
-            pass
-
-
-def generate_schedule_id() -> str:
-    return f"sched-{uuid4().hex[:12]}"
+    return candidate.astimezone(UTC)
 

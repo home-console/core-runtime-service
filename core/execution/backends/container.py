@@ -17,7 +17,7 @@ import os
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Sequence
 
-from execution.backend import OperationResult
+from ..backend import OperationResult
 
 
 @dataclass(frozen=True)
@@ -226,6 +226,6 @@ class ContainerBackend:
         """
         async with self._lock:
             exists = execution_id in self._containers
-        #TODO Здесь можно будет вызвать `docker kill` по container_id, если он известен.
+        # TODO Здесь можно будет вызвать `docker kill` по container_id, если он известен.
         return exists
 

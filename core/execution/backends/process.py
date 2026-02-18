@@ -8,7 +8,7 @@ Process execution backend (D3.2).
 
 Backend = чистый транспорт:
 - формирует JSON envelope по docs/EXECUTION-PROTOCOL.md
-- запускает runner (`python -m execution.runner.homeconsole_runner`)
+- запускает runner (`python -m core.execution.runner.homeconsole_runner`)
 - пишет envelope в stdin, читает stdout
 - мапит stdout JSON в OperationResult
 """
@@ -19,13 +19,13 @@ import sys
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
-from execution.backend import OperationResult
+from ..backend import OperationResult
 
 
 @dataclass(frozen=True)
 class ProcessBackendConfig:
     python_executable: str = sys.executable
-    module_path: str = "execution.runner.homeconsole_runner"
+    module_path: str = "core.execution.runner.homeconsole_runner"
 
 
 class ProcessBackend:

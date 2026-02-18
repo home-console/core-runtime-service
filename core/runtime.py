@@ -506,7 +506,7 @@ class CoreRuntime:
             await self.storage.get("metrics", "test")
             metrics["storage"] = {
                 "available": True,
-                "type": self.storage._adapter.__class__.__name__ if hasattr(self.storage, "_adapter") else "unknown"
+                "type": self.storage._adapter.__class__.__name__ if hasattr(self.storage, "_adapter") else "unknown"  # pyright: ignore[reportAttributeAccessIssue]
             }
         except Exception as e:
             metrics["storage"] = {

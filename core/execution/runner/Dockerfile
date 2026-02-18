@@ -6,9 +6,9 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Ship runner as a module: python -m homeconsole_runner
-COPY execution/runner/__init__.py /app/__init__.py
-COPY execution/runner/adapter.py /app/adapter.py
-COPY execution/runner/homeconsole_runner.py /app/homeconsole_runner.py
+COPY core/execution/runner/__init__.py /app/__init__.py
+COPY core/execution/runner/adapter.py /app/adapter.py
+COPY core/execution/runner/homeconsole_runner.py /app/homeconsole_runner.py
 
 ENV PYTHONUNBUFFERED=1
 

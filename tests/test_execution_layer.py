@@ -4,9 +4,9 @@ from core.runtime import CoreRuntime
 from core.module_manager import ModuleSpec
 from modules.execution.module import ExecutionModule
 from core.operations import OperationInitiator, OperationInitiatorKind
-from execution.controller import ExecutionControllerImpl
-from execution.backend import ExecutionBackend, OperationResult
-from execution.scheduler import ExecutionScheduler, ExecutionSchedule, compute_next_run
+from core.execution.controller import ExecutionControllerImpl
+from core.execution.backend import ExecutionBackend, OperationResult
+from core.execution.scheduler import ExecutionScheduler, ExecutionSchedule, compute_next_run
 from typing import Any, Dict
 import asyncio
 

@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from execution.backends.process import ProcessBackend, ProcessBackendConfig
+from core.execution.backends.process import ProcessBackend, ProcessBackendConfig
 
 
 class DummyProc:
@@ -32,7 +32,7 @@ async def test_process_backend_calls_runner_and_parses_ok(monkeypatch):
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
 
-    cfg = ProcessBackendConfig(python_executable="python", module_path="execution.runner.homeconsole_runner")
+    cfg = ProcessBackendConfig(python_executable="python", module_path="core.execution.runner.homeconsole_runner")
     backend = ProcessBackend(cfg)
 
     out = await backend.execute(operation_type="test.echo", params={"a": 1}, context={"k": "v"})
@@ -42,7 +42,7 @@ async def test_process_backend_calls_runner_and_parses_ok(monkeypatch):
     assert out.backend == "process"
 
     assert captured.cmd[:2] == ["python", "-m"]
-    assert captured.cmd[2] == "execution.runner.homeconsole_runner"
+    assert captured.cmd[2] == "core.execution.runner.homeconsole_runner"
 
 
 @pytest.mark.asyncio

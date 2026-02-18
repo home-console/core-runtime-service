@@ -19,8 +19,8 @@ from typing import Any, Optional, Callable, Awaitable
 from core.runtime_module import RuntimeModule
 from core.operations import Operation, OperationStatus, OperationError
 
-from execution.controller import ExecutionControllerImpl
-from execution.scheduler import ExecutionScheduler, ExecutionSchedule, generate_schedule_id
+from core.execution.controller import ExecutionControllerImpl
+from core.execution.scheduler import ExecutionScheduler, ExecutionSchedule, generate_schedule_id
 
 
 class ExecutionModule(RuntimeModule):
@@ -111,7 +111,7 @@ class ExecutionModule(RuntimeModule):
             every_seconds = trigger.get("every_seconds")
             at_raw = trigger.get("at")
 
-            from execution.scheduler import _parse_datetime_optional, compute_next_run  # type: ignore[attr-defined]
+            from core.execution.scheduler import _parse_datetime_optional, compute_next_run  # type: ignore[attr-defined]
 
             trigger_at = None
             if at_raw is not None:
@@ -172,7 +172,7 @@ class ExecutionModule(RuntimeModule):
                 next_run_at = now + timedelta(seconds=sec)
 
             schedule_id = generate_schedule_id()
-            from execution.scheduler import ExecutionSchedule
+            from core.execution.scheduler import ExecutionSchedule
 
             sched = ExecutionSchedule(
                 schedule_id=schedule_id,
