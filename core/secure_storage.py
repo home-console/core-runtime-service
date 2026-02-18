@@ -45,6 +45,7 @@ CRITICAL_NAMESPACES = {
     "agent_registry", 
     "secrets.store",
     "marketplace.transactions",
+    "_audit.security",  # Step 17.5: Credential security audit trail (tamper-evident)
 }
 
 # NAMESPACES с системной информацией (не должны быть напрямую доступны)
@@ -362,6 +363,65 @@ class SecureStorageWrapper:
                 await self._recalculate_root_hash()
             
             return deleted
+    
+    async def append(
+        self,
+        namespace: str,
+        event: dict[str, Any]
+    ) -> str:
+        """
+        Append-only write for security events (Step 17.5).
+        
+        Используется для неизменяемых событий аудита, которые:
+        - Никогда не переписываются
+        - Уникальны по ID
+        - Должны быть tamper-evident
+        
+        Операция (идентична secure_set):
+        1. Начинаем транзакцию
+        2. Bump epoch (защита от rollback)
+        3. Append audit log (P0 internal audit)
+        4. Writes event (использует event["id"] как key)
+        5. Recalculate merkle root
+        6. Commit (атомарно)
+        
+        Args:
+            namespace: Must be "_audit.security" for credential events
+            event: Dict with 'id' and event data (e.g., SecurityEvent.to_dict())
+            
+        Returns:
+            event["id"] (для confirmation)
+            
+        Raises:
+            ValueError: If namespace not in CRITICAL_NAMESPACES
+        """
+        if namespace not in CRITICAL_NAMESPACES:
+            raise ValueError(
+                f"append() requires critical namespace, got {namespace}. "
+                f"For append-only events, use namespace in {CRITICAL_NAMESPACES}"
+            )
+        
+        if "id" not in event:
+            raise ValueError(
+                f"append() requires event['id'] to be present"
+            )
+        
+        event_id = event["id"]
+        
+        async with self.transaction():
+            # 1. Bump epoch (защита от rollback)
+            await self._bump_epoch()
+            
+            # 2. Append to P0 audit log (internal P0 audit trail)
+            await self._append_audit_log(namespace, event_id, "SET", event)
+            
+            # 3. Write event (key is event_id, unique per event)
+            await self._adapter.set(namespace, event_id, event)
+            
+            # 4. Recalculate and save merkle root
+            await self._recalculate_root_hash()
+        
+        return event_id
     
     # Delegate остальные методы к adapter
     async def get(self, namespace: str, key: str) -> Optional[dict[str, Any]]:

@@ -103,3 +103,27 @@ __all__ = [
     "OptionalTPMSecretStore",
 ]
 
+# Step 17.4 RBAC imports
+try:
+    from .rbac_models import (
+        Role,
+        CredentialAccessLevel,
+        CredentialPolicy,
+        AccessDecision,
+    )
+    from .policy_engine import (
+        CredentialPolicyEngine,
+        PolicyStore,
+    )
+    
+    __all__.extend([
+        "Role",
+        "CredentialAccessLevel",
+        "CredentialPolicy",
+        "AccessDecision",
+        "CredentialPolicyEngine",
+        "PolicyStore",
+    ])
+except ImportError:
+    pass  # RBAC optional in security module
+
