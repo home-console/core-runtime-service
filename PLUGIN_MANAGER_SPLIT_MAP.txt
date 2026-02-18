@@ -1,0 +1,301 @@
+===============================================
+PLUGIN_MANAGER.PY DECOMPOSITION MAP (852 → 5 files)
+===============================================
+
+FILE 1: kernel/plugin_loader.py (~250 LOC)
+-----------------------------------------
+PURPOSE: Load plugins from manifest files, instruct classes, create instances
+
+SECTIONS TO EXTRACT:
+  
+  [A] Module docstring + imports
+    Lines: 1-20 (keep)
+  
+  [B] PluginState enum (PluginState)
+    Lines: 23-33 (PRESERVE - used by all files)
+    => Create separate: kernel/plugin_state.py ~15 LOC
+       Then import from plugin_state
+  
+  [C] Manifest loading method
+    Lines: 593-613 (METHOD: _load_plugin_manifest)
+    Type: Loader responsibility
+    Dependencies: None
+    Estimated LOC after extraction: 20
+  
+  [D] Manifest parsing and class instantiation
+    Lines: 615-750 (METHOD: _load_plugin_from_manifest)
+    Type: Loader responsibility + integration detection
+    Dependencies: importlib, logging, IntegrationRegistry
+    Split note: Contains integration detection logic (extract to separate method)
+    Estimated LOC after extraction: 135
+  
+  [E] auto_load_plugins orchestration
+    Lines: 752-852 (METHOD: auto_load_plugins)
+    Type: Loader orchestrator
+    Dependencies: _load_plugin_manifest, _load_plugin_from_manifest, _topological_sort_manifests
+    Estimated LOC after extraction: 100
+
+TOTAL: 250 LOC
+CLASS: PluginLoader
+INIT: __init__(self, runtime, plugin_manager)
+     - Store reference to runtime
+     - Store reference to parent plugin_manager for state updates
+
+
+FILE 2: kernel/plugin_registry.py (~150 LOC)
+---------------------------------------------
+PURPOSE: Query plugin state, track loaded plugins, report block reasons
+
+SECTIONS TO EXTRACT:
+
+  [A] Imports + PluginManager setup (partial)
+    Lines: 1-60 (partial)
+    Type: Registry class init
+    Estimated LOC: 60
+  
+  [B] Plugin getter/querier methods
+    Lines: 362-400 (METHODS: get_plugin, get_plugin_state, get_plugin_block_reason, list_plugins)
+    Type: Registry query operations
+    Estimated LOC: 40
+  
+  [C] Plugin state tracking (internal structures)
+    Lines: 60-100 (partial from __init__)
+    Type: State management
+    Estimated LOC: 20
+  
+  [D] Batch query helpers
+    Lines: NOT EXPLICIT - create utility methods
+    Type: Derived from individual queries
+    Estimated LOC: 30
+
+TOTAL: 150 LOC
+CLASS: PluginRegistry
+INIT: __init__(self)
+     - _plugins dict
+     - _states dict
+     - _block_reasons dict
+     - Read-only thread-safe access
+
+
+FILE 3: kernel/plugin_lifecycle.py (~200 LOC)
+----------------------------------------------
+PURPOSE: start/stop/reload plugins with state transitions
+
+SECTIONS TO EXTRACT:
+
+  [A] start_plugin method
+    Lines: 175-220 (METHOD: start_plugin)
+    Type: Lifecycle operation
+    Dependencies: capability_registry
+    Estimated LOC: 45
+  
+  [B] stop_plugin method
+    Lines: 222-245 (METHOD: stop_plugin)
+    Type: Lifecycle operation
+    Estimated LOC: 25
+  
+  [C] reload_plugin method
+    Lines: 292-360 (METHOD: reload_plugin)
+    Type: Lifecycle operation (hot-reload)
+    Dependencies: PluginLoader
+    Estimated LOC: 68
+  
+  [D] unload_plugin method
+    Lines: 247-290 (METHOD: unload_plugin)
+    Type: Lifecycle operation (cleanup)
+    Dependencies: capability_registry, operations manager
+    Estimated LOC: 44
+  
+  [E] state transition helpers
+    Type: Derived - utility methods for safe state transitions
+    Estimated LOC: 18
+
+TOTAL: 200 LOC
+CLASS: PluginLifecycle
+INIT: __init__(self, runtime, plugin_manager)
+     - Store runtime reference
+     - Hook into plugin_manager for state management
+
+
+FILE 4: kernel/plugin_sandbox.py (~200 LOC)
+--------------------------------------------
+PURPOSE: Plugin isolation - storage proxies, service proxies, security checks
+
+SECTIONS TO EXTRACT:
+
+  [A] load_plugin isolation proxies setup
+    Lines: 75-110 (SECTION within load_plugin)
+    Type: Sandbox setup
+    Dependencies: StorageProxy, ServiceProxy, IntegrationRegistry
+    Estimated LOC: 35
+  
+  [B] Capability requirements validation (from load_plugin)
+    Lines: 135-165 (SECTION within load_plugin)
+    Type: Sandbox enforcement
+    Estimated LOC: 30
+  
+  [C] Plugin-specific isolation checks
+    Type: New methods to add
+    Estimated LOC: 50
+  
+  [D] Thread-safe plugin access enforcement
+    Type: Derived from _plugin_lock philosophy
+    Estimated LOC: 40
+  
+  [E] Security-related helper methods
+    Type: Validation, permission checks
+    Estimated LOC: 45
+
+TOTAL: 200 LOC
+CLASS: PluginSandbox
+INIT: __init__(self, runtime, plugin_manager)
+     - Store runtime
+     - Store plugin_manager
+     - Manage isolation proxies cache
+
+
+FILE 5: plugin_manager.py (FACADE) (~150 LOC)
+----------------------------------------------
+PURPOSE: Public API, delegation to component classes
+
+KEEPS:
+
+  [A] PluginState enum (PRESERVE - public API)
+    Lines: 23-33
+    Estimated LOC: 10
+  
+  [B] PluginManager class (refactored facade)
+    Lines: 35-60 (docstring + facade)
+    Type: Delegating facade
+    Estimated LOC: 140
+  
+  New methods:
+    - __init__(): Initialize component managers
+    - load_plugin(): Delegate to plugin_lifecycle
+    - start_plugin(): Delegate to plugin_lifecycle
+    - stop_plugin(): Delegate to plugin_lifecycle
+    - unload_plugin(): Delegate to plugin_lifecycle  
+    - reload_plugin(): Delegate to plugin_lifecycle
+    - get_plugin(): Delegate to plugin_registry
+    - get_plugin_state(): Delegate to plugin_registry
+    - get_plugin_block_reason(): Delegate to plugin_registry
+    - list_plugins(): Delegate to plugin_registry
+    - start_all(): Delegate to plugin_lifecycle
+    - stop_all(): Delegate to plugin_lifecycle
+    - load_plugin_by_name(): Delegate to plugin_loader
+    - auto_load_plugins(): Delegate to plugin_loader
+
+TOTAL: 150 LOC
+CLASS: PluginManager (FACADE)
+INIT: __init__(self, runtime)
+     - Create PluginLoader, PluginRegistry, PluginLifecycle, PluginSandbox
+     - Store root reference to _runtime
+
+
+===============================================
+DECOMPOSITION STRATEGY
+===============================================
+
+PHASE 1: CREATE SUPPORTING STRUCTURES
+  1. Create kernel/plugin_state.py (extract PluginState enum)
+  2. Create kernel/__init__.py (setup imports)
+
+PHASE 2: EXTRACT COMPONENT CLASSES
+  3. Create kernel/plugin_registry.py (state tracking)
+  4. Create kernel/plugin_loader.py (manifest loading)
+  5. Create kernel/plugin_sandwich.py (isolation/security)
+  6. Create kernel/plugin_lifecycle.py (start/stop/reload)
+
+PHASE 3: CONVERT PluginManager TO FACADE
+  7. Refactor core/plugin_manager.py
+     - Keep PluginState as import
+     - Replace PluginManager class with delegating facade
+     - Remove all implementation details
+     - Delegate everything to component classes
+
+PHASE 4: TESTING & VALIDATION
+  8. Run existing test suite (tests/test_plugin_manager.py)
+  9. Add integration tests for component boundaries
+  10. Verify no breaking changes in public API
+
+
+===============================================
+DIRECT IMPORTS MAPPING
+===============================================
+
+OLD: core.plugin_manager.PluginManager
+NEW: core.plugin_manager.PluginManager (same - facade)
+
+OLD: self._load_plugin_manifest()
+NEW: self._loader._load_plugin_manifest()
+
+OLD: self._load_plugin_from_manifest()
+NEW: self._loader._load_plugin_from_manifest()
+
+OLD: self._topological_sort_manifests()
+NEW: self._loader._topological_sort_manifests()
+
+OLD: self.get_plugin_state()
+NEW: self._registry.get_plugin_state()
+
+OLD: self._states
+NEW: self._registry._states
+
+
+===============================================
+RISK ASSESSMENT
+===============================================
+
+CRITICAL RISKS:
+  1. Plugin isolation setup in load_plugin() → must preserve StorageProxy/ServiceProxy exact behavior
+  2. Capability registry coordination → must preserve exact sequence
+  3. Thread safety (_plugin_lock) → must ensure each component respects locks
+
+MEDIUM RISKS:
+  1. Hot-reload logic (reload_plugin) → complex state transitions
+  2. Topological sort algorithm → dependency edge cases
+  3. Integration detection → manifest parsing details
+
+LOW RISKS:
+  1. Getter methods → simple delegation
+  2. Batch operations → straightforward delegation
+
+
+===============================================
+SUCCESS CRITERIA
+===============================================
+
+✓ All 852 LOC split into 5 files < 300 LOC each
+✓ plugin_manager.py facade < 200 LOC (public API only)
+✓ No new dependencies introduced
+✓ Thread-safe (_plugin_lock) preserved
+✓ All existing tests pass
+✓ No changes to public API (PluginManager, PluginState)
+✓ Internal code uses event-bus for inter-component communication (Phase 4+)
+
+
+===============================================
+VALIDATION COMMANDS (After Split)
+===============================================
+
+wc -l core/plugin_manager.py kernel/plugin_*.py
+
+Expected output:
+  ~150 plugin_manager.py (facade)
+  ~250 plugin_loader.py
+  ~150 plugin_registry.py
+  ~200 plugin_lifecycle.py
+  ~200 plugin_sandbox.py
+  ~15 plugin_state.py
+  ---
+  ~1000 total (split from 852 original + some refactoring)
+
+Test validation:
+  pytest tests/test_plugin_manager.py -v
+
+Import validation:
+  python -c "from core.plugin_manager import PluginManager; print(PluginManager)"
+
+Circular import check:
+  python -c "import core.plugin_manager; import kernel.plugin_loader; print('OK')"
+
