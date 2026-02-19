@@ -21,7 +21,29 @@ from pathlib import Path
 from core.config import Config
 from core.runtime import CoreRuntime
 from core.storage_factory import create_storage_manager
-from app.bootstrap import ApplicationBootstrap, APP_MODULES
+from core.module_manager import ModuleSpec
+
+
+APP_MODULES: list[ModuleSpec] = [
+    # Logger и request_logger — первыми (инфраструктура логирования).
+    ModuleSpec("logger", required=True),
+    ModuleSpec("request_logger", required=True),
+    ModuleSpec("api", required=True),
+    ModuleSpec("admin", required=True),
+    ModuleSpec("auth", required=True),
+    ModuleSpec("operations", required=True),
+    # Step 15: Agent Control Plane (optional, but enables distributed agents)
+    ModuleSpec("agent", required=False),
+    # Execution Layer (D3): policy + backends, Core об этом не знает.
+    ModuleSpec("execution", required=True),
+    ModuleSpec("integrations", required=True),
+    ModuleSpec("devices", required=True),
+    # Automation/Flows — доменный оркестратор поверх EventBus+Operations.
+    # НЕ часть Core и должен быть удаляемым без остановки runtime.
+    ModuleSpec("automation", required=False),
+    ModuleSpec("presence", required=True),
+    ModuleSpec("product_api", required=False),
+]
 
 
 async def main():
@@ -32,7 +54,11 @@ async def main():
     if config.storage_type == "sqlite":
         Path(config.db_path).parent.mkdir(parents=True, exist_ok=True)
     
-    if config.storage_mode == "dual" and config.vault_storage_type == "sqlite":
+    if (
+        config.storage_mode == "dual"
+        and config.vault_storage_type == "sqlite"
+        and config.vault_db_path
+    ):
         Path(config.vault_db_path).parent.mkdir(parents=True, exist_ok=True)
 
     # Create storage manager (handles both single and dual mode)
@@ -43,7 +69,6 @@ async def main():
     core_storage = storage_manager.get_core()
     
     runtime = CoreRuntime(core_storage, config=config)
-    bootstrap = ApplicationBootstrap(APP_MODULES)
 
     loop = asyncio.get_running_loop()
     sigint_count = 0
@@ -93,7 +118,7 @@ async def main():
 
     # 1) Приложение регистрирует модули в Core
     print("[Runtime] Регистрация модулей приложения...")
-    await bootstrap.start(runtime)
+    await runtime.module_manager.register_module_specs(runtime, APP_MODULES)
     try:
         modules = runtime.module_manager.list_modules()
         if modules:
