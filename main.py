@@ -20,8 +20,9 @@ from pathlib import Path
 
 from core.config import Config
 from core.runtime import CoreRuntime
-from core.storage_factory import create_storage_manager
+from core.storage_factory import build_storage_stack
 from core.module_manager import ModuleSpec
+from core.state_engine import StateEngine
 
 
 APP_MODULES: list[ModuleSpec] = [
@@ -61,14 +62,19 @@ async def main():
     ):
         Path(config.vault_db_path).parent.mkdir(parents=True, exist_ok=True)
 
-    # Create storage manager (handles both single and dual mode)
-    storage_manager = await create_storage_manager(config)
+    # Create StateEngine (needed for CoreStoragePort)
+    state_engine = StateEngine()
     
-    # For compatibility with existing CoreRuntime, pass core storage adapter
-    # In dual mode, CoreRuntime uses core storage; vault is handled separately
-    core_storage = storage_manager.get_core()
+    # Build complete storage stack (includes checks, adapters, manager, ports)
+    storage_stack = await build_storage_stack(config, state_engine)
     
-    runtime = CoreRuntime(core_storage, config=config)
+    # Create runtime with storage ports and state_engine
+    runtime = CoreRuntime(
+        storage_port=storage_stack.core_port,
+        config=config,
+        vault_port=storage_stack.vault_port,
+        state_engine=state_engine,
+    )
 
     loop = asyncio.get_running_loop()
     sigint_count = 0
@@ -87,8 +93,8 @@ async def main():
             )
             print("[Runtime] Core Runtime остановлен")
             
-            # Close storage manager
-            await storage_manager.close()
+            # Close storage stack
+            await storage_stack.manager.close()
             print("[Runtime] Storage закрыт")
         except asyncio.TimeoutError:
             print("[Runtime] Таймаут при остановке Runtime")

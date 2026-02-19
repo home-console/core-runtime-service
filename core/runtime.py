@@ -42,26 +42,30 @@ class CoreRuntime:
     Предоставляет единую точку доступа для плагинов.
     """
 
-    def __init__(self, storage_adapter: Any, config: Optional[Any] = None):
+    def __init__(self, storage_port: Any, config: Optional[Any] = None, vault_port: Optional[Any] = None, state_engine: Optional[Any] = None):
         """
         Инициализация Core Runtime.
         
         Args:
-            storage_adapter: адаптер для работы с хранилищем
+            storage_port: CoreStoragePort для доступа к core storage
             config: опциональная конфигурация (для shutdown_timeout)
+            vault_port: опциональный VaultStoragePort для доступа к vault (если dual-mode)
+            state_engine: опциональный StateEngine (если None, создаётся новый)
         """
         # Инициализация компонентов
         self.event_bus = EventBus()
         # ServiceRegistry с timeout из конфига (защита от зависших вызовов)
         default_timeout = config.service_call_timeout if config else None
         self.service_registry = ServiceRegistry(default_timeout=default_timeout)
-        self.state_engine = StateEngine()
         
-        # Base storage adapter instance
-        base_storage = Storage(storage_adapter)
+        # StateEngine (используем переданный или создаём новый)
+        self.state_engine = state_engine if state_engine is not None else StateEngine()
         
-        # Обёртка для синхронизации storage и state_engine
-        self.storage = StorageWithStateMirror(base_storage, self.state_engine)
+        # Storage port для core storage (уже обёрнут в StorageWithStateMirror)
+        self.storage = storage_port.storage
+        
+        # Vault port для vault storage (если dual-mode)
+        self.vault = vault_port if vault_port else None
         self.plugin_manager = PluginManager(self)
         self.module_manager = ModuleManager(self)
         # Регистр HTTP-интерфейсов (каталог контрактов)

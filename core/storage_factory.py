@@ -5,12 +5,17 @@
 Поддерживает Storage v3 dual-mode с отдельными хранилищами для Core и Vault.
 """
 
-from typing import Any
+from typing import Any, Optional
+from dataclasses import dataclass
 
 from core.config import Config
 from adapters.storage_adapter import StorageAdapter
 from core.storage_manager import StorageManager
 from core.storage_errors import StorageConfigurationError
+from core.storage_port import CoreStoragePort, VaultStoragePort
+from core.state_engine import StateEngine
+from core.secure_storage import SecureStorageWrapper
+from core.storage_startup import StorageStartupChecker
 
 
 async def create_storage_adapter(config: Config) -> StorageAdapter:
@@ -149,4 +154,78 @@ async def create_storage_manager(config: Config) -> StorageManager:
     )
     
     return manager
+
+
+@dataclass
+class StorageStack:
+    """
+    Полный стек storage компонентов для ядра.
+    
+    Содержит все необходимые компоненты для работы с storage:
+    - manager: StorageManager для доменных репозиториев
+    - core_port: CoreStoragePort для CoreRuntime
+    - vault_port: VaultStoragePort для доступа к vault (если dual-mode)
+    """
+    manager: StorageManager
+    core_port: CoreStoragePort
+    vault_port: Optional[VaultStoragePort] = None
+
+
+async def build_storage_stack(config: Config, state_engine: StateEngine) -> StorageStack:
+    """
+    Единая фабрика для создания полного storage stack.
+    
+    Выполняет:
+    1. Startup checks (StorageStartupChecker)
+    2. Создание адаптеров (core + vault если dual-mode)
+    3. Обёртка vault в SecureStorageWrapper
+    4. Создание StorageManager
+    5. Создание CoreStoragePort и VaultStoragePort
+    
+    Args:
+        config: конфигурация Core Runtime
+        state_engine: StateEngine для синхронизации состояния
+    
+    Returns:
+        StorageStack со всеми компонентами
+    
+    Raises:
+        StorageConfigurationError: если конфигурация невалидна
+        StorageCorruptionError: если integrity check не прошёл
+    """
+    # Step 1: Startup checks
+    checker = StorageStartupChecker(config)
+    await checker.check_all()
+    
+    # Step 2: Create core storage adapter
+    core_adapter = await create_storage_adapter(config)
+    
+    # Step 3: Create vault storage adapter (если dual-mode)
+    vault_adapter = None
+    secure_storage = None
+    if config.storage_mode == "dual":
+        vault_adapter = await _create_vault_storage_adapter(config)
+        
+        # Step 4: Wrap vault adapter in SecureStorageWrapper
+        secure_storage = SecureStorageWrapper(vault_adapter)
+        await secure_storage.initialize()
+    
+    # Step 5: Create StorageManager
+    manager = StorageManager(
+        core_storage=core_adapter,
+        vault_storage=vault_adapter,
+        mode=config.storage_mode,
+    )
+    
+    # Step 6: Create ports
+    core_port = CoreStoragePort(core_adapter, state_engine)
+    vault_port = None
+    if secure_storage:
+        vault_port = VaultStoragePort(secure_storage)
+    
+    return StorageStack(
+        manager=manager,
+        core_port=core_port,
+        vault_port=vault_port,
+    )
 

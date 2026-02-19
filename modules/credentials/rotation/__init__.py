@@ -5,6 +5,7 @@ Provides automated credential lifecycle management:
 - Manual rotation
 - State tracking
 - Audit logging
+- Plugin-based rotation strategies
 """
 
 from .policy import (
@@ -14,6 +15,7 @@ from .policy import (
     RotationState,
 )
 from .executor import RotationExecutor
+from .executor_v2 import RotationExecutor as RotationExecutorV2
 from .scheduler import RotationScheduler
 from .engine import CredentialRotationEngine
 from .exceptions import (
@@ -30,6 +32,21 @@ from .secret_gen import (
     generate_database_password,
     calculate_entropy_bits,
 )
+# Strategy plugin system
+from .strategy import (
+    RotationStrategy as RotationStrategyBase,
+    RotationStrategyType,
+    RotationStrategyContext,
+    RotationResult,
+    StrategyExecutionError,
+    IdempotencyKeyError,
+)
+from .registry import StrategyRegistry
+from .strategies import (
+    GenerateNewSecretStrategy,
+    AgentPushStrategy,
+    WebhookRotationStrategy,
+)
 
 __all__ = [
     # Policy
@@ -39,8 +56,19 @@ __all__ = [
     "RotationState",
     # Components
     "RotationExecutor",
+    "RotationExecutorV2",
     "RotationScheduler",
     "CredentialRotationEngine",
+    # Strategy System
+    "RotationStrategyBase",
+    "RotationStrategyType",
+    "RotationStrategyContext",
+    "RotationResult",
+    "StrategyRegistry",
+    # Built-in Strategies
+    "GenerateNewSecretStrategy",
+    "AgentPushStrategy",
+    "WebhookRotationStrategy",
     # Exceptions
     "RotationException",
     "RotationFailedError",
@@ -48,6 +76,8 @@ __all__ = [
     "RotationTimeoutError",
     "RotationCancelledError",
     "SecretGenerationError",
+    "StrategyExecutionError",
+    "IdempotencyKeyError",
     # Utilities
     "generate_strong_secret",
     "generate_api_token",

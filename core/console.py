@@ -12,7 +12,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from core.config import Config
 from core.runtime import CoreRuntime
-from core.storage_factory import create_storage_adapter
+from core.storage_factory import build_storage_stack
+from core.state_engine import StateEngine
 from core.http_registry import HttpEndpoint
 
 
@@ -80,8 +81,17 @@ async def run_cli(argv: Optional[List[str]] = None, input_func: Callable[[str], 
     # Создать директорию для БД, если нужно (только для SQLite)
     if config.storage_type == "sqlite":
         Path(config.db_path).parent.mkdir(parents=True, exist_ok=True)
-    adapter = await create_storage_adapter(config)
-    runtime = CoreRuntime(adapter)
+    
+    # Create StateEngine and build storage stack
+    state_engine = StateEngine()
+    storage_stack = await build_storage_stack(config, state_engine)
+    
+    runtime = CoreRuntime(
+        storage_port=storage_stack.core_port,
+        config=config,
+        vault_port=storage_stack.vault_port,
+        state_engine=state_engine,
+    )
 
     await _auto_load_plugins(runtime)
 
