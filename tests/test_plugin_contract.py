@@ -12,7 +12,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from core.base_plugin import BasePlugin, PluginMetadata
-from core.plugin_manager import PluginManager
+from core.plugins import PluginManager
 from core.runtime import CoreRuntime
 
 
@@ -347,7 +347,7 @@ async def test_plugin_load_error_sets_error_state():
         await manager.load_plugin(failing_plugin)
     
     # Состояние должно быть ERROR
-    from core.plugin_manager import PluginState
+    from core.plugins import PluginState
     assert manager.get_plugin_state("failing") == PluginState.ERROR
 
 

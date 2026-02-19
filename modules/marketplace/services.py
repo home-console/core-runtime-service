@@ -14,7 +14,7 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone
 from pathlib import Path
 
-from core.operations import Operation
+from core.operations.models import Operation
 from modules.marketplace.installer import MarketplaceInstaller, InstallerError
 from core.marketplace.transaction import UpdateTransactionManager, TransactionError, RollbackError
 

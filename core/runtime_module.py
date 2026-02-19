@@ -26,7 +26,9 @@ RuntimeModule — это обязательные домены системы, �
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Awaitable, Callable, Optional
+from typing import Any, Awaitable, Callable, Optional, Union
+
+from core.runtime_context import RuntimeContext
 
 # Тип для сервисной функции: async (*args, **kwargs) -> Any
 ServiceFunc = Callable[..., Awaitable[Any]]
@@ -57,14 +59,37 @@ class RuntimeModule(ABC):
         - Один экземпляр модуля может быть зарегистрирован только один раз
     """
 
-    def __init__(self, runtime: Any):
+    def __init__(self, runtime_or_context: Union[Any, RuntimeContext]):
         """
         Инициализация модуля.
 
         Args:
-            runtime: экземпляр CoreRuntime
+            runtime_or_context: экземпляр CoreRuntime или RuntimeContext
+                Если передан CoreRuntime, создаётся RuntimeContext автоматически
         """
-        self.runtime = runtime
+        # Поддержка обратной совместимости: принимаем как runtime, так и context
+        if isinstance(runtime_or_context, RuntimeContext):
+            self.context = runtime_or_context
+            # Для обратной совместимости сохраняем runtime если доступен
+            self.runtime = getattr(runtime_or_context, '_runtime', None)
+        else:
+            # Старый способ: передали runtime напрямую
+            self.runtime = runtime_or_context
+            # Создаём context из runtime если у runtime есть метод create_context
+            if hasattr(runtime_or_context, 'create_context'):
+                self.context = runtime_or_context.create_context()
+            else:
+                # Fallback: создаём минимальный context вручную
+                from core.runtime_context import RuntimeContext
+                self.context = RuntimeContext(
+                    storage=runtime_or_context.storage,
+                    vault=getattr(runtime_or_context, 'vault', None),
+                    services=runtime_or_context.service_registry,
+                    http=runtime_or_context.http,
+                    capabilities=runtime_or_context.capability_registry,
+                    operations=runtime_or_context.operations,
+                    state=getattr(runtime_or_context, 'state_engine', None),
+                )
 
     async def register_service(
         self,
@@ -88,9 +113,15 @@ class RuntimeModule(ABC):
         """
 
         async def _wrapper(*args, **kwargs):
-            return await func(self.runtime, *args, **kwargs)
+            # Используем context если доступен, иначе runtime для обратной совместимости
+            ctx = self.context if hasattr(self, 'context') and self.context else self.runtime
+            return await func(ctx, *args, **kwargs)
 
-        reg = self.runtime.service_registry
+        # Используем context.services если доступен
+        if hasattr(self, 'context') and self.context:
+            reg = self.context.services
+        else:
+            reg = self.runtime.service_registry
         if hasattr(reg, "register_with_acl"):
             await reg.register_with_acl(
                 name,

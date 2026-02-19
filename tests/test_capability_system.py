@@ -12,7 +12,7 @@ import pytest
 from typing import Optional, List
 
 from core.base_plugin import BasePlugin, PluginMetadata
-from core.plugin_manager import PluginManager, PluginState
+from core.plugins import PluginManager, PluginState
 from core.runtime import CoreRuntime
 from core.capability_registry import CapabilityRegistry
 

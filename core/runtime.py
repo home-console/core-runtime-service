@@ -20,18 +20,19 @@ from core.service_registry import ServiceRegistry
 from core.state_engine import StateEngine
 from core.storage import Storage
 from core.storage_mirror import StorageWithStateMirror
-from core.plugin_manager import PluginManager, PluginState
+from core.plugins import PluginManager, PluginState
 from core.module_manager import ModuleManager
 from core.http_registry import HttpRegistry
 from core.integration_registry import IntegrationRegistry
 from core.capability_registry import CapabilityRegistry
 from core.logger_helper import info, warning
 from core.base_plugin import BasePlugin
-from core.operations import OperationManager
+from core.operations.manager import OperationManager
 from core.dependency_resolver import DependencyResolver, RuntimeIntegrityError  # Step 10
 from core.agent.enrollment import AgentEnrollmentManager
 from core.agent.registry import AgentRegistry
 from core.agent.tls import MTLSCertificateAuthority
+from core.runtime_context import RuntimeContext
 
 
 class CoreRuntime:
@@ -94,6 +95,26 @@ class CoreRuntime:
 
         self._running = False
         self._start_time: Optional[float] = None
+    
+    def create_context(self) -> RuntimeContext:
+        """
+        Создать RuntimeContext для модулей и плагинов.
+        
+        Возвращает ограниченный контекст с только необходимыми компонентами.
+        Используется модулями и плагинами вместо прямого доступа к runtime.
+        
+        Returns:
+            RuntimeContext с storage, services, http, capabilities, operations
+        """
+        return RuntimeContext(
+            storage=self.storage,
+            vault=self.vault,
+            services=self.service_registry,
+            http=self.http,
+            capabilities=self.capability_registry,
+            operations=self.operations,
+            state=self.state_engine,
+        )
 
     @property
     def state(self):

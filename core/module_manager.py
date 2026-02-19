@@ -361,6 +361,8 @@ class ModuleManager:
             RuntimeError: если создание экземпляра не удалось
         """
         try:
+            # Передаём runtime, RuntimeModule сам создаст context если нужно
+            # Это обеспечивает обратную совместимость
             return module_class(runtime)
         except Exception as e:
             raise RuntimeError(f"Failed to create module instance: {e}")

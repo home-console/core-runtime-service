@@ -10,9 +10,10 @@
 import os
 from abc import abstractmethod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Optional, Awaitable, Callable, Any, Literal
+from typing import TYPE_CHECKING, Optional, Awaitable, Callable, Any, Literal, Union
 
 from sdk.plugin import BasePlugin as SDKBasePlugin
+from core.runtime_context import RuntimeContext
 
 if TYPE_CHECKING:
     from core.runtime import CoreRuntime
@@ -48,13 +49,53 @@ class PluginMetadata:
 class BasePlugin(SDKBasePlugin):
     """
     Базовый класс для всех плагинов (расширяет sdk.BasePlugin).
+    
     Lifecycle: on_load → on_start → on_stop → on_unload.
+    
+    Согласованность с RuntimeModule:
+    - Module: __init__ → register() → start() → stop()
+    - Plugin: __init__ → on_load() → on_start() → on_stop() → on_unload()
+    
+    Различия:
+    - Module.register() регистрирует сервисы/endpoints (идентично Plugin.on_load())
+    - Module.start() инициализирует runtime-зависимые ресурсы (идентично Plugin.on_start())
+    - Module.stop() останавливает модуль (идентично Plugin.on_stop())
+    - Plugin.on_unload() дополнительно очищает ресурсы (Module не имеет аналога)
+    
+    Оба используют RuntimeContext для доступа к ядру (storage, services, http, capabilities, operations).
     """
     _loaded: bool = False
     _started: bool = False
 
-    def __init__(self, runtime: Optional["CoreRuntime"] = None) -> None:
+    def __init__(self, runtime_or_context: Optional[Union["CoreRuntime", RuntimeContext]] = None) -> None:
+        """
+        Инициализация плагина.
+        
+        Args:
+            runtime_or_context: экземпляр CoreRuntime или RuntimeContext
+                Если передан CoreRuntime, создаётся RuntimeContext автоматически
+                Если None, context будет установлен позже через PluginManager
+        """
+        # Для обратной совместимости передаём runtime в SDKBasePlugin
+        runtime = runtime_or_context if not isinstance(runtime_or_context, RuntimeContext) else None
         super().__init__(runtime)
+        
+        # Сохраняем context если передан
+        if isinstance(runtime_or_context, RuntimeContext):
+            self.context = runtime_or_context
+            self.runtime = None  # Не используем runtime напрямую
+        elif runtime_or_context is not None:
+            # Старый способ: передали runtime
+            self.runtime = runtime_or_context
+            # Создаём context из runtime если у runtime есть метод create_context
+            if hasattr(runtime_or_context, 'create_context'):
+                self.context = runtime_or_context.create_context()
+            else:
+                self.context = None  # Будет установлен позже через PluginManager
+        else:
+            self.runtime = None
+            self.context = None  # Будет установлен позже через PluginManager
+        
         self._loaded = False
         self._started = False
 
@@ -86,7 +127,14 @@ class BasePlugin(SDKBasePlugin):
             # В сомнительных случаях не ужесточаем, оставляем на усмотрение конвенций в ServiceRegistry
             effective_admin_only = admin_only
 
-        reg = self.runtime.service_registry
+        # Используем context.services если доступен, иначе runtime.service_registry
+        if hasattr(self, 'context') and self.context:
+            reg = self.context.services
+        elif self.runtime:
+            reg = self.runtime.service_registry
+        else:
+            raise RuntimeError("Plugin not initialized: no runtime or context available")
+        
         if hasattr(reg, "register_with_acl"):
             await reg.register_with_acl(
                 name,

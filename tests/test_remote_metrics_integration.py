@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from core.runtime import CoreRuntime
-from core.plugin_manager import PluginManager
+from core.plugins import PluginManager
 from plugins.remote_plugin_proxy import RemotePluginProxy
 from tests.conftest import InMemoryStorageAdapter
 

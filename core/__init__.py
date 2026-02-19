@@ -7,7 +7,6 @@ from .console import run_cli
 from .event_bus import EventBus
 from .http_registry import HttpRegistry
 from .module_manager import ModuleManager
-from .plugin_manager import PluginManager
 from .runtime import CoreRuntime
 from .runtime_module import RuntimeModule
 from .service_registry import ServiceRegistry
@@ -31,7 +30,6 @@ __all__ = [
     "info",
     "warning",
     "error",
-    "PluginManager",
     "HttpRegistry",
     "ModuleManager",
     "RuntimeModule",

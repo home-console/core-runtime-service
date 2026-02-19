@@ -12,9 +12,7 @@ Inspector = memory dump runtime, не API.
 from typing import Any, Dict, List
 import time
 
-from core.plugin_manager import PluginState
-
-from core.plugin_manager import PluginState
+from core.plugins import PluginState
 
 
 async def get_runtime_info(runtime: Any, admin_started_at: float | None) -> Dict[str, Any]:

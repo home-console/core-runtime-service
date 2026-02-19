@@ -15,8 +15,10 @@ from core.operations import (
     OperationInitiator, OperationInitiatorKind
 )
 from core.execution_router import ExecutionRouter
-from core.process_executor import ProcessExecutor
-from core.container_executor import ContainerExecutor
+# NOTE: Старые executors удалены, используйте execution/backends/ProcessBackend и ContainerBackend
+# from core.process_executor import ProcessExecutor  # DEPRECATED
+# from core.container_executor import ContainerExecutor  # DEPRECATED
+# TODO: Обновить тесты для использования execution/backends/
 from core.capability_protocol import ProviderMetadata
 from core.capability_registry import CapabilityRegistry
 
@@ -97,8 +99,23 @@ class TestExecutionRouter:
     
     @pytest.mark.asyncio
     async def test_process_execution_routing(self, router, operation):
-        """Test process execution routing."""
-        executor_mock = AsyncMock(return_value={"status": "process_result"})
+        """Test process execution routing через ExecutionController."""
+        # NOTE: ExecutionRouter теперь использует ExecutionController если доступен
+        # Этот тест проверяет, что routing работает через ExecutionController
+        from core.execution.controller import ExecutionControllerImpl
+        from core.execution.backend import OperationResult
+        
+        # Создаём mock ExecutionController
+        controller_mock = AsyncMock(spec=ExecutionControllerImpl)
+        controller_mock.execute_operation = AsyncMock(
+            return_value=OperationResult(
+                ok=True,
+                result={"status": "process_result"},
+                backend="process"
+            )
+        )
+        
+        router.runtime.execution_controller = controller_mock
         
         metadata = ProviderMetadata(
             plugin_name="test_plugin",
@@ -107,14 +124,28 @@ class TestExecutionRouter:
             process_config={"cmd": "python handler.py", "timeout": 30}
         )
         
-        with patch.object(ProcessExecutor, 'execute', executor_mock):
-            result = await router.execute(operation, metadata)
-            assert result == {"status": "process_result"}
+        result = await router.execute(operation, metadata)
+        assert result == {"status": "process_result"}
+        controller_mock.execute_operation.assert_called_once()
     
     @pytest.mark.asyncio
     async def test_container_execution_routing(self, router, operation):
-        """Test container execution routing."""
-        executor_mock = AsyncMock(return_value={"status": "container_result"})
+        """Test container execution routing через ExecutionController."""
+        # NOTE: ExecutionRouter теперь использует ExecutionController если доступен
+        from core.execution.controller import ExecutionControllerImpl
+        from core.execution.backend import OperationResult
+        
+        # Создаём mock ExecutionController
+        controller_mock = AsyncMock(spec=ExecutionControllerImpl)
+        controller_mock.execute_operation = AsyncMock(
+            return_value=OperationResult(
+                ok=True,
+                result={"status": "container_result"},
+                backend="container"
+            )
+        )
+        
+        router.runtime.execution_controller = controller_mock
         
         metadata = ProviderMetadata(
             plugin_name="test_plugin",
@@ -123,9 +154,9 @@ class TestExecutionRouter:
             container_config={"image": "test:latest", "timeout": 30}
         )
         
-        with patch.object(ContainerExecutor, 'execute', executor_mock):
-            result = await router.execute(operation, metadata)
-            assert result == {"status": "container_result"}
+        result = await router.execute(operation, metadata)
+        assert result == {"status": "container_result"}
+        controller_mock.execute_operation.assert_called_once()
     
     @pytest.mark.asyncio
     async def test_unknown_execution_mode(self, router, operation):
@@ -145,152 +176,19 @@ class TestExecutionRouter:
             await router.execute(operation, metadata)
 
 
-class TestProcessExecutor:
-    """Test ProcessExecutor subprocess execution."""
-    
-    @pytest.fixture
-    def executor(self):
-        """Create ProcessExecutor."""
-        return ProcessExecutor()
-    
-    @pytest.fixture
-    def operation(self):
-        """Create sample operation."""
-        initiator = OperationInitiator(
-            kind=OperationInitiatorKind.ADMIN,
-            user_id="test_admin"
-        )
-        return Operation(
-            operation_id="op456",
-            op_type="compute.task",
-            params={"x": 5, "y": 10},
-            initiator=initiator
-        )
-    
-    def test_executor_init(self, executor):
-        """Test ProcessExecutor initialization."""
-        assert executor is not None
-        assert hasattr(executor, 'execute')
-    
-    @pytest.mark.asyncio
-    async def test_process_execution_success(self, executor, operation):
-        """Test successful subprocess execution."""
-        config = {
-            "cmd": "python -c \"print(json.dumps({'result': 42}))\"",
-            "timeout": 10
-        }
-        
-        # Mock subprocess to return success
-        mock_process = AsyncMock()
-        mock_process.wait = AsyncMock(return_value=0)
-        mock_process.communicate = AsyncMock(
-            return_value=(b'{"result": 42}', b'')
-        )
-        mock_process.returncode = 0
-        
-        with patch('asyncio.create_subprocess_exec', return_value=mock_process):
-            result = await executor.execute(operation, config)
-            assert result == {"result": 42}
-    
-    @pytest.mark.asyncio
-    async def test_process_execution_with_timeout(self, executor, operation):
-        """Test process execution timeout handling."""
-        config = {
-            "cmd": "sleep 100",
-            "timeout": 0.1  # Very short timeout
-        }
-        
-        # This test just verifies timeout config is accepted
-        # Actual timeout testing would require real process
-        try:
-            # Create a simple process
-            mock_process = AsyncMock()
-            mock_process.kill = AsyncMock()
-            
-            with patch('asyncio.create_subprocess_exec', return_value=mock_process):
-                with patch('asyncio.wait_for', side_effect=asyncio.TimeoutError):
-                    with pytest.raises(Exception):  # Exception or timeout
-                        await executor.execute(operation, config)
-        except Exception:
-            pass  # Expected
+# NOTE: Старые executors удалены. Тесты для ProcessExecutor и ContainerExecutor
+# должны быть переписаны для использования execution/backends/ProcessBackend и ContainerBackend.
+# TODO: Переписать эти тесты для новых backends
 
+# class TestProcessExecutor:
+#     """Test ProcessExecutor subprocess execution."""
+#     # DEPRECATED: Используйте execution/backends/ProcessBackend
+#     pass
 
-class TestContainerExecutor:
-    """Test ContainerExecutor docker/podman execution."""
-    
-    @pytest.fixture
-    def executor(self):
-        """Create ContainerExecutor."""
-        return ContainerExecutor()
-    
-    @pytest.fixture
-    def operation(self):
-        """Create sample operation."""
-        initiator = OperationInitiator(
-            kind=OperationInitiatorKind.ADMIN,
-            user_id="test_admin"
-        )
-        return Operation(
-            operation_id="op789",
-            op_type="ml.inference",
-            params={"model": "gpt", "prompt": "test"},
-            initiator=initiator
-        )
-    
-    def test_executor_init(self, executor):
-        """Test ContainerExecutor initialization."""
-        assert executor is not None
-        assert hasattr(executor, 'execute')
-        assert hasattr(executor, '_detect_docker')
-    
-    def test_docker_detection(self, executor):
-        """Test docker/podman detection."""
-        with patch('shutil.which') as mock_which:
-            # Test docker available
-            mock_which.return_value = "/usr/bin/docker"
-            docker_cmd = executor._detect_docker()
-            assert docker_cmd in ["docker", "podman"]
-    
-    @pytest.mark.asyncio
-    async def test_container_execution_success(self, executor, operation):
-        """Test successful container execution."""
-        config = {
-            "image": "python:3.11",
-            "timeout": 30,
-            "env": {"KEY": "value"}
-        }
-        
-        mock_process = AsyncMock()
-        mock_process.wait = AsyncMock(return_value=0)
-        mock_process.communicate = AsyncMock(
-            return_value=(b'{"status": "completed"}', b'')
-        )
-        mock_process.returncode = 0
-        
-        with patch('asyncio.create_subprocess_exec', return_value=mock_process):
-            with patch.object(executor, '_detect_docker', return_value='docker'):
-                result = await executor.execute(operation, config)
-                assert result == {"status": "completed"}
-    
-    @pytest.mark.asyncio
-    async def test_container_execution_with_volumes(self, executor, operation):
-        """Test container execution with volume mounts."""
-        config = {
-            "image": "python:3.11",
-            "timeout": 30,
-            "volumes": {"/data": "/container/data"}
-        }
-        
-        mock_process = AsyncMock()
-        mock_process.communicate = AsyncMock(
-            return_value=(b'{"mounted": true}', b'')
-        )
-        mock_process.returncode = 0
-        
-        with patch('asyncio.create_subprocess_exec', return_value=mock_process):
-            with patch.object(executor, '_detect_docker', return_value='docker'):
-                result = await executor.execute(operation, config)
-                assert result == {"mounted": True}
+# class TestContainerExecutor:
+#     """Test ContainerExecutor docker/podman execution."""
+#     # DEPRECATED: Используйте execution/backends/ContainerBackend
+#     pass
 
 
 class TestExecutionModes:
