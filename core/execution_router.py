@@ -1,9 +1,16 @@
 """
 ExecutionRouter — Legacy adapter для обратной совместимости.
 
-DEPRECATED: Используйте ExecutionControllerImpl напрямую через runtime.execution_controller.
+⚠️ DEPRECATED: Этот класс больше не используется в прод-коде и будет удалён в будущем.
 
-Этот класс остаётся для обратной совместимости со старым кодом,
+REFACTORING STATUS:
+- OperationExecutor больше не использует ExecutionRouter как fallback
+- OperationManager больше не создаёт ExecutionRouter
+- OperationHandlerRegistry больше не регистрирует handler'ы в ExecutionRouter
+
+Используйте ExecutionControllerImpl напрямую через runtime.execution_controller.
+
+Этот класс остаётся только для обратной совместимости со старым кодом,
 который использует Operation + ProviderMetadata → Dict[str, Any].
 
 Новый код должен использовать ExecutionControllerImpl.execute_operation() напрямую.
@@ -36,7 +43,19 @@ class ExecutionRouter:
     """
     
     def __init__(self, runtime: Any):
-        """Initialize router with runtime context."""
+        """
+        Initialize router with runtime context.
+        
+        ⚠️ DEPRECATED: Этот класс больше не используется в прод-коде.
+        Используйте runtime.execution_controller напрямую.
+        """
+        import warnings
+        warnings.warn(
+            "ExecutionRouter is deprecated and will be removed in a future version. "
+            "Use runtime.execution_controller.execute_operation() directly.",
+            DeprecationWarning,
+            stacklevel=2
+        )
         self.runtime = runtime
         # Храним handlers для fallback (если ExecutionController недоступен)
         self._local_handlers: Dict[str, Callable[[Dict[str, Any], Operation], Awaitable[Dict[str, Any]]]] = {}
@@ -79,7 +98,7 @@ class ExecutionRouter:
             ExecutionRouterError: if routing or execution fails
         """
         # Пытаемся использовать ExecutionControllerImpl если доступен
-        controller = getattr(self.runtime, "execution_controller", None)
+        controller = self.runtime.execution_controller
         
         if controller is not None:
             # Используем новый ExecutionController

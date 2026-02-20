@@ -111,7 +111,7 @@ class OperationExecutor:
         """
         from core.remote_executor import RemoteOperationExecutor
         
-        provider_name = provider_info.get("plugin")
+        provider_name = provider_info.get("plugin") or "unknown"
         
         # Mark as running
         operation.status = OperationStatus.RUNNING
@@ -181,8 +181,9 @@ class OperationExecutor:
                         
                         # Skip current provider and try next healthy one
                         for alt_provider in all_providers:
-                            if alt_provider["plugin"] != provider_name and alt_provider.get("type") == "remote":
-                                if not self._health_monitor.should_skip_provider(alt_provider["plugin"]):
+                            alt_provider_name = alt_provider.get("plugin") or "unknown"
+                            if alt_provider_name != provider_name and alt_provider.get("type") == "remote":
+                                if not self._health_monitor.should_skip_provider(alt_provider_name):
                                     # Reset operation status and retry with alternative
                                     operation.status = OperationStatus.PENDING
                                     operation.error = None
@@ -293,50 +294,60 @@ class OperationExecutor:
             operation.started_at = time.time()
             await self.storage.persist(operation)
             
-            # Execute через ExecutionController если доступен, иначе через ExecutionRouter (legacy)
+            # REFACTORING: ExecutionRouter удалён, execution_controller теперь обязателен
+            # Если execution_controller отсутствует, это ошибка конфигурации
             controller = self.runtime.execution_controller
             
-            if controller is not None:
-                # Используем новый ExecutionController
-                context = {
-                    "runtime": self.runtime,
-                    "operation_id": operation.operation_id,
-                }
-                
-                # Добавляем provider metadata в context если есть
-                if provider_metadata:
-                    context["_execution_policy"] = {
-                        "execution_mode": getattr(provider_metadata, "execution_mode", "in_process"),
-                        "process_config": getattr(provider_metadata, "process_config", None),
-                        "container_config": getattr(provider_metadata, "container_config", None),
-                    }
-                
-                op_res = await controller.execute_operation(
-                    operation_id=operation.operation_id,
-                    operation_type=operation.type,
-                    params=operation.params,
-                    context=context,
+            if controller is None:
+                # Execution controller должен быть доступен (устанавливается модулем execution)
+                operation.status = OperationStatus.FAILED
+                operation.error = OperationError(
+                    code="execution_controller_unavailable",
+                    message="Execution controller is not available. Ensure 'execution' module is registered."
                 )
+                await self.storage.persist(operation)
                 
-                # Конвертируем OperationResult → Operation status
-                if op_res.ok:
-                    operation.status = OperationStatus.SUCCESS
-                    operation.result = op_res.result or {}
-                else:
-                    operation.status = OperationStatus.FAILED
-                    error_info = op_res.error or {}
-                    operation.error = OperationError(
-                        code=str(error_info.get("code", "execution_error")),
-                        message=str(error_info.get("message", "Execution failed")),
-                        details=error_info
-                    )
-            else:
-                # Fallback: используем ExecutionRouter (legacy)
-                from core.execution_router import ExecutionRouter
-                execution_router = ExecutionRouter(self.runtime)
-                result = await execution_router.execute(operation, provider_metadata)
+                # Record metrics
+                metrics.increment_counter("operations_total", label_value=operation.type)
+                metrics.increment_counter("operations_failed_total", label_value=operation.type)
+                latency = (time.time() - start_time) * 1000  # ms
+                metrics.observe_histogram("operation_latency_seconds", latency / 1000.0)
+                
+                return operation
+            
+            # Используем ExecutionController
+            context = {
+                "runtime": self.runtime,
+                "operation_id": operation.operation_id,
+            }
+            
+            # Добавляем provider metadata в context если есть
+            if provider_metadata:
+                context["_execution_policy"] = {
+                    "execution_mode": getattr(provider_metadata, "execution_mode", "in_process"),
+                    "process_config": getattr(provider_metadata, "process_config", None),
+                    "container_config": getattr(provider_metadata, "container_config", None),
+                }
+            
+            op_res = await controller.execute_operation(
+                operation_id=operation.operation_id,
+                operation_type=operation.type,
+                params=operation.params,
+                context=context,
+            )
+            
+            # Конвертируем OperationResult → Operation status
+            if op_res.ok:
                 operation.status = OperationStatus.SUCCESS
-                operation.result = result
+                operation.result = op_res.result or {}
+            else:
+                operation.status = OperationStatus.FAILED
+                error_info = op_res.error or {}
+                operation.error = OperationError(
+                    code=str(error_info.get("code", "execution_error")),
+                    message=str(error_info.get("message", "Execution failed")),
+                    details=error_info
+                )
             
             operation.finished_at = time.time()
             

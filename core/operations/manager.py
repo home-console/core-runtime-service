@@ -40,12 +40,9 @@ class OperationManager:
         """
         self.runtime = runtime
         
-        # Execution router для обратной совместимости (legacy fallback)
-        from core.execution_router import ExecutionRouter
-        execution_router = ExecutionRouter(runtime)
-        
+        # REFACTORING: ExecutionRouter удалён, больше не нужен для registry
         # Создаём компоненты
-        self._registry = OperationHandlerRegistry(execution_router)
+        self._registry = OperationHandlerRegistry(execution_router=None)
         self._storage = OperationStorage(runtime)
         self._executor = OperationExecutor(self._registry, runtime, self._storage)
         

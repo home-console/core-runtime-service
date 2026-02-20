@@ -47,9 +47,7 @@ class OperationHandlerRegistry:
         """
         with self._handlers_lock:
             self._handlers[op_type] = handler
-            # Also register with ExecutionRouter for isolation support
-            if self._execution_router:
-                self._execution_router.register_handler(op_type, handler)
+            # REFACTORING: ExecutionRouter удалён, больше не регистрируем handler'ы там
     
     def unregister(self, op_type: str) -> None:
         """
@@ -60,9 +58,7 @@ class OperationHandlerRegistry:
         """
         with self._handlers_lock:
             self._handlers.pop(op_type, None)
-            # Also unregister from ExecutionRouter (P0: race condition fix)
-            if self._execution_router:
-                self._execution_router.unregister_handler(op_type)
+            # REFACTORING: ExecutionRouter удалён, больше не нужно дерегистрировать
     
     def list_types(self) -> List[str]:
         """
