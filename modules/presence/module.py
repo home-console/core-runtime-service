@@ -31,7 +31,7 @@ class PresenceModule(RuntimeModule):
         Регистрирует сервис presence.set и HTTP endpoints.
         """
         # Регистрация сервиса
-        await self.runtime.service_registry.register("presence.set", self._set_service)
+        await self.context.services.register("presence.set", self._set_service)
 
         # Регистрация HTTP контрактов
         try:
@@ -60,10 +60,10 @@ class PresenceModule(RuntimeModule):
         Инициализирует состояние presence.home в False, если отсутствует.
         """
         try:
-            cur = await self.runtime.storage.get("presence", "home")
+            cur = await self.context.storage.get("presence", "home")
             if cur is None or not isinstance(cur, dict) or cur.get("value") is None:
                 # Инициализируем в False, если отсутствует
-                await self.runtime.storage.set("presence", "home", {"value": False})
+                await self.context.storage.set("presence", "home", {"value": False})
         except Exception:
             # Не мешаем старту системы
             pass
@@ -76,7 +76,7 @@ class PresenceModule(RuntimeModule):
         """
         # Отмена регистрации сервиса
         try:
-            await self.runtime.service_registry.unregister("presence.set")
+            await self.context.services.unregister("presence.set")
         except Exception:
             pass
 
@@ -101,7 +101,7 @@ class PresenceModule(RuntimeModule):
                 raise ValueError("Аргумент 'home' должен быть типа bool")
 
             # Получаем старое состояние (может быть None) — читаем из storage
-            old = await self.runtime.storage.get("presence", "home")
+            old = await self.context.storage.get("presence", "home")
             # Извлекаем значение из dict, если это dict, иначе считаем False
             if isinstance(old, dict):
                 old_val = old.get("value", False)
@@ -116,7 +116,7 @@ class PresenceModule(RuntimeModule):
 
             # Обновляем state через storage — storage является SOR
             # Storage требует dict, поэтому оборачиваем bool в dict
-            await self.runtime.storage.set("presence", "home", {"value": home})
+            await self.context.storage.set("presence", "home", {"value": home})
 
             # Публикуем событие в зависимости от направления изменения
             payload = {"old_state": old_val, "new_state": home}
@@ -130,7 +130,7 @@ class PresenceModule(RuntimeModule):
         except Exception as exc:
             # Логируем ошибки, но не ломаем Core
             try:
-                await self.runtime.service_registry.call(
+                await self.context.services.call(
                     "logger.log",
                     level="error",
                     message=f"presence.set error: {str(exc)}",

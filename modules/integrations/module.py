@@ -27,12 +27,13 @@ class IntegrationsModule(RuntimeModule):
             return await admin_v1_integrations(self.runtime)
 
         try:
-            if hasattr(self.runtime.service_registry, "register_with_acl"):
-                await self.runtime.service_registry.register_with_acl(
+            services = self.context.services
+            if hasattr(services, "register_with_acl"):
+                await services.register_with_acl(
                     "admin.v1.integrations", _wrap, admin_only=True
                 )
             else:
-                await self.runtime.service_registry.register("admin.v1.integrations", _wrap)
+                await services.register("admin.v1.integrations", _wrap)
         except ValueError:
             pass
         

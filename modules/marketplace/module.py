@@ -228,6 +228,15 @@ class MarketplaceModule(RuntimeModule):
     
     def list_installed_plugins(self) -> Dict[str, Any]:
         """Get installed plugins from storage."""
+        # REFACTORING: Синхронный метод, но storage асинхронный
+        # Для обратной совместимости используем runtime.storage напрямую
+        # TODO: Переделать на async или добавить синхронный wrapper
+        storage = self.context.storage if hasattr(self, "context") and self.context else self.runtime.storage
+        # Внимание: это синхронный вызов, но storage.get асинхронный
+        # Это legacy код, который нужно будет переделать
+        if hasattr(storage, "get_sync"):
+            return (storage.get_sync("marketplace.installed") or {})
+        # Fallback на runtime.storage для синхронного доступа (legacy)
         return (self.runtime.storage.get("marketplace.installed") or {})
     
     def get_manifest(self, plugin_name: str) -> Optional[Dict[str, Any]]:

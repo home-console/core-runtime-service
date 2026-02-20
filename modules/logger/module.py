@@ -55,10 +55,11 @@ class LoggerModule(RuntimeModule):
         # Регистрируем сервис logger.log (ACL обвязка в ядре — без ограничений)
         # Поддерживаем старые FakeRegistry объекты в тестах, поэтому используем
         # register_with_acl если доступен, иначе падаем back на register().
-        if hasattr(self.runtime.service_registry, "register_with_acl"):
-            await self.runtime.service_registry.register_with_acl("logger.log", self._log_service)
+        services = self.context.services if hasattr(self, "context") and self.context else self.runtime.service_registry
+        if hasattr(services, "register_with_acl"):
+            await services.register_with_acl("logger.log", self._log_service)
         else:
-            await self.runtime.service_registry.register("logger.log", self._log_service)
+            await services.register("logger.log", self._log_service)
 
     async def start(self) -> None:
         """
@@ -99,7 +100,8 @@ class LoggerModule(RuntimeModule):
 
         # Отменяем регистрацию сервиса
         try:
-            await self.runtime.service_registry.unregister("logger.log")
+            services = self.context.services if hasattr(self, "context") and self.context else self.runtime.service_registry
+            await services.unregister("logger.log")
         except Exception:
             pass
 
@@ -190,8 +192,9 @@ class LoggerModule(RuntimeModule):
         
         # Если доступен RequestLoggerModule, записываем лог туда тоже
         try:
-            if hasattr(self.runtime, 'service_registry'):
-                has_request_logger = await self.runtime.service_registry.has_service("request_logger.log")
+            services = self.context.services if hasattr(self, "context") and self.context else self.runtime.service_registry
+            if services:
+                has_request_logger = await services.has_service("request_logger.log")
                 if has_request_logger:
                     # Используем operation_id из параметров или из контекста выполнения
                     if not operation_id:
@@ -199,7 +202,7 @@ class LoggerModule(RuntimeModule):
                         operation_id = get_operation_id()
                     
                     if operation_id:
-                        await self.runtime.service_registry.call(
+                        await services.call(
                             "request_logger.log",
                             request_id=operation_id,  # Используем operation_id как request_id для обратной совместимости API
                             level=lvl,

@@ -36,16 +36,26 @@ class LoggedClientSession:
         Инициализация обёртки.
         
         Args:
-            runtime: экземпляр CoreRuntime для доступа к service_registry
+            runtime: экземпляр CoreRuntime или RuntimeContext для доступа к service_registry
             source: источник запроса (имя плагина/модуля для логирования)
             **session_kwargs: параметры для aiohttp.ClientSession
         """
         self.runtime = runtime
+        # REFACTORING: Поддержка RuntimeContext
+        self.context = getattr(runtime, "context", None) if hasattr(runtime, "context") else None
         self.source = source
         self._has_request_logger = None
         
         # Создаём trace_config для перехвата запросов
         trace_config = self._create_trace_config()
+    
+    def _get_service_registry(self):
+        """Получить ServiceRegistry из context или runtime."""
+        if self.context and hasattr(self.context, "services"):
+            return self.context.services
+        elif self.runtime and hasattr(self.runtime, "service_registry"):
+            return self.runtime.service_registry
+        return None
         
         # Создаём ClientSession с trace_config
         if "trace_configs" not in session_kwargs:
@@ -144,29 +154,33 @@ class LoggedClientSession:
             
             # Логируем запрос в обычный logger (чтобы видеть в консоли)
             try:
-                await self.runtime.service_registry.call(
-                    "logger.log",
-                    level="info",
-                    message=f"Outgoing HTTP {trace_config_ctx.method} {trace_config_ctx.url}",
-                    plugin=self.source,
-                    context={
-                        "method": trace_config_ctx.method,
-                        "url": trace_config_ctx.url,
-                    }
-                )
+                services = self._get_service_registry()
+                if services:
+                    await services.call(
+                        "logger.log",
+                        level="info",
+                        message=f"Outgoing HTTP {trace_config_ctx.method} {trace_config_ctx.url}",
+                        plugin=self.source,
+                        context={
+                            "method": trace_config_ctx.method,
+                            "url": trace_config_ctx.url,
+                        }
+                    )
             except Exception:
                 pass
             
             # Логируем запрос в request_logger используя operation_id
-            await self.runtime.service_registry.call(
-                "request_logger.log",
-                request_id=trace_config_ctx.operation_id,  # Используем operation_id вместо request_id
-                level="info",
-                message=f"Outgoing HTTP {trace_config_ctx.method} {trace_config_ctx.url}",
-                context={
-                    "type": "outgoing_request",
-                    "source": self.source,
-                    "origin": trace_config_ctx.origin,  # "http" или "system"
+            services = self._get_service_registry()
+            if services:
+                await services.call(
+                    "request_logger.log",
+                    request_id=trace_config_ctx.operation_id,  # Используем operation_id вместо request_id
+                    level="info",
+                    message=f"Outgoing HTTP {trace_config_ctx.method} {trace_config_ctx.url}",
+                    context={
+                        "type": "outgoing_request",
+                        "source": self.source,
+                        "origin": trace_config_ctx.origin,  # "http" или "system"
                     "method": trace_config_ctx.method,
                     "url": trace_config_ctx.url,
                     "headers": sanitized_request_headers,
@@ -193,48 +207,51 @@ class LoggedClientSession:
             }
             
             # Сохраняем метаданные используя operation_id
-            await self.runtime.service_registry.call(
-                "request_logger.set_request_metadata",
-                request_id=trace_config_ctx.operation_id,  # Используем operation_id вместо request_id
-                request_metadata=request_metadata,
-                response_metadata=response_metadata
-            )
+            if services:
+                await services.call(
+                    "request_logger.set_request_metadata",
+                    request_id=trace_config_ctx.operation_id,  # Используем operation_id вместо request_id
+                    request_metadata=request_metadata,
+                    response_metadata=response_metadata
+                )
             
             # Логируем ответ в обычный logger (чтобы видеть в консоли)
             status = params.response.status
             level = "info" if 200 <= status < 400 else "warning" if 400 <= status < 500 else "error"
             
             try:
-                await self.runtime.service_registry.call(
-                    "logger.log",
-                    level=level,
-                    message=f"Outgoing HTTP {trace_config_ctx.method} {trace_config_ctx.url} -> HTTP {status}",
-                    plugin=self.source,
-                    context={
-                        "method": trace_config_ctx.method,
-                        "url": trace_config_ctx.url,
-                        "status_code": status,
-                        "duration_ms": duration_ms,
-                    }
-                )
+                if services:
+                    await services.call(
+                        "logger.log",
+                        level=level,
+                        message=f"Outgoing HTTP {trace_config_ctx.method} {trace_config_ctx.url} -> HTTP {status}",
+                        plugin=self.source,
+                        context={
+                            "method": trace_config_ctx.method,
+                            "url": trace_config_ctx.url,
+                            "status_code": status,
+                            "duration_ms": duration_ms,
+                        }
+                    )
             except Exception:
                 pass
             
-            await self.runtime.service_registry.call(
-                "request_logger.log",
-                request_id=trace_config_ctx.operation_id,  # Используем operation_id вместо request_id
-                level=level,
-                message=f"Outgoing HTTP {trace_config_ctx.method} {trace_config_ctx.url} completed",
-                context={
-                    "type": "outgoing_response",
-                    "source": self.source,
-                    "origin": trace_config_ctx.origin,  # "http" или "system"
-                    "status_code": status,
-                    "headers": sanitized_response_headers,
-                    "body": response_body,
-                    "duration_ms": duration_ms,
-                }
-            )
+            if services:
+                await services.call(
+                    "request_logger.log",
+                    request_id=trace_config_ctx.operation_id,  # Используем operation_id вместо request_id
+                    level=level,
+                    message=f"Outgoing HTTP {trace_config_ctx.method} {trace_config_ctx.url} completed",
+                    context={
+                        "type": "outgoing_response",
+                        "source": self.source,
+                        "origin": trace_config_ctx.origin,  # "http" или "system"
+                        "status_code": status,
+                        "headers": sanitized_response_headers,
+                        "body": response_body,
+                        "duration_ms": duration_ms,
+                    }
+                )
         
         async def on_request_exception(session, trace_config_ctx, params):
             """Вызывается при ошибке запроса."""
@@ -244,19 +261,21 @@ class LoggedClientSession:
             duration_ms = (time.time() - trace_config_ctx.start_time) * 1000
             
             # Логируем ошибку в обычный logger
+            services = self._get_service_registry()
             try:
-                await self.runtime.service_registry.call(
-                    "logger.log",
-                    level="error",
-                    message=f"Outgoing HTTP {trace_config_ctx.method} {trace_config_ctx.url} failed: {type(params.exception).__name__}: {str(params.exception)}",
-                    plugin=self.source,
-                    context={
-                        "method": trace_config_ctx.method,
-                        "url": trace_config_ctx.url,
-                        "error": str(params.exception),
-                        "error_type": type(params.exception).__name__,
-                    }
-                )
+                if services:
+                    await services.call(
+                        "logger.log",
+                        level="error",
+                        message=f"Outgoing HTTP {trace_config_ctx.method} {trace_config_ctx.url} failed: {type(params.exception).__name__}: {str(params.exception)}",
+                        plugin=self.source,
+                        context={
+                            "method": trace_config_ctx.method,
+                            "url": trace_config_ctx.url,
+                            "error": str(params.exception),
+                            "error_type": type(params.exception).__name__,
+                        }
+                    )
             except Exception:
                 pass
             
@@ -288,31 +307,32 @@ class LoggedClientSession:
             }
             
             # Сохраняем метаданные используя operation_id
-            await self.runtime.service_registry.call(
-                "request_logger.set_request_metadata",
-                request_id=trace_config_ctx.operation_id,  # Используем operation_id вместо request_id
-                request_metadata=request_metadata,
-                response_metadata=response_metadata
-            )
-            
-            await self.runtime.service_registry.call(
-                "request_logger.log",
-                request_id=trace_config_ctx.operation_id,  # Используем operation_id вместо request_id
-                level="error",
-                message=f"Outgoing HTTP {trace_config_ctx.method} {trace_config_ctx.url} failed",
-                context={
-                    "type": "outgoing_request",
-                    "source": self.source,
-                    "origin": trace_config_ctx.origin,  # "http" или "system"
-                    "method": trace_config_ctx.method,
-                    "url": trace_config_ctx.url,
-                    "headers": sanitized_headers,
-                    "body": trace_config_ctx.body,
-                    "error": str(params.exception),
-                    "error_type": type(params.exception).__name__,
-                    "duration_ms": duration_ms,
-                }
-            )
+            if services:
+                await services.call(
+                    "request_logger.set_request_metadata",
+                    request_id=trace_config_ctx.operation_id,  # Используем operation_id вместо request_id
+                    request_metadata=request_metadata,
+                    response_metadata=response_metadata
+                )
+                
+                await services.call(
+                    "request_logger.log",
+                    request_id=trace_config_ctx.operation_id,  # Используем operation_id вместо request_id
+                    level="error",
+                    message=f"Outgoing HTTP {trace_config_ctx.method} {trace_config_ctx.url} failed",
+                    context={
+                        "type": "outgoing_request",
+                        "source": self.source,
+                        "origin": trace_config_ctx.origin,  # "http" или "system"
+                        "method": trace_config_ctx.method,
+                        "url": trace_config_ctx.url,
+                        "headers": sanitized_headers,
+                        "body": trace_config_ctx.body,
+                        "error": str(params.exception),
+                        "error_type": type(params.exception).__name__,
+                        "duration_ms": duration_ms,
+                    }
+                )
         
         trace_config.on_request_start.append(on_request_start)
         trace_config.on_request_end.append(on_request_end)
@@ -324,7 +344,11 @@ class LoggedClientSession:
         """Проверяет, доступен ли RequestLoggerModule."""
         if self._has_request_logger is None:
             try:
-                self._has_request_logger = await self.runtime.service_registry.has_service("request_logger.log")
+                services = self._get_service_registry()
+                if services:
+                    self._has_request_logger = await services.has_service("request_logger.log")
+                else:
+                    self._has_request_logger = False
             except Exception:
                 self._has_request_logger = False
         return self._has_request_logger
@@ -363,48 +387,50 @@ class LoggedClientSession:
                         sanitized_headers[k] = v
             
             # Логируем запрос
-            await self.runtime.service_registry.call(
-                "request_logger.log",
-                request_id=request_id,
-                level="info",
-                message=f"Outgoing HTTP {method} {url}",
-                context={
-                    "type": "outgoing_request",
-                    "source": self.source,
-                    "method": method,
-                    "url": str(url),
-                    "headers": sanitized_headers,
-                    "body": body if body else None,
-                }
-            )
-            
-            # Логируем ответ
-            if error:
-                await self.runtime.service_registry.call(
+            services = self._get_service_registry()
+            if services:
+                await services.call(
                     "request_logger.log",
                     request_id=request_id,
-                    level="error",
-                    message=f"Outgoing HTTP {method} {url} failed",
+                    level="info",
+                    message=f"Outgoing HTTP {method} {url}",
                     context={
-                        "type": "outgoing_response",
+                        "type": "outgoing_request",
                         "source": self.source,
-                        "error": error,
-                        "duration_ms": duration_ms,
+                        "method": method,
+                        "url": str(url),
+                        "headers": sanitized_headers,
+                        "body": body if body else None,
                     }
                 )
-            elif response_status is not None:
-                sanitized_response_headers = {}
-                if response_headers:
-                    for k, v in response_headers.items():
-                        if k.lower() in ["set-cookie"]:
-                            sanitized_response_headers[k] = "***"
-                        else:
-                            sanitized_response_headers[k] = v
                 
-                await self.runtime.service_registry.call(
-                    "request_logger.log",
-                    request_id=request_id,
-                    level="info" if 200 <= response_status < 400 else "warning" if 400 <= response_status < 500 else "error",
+                # Логируем ответ
+                if error:
+                    await services.call(
+                        "request_logger.log",
+                        request_id=request_id,
+                        level="error",
+                        message=f"Outgoing HTTP {method} {url} failed",
+                        context={
+                            "type": "outgoing_response",
+                            "source": self.source,
+                            "error": error,
+                            "duration_ms": duration_ms,
+                        }
+                    )
+                elif response_status is not None:
+                    sanitized_response_headers = {}
+                    if response_headers:
+                        for k, v in response_headers.items():
+                            if k.lower() in ["set-cookie"]:
+                                sanitized_response_headers[k] = "***"
+                            else:
+                                sanitized_response_headers[k] = v
+                    
+                    await services.call(
+                        "request_logger.log",
+                        request_id=request_id,
+                        level="info" if 200 <= response_status < 400 else "warning" if 400 <= response_status < 500 else "error",
                     message=f"Outgoing HTTP {method} {url} completed",
                     context={
                         "type": "outgoing_response",

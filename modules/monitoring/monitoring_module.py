@@ -57,7 +57,8 @@ class MonitoringModule:
         # Check storage if runtime available
         if self.runtime:
             try:
-                await self.runtime.storage.get("health_check", "test")
+                storage = self.context.storage if hasattr(self, "context") and self.context else self.runtime.storage
+                await storage.get("health_check", "test")
                 checks["storage"] = "ok"
             except Exception as e:
                 checks["storage"] = "error"

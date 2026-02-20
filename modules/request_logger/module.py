@@ -48,15 +48,15 @@ class RequestLoggerModule(RuntimeModule):
         Регистрирует сервисы для записи и чтения логов.
         """
         # Регистрируем сервисы (ACL-метаданные в ядре: чтение/очистка — admin_only)
-        reg = self.runtime.service_registry
+        services = self.context.services if hasattr(self, "context") and self.context else self.runtime.service_registry
 
-        await reg.register_with_acl("request_logger.log", self._log_service)
-        await reg.register_with_acl("request_logger.set_request_metadata", self._set_request_metadata_service)
-        await reg.register_with_acl("request_logger.create_http_session", self._create_http_session_service)
+        await services.register_with_acl("request_logger.log", self._log_service)
+        await services.register_with_acl("request_logger.set_request_metadata", self._set_request_metadata_service)
+        await services.register_with_acl("request_logger.create_http_session", self._create_http_session_service)
 
-        await reg.register_with_acl("request_logger.get_request_logs", self._get_request_logs_service, admin_only=True)
-        await reg.register_with_acl("request_logger.list_requests", self._list_requests_service, admin_only=True)
-        await reg.register_with_acl("request_logger.clear_logs", self._clear_logs_service, admin_only=True)
+        await services.register_with_acl("request_logger.get_request_logs", self._get_request_logs_service, admin_only=True)
+        await services.register_with_acl("request_logger.list_requests", self._list_requests_service, admin_only=True)
+        await services.register_with_acl("request_logger.clear_logs", self._clear_logs_service, admin_only=True)
 
     async def start(self) -> None:
         """Запуск модуля."""
@@ -64,7 +64,8 @@ class RequestLoggerModule(RuntimeModule):
         from modules.request_logger.middleware import RequestLoggerOperationContext
         set_operation_context_provider(RequestLoggerOperationContext())
         try:
-            await self.runtime.service_registry.call(
+            services = self.context.services if hasattr(self, "context") and self.context else self.runtime.service_registry
+            await services.call(
                 "logger.log",
                 level="info",
                 message="RequestLogger module started",
@@ -78,7 +79,8 @@ class RequestLoggerModule(RuntimeModule):
         from core.operation_context import set_operation_context_provider
         set_operation_context_provider(None)
         try:
-            await self.runtime.service_registry.call(
+            services = self.context.services if hasattr(self, "context") and self.context else self.runtime.service_registry
+            await services.call(
                 "logger.log",
                 level="info",
                 message="RequestLogger module stopped",
@@ -89,12 +91,13 @@ class RequestLoggerModule(RuntimeModule):
 
         # Отменяем регистрацию сервисов
         try:
-            await self.runtime.service_registry.unregister("request_logger.log")
-            await self.runtime.service_registry.unregister("request_logger.get_request_logs")
-            await self.runtime.service_registry.unregister("request_logger.list_requests")
-            await self.runtime.service_registry.unregister("request_logger.clear_logs")
-            await self.runtime.service_registry.unregister("request_logger.set_request_metadata")
-            await self.runtime.service_registry.unregister("request_logger.create_http_session")
+            services = self.context.services if hasattr(self, "context") and self.context else self.runtime.service_registry
+            await services.unregister("request_logger.log")
+            await services.unregister("request_logger.get_request_logs")
+            await services.unregister("request_logger.list_requests")
+            await services.unregister("request_logger.clear_logs")
+            await services.unregister("request_logger.set_request_metadata")
+            await services.unregister("request_logger.create_http_session")
         except Exception:
             pass
 
@@ -283,7 +286,10 @@ class RequestLoggerModule(RuntimeModule):
             LoggedClientSession обёртка
         """
         from modules.request_logger.http_client import create_logged_session
-        return create_logged_session(self.runtime, source, **session_kwargs)
+        # REFACTORING: Передаём runtime для обратной совместимости с http_client
+        # TODO: В будущем можно передавать только context
+        runtime = self.runtime if hasattr(self, "runtime") else None
+        return create_logged_session(runtime, source, **session_kwargs)
 
     async def _set_request_metadata_service(
         self,

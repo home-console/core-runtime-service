@@ -29,26 +29,24 @@ class ProductApiModule(RuntimeModule):
         return "product_api"
 
     async def register(self) -> None:
-        runtime = self.runtime
-
         async def _devices_list(**kwargs: Any) -> Any:
             """BFF: GET /api/v1/devices → devices.list()."""
-            return await runtime.service_registry.call("devices.list")
+            return await self.context.services.call("devices.list")
 
         async def _devices_get(id: str, **kwargs: Any) -> Any:
             """BFF: GET /api/v1/devices/{id} → devices.get(id)."""
-            return await runtime.service_registry.call("devices.get", id)
+            return await self.context.services.call("devices.get", id)
 
         async def _devices_set_state(id: str, body: Any = None, **kwargs: Any) -> Any:
             """BFF: POST /api/v1/devices/{id}/state → devices.set_state(id, state)."""
             state = body if isinstance(body, dict) else {}
             if isinstance(body, dict) and "state" in body and isinstance(body["state"], dict):
                 state = body["state"]
-            return await runtime.service_registry.call("devices.set_state", id, state)
+            return await self.context.services.call("devices.set_state", id, state)
 
-        await runtime.service_registry.register("product_api.v1.devices.list", _devices_list)
-        await runtime.service_registry.register("product_api.v1.devices.get", _devices_get)
-        await runtime.service_registry.register("product_api.v1.devices.set_state", _devices_set_state)
+        await self.context.services.register("product_api.v1.devices.list", _devices_list)
+        await self.context.services.register("product_api.v1.devices.get", _devices_get)
+        await self.context.services.register("product_api.v1.devices.set_state", _devices_set_state)
         
         self.context.http.register(HttpEndpoint(
             method="GET",
@@ -75,6 +73,6 @@ class ProductApiModule(RuntimeModule):
     async def stop(self) -> None:
         for name in ("product_api.v1.devices.list", "product_api.v1.devices.get", "product_api.v1.devices.set_state"):
             try:
-                await self.runtime.service_registry.unregister(name)
+                await self.context.services.unregister(name)
             except Exception:
                 pass

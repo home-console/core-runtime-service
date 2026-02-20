@@ -57,7 +57,9 @@ class AgentControlPlaneModule(RuntimeModule):
         # Get or create SecretStore
         # For now, we use a simple in-memory or file-based secret store
         # In production, this would be initialized with a secure passphrase
-        secret_store = SecretStore(self.runtime.storage._adapter)
+        # REFACTORING: Используем context.storage, но для SecretStore нужен _adapter
+        storage = self.context.storage if hasattr(self, "context") and self.context else self.runtime.storage
+        secret_store = SecretStore(storage._adapter)
         
         # Initialize SecretStore with a passphrase
         # In production, this should come from environment or secure input
@@ -99,27 +101,28 @@ class AgentControlPlaneModule(RuntimeModule):
         self.runtime.mtls_ca = mtls_ca
         
         # Register services with service registry
-        await self.runtime.service_registry.register(
+        services = self.context.services if hasattr(self, "context") and self.context else self.runtime.service_registry
+        await services.register(
             "admin.agent.create_enrollment_token",
             admin_agent_create_enrollment_token,
         )
-        await self.runtime.service_registry.register(
+        await services.register(
             "admin.agent.enroll_agent",
             admin_agent_enroll_agent,
         )
-        await self.runtime.service_registry.register(
+        await services.register(
             "admin.agent.list_agents",
             admin_agent_list_agents,
         )
-        await self.runtime.service_registry.register(
+        await services.register(
             "admin.agent.get_agent",
             admin_agent_get_agent,
         )
-        await self.runtime.service_registry.register(
+        await services.register(
             "admin.agent.deregister_agent",
             admin_agent_deregister_agent,
         )
-        await self.runtime.service_registry.register(
+        await services.register(
             "admin.agent.list_agents_providing_capability",
             admin_agent_list_agents_providing_capability,
         )
