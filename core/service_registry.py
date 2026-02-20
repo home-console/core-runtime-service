@@ -173,17 +173,15 @@ class ServiceRegistry:
                 effective_admin_only = False
 
         async def wrapped(*args, **kwargs):
-            from core import acl
-
-            ctx = None
-            try:
-                ctx = acl.current_context()
-            except Exception:
-                ctx = None
+            # REFACTORING: Проблема 7 - используем PolicyEngine вместо прямого импорта core.acl
+            from core.policy_engine import get_policy_engine
+            
+            policy_engine = get_policy_engine()
+            ctx = policy_engine.current_context()
 
             # Админ-флажок
             if effective_admin_only:
-                acl.enforce_admin(ctx)
+                policy_engine.enforce_admin(ctx)
 
             # Ownership injection для create-like сервисов
             if inject_owner_param:
@@ -191,26 +189,26 @@ class ServiceRegistry:
                 if ctx is not None and kwargs.get(inject_owner_param) is None:
                     kwargs[inject_owner_param] = getattr(ctx, "user_id", None)
                 # Если пользователь пытается создать ресурс "не себе" — блокируем (если не админ)
-                if ctx is not None and kwargs.get(inject_owner_param) is not None and not acl.is_privileged(ctx):
+                if ctx is not None and kwargs.get(inject_owner_param) is not None and not policy_engine.is_privileged(ctx):
                     if getattr(ctx, "user_id", None) != kwargs.get(inject_owner_param):
                         raise ForbiddenError("forbidden")
 
             # Preload + policy enforcement до выполнения (важно для write операций)
             if resource and preload_resource:
                 obj = await preload_resource(args, kwargs)
-                acl.enforce_policy(ctx, resource, obj)
+                policy_engine.enforce_policy(ctx, resource, obj)
 
             result = await func(*args, **kwargs)
 
             # Enforcement по результату (например, get возвращает объект)
             if enforce_result and resource:
-                acl.enforce_policy(ctx, resource, result)
+                policy_engine.enforce_policy(ctx, resource, result)
 
             # Фильтрация результата (list operations)
             if filter_result and resource:
                 try:
                     if isinstance(result, (list, tuple)):
-                        result = acl.filter_with_policy(ctx, resource, result)
+                        result = policy_engine.filter_with_policy(ctx, resource, result)
                 except Exception:
                     # Если политика кинула исключение — пробрасываем
                     raise

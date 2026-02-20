@@ -5,8 +5,45 @@ HTTP Interface Registry для Core Runtime.
 Не выполняет HTTP-запросы и не зависит от фреймворков.
 """
 
-from dataclasses import dataclass
-from typing import List, Optional, Dict, Any, Literal
+from dataclasses import dataclass, field
+from typing import List, Optional, Dict, Any, Literal, Callable, Awaitable
+
+
+@dataclass
+class EndpointAuthConfig:
+    """
+    Декларативная конфигурация авторизации для endpoint.
+    
+    REFACTORING: Проблема 6 - выносим authz-логику из route_binding в декларацию.
+    """
+    # Публичный endpoint (не требует авторизации)
+    public: bool = False
+    
+    # Требуемые scopes (если не публичный)
+    required_scopes: Optional[List[str]] = None
+    
+    # Проверка ресурса (resource-based authorization)
+    # Если True, endpoint будет получать resource из доменного адаптера
+    requires_resource_check: bool = False
+    
+    # Имя доменного адаптера для получения resource (например, "devices", "auth")
+    # Если указано, route_binding будет вызывать соответствующий адаптер
+    resource_adapter: Optional[str] = None
+
+
+@dataclass
+class EndpointParamMapping:
+    """
+    Декларативная конфигурация маппинга параметров для endpoint.
+    
+    REFACTORING: Проблема 6 - выносим доменную логику маппинга параметров.
+    """
+    # Функция для извлечения/преобразования параметров из request
+    # Принимает: (request, body, path_params, query_params) -> dict для service call
+    param_extractor: Optional[Callable[[Any, Optional[Dict], Dict, Dict], Awaitable[Dict]]] = None
+    
+    # Функция для валидации body перед вызовом сервиса
+    body_validator: Optional[Callable[[Dict], Dict]] = None
 
 
 @dataclass
@@ -23,6 +60,8 @@ class HttpEndpoint:
       - deprecated: флаг устаревшей версии (True если версия помечена как deprecated)
       - kind: тип endpoint ("api" или "webhook") — определяет обработку и авторизацию
       - tags: опциональный список тегов для группировки в документации
+      - auth_config: декларативная конфигурация авторизации (REFACTORING: Проблема 6)
+      - param_mapping: декларативная конфигурация маппинга параметров (REFACTORING: Проблема 6)
 
     Правила валидации:
       - Если websocket=True → method должен быть None
@@ -37,6 +76,9 @@ class HttpEndpoint:
     deprecated: bool = False
     kind: Literal["api", "webhook"] = "api"
     tags: Optional[list[str]] = None
+    # REFACTORING: Проблема 6 - декларативная конфигурация authz и доменной логики
+    auth_config: Optional[EndpointAuthConfig] = None
+    param_mapping: Optional[EndpointParamMapping] = None
 
     def __post_init__(self) -> None:
         """Валидация endpoint после инициализации."""

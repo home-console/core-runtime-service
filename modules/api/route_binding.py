@@ -3,9 +3,12 @@ Route binding: attaches HttpRegistry endpoints to a FastAPI app.
 
 Used by Runtime after modules and plugins have registered routes.
 Runtime owns the app; this module only provides bind_routes(runtime, app).
+
+REFACTORING: Проблема 6 - упрощённый binding, использующий декларативную конфигурацию
+и доменные адаптеры вместо хардкода доменной логики.
 """
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 import re
 import inspect
 
@@ -15,6 +18,7 @@ from fastapi.openapi.utils import get_openapi
 from modules.api.auth import get_request_context
 from modules.api.authz import require as authz_require, AuthorizationError
 from modules.api.validation_models import validate_body_for_service
+from modules.api.domain_adapters import get_domain_adapter
 
 
 def bind_routes(runtime: Any, app: Any) -> None:
@@ -46,6 +50,12 @@ def bind_routes(runtime: Any, app: Any) -> None:
 
 
 def _make_api_handler(runtime: Any, endpoint: Any):
+    """
+    Создать FastAPI handler для API endpoint.
+    
+    REFACTORING: Проблема 6 - использует декларативную конфигурацию из endpoint.auth_config
+    и доменные адаптеры вместо хардкода доменной логики.
+    """
     path_params = re.findall(r'\{(\w+)\}', endpoint.path)
 
     async def handler(
@@ -54,65 +64,100 @@ def _make_api_handler(runtime: Any, endpoint: Any):
         body: Dict[str, Any] | None = Body(None) if endpoint.method in ["POST", "PUT", "PATCH"] else None,
         **kwargs: Any
     ):
+        # Получаем контекст запроса
         context = await get_request_context(request)
-        resource = None
-
-        if endpoint.service == "admin.auth.create_api_key" and context is None:
-            try:
-                keys = await runtime.storage.list_keys("auth_api_keys")
-                first_key_flag = await runtime.storage.get("auth_config", "first_key_created")
-                if len(keys) == 0 and first_key_flag is None:
-                    try:
-                        await runtime.storage.set("auth_config", "first_key_created", True)
-                        resource = {"allow_first_key": True}
-                    except Exception:
-                        keys_retry = await runtime.storage.list_keys("auth_api_keys")
-                        if len(keys_retry) == 0:
-                            resource = {"allow_first_key": True}
-            except Exception:
-                pass
-
-        if endpoint.service in ["admin.auth.change_password", "admin.auth.set_password",
-                                "admin.auth.revoke_all_sessions", "admin.auth.list_sessions"]:
-            if body is None and endpoint.method in ["POST", "PUT", "PATCH"]:
-                try:
-                    body = await request.json()
-                except Exception:
-                    body = None
-            if isinstance(body, dict):
-                user_id = body.get("user_id")
-                if user_id:
-                    resource = {"user_id": user_id}
-
-        public_endpoints = [
-            "admin.auth.me", "admin.auth.initialize", "admin.auth.login", "admin.auth.refresh",
-            "yandex_device_auth.start", "yandex_device_auth.cookies", "yandex_device_auth.status",
-            "yandex_device_auth.get_session", "yandex_device_auth.cancel",
-            "oauth_yandex.get_status", "oauth_yandex.get_authorize_url", "oauth_yandex.configure",
-            "oauth_yandex.exchange_code", "oauth_yandex.clear_tokens",
-            "yandex.login.start", "yandex.login.status",
-        ]
-        is_public = endpoint.service in public_endpoints
+        
+        # REFACTORING: Проблема 6 - используем декларативную конфигурацию auth
+        auth_config = endpoint.auth_config
+        is_public = auth_config.public if auth_config else False
+        
+        # Если не указана декларативная конфигурация, используем fallback на старую логику
+        # для обратной совместимости
+        if auth_config is None:
+            # Fallback: определяем публичные endpoints по списку (legacy)
+            public_endpoints = [
+                "admin.auth.me", "admin.auth.initialize", "admin.auth.login", "admin.auth.refresh",
+                "yandex_device_auth.start", "yandex_device_auth.cookies", "yandex_device_auth.status",
+                "yandex_device_auth.get_session", "yandex_device_auth.cancel",
+                "oauth_yandex.get_status", "oauth_yandex.get_authorize_url", "oauth_yandex.configure",
+                "oauth_yandex.exchange_code", "oauth_yandex.clear_tokens",
+                "yandex.login.start", "yandex.login.status",
+            ]
+            is_public = endpoint.service in public_endpoints
+        
+        # Авторизация: проверяем доступ к действию
+        resource: Optional[Dict[str, Any]] = None
+        
         if not is_public:
+            # REFACTORING: Проблема 6 - используем доменный адаптер для получения resource
+            if auth_config and auth_config.resource_adapter:
+                adapter = get_domain_adapter(auth_config.resource_adapter)
+                if adapter:
+                    # Читаем body заранее для auth adapter
+                    temp_body = body
+                    if temp_body is None and endpoint.method in ["POST", "PUT", "PATCH"]:
+                        try:
+                            temp_body = await request.json()
+                        except Exception:
+                            temp_body = None
+                    
+                    resource = await adapter.extract_resource(
+                        request=request,
+                        service_name=endpoint.service,
+                        runtime=runtime,
+                        context=context,
+                        body=temp_body
+                    )
+            
+            # Если не использовали адаптер, пробуем legacy fallback для auth endpoints
+            if resource is None and endpoint.service == "admin.auth.create_api_key" and context is None:
+                try:
+                    keys = await runtime.storage.list_keys("auth_api_keys")
+                    first_key_flag = await runtime.storage.get("auth_config", "first_key_created")
+                    if len(keys) == 0 and first_key_flag is None:
+                        try:
+                            await runtime.storage.set("auth_config", "first_key_created", True)
+                            resource = {"allow_first_key": True}
+                        except Exception:
+                            keys_retry = await runtime.storage.list_keys("auth_api_keys")
+                            if len(keys_retry) == 0:
+                                resource = {"allow_first_key": True}
+                except Exception:
+                    pass
+            
+            # Проверяем авторизацию на действие
             try:
-                authz_require(context, endpoint.service, None, runtime=runtime)
+                authz_require(context, endpoint.service, resource, runtime=runtime)
             except AuthorizationError:
                 raise HTTPException(
                     status_code=401 if context is None else 403,
                     detail="Unauthorized" if context is None else "Forbidden: insufficient permissions"
                 )
-
-        if endpoint.service in ["devices.get", "devices.set_state", "product_api.v1.devices.set_state"]:
-            device_id = request.path_params.get("id") or request.path_params.get("device_id")
-            if device_id:
-                try:
-                    device = await runtime.service_registry.call("devices.get", device_id)
-                    if isinstance(device, dict):
-                        resource = {}
-                        if "owner_id" in device:
-                            resource["owner_id"] = device["owner_id"]
-                        if "shared_with" in device:
-                            resource["shared_with"] = device["shared_with"]
+        
+        # REFACTORING: Проблема 6 - используем доменный адаптер для resource check
+        if auth_config and auth_config.requires_resource_check:
+            if auth_config.resource_adapter:
+                adapter = get_domain_adapter(auth_config.resource_adapter)
+                if adapter:
+                    # Читаем body заранее для адаптера
+                    temp_body = body
+                    if temp_body is None and endpoint.method in ["POST", "PUT", "PATCH"]:
+                        try:
+                            temp_body = await request.json()
+                        except Exception:
+                            temp_body = None
+                    
+                    # Получаем resource через адаптер
+                    extracted_resource = await adapter.extract_resource(
+                        request=request,
+                        service_name=endpoint.service,
+                        runtime=runtime,
+                        context=context,
+                        body=temp_body
+                    )
+                    if extracted_resource:
+                        resource = extracted_resource
+                        # Проверяем доступ к ресурсу
                         try:
                             authz_require(context, endpoint.service, resource, runtime=runtime)
                         except AuthorizationError:
@@ -120,50 +165,75 @@ def _make_api_handler(runtime: Any, endpoint: Any):
                                 status_code=403,
                                 detail="Forbidden: insufficient permissions for this resource"
                             )
-                except HTTPException:
-                    raise
-                except Exception:
-                    pass
-
-        params: Dict[str, Any] = {}
-        params.update(request.path_params)
-        for k, v in request.query_params.multi_items():
-            params[k] = v
-
+        
+        # Извлекаем параметры для вызова сервиса
+        path_params_dict = dict(request.path_params)
+        query_params_dict = {k: v for k, v in request.query_params.multi_items()}
+        
+        # Если body не передан, пытаемся прочитать из request
         if body is None and endpoint.method in ["POST", "PUT", "PATCH"]:
             try:
                 body = await request.json()
             except Exception:
                 body = None
-
-        if body is not None and endpoint.method in ["POST", "PUT", "PATCH"]:
-            try:
-                body = validate_body_for_service(endpoint.service, body)
-            except ValueError as ve:
-                raise HTTPException(status_code=400, detail=str(ve))
-
-        if body is not None:
-            params["body"] = body
-
-        if endpoint.service in ["admin.auth.login", "admin.auth.refresh"]:
-            params["request"] = request
-            params["response"] = response
-        if endpoint.service == "admin.auth.me":
-            params["request"] = request
-        if endpoint.service == "oauth_yandex.configure" and body and isinstance(body, dict):
-            params.pop("body", None)
-            params["client_id"] = body.get("client_id", "")
-            params["client_secret"] = body.get("client_secret", "")
-            params["redirect_uri"] = body.get("redirect_uri", "")
-            if "scope" in body:
-                params["scope"] = body.get("scope")
-        if endpoint.service == "oauth_yandex.exchange_code" and body and isinstance(body, dict):
-            params.pop("body", None)
-            params["code"] = body.get("code", "")
-
+        
+        # REFACTORING: Проблема 6 - используем доменный адаптер для маппинга параметров
+        if auth_config and auth_config.resource_adapter:
+            adapter = get_domain_adapter(auth_config.resource_adapter)
+            if adapter:
+                params = await adapter.extract_params(
+                    request=request,
+                    body=body,
+                    path_params=path_params_dict,
+                    query_params=query_params_dict,
+                    service_name=endpoint.service,
+                    response=response
+                )
+            else:
+                # Fallback: стандартный маппинг
+                params: Dict[str, Any] = {}
+                params.update(path_params_dict)
+                params.update(query_params_dict)
+                if body is not None:
+                    params["body"] = body
+        else:
+            # Стандартный маппинг параметров
+            params: Dict[str, Any] = {}
+            params.update(path_params_dict)
+            params.update(query_params_dict)
+            
+            # Валидация body
+            if body is not None and endpoint.method in ["POST", "PUT", "PATCH"]:
+                try:
+                    body = validate_body_for_service(endpoint.service, body)
+                except ValueError as ve:
+                    raise HTTPException(status_code=400, detail=str(ve))
+            
+            if body is not None:
+                params["body"] = body
+            
+            # Legacy спец-логика для auth endpoints (fallback)
+            if endpoint.service in ["admin.auth.login", "admin.auth.refresh"]:
+                params["request"] = request
+                params["response"] = response
+            elif endpoint.service == "admin.auth.me":
+                params["request"] = request
+            elif endpoint.service == "oauth_yandex.configure" and body and isinstance(body, dict):
+                params.pop("body", None)
+                params["client_id"] = body.get("client_id", "")
+                params["client_secret"] = body.get("client_secret", "")
+                params["redirect_uri"] = body.get("redirect_uri", "")
+                if "scope" in body:
+                    params["scope"] = body.get("scope")
+            elif endpoint.service == "oauth_yandex.exchange_code" and body and isinstance(body, dict):
+                params.pop("body", None)
+                params["code"] = body.get("code", "")
+        
+        # Проверяем существование сервиса
         if not await runtime.service_registry.has_service(endpoint.service):
             raise HTTPException(status_code=404, detail="service not found")
-
+        
+        # Вызываем сервис
         try:
             result = await runtime.service_registry.call(endpoint.service, **params)
         except Exception as e:
@@ -190,6 +260,7 @@ def _make_api_handler(runtime: Any, endpoint: Any):
 
         return result
 
+    # Формируем сигнатуру handler'а для FastAPI
     params_sig = [
         inspect.Parameter("request", kind=inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=Request),
         inspect.Parameter("response", kind=inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=Response),
