@@ -60,10 +60,23 @@ class OperationExecutor:
             if hasattr(self.runtime, 'capability_registry') and self.runtime.capability_registry:
                 cap_reg = self.runtime.capability_registry
                 
-                # Get all providers for this capability
-                all_providers = cap_reg.get_all_providers_for_capability(operation_type)
+                # REFACTORING: Используем высокоуровневый API для поиска провайдеров
+                # Сначала пробуем select_provider_for для получения метаданных
+                provider_metadata = cap_reg.select_provider_for(operation_type)
+                if provider_metadata and provider_metadata.provider_type == "remote":
+                    # Конвертируем ProviderMetadata обратно в dict для совместимости
+                    return {
+                        "plugin": provider_metadata.plugin_name,
+                        "type": provider_metadata.provider_type,
+                        "remote_config": provider_metadata.remote_config or {},
+                        "timeouts": provider_metadata.timeouts or {},
+                        "protocol_version": provider_metadata.protocol_version,
+                        "provider_version": provider_metadata.provider_version,
+                    }
                 
-                # Find remote provider (prefer first remote if multiple exist)
+                # Если select_provider_for вернул локальный или None, ищем remote вручную
+                # (для случаев, когда нужен именно remote, а не просто первый провайдер)
+                all_providers = cap_reg.get_all_providers_for_capability(operation_type)
                 for provider_info in all_providers:
                     if provider_info.get("type") == "remote":
                         return provider_info
@@ -235,45 +248,21 @@ class OperationExecutor:
             handler = self.registry.find_handler(operation.type, self.runtime)
             provider_metadata = None  # Get metadata for execution mode decision
             
-            # P0: ATOMIC PROVIDER SELECTION with lock
-            # Lock held only for selection, not during execution
-            provider_dict = None
+            # REFACTORING: Используем инкапсулированный метод вместо прямого доступа к _lock
+            # Метод select_provider_for() атомарно выбирает провайдера и возвращает ProviderMetadata
             try:
                 if hasattr(self.runtime, 'capability_registry') and self.runtime.capability_registry:
                     cap_reg = self.runtime.capability_registry
-                    # Atomic: hold lock only during selection
-                    with cap_reg._lock:
-                        all_providers = cap_reg.get_all_providers_for_capability(operation.type)
-                        if all_providers and len(all_providers) > 0:
-                            # Take snapshot of first provider
-                            provider_dict = dict(all_providers[0])
-                            # Convert dict to ProviderMetadata using registry method
-                            provider_metadata = cap_reg.provider_info_to_metadata(provider_dict)
+                    provider_metadata = cap_reg.select_provider_for(operation.type)
             except Exception:
                 pass  # Failed to get metadata, continue with defaults
             
-            # 2. Verify provider still exists (after releasing lock)
+            # 2. Извлекаем execution_mode и provider_type из metadata
             execution_mode = "in_process"  # default
             provider_type = "local"  # default
             if provider_metadata:
                 execution_mode = provider_metadata.execution_mode
                 provider_type = provider_metadata.provider_type
-                
-                # Check provider still valid
-                if provider_dict and hasattr(self.runtime, 'capability_registry') and self.runtime.capability_registry:
-                    cap_reg = self.runtime.capability_registry
-                    # Try to verify provider with provider_exists check (if available)
-                    try:
-                        if hasattr(cap_reg, 'provider_exists'):
-                            provider_still_exists = cap_reg.provider_exists(
-                                provider_dict["plugin"], 
-                                operation.type
-                            )
-                            if not provider_still_exists:
-                                raise Exception(f"Provider {provider_dict['plugin']} disappeared during execution setup")
-                    except (AttributeError, Exception):
-                        # provider_exists might not exist yet, skip this check
-                        pass
             
             # If no local handler, try remote provider (backward compatible)
             if handler is None:
@@ -305,7 +294,7 @@ class OperationExecutor:
             await self.storage.persist(operation)
             
             # Execute через ExecutionController если доступен, иначе через ExecutionRouter (legacy)
-            controller = getattr(self.runtime, "execution_controller", None)
+            controller = self.runtime.execution_controller
             
             if controller is not None:
                 # Используем новый ExecutionController

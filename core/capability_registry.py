@@ -424,6 +424,51 @@ class CapabilityRegistry:
             container_config=provider_info.get("container_config"),  # Step 9
         )
 
+    def select_provider_for(self, capability_id: str) -> Optional[ProviderMetadata]:
+        """
+        Выбрать провайдера для capability с инкапсулированной логикой выбора.
+        
+        Этот метод инкапсулирует выбор провайдера, включая:
+        - Блокировку для атомарного выбора
+        - Применение политики выбора (здоровые провайдеры, локальные перед remote)
+        - Конвертацию в ProviderMetadata
+        
+        Args:
+            capability_id: ID capability для которой нужен провайдер
+            
+        Returns:
+            ProviderMetadata выбранного провайдера или None, если провайдеров нет
+            
+        Note:
+            Выбор провайдера атомарный (под локом), но возвращаемый объект
+            является snapshot'ом состояния на момент выбора. Провайдер может
+            измениться или исчезнуть после возврата из метода.
+        """
+        with self._lock:
+            providers = self._providers.get(capability_id, [])
+            if not providers:
+                return None
+            
+            # Применяем политику выбора: здоровые провайдеры, локальные перед remote
+            healthy_local = [p for p in providers if p.get("healthy", True) and p.get("type") == "local"]
+            healthy_remote = [p for p in providers if p.get("healthy", True) and p.get("type") == "remote"]
+            
+            # Выбираем первого подходящего (можно расширить до weighted/round-robin)
+            selected_provider = None
+            if healthy_local:
+                selected_provider = healthy_local[0]
+            elif healthy_remote:
+                selected_provider = healthy_remote[0]
+            else:
+                # Если нет здоровых, берём первого (fallback)
+                selected_provider = providers[0]
+            
+            if not selected_provider:
+                return None
+            
+            # Конвертируем в ProviderMetadata
+            return self.provider_info_to_metadata(selected_provider)
+
     async def validate_plugin_requirements(self, plugin_name: str) -> Tuple[bool, List[str]]:
         """
         Проверить, что все требуемые плагину capabilities имеют хотя бы одного provider.
@@ -432,11 +477,12 @@ class CapabilityRegistry:
             (True, []) если все требования удовлетворены.
             (False, [missing_capability_id, ...]) если какие-то capabilities отсутствуют.
         """
-        with self._lock:
-            required = self.get_required_capabilities(plugin_name)
-            missing: List[str] = []
-            for cap_id in required:
-                if not self.get_providers(cap_id):
-                    missing.append(cap_id)
-            return (len(missing) == 0, missing)
+        # Не держим self._lock здесь: get_required_capabilities и get_providers сами его берут.
+        # Иначе один поток держит lock и вызывает getters, которые снова берут тот же Lock → дедлок.
+        required = self.get_required_capabilities(plugin_name)
+        missing: List[str] = []
+        for cap_id in required:
+            if not self.get_providers(cap_id):
+                missing.append(cap_id)
+        return (len(missing) == 0, missing)
 
