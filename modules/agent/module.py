@@ -4,7 +4,12 @@ import os
 from datetime import datetime, timezone
 from core.runtime_module import RuntimeModule
 from core.http_registry import HttpEndpoint
-from core.security import SecretStore
+
+try:
+    from core.security import SecretStore
+except ImportError:
+    SecretStore = None  # type: ignore[misc, assignment]
+
 from core.agent.enrollment import AgentEnrollmentManager
 from core.agent.registry import AgentRegistry
 from core.agent.tls import MTLSCertificateAuthority
@@ -44,6 +49,11 @@ class AgentControlPlaneModule(RuntimeModule):
         - Initialize MTLSCertificateAuthority
         - Register HTTP endpoints
         """
+        if SecretStore is None:
+            raise RuntimeError(
+                "Agent module requires SecretStore from core.security; "
+                "ensure core.security.secret_store is available (e.g. cryptography package)."
+            )
         # Get or create SecretStore
         # For now, we use a simple in-memory or file-based secret store
         # In production, this would be initialized with a secure passphrase

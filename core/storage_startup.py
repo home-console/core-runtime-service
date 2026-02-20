@@ -38,7 +38,7 @@ class StorageStartupChecker:
         self.config = config
         self.storage_type = getattr(config, 'storage_type', 'sqlite')
         self.db_path = getattr(config, 'db_path', 'data/runtime.db')
-        self.is_production = getattr(config, 'environment', 'development') == 'production'
+        self.is_production = getattr(config, 'env', 'development') == 'production'
     
     async def check_all(self) -> bool:
         """
@@ -49,7 +49,7 @@ class StorageStartupChecker:
             Raises исключения для fatal ошибок
         """
         print(f"\n{'='*70}")
-        print(f"🔐 Storage Startup Checks (environment: {self.config.environment})")
+        print(f"🔐 Storage Startup Checks (environment: {self.config.env})")
         print(f"{'='*70}\n")
         
         passed = True
@@ -212,43 +212,58 @@ class StorageStartupChecker:
 class StorageInitializer:
     """
     Инициализировать storage на старте системы.
-    
+
+    Создание адаптеров вынесено в слой adapters; фабрику передаёт вызывающий код.
+
     Использование:
-        init = StorageInitializer(config)
+        from adapters.storage_factory import create_storage_adapter
+        init = StorageInitializer(config, create_adapter=create_storage_adapter)
         storage = await init.initialize()
     """
-    
-    def __init__(self, config):
-        """Инициализация."""
+
+    def __init__(self, config, create_adapter=None):
+        """
+        Инициализация.
+
+        Args:
+            config: объект конфигурации
+            create_adapter: async callable(config) -> IStorageBackend (из adapters.storage_factory.create_storage_adapter)
+        """
         self.config = config
-    
+        self._create_adapter = create_adapter
+
     async def initialize(self):
         """
         Полная инициализация storage.
-        
+
         1. Запустить checks
-        2. Создать adapter
+        2. Создать adapter (через переданную фабрику)
         3. Обернуть SecureStorageWrapper
         4. Инициализировать schema
         5. Проверить целостность
-        
+
         Returns:
             SecureStorageWrapper ready for use
-        
+
         Raises:
+            ValueError: если create_adapter не передан
             StorageCorruptionError: if integrity check fails
             StorageRollbackDetected: if rollback detected
         """
-        from core.storage_factory import create_storage_adapter
         from core.secure_storage import SecureStorageWrapper
-        
+
+        if self._create_adapter is None:
+            raise ValueError(
+                "StorageInitializer requires create_adapter (e.g. from adapters.storage_factory import create_storage_adapter)"
+            )
+
         # Step 1: Checks
         checker = StorageStartupChecker(self.config)
         await checker.check_all()
-        
-        # Step 2: Create adapter
+
+        # Step 2: Create adapter via injected factory
         print("🚀 Initializing storage adapter...\n")
-        adapter = await create_storage_adapter(self.config)
+        adapter = await self._create_adapter(self.config)
         
         # Step 3: Wrap with secure storage
         print("🔐 Initializing secure storage wrapper...\n")

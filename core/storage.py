@@ -8,7 +8,7 @@ Storage API - единый интерфейс для работы с храни�
 from typing import Any, Optional, Callable, Awaitable, AsyncIterator
 from contextlib import asynccontextmanager
 
-from adapters.storage_adapter import StorageAdapter
+from core.storage_abstraction import IStorageBackend
 
 
 class Storage:
@@ -19,7 +19,7 @@ class Storage:
     Без моделей, без ORM, без схемы.
     """
 
-    def __init__(self, adapter: StorageAdapter):
+    def __init__(self, adapter: IStorageBackend):
         """ Инициализация Storage. adapter: адаптер для работы с хранилищем """
         self._adapter = adapter
 

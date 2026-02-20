@@ -10,7 +10,7 @@ Provides:
 
 from typing import Optional, Any, List
 from core.storage_errors import NamespaceViolationError, StorageConfigurationError
-from adapters.storage_adapter import StorageAdapter
+from core.storage_abstraction import IStorageBackend
 from core.config import Config
 
 # Critical vault namespaces that MUST NOT be written through core_storage in dual mode
@@ -40,8 +40,8 @@ class StorageManager:
     
     def __init__(
         self,
-        core_storage: StorageAdapter,
-        vault_storage: Optional[StorageAdapter] = None,
+        core_storage: IStorageBackend,
+        vault_storage: Optional[IStorageBackend] = None,
         mode: str = "single",
     ):
         """

@@ -26,7 +26,7 @@ from typing import Dict, List, Tuple
 from core.config import Config
 from core.storage_manager import StorageManager, CRITICAL_VAULT_NAMESPACES
 from core.storage_errors import StorageConfigurationError
-from core.storage_factory import create_storage_manager
+from adapters.storage_factory import create_storage_manager
 
 
 logger = logging.getLogger(__name__)

@@ -225,7 +225,7 @@ async def test_factory_backward_compat():
     print("-" * 60)
     
     from core.config import Config
-    from core.storage_factory import create_storage_adapter, create_storage_manager
+    from adapters.storage_factory import create_storage_adapter, create_storage_manager
     
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
         db_path = f.name
@@ -267,7 +267,7 @@ async def test_single_to_dual_migration():
     print("-" * 60)
     
     from core.config import Config
-    from core.storage_factory import create_storage_manager
+    from adapters.storage_factory import create_storage_manager
     from core.storage_migrate import migrate_to_dual_mode
     
     with tempfile.TemporaryDirectory() as tmpdir:

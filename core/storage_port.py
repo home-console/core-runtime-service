@@ -3,18 +3,20 @@ Storage Ports - абстракции для доступа к storage из яд�
 
 CoreStoragePort - единый интерфейс для core storage (для CoreRuntime).
 VaultStoragePort - интерфейс для vault storage (если dual-mode).
+StorageStack - результат сборки стека (manager, core_port, vault_port).
 
-Эти порты скрывают детали реализации (StorageManager, SecureStorageWrapper)
-и предоставляют чистый API для ядра.
+Создание конкретных адаптеров и сборка стека — в слое adapters (storage_factory).
 """
 
 from typing import Any, Optional, AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 
 from core.storage import Storage
 from core.storage_mirror import StorageWithStateMirror
 from core.state_engine import StateEngine
-from adapters.storage_adapter import StorageAdapter
+from core.storage_abstraction import IStorageBackend
+from core.storage_manager import StorageManager
 
 
 class CoreStoragePort:
@@ -27,7 +29,7 @@ class CoreStoragePort:
     Используется CoreRuntime как единая точка доступа к storage.
     """
     
-    def __init__(self, adapter: StorageAdapter, state_engine: StateEngine):
+    def __init__(self, adapter: IStorageBackend, state_engine: StateEngine):
         """
         Инициализация порта.
         
@@ -144,3 +146,15 @@ class VaultStoragePort:
         """Итерировать по namespace."""
         async for item in self._secure_storage.iter_namespace(namespace, batch_size):
             yield item
+
+
+@dataclass
+class StorageStack:
+    """
+    Полный стек storage компонентов для ядра.
+
+    Собирается в слое adapters (build_storage_stack).
+    """
+    manager: StorageManager
+    core_port: CoreStoragePort
+    vault_port: Optional[VaultStoragePort] = None

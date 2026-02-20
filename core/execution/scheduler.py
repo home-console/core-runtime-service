@@ -285,3 +285,87 @@ def compute_next_run(
 
     return candidate.astimezone(UTC)
 
+
+def generate_schedule_id() -> str:
+    """Генерирует уникальный идентификатор расписания."""
+    return f"sched-{uuid4().hex[:16]}"
+
+
+class ExecutionScheduler:
+    """
+    Scheduler для запуска ExecutionSchedule по next_run_at.
+    Хранит расписания в storage (namespace execution, ключи schedules/<schedule_id>).
+    """
+
+    def __init__(self, runtime: Any, controller: Any) -> None:
+        self._runtime = runtime
+        self._controller = controller
+        self._ns = "execution"
+        self._prefix = "schedules/"
+
+    async def save_schedule(self, sched: ExecutionSchedule) -> None:
+        """Сохраняет расписание в storage."""
+        storage = getattr(self._runtime, "storage", None)
+        if storage is None:
+            return
+        key = f"{self._prefix}{sched.schedule_id}"
+        data = sched.to_dict()
+        # Сериализуем datetime в ISO строки для JSON-совместимого хранения
+        await storage.set(self._ns, key, data)
+
+    async def _load_schedule(self, schedule_id: str) -> Optional[ExecutionSchedule]:
+        """Загружает одно расписание по id."""
+        storage = getattr(self._runtime, "storage", None)
+        if storage is None:
+            return None
+        key = f"{self._prefix}{schedule_id}"
+        try:
+            data = await storage.get(self._ns, key)
+        except Exception:
+            return None
+        if not isinstance(data, dict):
+            return None
+        return ExecutionSchedule.from_dict(data)
+
+    async def tick(self, now: Optional[datetime] = None) -> None:
+        """
+        Один проход: загружает расписания, для которых next_run_at <= now,
+        запускает execution через controller, обновляет и сохраняет.
+        """
+        now = now or datetime.now(UTC)
+        storage = getattr(self._runtime, "storage", None)
+        if storage is None:
+            return
+        try:
+            keys = await storage.list_keys(self._ns)
+        except Exception:
+            return
+        schedule_keys = [k for k in keys if k.startswith(self._prefix)]
+        for key in schedule_keys:
+            schedule_id = key[len(self._prefix) :]
+            sched = await self._load_schedule(schedule_id)
+            if sched is None or not sched.enabled:
+                continue
+            if sched.next_run_at is None:
+                sched.ensure_next_run_at(now)
+            if sched.next_run_at is None or sched.next_run_at > now:
+                if sched.next_run_at is not None:
+                    await self.save_schedule(sched)
+                continue
+            # Запускаем выполнение
+            try:
+                await self._controller.execute_operation(
+                    operation_id=generate_schedule_id(),
+                    operation_type=sched.operation_type,
+                    params=sched.params,
+                    context=dict(sched.context),
+                )
+            except Exception:
+                pass
+            sched.run_count += 1
+            sched.last_run_at = now
+            sched.compute_next_after_run(now)
+            if sched.max_runs is not None and sched.run_count >= sched.max_runs:
+                sched.enabled = False
+            await self.save_schedule(sched)
+

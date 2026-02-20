@@ -22,7 +22,7 @@ import json
 import time
 import asyncio
 
-from adapters.storage_adapter import StorageAdapter
+from core.storage_abstraction import IStorageBackend
 from core.storage_exceptions import (
     StorageCorruptionError,
     StorageRollbackDetected, 
@@ -86,7 +86,7 @@ class SecureStorageWrapper:
     └─────────────────────────────────────────────────┘
     """
     
-    def __init__(self, adapter: StorageAdapter):
+    def __init__(self, adapter: IStorageBackend):
         """Инициализация secure wrapper."""
         self._adapter = adapter
         self._lock = asyncio.Lock()  # Глобальная блокировка для секурных операций

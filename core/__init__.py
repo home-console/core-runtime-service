@@ -10,10 +10,10 @@ from .module_manager import ModuleManager
 from .runtime import CoreRuntime
 from .runtime_module import RuntimeModule
 from .service_registry import ServiceRegistry
-from .storage_factory import create_storage_adapter
 from .state_engine import StateEngine
 from .storage import Storage
 from .storage_mirror import StorageWithStateMirror
+from .storage_port import StorageStack
 from .integration_registry import IntegrationRegistry
 from .logger_helper import info, warning, error
 from .base_plugin import BasePlugin
@@ -26,6 +26,7 @@ __all__ = [
     "StateEngine",
     "Storage",
     "StorageWithStateMirror",
+    "StorageStack",
     "IntegrationRegistry",
     "info",
     "warning",
@@ -33,5 +34,4 @@ __all__ = [
     "HttpRegistry",
     "ModuleManager",
     "RuntimeModule",
-    "create_storage_adapter",
 ]

@@ -24,7 +24,7 @@ from core.storage_errors import (
     NamespaceViolationError,
     StorageConfigurationError,
 )
-from core.storage_factory import (
+from adapters.storage_factory import (
     create_storage_manager,
     create_storage_adapter,
     _create_vault_storage_adapter,

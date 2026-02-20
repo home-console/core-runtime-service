@@ -34,19 +34,15 @@ class RuntimeContext:
     - Прямой доступ к runtime (только через контекст)
     """
     
-    # Storage
+    # Storage (обязательные — без default)
     storage: Storage  # Core storage (через StoragePort)
-    vault: Optional[Any] = None  # Vault storage port (если dual-mode)
-    
-    # Registries
     services: ServiceRegistry  # Service registry
     http: HttpRegistry  # HTTP registry
     capabilities: CapabilityRegistry  # Capability registry
-    
-    # Operations
     operations: OperationManager  # Operations manager
-    
-    # Опциональные компоненты (могут быть None в некоторых контекстах)
+
+    # Опциональные (с default — должны идти после обязательных)
+    vault: Optional[Any] = None  # Vault storage port (если dual-mode)
     state: Optional[Any] = None  # StateEngine (для быстрого доступа к state)
     
     def __post_init__(self):

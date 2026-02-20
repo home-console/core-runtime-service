@@ -253,22 +253,7 @@ class CoreRuntime:
                     # Не мешаем запуску runtime из-за проблем с автозагрузкой
                     # Логируем ошибку для отладки
                     await warning(self, f"Ошибка автозагрузки плагинов: {e}", component="runtime")
-                # После автозагрузки печатаем список найденных плагинов для видимости
-                try:
-                    loaded = self.plugin_manager.list_plugins()
-                    if loaded:
-                        print("[Runtime] Загруженные плагины:")
-                        for name in loaded:
-                            state = self.plugin_manager.get_plugin_state(name)
-                            state_str = state.value if state is not None else "unknown"
-                            block = self.plugin_manager.get_plugin_block_reason(name)
-                            if block:
-                                print(f"  - {name}: {state_str} (blocked: {block})")
-                            else:
-                                print(f"  - {name}: {state_str}")
-                except Exception:
-                    pass
-            
+
             # Запустить все плагины
             plugins = self.plugin_manager.list_plugins()
             await self.plugin_manager.start_all()

@@ -38,7 +38,7 @@ async def e2e_test_dual_mode_workflow():
             print("-" * 70)
             
             from core.config import Config
-            from core.storage_factory import create_storage_manager
+            from adapters.storage_factory import create_storage_manager
             
             single_config = Config(
                 storage_type="sqlite",

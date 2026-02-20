@@ -12,7 +12,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from core.config import Config
 from core.runtime import CoreRuntime
-from core.storage_factory import build_storage_stack
+from adapters.storage_factory import build_storage_stack
 from core.state_engine import StateEngine
 from core.http_registry import HttpEndpoint
 

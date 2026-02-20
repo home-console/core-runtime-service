@@ -79,8 +79,7 @@ class RuntimeModule(ABC):
             if hasattr(runtime_or_context, 'create_context'):
                 self.context = runtime_or_context.create_context()
             else:
-                # Fallback: создаём минимальный context вручную
-                from core.runtime_context import RuntimeContext
+                # Fallback: создаём минимальный context вручную (RuntimeContext уже импортирован выше)
                 self.context = RuntimeContext(
                     storage=runtime_or_context.storage,
                     vault=getattr(runtime_or_context, 'vault', None),
