@@ -6,11 +6,17 @@ Client Manager Plugin — интеграция client-manager-service как п�
 2. standalone - запускает отдельный FastAPI сервер (порт 10000)
 
 Режим выбирается через переменную окружения CLIENT_MANAGER_MODE (по умолчанию: standalone).
+
+Опционально: при RUNTIME_INSTALL_PLUGIN_DEPS=1 при первом ImportError плагин попытается
+установить зависимости из plugins/client-manager-service/requirements.txt (для разработки).
+В production лучше заранее: pip install -r requirements.txt (в нём уже есть deps плагинов).
 """
 import sys
+import subprocess
 import threading
 import asyncio
 import importlib
+import os
 from pathlib import Path
 from typing import Optional, Any, Literal
 
@@ -22,19 +28,29 @@ except ImportError:
 from core.base_plugin import BasePlugin, PluginMetadata
 
 
-async def _safe_log(runtime: Any, level: str, message: str, plugin: str = "client_manager") -> None:
+async def _safe_log(owner: Any, level: str, message: str, plugin: str = "client_manager") -> None:
     """
     Безопасное логирование с fallback на print.
     
     Используется в on_load(), когда logger.log может быть ещё недоступен.
     """
+    # Пытаемся логировать через ServiceRegistry из RuntimeContext или Runtime
     try:
-        if runtime and hasattr(runtime, 'service_registry'):
-            await runtime.service_registry.call(
+        runtime = getattr(owner, "runtime", None)
+        context = getattr(owner, "context", None)
+
+        service_registry = None
+        if context is not None and hasattr(context, "services"):
+            service_registry = context.services
+        elif runtime is not None and hasattr(runtime, "service_registry"):
+            service_registry = runtime.service_registry
+
+        if service_registry is not None:
+            await service_registry.call(
                 "logger.log",
                 level=level,
                 message=message,
-                plugin=plugin
+                plugin=plugin,
             )
             return
     except Exception:
@@ -70,7 +86,30 @@ class ClientManagerPlugin(BasePlugin):
             version="1.0.0",
             description="Client Manager Service - управление удалёнными клиентами через WebSocket",
             author="Home Console",
-            dependencies=[]
+            dependencies=[],
+            execution_mode="container",
+            container_config={
+                "name": "plugin-client_manager",
+                "image": "homeconsole-client-manager:dev",
+                "build": {
+                    # Dockerfile лежит в core-runtime-service/plugins/client-manager-service/Dockerfile
+                    # Build context = core-runtime-service (где есть requirements.txt и plugins/client-manager-service)
+                    "dockerfile": "plugins/client-manager-service/Dockerfile",
+                    "context": "core-runtime-service",
+                    "auto_build": True,
+                },
+                "ports": {
+                    "10000": "10000",
+                },
+                "env": {
+                    "JWT_SECRET_KEY": os.getenv("JWT_SECRET_KEY", "dev-secret-key-change-in-production"),
+                    "SERVER_ENCRYPTION_KEY": os.getenv(
+                        "SERVER_ENCRYPTION_KEY", "dev-secret-key-change-in-production"
+                    ),
+                },
+                # Явно указываем сеть, которую при необходимости создаст ContainerOrchestrator
+                "network": "homeconsole",
+            }
         )
     
     def __init__(self, runtime: Optional[Any] = None):
@@ -100,9 +139,15 @@ class ClientManagerPlugin(BasePlugin):
             Значение конфигурации или default
         """
         # Сначала проверяем storage (компонент ядра)
-        if self.runtime and hasattr(self.runtime, 'storage'):
+        storage = None
+        if hasattr(self, "context") and self.context is not None and hasattr(self.context, "storage"):
+            storage = self.context.storage
+        elif self.runtime and hasattr(self.runtime, "storage"):
+            storage = self.runtime.storage
+
+        if storage is not None:
             try:
-                config = await self.runtime.storage.get(self.CONFIG_NAMESPACE, self.CONFIG_KEY)
+                config = await storage.get(self.CONFIG_NAMESPACE, self.CONFIG_KEY)
                 if config and isinstance(config, dict) and key in config:
                     value = config.get(key)
                     if value is not None:
@@ -132,12 +177,18 @@ class ClientManagerPlugin(BasePlugin):
             key: имя параметра конфигурации
             value: значение для сохранения
         """
-        if not self.runtime or not hasattr(self.runtime, 'storage'):
+        storage = None
+        if hasattr(self, "context") and self.context is not None and hasattr(self.context, "storage"):
+            storage = self.context.storage
+        elif self.runtime and hasattr(self.runtime, "storage"):
+            storage = self.runtime.storage
+
+        if storage is None:
             return
         
         try:
             # Получаем текущую конфигурацию
-            config = await self.runtime.storage.get(self.CONFIG_NAMESPACE, self.CONFIG_KEY)
+            config = await storage.get(self.CONFIG_NAMESPACE, self.CONFIG_KEY)
             if not config or not isinstance(config, dict):
                 config = {}
             
@@ -145,7 +196,7 @@ class ClientManagerPlugin(BasePlugin):
             config[key] = value
             
             # Сохраняем обратно в storage
-            await self.runtime.storage.set(self.CONFIG_NAMESPACE, self.CONFIG_KEY, config)
+            await storage.set(self.CONFIG_NAMESPACE, self.CONFIG_KEY, config)
         except Exception:
             # Если не удалось сохранить - игнорируем (не критично)
             pass
@@ -163,13 +214,13 @@ class ClientManagerPlugin(BasePlugin):
             mode = "standalone"
             
         if mode not in ("integrated", "standalone"):
-            await _safe_log(self.runtime, "warning", f"Неизвестный режим {mode}, используем standalone")
+            await _safe_log(self, "warning", f"Неизвестный режим {mode}, используем standalone")
             mode = "standalone"
         self._mode = mode
         
         # Проверяем наличие uvicorn (нужен для standalone режима)
         if mode == "standalone" and uvicorn is None:
-            await _safe_log(self.runtime, "error", "uvicorn не установлен. Установите: pip install uvicorn")
+            await _safe_log(self, "error", "uvicorn не установлен. Установите: pip install uvicorn")
             raise ImportError("uvicorn is required for client_manager plugin in standalone mode")
         
         # В режиме integrated не создаём app здесь, это будет сделано в on_start
@@ -183,6 +234,27 @@ class ClientManagerPlugin(BasePlugin):
                 if client_manager_str not in sys.path:
                     sys.path.insert(0, client_manager_str)
                 
+                # Опционально: доставить зависимости плагина при первом импорте (для разработки)
+                def _ensure_plugin_deps() -> bool:
+                    if os.getenv("RUNTIME_INSTALL_PLUGIN_DEPS", "").strip() != "1":
+                        return False
+                    req_file = client_manager_path / "requirements.txt"
+                    if not req_file.is_file():
+                        return False
+                    try:
+                        out = subprocess.run(
+                            [sys.executable, "-m", "pip", "install", "-r", str(req_file), "-q"],
+                            check=False,
+                            capture_output=True,
+                            timeout=120,
+                        )
+                        if out.returncode != 0 and out.stderr:
+                            print(out.stderr.decode(errors="replace"), file=sys.stderr)
+                        return out.returncode == 0
+                    except Exception as e:
+                        print(f"[client_manager] pip install failed: {e}", file=sys.stderr)
+                        return False
+
                 # Используем importlib для импорта модулей
                 try:
                     app_main = importlib.import_module('app.main')
@@ -201,32 +273,76 @@ class ClientManagerPlugin(BasePlugin):
                         # Handler может быть не инициализирован до старта
                         self._handler = None
                     
-                    await _safe_log(self.runtime, "info", "Client Manager app создан (standalone режим)")
+                    await _safe_log(self, "info", "Client Manager app создан (standalone режим)")
                 except ImportError as e:
-                    await _safe_log(self.runtime, "error", f"Не удалось импортировать client-manager app: {e}")
-                    import traceback
-                    await _safe_log(self.runtime, "error", f"Traceback: {traceback.format_exc()}")
-                    raise
+                    if _ensure_plugin_deps():
+                        await _safe_log(self, "info", "Установлены зависимости плагина, повторный импорт...")
+                        try:
+                            importlib.invalidate_caches()
+                            app_main = importlib.import_module("app.main")
+                            create_app = getattr(app_main, "create_app")
+                            self._app = create_app()
+                            try:
+                                app_deps = importlib.import_module("app.dependencies")
+                                get_websocket_handler = getattr(app_deps, "get_websocket_handler", None)
+                                self._handler = get_websocket_handler() if get_websocket_handler else None
+                            except Exception:
+                                self._handler = None
+                            await _safe_log(self, "info", "Client Manager app создан (standalone режим)")
+                        except ImportError as e2:
+                            await _safe_log(self, "error", f"Не удалось импортировать после установки deps: {e2}")
+                            import traceback
+                            await _safe_log(self, "error", f"Traceback: {traceback.format_exc()}")
+                            raise
+                    else:
+                        # Подсказка: почему автоустановка не сработала
+                        env_val = os.getenv("RUNTIME_INSTALL_PLUGIN_DEPS", "").strip()
+                        if env_val != "1":
+                            await _safe_log(
+                                self, "info",
+                                "Для автоустановки задайте в .env: RUNTIME_INSTALL_PLUGIN_DEPS=1 "
+                                "или выполните: pip install -r plugins/client-manager-service/requirements.txt",
+                            )
+                        req_file = client_manager_path / "requirements.txt"
+                        if not req_file.is_file():
+                            await _safe_log(
+                                self, "warning",
+                                f"Файл не найден: {req_file} (автоустановка невозможна)",
+                            )
+                        if env_val == "1" and req_file.is_file():
+                            await _safe_log(
+                                self, "warning",
+                                "Автоустановка зависимостей не удалась. Выполните вручную: "
+                                "pip install -r plugins/client-manager-service/requirements.txt",
+                            )
+                        await _safe_log(self, "error", f"Не удалось импортировать client-manager app: {e}")
+                        import traceback
+                        await _safe_log(self, "error", f"Traceback: {traceback.format_exc()}")
+                        raise
                     
             except Exception as e:
-                await _safe_log(self.runtime, "error", f"Ошибка при создании Client Manager app: {e}")
+                await _safe_log(self, "error", f"Ошибка при создании Client Manager app: {e}")
                 import traceback
-                await _safe_log(self.runtime, "error", f"Traceback: {traceback.format_exc()}")
+                await _safe_log(self, "error", f"Traceback: {traceback.format_exc()}")
                 raise
         else:
-            await _safe_log(self.runtime, "info", "Client Manager будет интегрирован в основной API (integrated режим)")
+            await _safe_log(self, "info", "Client Manager будет интегрирован в основной API (integrated режим)")
     
     async def on_start(self) -> None:
         """Запуск: в зависимости от режима интегрируем или запускаем отдельный сервер."""
+        await _safe_log(self, "info", "[client_manager] on_start: entered", plugin="client_manager")
         await super().on_start()
-        
+        await _safe_log(self, "info", "[client_manager] on_start: super() done", plugin="client_manager")
+
         if self._mode == "integrated":
             await self._start_integrated_mode()
         else:
             await self._start_standalone_mode()
-        
+        await _safe_log(self, "info", "[client_manager] on_start: mode started", plugin="client_manager")
+
         # Регистрируем сервисы для доступа к ClientManager из других плагинов
         await self._register_services()
+        await _safe_log(self, "info", "[client_manager] on_start: _register_services done", plugin="client_manager")
     
     async def _start_integrated_mode(self) -> None:
         """Режим интеграции: монтируем роуты в основной API."""
@@ -447,11 +563,15 @@ class ClientManagerPlugin(BasePlugin):
     
     async def _start_standalone_mode(self) -> None:
         """Режим прокси: запускаем отдельный сервер."""
+        await _safe_log(self, "info", "[client_manager] _start_standalone_mode: entered", plugin="client_manager")
         if self._app is None:
+            await _safe_log(self, "info", "[client_manager] _start_standalone_mode: _app is None, return", plugin="client_manager")
             return
-        
+
         # Получаем конфигурацию через компоненты ядра
+        await _safe_log(self, "info", "[client_manager] _start_standalone_mode: getting host", plugin="client_manager")
         host = await self._get_config("host", default="0.0.0.0") or "0.0.0.0"
+        await _safe_log(self, "info", "[client_manager] _start_standalone_mode: getting port", plugin="client_manager")
         port_str = await self._get_config("port", default="10000") or "10000"
         try:
             port = int(port_str)
@@ -507,9 +627,11 @@ class ClientManagerPlugin(BasePlugin):
                     pass
                 return
         
+        await _safe_log(self, "info", "[client_manager] _start_standalone_mode: starting thread", plugin="client_manager")
         self._thread = threading.Thread(target=run_server, daemon=True)
         self._thread.start()
-        
+        await _safe_log(self, "info", "[client_manager] _start_standalone_mode: thread started", plugin="client_manager")
+
         # Логируем успешный запуск
         await self.runtime.service_registry.call(
             "logger.log",
@@ -520,6 +642,7 @@ class ClientManagerPlugin(BasePlugin):
     
     async def _register_services(self) -> None:
         """Регистрирует сервисы Client Manager через ServiceRegistry."""
+        await _safe_log(self, "info", "[client_manager] _register_services: entered", plugin="client_manager")
         try:
             from app.dependencies import get_websocket_handler
             
