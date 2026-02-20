@@ -17,7 +17,8 @@ import importlib
 from core.base_plugin import BasePlugin
 from core.kernel.plugin_registry import PluginRegistry, PluginState
 from core.kernel.plugin_sandbox import PluginSandbox
-from core.logger_helper import warning
+from core.kernel.plugin_infrastructure import PluginInfrastructureCoordinator
+from core.logger_helper import warning, info
 
 
 class PluginLifecycleManager:
@@ -41,6 +42,17 @@ class PluginLifecycleManager:
         """
         self._registry = registry
         self._runtime = runtime
+
+        # Инфраструктурный координатор: capabilities, operations, integrations
+        # Явно берём зависимости из runtime, чтобы lifecycle не знал деталей.
+        capability_registry = getattr(runtime, "capability_registry", None) if runtime is not None else None
+        operations = getattr(runtime, "operations", None) if runtime is not None else None
+        integrations = getattr(runtime, "integrations", None) if runtime is not None else None
+        self._infra = PluginInfrastructureCoordinator(
+            capability_registry=capability_registry,
+            operations=operations,
+            integrations=integrations,
+        )
     
     async def load_plugin(self, plugin: BasePlugin) -> None:
         """
@@ -93,26 +105,8 @@ class PluginLifecycleManager:
             # Регистрируем в реестре
             self._registry.register(plugin_name, plugin, PluginState.LOADED)
             
-            # CapabilityRegistry: регистрируем provided и required
-            if self._runtime and hasattr(self._runtime, "capability_registry"):
-                reg = self._runtime.capability_registry
-                
-                # Get trust level from plugin if available (set by MarketplaceInstaller)
-                trust_level = getattr(plugin, '_trust_level', None)
-                plugin_privilege = reg.trust_level_to_privilege(trust_level)
-                
-                for cap_id in (metadata.capabilities_provided or []):
-                    # Determine if this is a remote provider
-                    provider_type = "remote" if metadata.remote_config else "local"
-                    await reg.register_provider(
-                        plugin_name,
-                        cap_id,
-                        provider_type=provider_type,
-                        remote_config=metadata.remote_config,
-                        plugin_privilege=plugin_privilege
-                    )
-                for cap_id in (metadata.capabilities_required or []):
-                    await reg.register_consumer(plugin_name, cap_id)
+            # CapabilityRegistry / инфраструктура: регистрация capabilities вынесена в координатор
+            await self._infra.on_plugin_loaded(plugin)
         except Exception as e:
             # Устанавливаем состояние ERROR
             self._registry.set_plugin_state(plugin_name, PluginState.ERROR)
@@ -144,7 +138,11 @@ class PluginLifecycleManager:
         self._registry.clear_plugin_block_reason(plugin_name)
         if self._runtime and hasattr(self._runtime, "capability_registry"):
             reg = self._runtime.capability_registry
+            if self._runtime:
+                await info(self._runtime, f"RUNTIME: validating capabilities for plugin {plugin_name}", component="runtime")
             ok, missing = await reg.validate_plugin_requirements(plugin_name)
+            if self._runtime:
+                await info(self._runtime, f"RUNTIME: capabilities validated for {plugin_name} ok={ok}", component="runtime")
             if not ok:
                 self._registry.set_plugin_block_reason(plugin_name, {"missing_capabilities": missing})
                 return  # Плагин не стартуем — управляемое состояние (blocked), не исключение
@@ -204,28 +202,11 @@ class PluginLifecycleManager:
             await plugin.on_unload()
             self._registry.clear_plugin_block_reason(plugin_name)
             
-            # Unregister handlers for all capabilities provided by this plugin
-            if self._runtime and hasattr(self._runtime, "capability_registry") and hasattr(self._runtime, "operations"):
-                cap_reg = self._runtime.capability_registry
-                ops_mgr = self._runtime.operations
-                
-                # Get all capabilities provided by this plugin
-                metadata = plugin.metadata
-                for cap_id in metadata.capabilities_provided:
-                    # Unregister direct handler (backward compatibility)
-                    ops_mgr.unregister_handler(cap_id)
-                    # Unregister plugin name as handler (if it was used)
-                    ops_mgr.unregister_handler(plugin_name)
-                
-                # Finally unregister from capability registry
-                cap_reg.unregister_plugin(plugin_name)
-            
-            # Удаляем из реестра
+            # Инфраструктурная очистка (capabilities, handlers, integrations)
+            await self._infra.on_plugin_unloaded(plugin)
+
+            # Удаляем из реестра плагинов
             self._registry.unregister(plugin_name)
-            
-            # Удаляем интеграцию из реестра (если была зарегистрирована)
-            if self._runtime is not None and hasattr(self._runtime, 'integrations'):
-                self._runtime.integrations.unregister(plugin_name)
         except Exception as e:
             self._registry.set_plugin_state(plugin_name, PluginState.ERROR)
             raise RuntimeError(f"Ошибка выгрузки плагина '{plugin_name}': {e}")
@@ -303,9 +284,15 @@ class PluginLifecycleManager:
     async def start_all(self) -> None:
         """Запустить все загруженные плагины."""
         states = self._registry.get_all_states()
+        if self._runtime:
+            await info(self._runtime, "RUNTIME: plugin_manager.start_all() entered", component="runtime")
         for plugin_name, state in states.items():
             if state == PluginState.LOADED:
+                if self._runtime:
+                    await info(self._runtime, f"RUNTIME: starting plugin {plugin_name}", component="runtime")
                 await self.start_plugin(plugin_name)
+                if self._runtime:
+                    await info(self._runtime, f"RUNTIME: plugin {plugin_name} started", component="runtime")
     
     async def stop_all(self) -> None:
         """Остановить все запущенные плагины."""
