@@ -11,6 +11,9 @@ Components:
 - secret_policy: namespace access control (whitelist)
 """
 
+# Rate limiting (API middleware)
+from .rate_limiter import RateLimiter
+
 # Step 16 imports
 from .secure_memory import SecureBuffer, SecureBytes, wipe_memory
 from .vault_hardening import VaultHardening, HardeningStatus
@@ -64,6 +67,8 @@ def sanitize_for_logging(data, mask="***REDACTED***"):
     return data
 
 __all__ = [
+    # Rate limiting
+    "RateLimiter",
     # Step 16 - Secure Memory
     "SecureBuffer",
     "SecureBytes",

@@ -433,6 +433,29 @@ class AdminModule(RuntimeModule):
                 else:
                     error_msg = stderr.decode("utf-8", errors="replace") if stderr else "Неизвестная ошибка"
                     logger.warning(f"Failed to restart container {container_name}: {error_msg}")
+                    
+                    # Если ошибка связана с сетью, удаляем контейнер и пересоздаём
+                    if "network" in error_msg.lower() and "not found" in error_msg.lower():
+                        logger.info(f"Network error detected, removing container {container_name} to recreate it")
+                        remove_result = await self._container_orchestrator.remove_container(container_name, force=True)
+                        if remove_result["ok"]:
+                            # Пересоздаём контейнер с правильной сетью
+                            logger.info(f"Recreating container {container_name} with correct network configuration")
+                            ensure_result = await self._container_orchestrator.ensure_container(
+                                container_name,
+                                metadata.container_config
+                            )
+                            if ensure_result["ok"]:
+                                return {"ok": True, "message": f"Контейнер '{container_name}' пересоздан и запущен (была проблема с сетью)"}
+                            else:
+                                return ensure_result
+                        else:
+                            return {
+                                "ok": False,
+                                "error": f"Не удалось перезапустить контейнер '{container_name}': {error_msg}. "
+                                        f"Также не удалось удалить контейнер для пересоздания: {remove_result.get('error', 'неизвестная ошибка')}"
+                            }
+                    
                     return {
                         "ok": False,
                         "error": f"Не удалось перезапустить контейнер '{container_name}': {error_msg}"

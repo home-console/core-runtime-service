@@ -3,11 +3,22 @@ Admin Access Middleware — ограничение доступа к админ-
 
 Блокирует доступ к /admin/* endpoints если запрос не с localhost или не из приватной сети.
 Это обеспечивает, что админ-панель доступна только при прямом подключении к ядру или через VPN.
+При возврате 403 добавляем CORS-заголовки, иначе браузер скрывает ответ и фронт видит только CORS error.
 """
 
 import ipaddress
 from typing import Optional
 from fastapi import Request, Response
+
+
+def _add_cors_if_localhost(request: Request, response: Response) -> None:
+    """Добавить CORS-заголовки к ответу для localhost origin."""
+    origin = request.headers.get("origin")
+    if not origin:
+        return
+    if origin.startswith("http://localhost") or origin.startswith("http://127.0.0.1"):
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
 
 
 def is_private_ip(ip: str) -> bool:
@@ -108,20 +119,24 @@ async def admin_access_middleware(request: Request, call_next):
     
     if client_ip is None:
         # Не удалось определить IP - блокируем для безопасности
-        return Response(
+        r = Response(
             content='{"detail": "Access denied: unable to determine client IP address"}',
             status_code=403,
             media_type="application/json"
         )
-    
+        _add_cors_if_localhost(request, r)
+        return r
+
     # Проверяем, является ли IP приватным
     if not is_private_ip(client_ip):
         # Публичный IP - блокируем доступ к админ-панели
-        return Response(
+        r = Response(
             content='{"detail": "Access denied: admin panel is only available from localhost or private network (VPN required)"}',
             status_code=403,
             media_type="application/json"
         )
+        _add_cors_if_localhost(request, r)
+        return r
     
     # Приватный IP - разрешаем доступ
     return await call_next(request)

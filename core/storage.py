@@ -23,6 +23,10 @@ class Storage:
         """ Инициализация Storage. adapter: адаптер для работы с хранилищем """
         self._adapter = adapter
 
+    def get_backend_name(self) -> str:
+        """Имя бэкенда хранилища (для метрик/диагностики). Не раскрывает _adapter."""
+        return type(self._adapter).__name__
+
     async def get(self, namespace: str, key: str) -> Optional[dict[str, Any]]:
         """
         Получить значение.

@@ -33,6 +33,10 @@ class StorageWithStateMirror:
         self._storage = storage
         self._state_engine = state_engine
 
+    def get_backend_name(self) -> str:
+        """Имя бэкенда хранилища (для метрик/диагностики). Делегирует во внутренний Storage."""
+        return self._storage.get_backend_name()
+
     async def get(self, namespace: str, key: str) -> Any:
         """
         Получить значение из storage.

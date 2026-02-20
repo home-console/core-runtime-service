@@ -1,22 +1,36 @@
 """
 Точка входа в приложение Home Console.
 
-Core Runtime (kernel) не знает, какие модули загружать.
-Приложение задаёт набор модулей через ApplicationBootstrap (app/bootstrap.py).
-
-Storage Support:
-- Single Mode (default): RUNTIME_STORAGE_MODE=single
-  One storage adapter handles all namespaces
-  
-- Dual Mode: RUNTIME_STORAGE_MODE=dual
-  Separate core and vault storage with namespace enforcement
-  Requires: RUNTIME_VAULT_STORAGE_TYPE and RUNTIME_VAULT_DB_PATH/DSN
+main.py строит config/storage/runtime, регистрирует модули и вызывает runtime.run().
+HTTP (FastAPI/uvicorn) полностью в модуле api; Runtime только вызывает api.run_http() после start().
 """
 
 import asyncio
 import os
-import signal
 from pathlib import Path
+
+def _load_dotenv() -> None:
+    def _load_file(path: Path) -> None:
+        if not path.is_file():
+            return
+        try:
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    if "=" in line:
+                        key, _, value = line.partition("=")
+                        key = key.strip()
+                        value = value.strip().strip("'\"").replace("\\n", "\n").strip()
+                        if key and key not in os.environ:
+                            os.environ[key] = value
+        except OSError:
+            pass
+    _load_file(Path(__file__).resolve().parent / ".env")
+    _load_file(Path.cwd() / ".env")
+
+_load_dotenv()
 
 from core.config import Config
 from core.runtime import CoreRuntime
@@ -26,35 +40,26 @@ from core.state_engine import StateEngine
 
 
 APP_MODULES: list[ModuleSpec] = [
-    # Logger и request_logger — первыми (инфраструктура логирования).
     ModuleSpec("logger", required=True),
     ModuleSpec("request_logger", required=True),
     ModuleSpec("api", required=True),
     ModuleSpec("admin", required=True),
     ModuleSpec("auth", required=True),
     ModuleSpec("operations", required=True),
-    # Step 15: Agent Control Plane (optional, but enables distributed agents)
     ModuleSpec("agent", required=False),
-    # Execution Layer (D3): policy + backends, Core об этом не знает.
     ModuleSpec("execution", required=True),
     ModuleSpec("integrations", required=True),
     ModuleSpec("devices", required=True),
-    # Automation/Flows — доменный оркестратор поверх EventBus+Operations.
-    # НЕ часть Core и должен быть удаляемым без остановки runtime.
     ModuleSpec("automation", required=False),
     ModuleSpec("presence", required=True),
     ModuleSpec("product_api", required=False),
 ]
 
 
-async def main():
-    """Главная функция запуска приложения."""
+async def main() -> None:
     config = Config.from_env()
-
-    # Create directories for storage
     if config.storage_type == "sqlite":
         Path(config.db_path).parent.mkdir(parents=True, exist_ok=True)
-    
     if (
         config.storage_mode == "dual"
         and config.vault_storage_type == "sqlite"
@@ -62,13 +67,8 @@ async def main():
     ):
         Path(config.vault_db_path).parent.mkdir(parents=True, exist_ok=True)
 
-    # Create StateEngine (needed for CoreStoragePort)
     state_engine = StateEngine()
-    
-    # Build complete storage stack (includes checks, adapters, manager, ports)
     storage_stack = await build_storage_stack(config, state_engine)
-    
-    # Create runtime with storage ports and state_engine
     runtime = CoreRuntime(
         storage_port=storage_stack.core_port,
         config=config,
@@ -76,69 +76,26 @@ async def main():
         state_engine=state_engine,
     )
 
-    loop = asyncio.get_running_loop()
-    sigint_count = 0
-    shutting_down = False
-
-    async def _graceful_shutdown() -> None:
-        nonlocal shutting_down
-        if shutting_down:
-            return
-        shutting_down = True
-        print("[Runtime] Остановка Core Runtime...")
-        try:
-            await asyncio.wait_for(
-                runtime.shutdown(),
-                timeout=config.shutdown_timeout,
-            )
-            print("[Runtime] Core Runtime остановлен")
-            
-            # Close storage stack
-            await storage_stack.manager.close()
-            print("[Runtime] Storage закрыт")
-        except asyncio.TimeoutError:
-            print("[Runtime] Таймаут при остановке Runtime")
-        finally:
-            # Гарантированно завершаем процесс после shutdown
-            os._exit(0)
-
-    def _handle_sigint(signum, frame):
-        nonlocal sigint_count
-        sigint_count += 1
-        if sigint_count == 1:
-            # Первый Ctrl+C — запускаем асинхронный graceful shutdown
-            print("\n[Runtime] Получен сигнал остановки (Ctrl+C). Завершаем работу...")
-            loop.call_soon_threadsafe(lambda: asyncio.create_task(_graceful_shutdown()))
-        else:
-            # Повторный Ctrl+C — принудительный выход, без ожидания
-            print("\n[Runtime] Повторный Ctrl+C — принудительный выход.")
-            os._exit(1)
-
-    # Регистрируем обработчик SIGINT (Ctrl+C)
-    signal.signal(signal.SIGINT, _handle_sigint)
-
-    # Log storage mode
     print(f"[Runtime] Storage mode: {config.storage_mode} ({config.storage_type})")
     if config.storage_mode == "dual":
         print(f"[Runtime] Vault storage: {config.vault_storage_type}")
-
-    # 1) Приложение регистрирует модули в Core
-    print("[Runtime] Регистрация модулей приложения...")
+    print("[Runtime] Регистрация модулей...")
     await runtime.module_manager.register_module_specs(runtime, APP_MODULES)
     try:
         modules = runtime.module_manager.list_modules()
         if modules:
-            print(f"[Runtime] Модули зарегистрированы: {modules}")
+            print(f"[Runtime] Модули: {modules}")
     except Exception:
         pass
 
-    # 2) Core запускает зарегистрированные модули и плагины (kernel)
-    print("[Runtime] Запуск Core Runtime...")
-    await runtime.start()
-    print("[Runtime] Core Runtime запущен")
-    
-    # Ждём, пока процесс не будет завершён через Ctrl+C / SIGINT
-    await asyncio.Event().wait()
+    await runtime.run()
+
+    try:
+        await storage_stack.manager.close()
+        print("[Runtime] Storage закрыт")
+    except Exception:
+        pass
+    os._exit(0)
 
 
 if __name__ == "__main__":

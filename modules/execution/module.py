@@ -37,7 +37,7 @@ class ExecutionModule(RuntimeModule):
     async def register(self) -> None:
         # Создаём controller и публикуем в runtime как расширение (не Core API).
         self._controller = ExecutionControllerImpl(self.runtime)
-        setattr(self.runtime, "execution_controller", self._controller)
+        self.runtime.execution_controller = self._controller
 
         ops_mgr = getattr(self.runtime, "operations", None)
         if ops_mgr is None:
@@ -49,7 +49,7 @@ class ExecutionModule(RuntimeModule):
             if not execution_id:
                 return {"status": "error", "error": {"code": "missing_execution_id", "message": "execution_id is required"}}
 
-            controller: ExecutionControllerImpl = getattr(self.runtime, "execution_controller", None)
+            controller: ExecutionControllerImpl = self.runtime.execution_controller
             if controller is None:
                 return {"status": "error", "error": {"code": "no_execution_controller", "message": "Execution controller not available"}}
 
@@ -70,7 +70,7 @@ class ExecutionModule(RuntimeModule):
                     "error": {"code": "missing_execution_id", "message": "execution_id is required"},
                 }
 
-            controller: ExecutionControllerImpl = getattr(self.runtime, "execution_controller", None)
+            controller: ExecutionControllerImpl = self.runtime.execution_controller
             if controller is None:
                 return {
                     "status": "error",
@@ -342,7 +342,7 @@ class ExecutionModule(RuntimeModule):
         # Запускаем фоновый scheduler (D3.6).
         if self._controller is None:
             self._controller = ExecutionControllerImpl(self.runtime)
-            setattr(self.runtime, "execution_controller", self._controller)
+            self.runtime.execution_controller = self._controller
 
         self._scheduler = ExecutionScheduler(self.runtime, self._controller)
 

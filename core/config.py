@@ -232,7 +232,7 @@ class Config:
             rate_limit_window=int(os.getenv("RUNTIME_RATE_LIMIT_WINDOW", "60")),
             env=os.getenv("RUNTIME_ENV", "development").lower(),
             trust_proxy_headers=os.getenv("RUNTIME_TRUST_PROXY_HEADERS", "false").lower() == "true",
-            cors_allowed_origins=cors_allowed,
+            cors_allowed_origins=cors_allowed if cors_allowed is not None else ["http://localhost:3000", "http://127.0.0.1:3000"],
             csrf_enabled=os.getenv("RUNTIME_CSRF_ENABLED", "true").lower() == "true",
             csrf_cookie_name=os.getenv("RUNTIME_CSRF_COOKIE_NAME", "csrf_token"),
             csrf_header_name=os.getenv("RUNTIME_CSRF_HEADER_NAME", "X-CSRF-Token"),

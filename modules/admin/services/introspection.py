@@ -117,6 +117,8 @@ async def list_plugins(runtime: Any) -> List[Dict[str, Any]]:
             "capabilities_provided": capabilities_provided,
             "capabilities_required": capabilities_required,
             "unresolved_capabilities": unresolved_capabilities,
+            # Execution / isolation mode (for UI statistics)
+            "execution_mode": getattr(metadata, "execution_mode", "in_process"),
         })
 
     return result
@@ -328,6 +330,29 @@ async def inspector_auth_summary(runtime: Any) -> Dict[str, Any]:
     Регистрируется вторым handler'ом для admin.v1.inspector.auth — перезаписывает первый.
     """
     return await auth_inspector_response(runtime)
+
+
+async def dashboard_inspector_response(runtime: Any) -> Dict[str, Any]:
+    """
+    Ответ для GET /admin/v1/inspector/dashboard: агрегат plugins, services, http_endpoints, state_keys
+    для главной страницы Admin UI (AdminDashboard).
+    """
+    try:
+        plugins = await list_plugins(runtime)
+        services = await list_services(runtime)
+        http_endpoints = await list_http_endpoints(runtime)
+        state_keys = await list_state_keys(runtime)
+    except Exception as e:
+        return {"ok": False, "error": str(e), "summary": None}
+    return {
+        "ok": True,
+        "summary": {
+            "plugins": plugins,
+            "services": services,
+            "http_endpoints": http_endpoints,
+            "state_keys": state_keys,
+        },
+    }
 
 
 # --- Execution observability (D3.3) ---

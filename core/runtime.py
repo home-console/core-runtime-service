@@ -13,6 +13,7 @@ CoreRuntime - главный класс Core Runtime.
 
 from typing import Any, Dict, Optional
 import asyncio
+import os
 import time
 
 from core.event_bus import EventBus
@@ -95,6 +96,36 @@ class CoreRuntime:
 
         self._running = False
         self._start_time: Optional[float] = None
+
+        # Execution controller (опционально; выставляется модулем execution)
+        self.execution_controller: Optional[Any] = None
+    
+    async def run(self) -> None:
+        """
+        Верный запуск: start (модули + плагины), затем HTTP через модуль api.
+        Runtime не знает про FastAPI/uvicorn — вызывает api.run_http(runtime).
+        """
+        await info(self, "RUNTIME: start() about to run", component="runtime")
+        await self.start()
+        await info(self, "RUNTIME: start() finished", component="runtime")
+
+        await info(self, "RUNTIME: about to run HTTP", component="runtime")
+        api_module = self.module_manager.get_module("api")
+        if api_module is not None and hasattr(api_module, "run_http"):
+            try:
+                await api_module.run_http(self)
+                await info(self, "RUNTIME: run_http returned", component="runtime")
+            except Exception as e:
+                await warning(self, f"Ошибка HTTP: {e}", component="runtime")
+                import traceback
+                traceback.print_exc()
+        else:
+            await info(self, "RUNTIME: api_module missing or no run_http", component="runtime")
+        try:
+            timeout = getattr(self._config, "shutdown_timeout", 10) if self._config else 10
+            await asyncio.wait_for(self.shutdown(), timeout=timeout)
+        except asyncio.TimeoutError:
+            await warning(self, "Таймаут при остановке", component="runtime")
     
     def create_context(self) -> RuntimeContext:
         """
@@ -200,29 +231,6 @@ class CoreRuntime:
             return
         
         try:
-            # Если нет загруженных плагинов (например, в тестах с InMemoryStorageAdapter),
-            # попытаться автоматически загрузить плагины из каталога plugins/
-            # (unless in TEST_MODE)
-            import os
-            if not self.plugin_manager.list_plugins() and not os.getenv('TEST_MODE'):
-                try:
-                    await self.plugin_manager.auto_load_plugins()
-                except Exception as e:
-                    # Не мешаем запуску runtime из-за проблем с автозагрузкой
-                    await warning(self, f"Ошибка автозагрузки плагинов: {e}", component="runtime")
-            # Принудительно подгрузить yandex_smart_home (команды вкл/выкл идут через него в Quasar)
-            if "yandex_smart_home" not in self.plugin_manager.list_plugins():
-                try:
-                    ok = await self.plugin_manager.load_plugin_by_name("yandex_smart_home", logger_func=info)
-                    if not ok:
-                        await warning(
-                            self,
-                            "Плагин yandex_smart_home не загружен — переключение устройств вкл/выкл через Яндекс не будет работать. Проверьте зависимости (oauth_yandex) и логи выше.",
-                            component="runtime",
-                        )
-                except Exception as e:
-                    await warning(self, f"Не удалось загрузить yandex_smart_home: {e}", component="runtime")
-
             # Модули регистрируются приложением (bootstrap) через register_module_specs() до вызова start().
             # Проверка, что все REQUIRED модули зарегистрированы (список required задаётся приложением)
             self.module_manager.check_required_modules_registered()
@@ -243,21 +251,21 @@ class CoreRuntime:
             if modules:
                 await info(self, f"Модули запущены: {modules}", component="runtime")
             
-            # P0: Auto-load plugins AFTER modules are started
-            # Плагины должны загружаться ПОСЛЕ модулей (модули создают инфраструктуру для плагинов)
+            # P0: Автозагрузка плагинов из папки plugins/ (один раз после модулей)
+            # Сканируем папку, в каждой подпапке ищем manifest/plugin.json — если валидный, грузим плагин
             import os
             if not self.plugin_manager.list_plugins() and not os.getenv('TEST_MODE'):
                 try:
                     await self.plugin_manager.auto_load_plugins()
                 except Exception as e:
-                    # Не мешаем запуску runtime из-за проблем с автозагрузкой
-                    # Логируем ошибку для отладки
                     await warning(self, f"Ошибка автозагрузки плагинов: {e}", component="runtime")
 
             # Запустить все плагины
             plugins = self.plugin_manager.list_plugins()
+            await info(self, "RUNTIME: about to call plugin_manager.start_all()", component="runtime")
             await self.plugin_manager.start_all()
-            
+            await info(self, "RUNTIME: plugin_manager.start_all() returned", component="runtime")
+
             # Логируем как список, так и сводку по количеству и состояниям
             if plugins:
                 await info(self, f"Плагины запущены: {plugins}", component="runtime")
@@ -312,7 +320,8 @@ class CoreRuntime:
             # Установить состояние runtime
             await self.state_engine.set("runtime.status", "running")
             self._running = True
-            
+            self._start_time = time.time()
+
         except Exception as e:
             # При любой ошибке старта останавливаем все модули
             # Гарантия: stop_all вызывается даже при частичном старте
@@ -329,6 +338,7 @@ class CoreRuntime:
         """
         Остановить Core Runtime.
         
+        - сигналит HTTP серверу (should_exit)
         - останавливает все плагины
         - очищает состояние
         - закрывает storage
@@ -516,7 +526,7 @@ class CoreRuntime:
             await self.storage.get("metrics", "test")
             metrics["storage"] = {
                 "available": True,
-                "type": self.storage._adapter.__class__.__name__ if hasattr(self.storage, "_adapter") else "unknown"  # pyright: ignore[reportAttributeAccessIssue]
+                "type": self.storage.get_backend_name(),
             }
         except Exception as e:
             metrics["storage"] = {
