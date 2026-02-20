@@ -158,6 +158,8 @@ class PluginLifecycleManager:
         """
         Остановить плагин.
         
+        Для плагинов с execution_mode="container" также останавливает Docker контейнер.
+        
         Args:
             plugin_name: имя плагина
             
@@ -173,11 +175,115 @@ class PluginLifecycleManager:
             return  # Не запущен
         
         try:
+            # REFACTORING: Проблема с lifecycle контейнеров - останавливаем контейнер перед on_stop()
+            # Для плагинов с execution_mode="container" нужно остановить Docker контейнер
+            metadata = plugin.metadata
+            if metadata.execution_mode == "container" and metadata.container_config:
+                await self._stop_plugin_container(plugin_name, metadata.container_config)
+            
             await plugin.on_stop()
             self._registry.set_plugin_state(plugin_name, PluginState.STOPPED)
         except Exception as e:
             self._registry.set_plugin_state(plugin_name, PluginState.ERROR)
             raise RuntimeError(f"Ошибка остановки плагина '{plugin_name}': {e}")
+    
+    async def _stop_plugin_container(self, plugin_name: str, container_config: dict) -> None:
+        """
+        Остановить Docker контейнер плагина.
+        
+        Args:
+            plugin_name: имя плагина
+            container_config: конфигурация контейнера из metadata
+        """
+        # Получаем ContainerOrchestrator из runtime (через AdminModule)
+        if not self._runtime:
+            return
+        
+        # Пытаемся получить ContainerOrchestrator из AdminModule
+        container_orchestrator = None
+        try:
+            if hasattr(self._runtime, "module_manager"):
+                admin_module = self._runtime.module_manager.get_module("admin")
+                if admin_module and hasattr(admin_module, "_container_orchestrator"):
+                    container_orchestrator = admin_module._container_orchestrator
+        except Exception:
+            pass
+        
+        if not container_orchestrator:
+            # Если ContainerOrchestrator недоступен, логируем предупреждение
+            try:
+                await warning(
+                    self._runtime,
+                    f"ContainerOrchestrator недоступен для остановки контейнера плагина '{plugin_name}'",
+                    component="plugin_lifecycle"
+                )
+            except Exception:
+                pass
+            return
+        
+        # Определяем имя контейнера
+        container_name = container_config.get("name")
+        if not container_name:
+            container_name = f"plugin-{plugin_name}"
+        
+        # Проверяем существование контейнера
+        if not await container_orchestrator.container_exists(container_name):
+            return  # Контейнер не существует, ничего не делаем
+        
+        # Останавливаем контейнер через docker stop
+        import asyncio
+        import shutil
+        docker_cmd = shutil.which("docker")
+        if not docker_cmd:
+            return
+        
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                docker_cmd,
+                "stop",
+                container_name,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30.0)
+            
+            if proc.returncode == 0:
+                try:
+                    await info(
+                        self._runtime,
+                        f"Контейнер '{container_name}' плагина '{plugin_name}' успешно остановлен",
+                        component="plugin_lifecycle"
+                    )
+                except Exception:
+                    pass
+            else:
+                error_msg = stderr.decode("utf-8", errors="replace") if stderr else "Неизвестная ошибка"
+                try:
+                    await warning(
+                        self._runtime,
+                        f"Не удалось остановить контейнер '{container_name}' плагина '{plugin_name}': {error_msg}",
+                        component="plugin_lifecycle"
+                    )
+                except Exception:
+                    pass
+        except asyncio.TimeoutError:
+            try:
+                await warning(
+                    self._runtime,
+                    f"Таймаут при остановке контейнера '{container_name}' плагина '{plugin_name}'",
+                    component="plugin_lifecycle"
+                )
+            except Exception:
+                pass
+        except Exception as e:
+            try:
+                await warning(
+                    self._runtime,
+                    f"Ошибка при остановке контейнера '{container_name}' плагина '{plugin_name}': {e}",
+                    component="plugin_lifecycle"
+                )
+            except Exception:
+                pass
     
     async def unload_plugin(self, plugin_name: str) -> None:
         """
@@ -202,6 +308,12 @@ class PluginLifecycleManager:
             await plugin.on_unload()
             self._registry.clear_plugin_block_reason(plugin_name)
             
+            # REFACTORING: Проблема с lifecycle контейнеров - удаляем контейнер при unload
+            # Для плагинов с execution_mode="container" удаляем Docker контейнер
+            metadata = plugin.metadata
+            if metadata.execution_mode == "container" and metadata.container_config:
+                await self._remove_plugin_container(plugin_name, metadata.container_config)
+            
             # Инфраструктурная очистка (capabilities, handlers, integrations)
             await self._infra.on_plugin_unloaded(plugin)
 
@@ -210,6 +322,57 @@ class PluginLifecycleManager:
         except Exception as e:
             self._registry.set_plugin_state(plugin_name, PluginState.ERROR)
             raise RuntimeError(f"Ошибка выгрузки плагина '{plugin_name}': {e}")
+    
+    async def _remove_plugin_container(self, plugin_name: str, container_config: dict) -> None:
+        """
+        Удалить Docker контейнер плагина.
+        
+        Args:
+            plugin_name: имя плагина
+            container_config: конфигурация контейнера из metadata
+        """
+        # Получаем ContainerOrchestrator из runtime (через AdminModule)
+        if not self._runtime:
+            return
+        
+        container_orchestrator = None
+        try:
+            if hasattr(self._runtime, "module_manager"):
+                admin_module = self._runtime.module_manager.get_module("admin")
+                if admin_module and hasattr(admin_module, "_container_orchestrator"):
+                    container_orchestrator = admin_module._container_orchestrator
+        except Exception:
+            pass
+        
+        if not container_orchestrator:
+            return
+        
+        # Определяем имя контейнера
+        container_name = container_config.get("name")
+        if not container_name:
+            container_name = f"plugin-{plugin_name}"
+        
+        # Удаляем контейнер через ContainerOrchestrator (с force=True для остановки перед удалением)
+        result = await container_orchestrator.remove_container(container_name, force=True)
+        if result.get("ok"):
+            try:
+                await info(
+                    self._runtime,
+                    f"Контейнер '{container_name}' плагина '{plugin_name}' успешно удалён",
+                    component="plugin_lifecycle"
+                )
+            except Exception:
+                pass
+        else:
+            error = result.get("error", "Неизвестная ошибка")
+            try:
+                await warning(
+                    self._runtime,
+                    f"Не удалось удалить контейнер '{container_name}' плагина '{plugin_name}': {error}",
+                    component="plugin_lifecycle"
+                )
+            except Exception:
+                pass
     
     async def reload_plugin(
         self,
