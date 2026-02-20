@@ -347,210 +347,28 @@ class ClientManagerPlugin(BasePlugin):
     async def _start_integrated_mode(self) -> None:
         """Режим интеграции: монтируем роуты в основной API."""
         try:
-            # Получаем ApiModule
-            api_module = self.runtime.module_manager.get_module("api")
+            # Получаем ApiModule (через runtime; ModuleManager не входит в RuntimeContext по дизайну)
+            api_module = getattr(self.runtime, "module_manager", None)
+            if api_module is not None:
+                api_module = api_module.get_module("api")
             if api_module is None or api_module.app is None:
-                await self.runtime.service_registry.call(
-                    "logger.log",
-                    level="error",
-                    message="ApiModule не найден или не инициализирован",
-                    plugin="client_manager"
-                )
+                await _safe_log(self, "error", "ApiModule не найден или не инициализирован")
                 raise RuntimeError("ApiModule not available for integrated mode")
-            
-            main_app = api_module.app
-            
-            # Импортируем зависимости client-manager-service
-            from app.core.websocket_handler import WebSocketHandler
-            from app.core.security.auth_service import AuthService
-            from app.dependencies import set_websocket_handler, get_websocket_handler
-            from app.routes import (
-                clients,
-                commands,
-                health,
-                files,
-                secrets,
-                enrollments,
-                universal_commands,
-                installations,
-                cloud,
-                terminal,
-                audit_queue,
+
+            from plugins.client_manager.http_integration import integrate_into_main_app
+
+            async def _wrap_log(level: str, message: str) -> None:
+                await _safe_log(self, level, message)
+
+            # Делегируем всю FastAPI/WS‑интеграцию в отдельный адаптер
+            handler = await integrate_into_main_app(
+                api_module.app,
+                get_config=self._get_config,
+                log=_wrap_log,
+                plugin_name="client_manager",
             )
-            from fastapi import WebSocket, WebSocketDisconnect
-            import json
-            import asyncio
-            
-            # Инициализируем WebSocketHandler
-            handler = WebSocketHandler()
-            set_websocket_handler(handler)
+            # Сохраняем handler для последующего cleanup в on_stop
             self._handler = handler
-            
-            # Инициализируем AuthService
-            try:
-                auth_service = AuthService()
-                handler.auth_service = auth_service
-            except Exception as e:
-                await self.runtime.service_registry.call(
-                    "logger.log",
-                    level="warning",
-                    message=f"AuthService не инициализирован: {e}",
-                    plugin="client_manager"
-                )
-            
-            # Запускаем фоновые задачи
-            try:
-                await handler.start_background_tasks()
-            except Exception as e:
-                await self.runtime.service_registry.call(
-                    "logger.log",
-                    level="warning",
-                    message=f"Не удалось запустить фоновые задачи: {e}",
-                    plugin="client_manager"
-                )
-            
-            # Получаем префикс для WebSocket endpoints через компоненты ядра
-            ws_prefix = await self._get_config("ws_prefix", default="")
-            ws_path = f"{ws_prefix}/ws" if ws_prefix else "/ws"
-            admin_ws_path = f"{ws_prefix}/admin/ws" if ws_prefix else "/admin/ws"
-            
-            # Монтируем WebSocket endpoints
-            @main_app.websocket(ws_path)
-            async def websocket_endpoint(websocket: WebSocket):
-                """WebSocket endpoint для клиентов"""
-                if handler:
-                    await handler.handle_websocket(websocket)
-                else:
-                    await websocket.close(code=1011, reason="Server not ready")
-            
-            @main_app.websocket(admin_ws_path)
-            async def admin_websocket_endpoint(websocket: WebSocket):
-                """Админский WebSocket endpoint. Ожидает JWT в query param `token`."""
-                if not handler:
-                    await websocket.close(code=1011, reason="Server not ready")
-                    return
-                
-                token = websocket.query_params.get('token')
-                if not token:
-                    sp = websocket.headers.get('sec-websocket-protocol')
-                    if sp:
-                        token_candidate = sp.split(',')[0].strip()
-                        if token_candidate.lower().startswith('bearer '):
-                            token = token_candidate[7:]
-                        else:
-                            token = token_candidate
-                
-                try:
-                    await websocket.accept()
-                except Exception:
-                    return
-                
-                if not token:
-                    await websocket.send_text('{"type":"auth_required","message":"Token required"}')
-                    await websocket.close(code=1008, reason="Auth required")
-                    return
-                
-                auth_svc = getattr(handler, 'auth_service', None)
-                if not auth_svc:
-                    await websocket.send_text('{"type":"auth_unavailable","message":"Auth service unavailable"}')
-                    await websocket.close(code=1011, reason="Auth service unavailable")
-                    return
-                
-                payload = auth_svc.verify_token(token)
-                if not payload:
-                    await websocket.send_text('{"type":"auth_failed","message":"Invalid token"}')
-                    await websocket.close(code=1008, reason="Invalid token")
-                    return
-                
-                admin_id = f"admin:{payload.get('client_id', 'unknown')}"
-                await handler.websocket_manager.connect(websocket, admin_id, metadata={"admin": True, "permissions": payload.get('permissions', [])})
-                
-                try:
-                    clients_list = handler.get_all_clients()
-                    await websocket.send_text(json.dumps({"type": "client_list", "data": clients_list}))
-                except Exception as e:
-                    await self.runtime.service_registry.call(
-                        "logger.log",
-                        level="warning",
-                        message=f"Ошибка при отправке списка клиентов админу: {e}",
-                        plugin="client_manager"
-                    )
-                
-                try:
-                    async def periodic_refresh():
-                        prev_snapshot = None
-                        while True:
-                            await asyncio.sleep(5)
-                            try:
-                                clients_list = handler.get_all_clients()
-                                snapshot = json.dumps(clients_list)
-                                if snapshot != prev_snapshot:
-                                    prev_snapshot = snapshot
-                                    await websocket.send_text(json.dumps({"type": "client_list_refresh", "data": clients_list}))
-                            except Exception:
-                                break
-                    
-                    refresh_task = asyncio.create_task(periodic_refresh())
-                    
-                    while True:
-                        text = await websocket.receive_text()
-                        try:
-                            msg = json.loads(text)
-                        except Exception:
-                            await websocket.send_text('{"type":"error","message":"Invalid JSON"}')
-                            continue
-                        
-                        if msg.get('type') == 'get_clients':
-                            await websocket.send_text(json.dumps({"type": "client_list", "data": handler.get_all_clients()}))
-                        elif msg.get('type') == 'ping':
-                            await websocket.send_text('{"type":"pong"}')
-                        else:
-                            await websocket.send_text(json.dumps({"type": "unknown_command", "received": msg.get('type')}))
-                
-                except WebSocketDisconnect:
-                    pass
-                except Exception as e:
-                    await self.runtime.service_registry.call(
-                        "logger.log",
-                        level="error",
-                        message=f"Ошибка в admin websocket loop: {e}",
-                        plugin="client_manager"
-                    )
-                finally:
-                    try:
-                        refresh_task.cancel()
-                    except Exception:
-                        pass
-                    await handler.websocket_manager.disconnect(admin_id)
-            
-            # Монтируем REST API роуты
-            # Используем префикс /api/client-manager чтобы не конфликтовать с основными роутами
-            main_app.include_router(clients.router, prefix="/api/client-manager", tags=["Client Manager - Clients"])
-            main_app.include_router(commands.router, prefix="/api/client-manager", tags=["Client Manager - Commands"])
-            main_app.include_router(files.router, prefix="/api/client-manager", tags=["Client Manager - Files"])
-            main_app.include_router(secrets.router, prefix="/api/client-manager", tags=["Client Manager - Secrets"])
-            main_app.include_router(enrollments.router, prefix="/api/client-manager", tags=["Client Manager - Enrollments"])
-            main_app.include_router(installations.router, prefix="/api/client-manager", tags=["Client Manager - Installations"])
-            main_app.include_router(universal_commands.router, prefix="/api/client-manager", tags=["Client Manager - Universal Commands"])
-            main_app.include_router(cloud.router, prefix="/api/client-manager/cloud", tags=["Client Manager - Cloud Services"])
-            main_app.include_router(terminal.router, prefix="/api/client-manager", tags=["Client Manager - Terminal"])
-            main_app.include_router(audit_queue.router, prefix="/api/client-manager", tags=["Client Manager - Audit"])
-            
-            # Health endpoint без префикса для совместимости
-            main_app.include_router(health.router, tags=["Client Manager - Health"])
-            
-            try:
-                from app.routes import admin_messages
-                main_app.include_router(admin_messages.router, prefix="/api/client-manager", tags=["Client Manager - Admin"])
-            except Exception:
-                pass
-            
-            await self.runtime.service_registry.call(
-                "logger.log",
-                level="info",
-                message="Client Manager интегрирован в основной API (integrated режим)",
-                plugin="client_manager"
-            )
             
         except Exception as e:
             await self.runtime.service_registry.call(
@@ -654,12 +472,7 @@ class ClientManagerPlugin(BasePlugin):
                         return handler.get_all_clients()
                     return {}
                 except Exception as e:
-                    await self.runtime.service_registry.call(
-                        "logger.log",
-                        level="error",
-                        message=f"Ошибка получения списка клиентов: {e}",
-                        plugin="client_manager"
-                    )
+                    await _safe_log(self, "error", f"Ошибка получения списка клиентов: {e}")
                     return {}
             
             async def get_client_info(client_id: str) -> Optional[dict]:
@@ -675,32 +488,22 @@ class ClientManagerPlugin(BasePlugin):
                             return info
                     return None
                 except Exception as e:
-                    await self.runtime.service_registry.call(
-                        "logger.log",
-                        level="error",
-                        message=f"Ошибка получения информации о клиенте {client_id}: {e}",
-                        plugin="client_manager"
-                    )
+                    await _safe_log(self, "error", f"Ошибка получения информации о клиенте {client_id}: {e}")
                     return None
             
-            # Регистрируем сервисы
-            await self.runtime.service_registry.register("client_manager.get_clients", get_clients)
-            await self.runtime.service_registry.register("client_manager.get_client_info", get_client_info)
-            
-            await self.runtime.service_registry.call(
-                "logger.log",
-                level="info",
-                message="Client Manager сервисы зарегистрированы",
-                plugin="client_manager"
+            # Регистрируем сервисы через context.services (fallback на runtime.service_registry)
+            services = (
+                self.context.services
+                if hasattr(self, "context") and self.context
+                else self.runtime.service_registry
             )
+            await services.register("client_manager.get_clients", get_clients)
+            await services.register("client_manager.get_client_info", get_client_info)
+
+            await _safe_log(self, "info", "Client Manager сервисы зарегистрированы")
         except Exception as e:
             # Не критично, если не удалось зарегистрировать сервисы
-            await self.runtime.service_registry.call(
-                "logger.log",
-                level="warning",
-                message=f"Не удалось зарегистрировать Client Manager сервисы: {e}",
-                plugin="client_manager"
-            )
+            await _safe_log(self, "warning", f"Не удалось зарегистрировать Client Manager сервисы: {e}")
     
     async def on_stop(self) -> None:
         """Остановка: останавливаем сервер или очищаем интеграцию."""
@@ -723,12 +526,7 @@ class ClientManagerPlugin(BasePlugin):
                 except Exception:
                     pass
         
-        await self.runtime.service_registry.call(
-            "logger.log",
-            level="info",
-            message="Client Manager остановлен",
-            plugin="client_manager"
-        )
+        await _safe_log(self, "info", "Client Manager остановлен")
     
     async def on_unload(self) -> None:
         """Выгрузка: cleanup."""
@@ -736,8 +534,13 @@ class ClientManagerPlugin(BasePlugin):
         
         # Отменяем регистрацию сервисов
         try:
-            await self.runtime.service_registry.unregister("client_manager.get_clients")
-            await self.runtime.service_registry.unregister("client_manager.get_client_info")
+            services = (
+                self.context.services
+                if hasattr(self, "context") and self.context
+                else self.runtime.service_registry
+            )
+            await services.unregister("client_manager.get_clients")
+            await services.unregister("client_manager.get_client_info")
         except Exception:
             pass
         
