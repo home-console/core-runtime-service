@@ -67,8 +67,12 @@ class DevicesModule(RuntimeModule):
         for name, func in service_names:
             # Skip services that are already registered (idempotent)
             try:
-                services = self.context.services if hasattr(self, "context") and self.context else self.runtime.service_registry
-                if await services.has_service(name):
+                service_registry = (
+                    self.context.services
+                    if hasattr(self, "context") and self.context
+                    else self.runtime.service_registry
+                )
+                if await service_registry.has_service(name):
                     continue
             except Exception:
                 # If service_registry doesn't implement has_service for some reason,
@@ -84,7 +88,12 @@ class DevicesModule(RuntimeModule):
                 # preload loaders
                 preload_resource = None
                 if meta.get("preload") == "device_by_id":
-                    storage = self.context.storage if hasattr(self, "context") and self.context else self.runtime.storage
+                    storage = (
+                        self.context.storage
+                        if hasattr(self, "context") and self.context
+                        else self.runtime.storage
+                    )
+
                     async def _preload(args, kwargs, _storage=storage):
                         device_id = None
                         if args:
@@ -97,9 +106,13 @@ class DevicesModule(RuntimeModule):
 
                     preload_resource = _preload
 
-                services = self.context.services if hasattr(self, "context") and self.context else self.runtime.service_registry
-                if hasattr(services, "register_with_acl"):
-                    await services.register_with_acl(
+                service_registry = (
+                    self.context.services
+                    if hasattr(self, "context") and self.context
+                    else self.runtime.service_registry
+                )
+                if hasattr(service_registry, "register_with_acl"):
+                    await service_registry.register_with_acl(
                         name,
                         _wrapper,
                         resource=meta.get("resource"),
@@ -111,7 +124,7 @@ class DevicesModule(RuntimeModule):
                     )
                 else:
                     # Fallback: older ServiceRegistry without ACL support
-                    await services.register(name, _wrapper)
+                    await service_registry.register(name, _wrapper)
                 self._registered_services.append(name)
             except ValueError:
                 # already registered concurrently — skip
@@ -144,8 +157,12 @@ class DevicesModule(RuntimeModule):
         except Exception as e:
             # Логируем но не ломаем старт модуля
             try:
-                services = self.context.services if hasattr(self, "context") and self.context else self.runtime.service_registry
-                await services.call(
+                service_registry = (
+                    self.context.services
+                    if hasattr(self, "context") and self.context
+                    else self.runtime.service_registry
+                )
+                await service_registry.call(
                     "logger.log",
                     level="warning",
                     message=f"Failed to start pending cleaner: {e}",
@@ -178,10 +195,14 @@ class DevicesModule(RuntimeModule):
             pass
 
         # Отмена регистрации сервисов
-        services = self.context.services if hasattr(self, "context") and self.context else self.runtime.service_registry
+        service_registry = (
+            self.context.services
+            if hasattr(self, "context") and self.context
+            else self.runtime.service_registry
+        )
         for service_name in getattr(self, "_registered_services", []):
             try:
-                await services.unregister(service_name)
+                await service_registry.unregister(service_name)
             except Exception:
                 pass
 
