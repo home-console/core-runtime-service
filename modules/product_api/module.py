@@ -49,20 +49,20 @@ class ProductApiModule(RuntimeModule):
         await runtime.service_registry.register("product_api.v1.devices.list", _devices_list)
         await runtime.service_registry.register("product_api.v1.devices.get", _devices_get)
         await runtime.service_registry.register("product_api.v1.devices.set_state", _devices_set_state)
-
-        self.runtime.http.register(HttpEndpoint(
+        
+        self.context.http.register(HttpEndpoint(
             method="GET",
             path="/api/v1/devices",
             service="product_api.v1.devices.list",
             description="Product API: list devices (BFF → devices.list)",
         ))
-        self.runtime.http.register(HttpEndpoint(
+        self.context.http.register(HttpEndpoint(
             method="GET",
             path="/api/v1/devices/{id}",
             service="product_api.v1.devices.get",
             description="Product API: get device by id (BFF → devices.get)",
         ))
-        self.runtime.http.register(HttpEndpoint(
+        self.context.http.register(HttpEndpoint(
             method="POST",
             path="/api/v1/devices/{id}/state",
             service="product_api.v1.devices.set_state",

@@ -31,31 +31,31 @@ class OperationsModule(RuntimeModule):
         Services уже зарегистрированы в AdminModule.
         """
         # Operations API endpoints
-        self.runtime.http.register(HttpEndpoint(
+        self.context.http.register(HttpEndpoint(
             method="POST",
             path="/admin/v1/operations",
             service="admin.operations.create",
             description="Create and execute an operation"
         ))
-        self.runtime.http.register(HttpEndpoint(
+        self.context.http.register(HttpEndpoint(
             method="GET",
             path="/admin/v1/operations",
             service="admin.operations.list",
             description="List operations with pagination"
         ))
-        self.runtime.http.register(HttpEndpoint(
+        self.context.http.register(HttpEndpoint(
             method="GET",
             path="/admin/v1/operations/{operation_id}",
             service="admin.operations.get",
             description="Get operation details by ID"
         ))
-        self.runtime.http.register(HttpEndpoint(
+        self.context.http.register(HttpEndpoint(
             method="POST",
             path="/admin/v1/operations/{operation_id}/cancel",
             service="admin.operations.cancel",
             description="Cancel a pending or running operation"
         ))
-        self.runtime.http.register(HttpEndpoint(
+        self.context.http.register(HttpEndpoint(
             method="POST",
             path="/admin/v1/operations/{operation_id}/retry",
             service="admin.operations.retry",

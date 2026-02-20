@@ -126,14 +126,14 @@ class AgentControlPlaneModule(RuntimeModule):
         
         # Register HTTP endpoints for Agent Control Plane
         # Enrollment endpoints
-        self.runtime.http.register(HttpEndpoint(
+        self.context.http.register(HttpEndpoint(
             method="POST",
             path="/admin/v1/agents/enrollment-token",
             service="admin.agent.create_enrollment_token",
             description="Create enrollment token for new agent"
         ))
         
-        self.runtime.http.register(HttpEndpoint(
+        self.context.http.register(HttpEndpoint(
             method="POST",
             path="/admin/v1/agents/enroll",
             service="admin.agent.enroll_agent",
@@ -141,21 +141,21 @@ class AgentControlPlaneModule(RuntimeModule):
         ))
         
         # Agent registry endpoints
-        self.runtime.http.register(HttpEndpoint(
+        self.context.http.register(HttpEndpoint(
             method="GET",
             path="/admin/v1/agents",
             service="admin.agent.list_agents",
             description="List all registered agents"
         ))
         
-        self.runtime.http.register(HttpEndpoint(
+        self.context.http.register(HttpEndpoint(
             method="GET",
             path="/admin/v1/agents/{agent_id}",
             service="admin.agent.get_agent",
             description="Get agent details"
         ))
         
-        self.runtime.http.register(HttpEndpoint(
+        self.context.http.register(HttpEndpoint(
             method="POST",
             path="/admin/v1/agents/{agent_id}/deregister",
             service="admin.agent.deregister_agent",
@@ -163,7 +163,7 @@ class AgentControlPlaneModule(RuntimeModule):
         ))
         
         # Capability routing endpoints
-        self.runtime.http.register(HttpEndpoint(
+        self.context.http.register(HttpEndpoint(
             method="GET",
             path="/admin/v1/agents/capabilities/{capability_id}",
             service="admin.agent.list_agents_providing_capability",

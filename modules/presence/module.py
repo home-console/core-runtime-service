@@ -35,14 +35,14 @@ class PresenceModule(RuntimeModule):
 
         # Регистрация HTTP контрактов
         try:
-            self.runtime.http.register(
+            self.context.http.register(
                 HttpEndpoint(
                     method="POST",
                     path="/presence/enter",
                     service="presence.set?home=true"
                 )
             )
-            self.runtime.http.register(
+            self.context.http.register(
                 HttpEndpoint(
                     method="POST",
                     path="/presence/leave",
@@ -82,7 +82,7 @@ class PresenceModule(RuntimeModule):
 
         # Удаление HTTP контрактов
         try:
-            self.runtime.http.clear(self.name)
+            self.context.http.clear(self.name)
         except Exception:
             pass
 

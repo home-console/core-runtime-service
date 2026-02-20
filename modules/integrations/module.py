@@ -35,8 +35,8 @@ class IntegrationsModule(RuntimeModule):
                 await self.runtime.service_registry.register("admin.v1.integrations", _wrap)
         except ValueError:
             pass
-
-        self.runtime.http.register(HttpEndpoint(
+        
+        self.context.http.register(HttpEndpoint(
             method="GET",
             path="/admin/v1/integrations",
             service="admin.v1.integrations",
