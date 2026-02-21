@@ -22,9 +22,9 @@ REFRESH_TOKEN_EXPIRATION_SECONDS = 7 * 24 * 60 * 60  # 7 дней
 JWT_SECRET_KEY_STORAGE_KEY = "jwt_secret_key"  # Хранится в storage
 
 # Rate limiting defaults
-RATE_LIMIT_AUTH_ATTEMPTS = 10  # попыток (для login, create_api_key и т.д.)
+RATE_LIMIT_AUTH_ATTEMPTS = 30  # попыток (для login, create_api_key и т.д.) - повышено: 10 → 30
 RATE_LIMIT_AUTH_WINDOW = 60  # секунд
-RATE_LIMIT_API_REQUESTS = 1000  # запросов (для обычных API запросов)
+RATE_LIMIT_API_REQUESTS = 5000  # запросов (для обычных API запросов) - повышено: 1000 → 5000
 RATE_LIMIT_API_WINDOW = 60  # секунд
 
 # Password policies

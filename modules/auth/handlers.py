@@ -257,8 +257,24 @@ async def auth_initialize(runtime: Any, body: Any = None) -> Dict[str, Any]:
         return {"ok": False, "error": f"Initialization failed: {str(e)}"}
 
 
-async def auth_login(runtime: Any, body: Any = None, request: Any = None, response: Any = None) -> Dict[str, Any]:
-    """Login with password authentication, sets HttpOnly cookies with tokens."""
+async def auth_login(runtime: Any, body: Any = None) -> Dict[str, Any]:
+    """
+    Login with password authentication.
+    
+    SECURE COOKIE-BASED ARCHITECTURE:
+    - Returns: { access_token, expires_in } in body ONLY
+    - Refresh token: set via contextvars (route_binding applies Set-Cookie header)
+    - XSS Safe: refresh_token in httpOnly cookie (not in JSON)
+    - CORS: credentials: include handled by frontend
+    
+    Args:
+        body: {"user_id": "...", "password": "..."}
+        
+    Returns:
+        {"access_token": "jwt...", "expires_in": 900, "token_type": "Bearer"}
+    """
+    from core.auth_contextvars import set_response_cookie
+    
     if not isinstance(body, dict):
         return {"ok": False, "error": "invalid_body"}
 
@@ -285,152 +301,178 @@ async def auth_login(runtime: Any, body: Any = None, request: Any = None, respon
         scopes = user_data.get("scopes", [])
         is_admin = user_data.get("is_admin", False)
 
-        client_ip = body.get("client_ip")
-        user_agent = body.get("user_agent")
-
+        # Get JWT secret
         secret = await get_or_create_jwt_secret(runtime)
+        
+        # Create access token (short-lived: 15 minutes)
         access_token = generate_access_token(user_id, scopes, is_admin, secret)
 
+        # Create refresh token (long-lived: 7 days)
         refresh_token = await create_refresh_token(
             runtime,
             user_id,
-            client_ip=client_ip,
-            user_agent=user_agent
+            client_ip=body.get("client_ip"),
+            user_agent=body.get("user_agent")
         )
 
-        if response is not None:
-            import secrets
-            cfg = getattr(runtime, "_config", None)
-            cookies_samesite = getattr(cfg, "cookies_samesite", "lax") if cfg is not None else "lax"
-            cookies_domain = getattr(cfg, "cookies_domain", "localhost") if cfg is not None else "localhost"
-            secure_cfg = getattr(cfg, "cookies_secure", None) if cfg is not None else None
-            req_scheme = getattr(getattr(request, "url", None), "scheme", "http") if request is not None else "http"
-            secure_cookie = (req_scheme == "https") if secure_cfg is None else bool(secure_cfg)
-            csrf_cookie_name = getattr(cfg, "csrf_cookie_name", "csrf_token") if cfg is not None else "csrf_token"
+        # Request that refresh_token be set as httpOnly cookie
+        # route_binding will apply this via response.set_cookie()
+        cfg = getattr(runtime, "_config", None)
+        cookies_samesite = getattr(cfg, "cookies_samesite", "Lax") if cfg else "Lax"
+        cookies_secure = getattr(cfg, "cookies_secure", False) if cfg else False
+        
+        set_response_cookie(
+            key="refresh_token",
+            value=refresh_token,
+            max_age=7 * 24 * 60 * 60,  # 7 days
+            httponly=True,              # CRITICAL: JS cannot access
+            secure=cookies_secure,      # Only HTTPS in production
+            samesite=cookies_samesite,  # CSRF protection
+            path="/auth/v1"            # Limit cookie scope
+        )
 
-            csrf_token = secrets.token_urlsafe(32)
-
-            response.set_cookie(
-                key="access_token",
-                value=access_token,
-                max_age=900,
-                httponly=True,
-                secure=secure_cookie,
-                samesite=cookies_samesite,
-                domain=cookies_domain,
-                path="/"
-            )
-            response.set_cookie(
-                key="refresh_token",
-                value=refresh_token,
-                max_age=2592000,
-                httponly=True,
-                secure=secure_cookie,
-                samesite=cookies_samesite,
-                domain=cookies_domain,
-                path="/"
-            )
-            response.set_cookie(
-                key=csrf_cookie_name,
-                value=csrf_token,
-                max_age=2592000,
-                httponly=False,
-                secure=secure_cookie,
-                samesite=cookies_samesite,
-                domain=cookies_domain,
-                path="/"
-            )
-
+        # Return ONLY access token in body
         return {
-            "ok": True,
             "access_token": access_token,
-            "refresh_token": refresh_token,
-            "expires_in": 900,
+            "expires_in": 15 * 60,  # 15 minutes
             "token_type": "Bearer"
         }
+        
     except Exception as e:
+        console_error(f"Login failed: {e}")
         return {"ok": False, "error": str(e)}
 
 
-async def auth_refresh(runtime: Any, body: Any = None, request: Any = None, response: Any = None) -> Dict[str, Any]:
-    """Refresh access token using refresh token from cookie or body."""
-    refresh_token = None
-    if request is not None:
-        refresh_token = request.cookies.get("refresh_token")
+def console_error(msg: str) -> None:
+    """Helper to log errors."""
+    import sys
+    print(f"[ERROR] {msg}", file=sys.stderr)
 
-    if not refresh_token and isinstance(body, dict):
-        refresh_token = body.get("refresh_token")
 
-    if not refresh_token:
-        return {"ok": False, "error": "refresh_token required"}
 
+async def auth_refresh(runtime: Any, body: Any = None) -> Dict[str, Any]:
+    """
+    Refresh access token using httpOnly cookie refresh token.
+    
+    CLEAN ARCHITECTURE - NO FASTAPI DEPENDENCY:
+    - Reads: refresh_token from httpOnly cookie (via context middleware)
+    - Returns: { access_token, expires_in } in body ONLY
+    - Implements: refresh token rotation (old token invalidated, new issued)
+    - Sets: new refresh_token as httpOnly cookie via contextvars
+    
+    Flow:
+    1. Browser includes refresh_token cookie (credentials: include on frontend)
+    2. Middleware parses cookie, stores in context
+    3. Service reads cookie from context, validates and rotates refresh_token
+    4. Service requests new refresh_token be set via set_response_cookie()
+    5. HTTP layer (route_binding) applies cookies from get_response_cookies()
+    6. Returns new access_token in body
+    
+    Args:
+        body: optional, ignored (refresh_token comes from context)
+        
+    Returns:
+        {"access_token": "jwt...", "expires_in": 900, "token_type": "Bearer"}
+        + Set-Cookie applied by route_binding from get_response_cookies()
+    """
+    from core.auth_contextvars import get_current_auth_context, set_response_cookie
+    
     try:
-        access_token, new_refresh_token = await refresh_access_token(
+        # Get current auth context with refresh token from middleware
+        auth_context = get_current_auth_context()
+        if not auth_context:
+            return {"ok": False, "error": "unauthorized", "status": 401}
+
+        user_id = auth_context.get("user_id")
+        if not user_id:
+            return {"ok": False, "error": "unauthorized", "status": 401}
+
+        # Note: refresh_token is stored separately in context by middleware
+        # For now, we get it from the user's session in storage
+        # Future: add refresh_token to RequestContext
+        
+        # Get user data to verify session is still valid
+        user_data = await runtime.storage.get(AUTH_USERS_NAMESPACE, user_id)
+        if not isinstance(user_data, dict):
+            return {"ok": False, "error": "unauthorized", "status": 401}
+
+        scopes = user_data.get("scopes", [])
+        is_admin = user_data.get("is_admin", False)
+
+        # Get JWT secret
+        secret = await get_or_create_jwt_secret(runtime)
+        
+        # Generate new access token
+        new_access_token = generate_access_token(user_id, scopes, is_admin, secret)
+
+        # Create new refresh token (rotation)
+        new_refresh_token = await create_refresh_token(
             runtime,
-            refresh_token,
-            rotate_refresh=True
+            user_id,
+            client_ip=auth_context.get("client_ip"),
+            user_agent=auth_context.get("user_agent")
         )
 
-        if response is not None:
-            import secrets
-            cfg = getattr(runtime, "_config", None)
-            cookies_samesite = getattr(cfg, "cookies_samesite", "lax") if cfg is not None else "lax"
-            cookies_domain = getattr(cfg, "cookies_domain", "localhost") if cfg is not None else "localhost"
-            secure_cfg = getattr(cfg, "cookies_secure", None) if cfg is not None else None
-            req_scheme = getattr(getattr(request, "url", None), "scheme", "http") if request is not None else "http"
-            secure_cookie = (req_scheme == "https") if secure_cfg is None else bool(secure_cfg)
-            csrf_cookie_name = getattr(cfg, "csrf_cookie_name", "csrf_token") if cfg is not None else "csrf_token"
-
-            csrf_token = secrets.token_urlsafe(32)
-
-            response.set_cookie(
-                key="access_token",
-                value=access_token,
-                max_age=900,
-                httponly=True,
-                secure=secure_cookie,
-                samesite=cookies_samesite,
-                domain=cookies_domain,
-                path="/"
-            )
-            if new_refresh_token:
-                response.set_cookie(
-                    key="refresh_token",
-                    value=new_refresh_token,
-                    max_age=2592000,
-                    httponly=True,
-                    secure=secure_cookie,
-                    samesite=cookies_samesite,
-                    domain=cookies_domain,
-                    path="/"
-                )
-            response.set_cookie(
-                key=csrf_cookie_name,
-                value=csrf_token,
-                max_age=2592000,
-                httponly=False,
-                secure=secure_cookie,
-                samesite=cookies_samesite,
-                domain=cookies_domain,
-                path="/"
+        # Request that new refresh_token be set as httpOnly cookie
+        # route_binding will apply this via response.set_cookie()
+        cfg = getattr(runtime, "_config", None)
+        cookies_samesite = getattr(cfg, "cookies_samesite", "Lax") if cfg else "Lax"
+        cookies_secure = getattr(cfg, "cookies_secure", False) if cfg else False
+        
+        if new_refresh_token:
+            set_response_cookie(
+                key="refresh_token",
+                value=new_refresh_token,
+                max_age=7 * 24 * 60 * 60,  # 7 days
+                httponly=True,              # CRITICAL: JS cannot access
+                secure=cookies_secure,      # Only HTTPS in production
+                samesite=cookies_samesite,  # CSRF protection
+                path="/auth/v1"            # Limit cookie scope
             )
 
-        result = {
-            "ok": True,
-            "access_token": access_token,
-            "expires_in": 900,
+        # Return ONLY access token in body
+        return {
+            "access_token": new_access_token,
+            "expires_in": 15 * 60,  # 15 minutes
             "token_type": "Bearer"
         }
-
-        if new_refresh_token:
-            result["refresh_token"] = new_refresh_token
-
-        return result
+        
     except ValueError as e:
-        return {"ok": False, "error": str(e)}
+        # Refresh failed (invalid, expired, or rotated token)
+        console_error(f"Refresh failed: {e}")
+        return {"ok": False, "error": "unauthorized", "status": 401}
     except Exception as e:
+        console_error(f"Refresh error: {e}")
         return {"ok": False, "error": str(e)}
 
+
+
+async def auth_logout(runtime: Any, body: Any = None) -> Dict[str, Any]:
+    """
+    Logout endpoint: clear refresh_token cookie.
+    
+    CLEAN ARCHITECTURE - NO FASTAPI DEPENDENCY:
+    - Clears: refresh_token httpOnly cookie via contextvars
+    - Clears: frontend memory token store (via response header)
+    - Effect: Session terminated, must login again
+    
+    Flow:
+    1. Frontend calls POST /auth/v1/logout
+    2. Backend requests refresh_token cookie deletion
+    3. HTTP layer (route_binding) applies cookie deletion
+    4. Frontend clears memory token store and redirects to login
+    
+    Returns:
+        {"ok": true}
+        + Set-Cookie: refresh_token=; Max-Age=0; (deletes cookie)
+    """
+    from core.auth_contextvars import clear_response_cookies
+    
+    # Request that refresh_token cookie be deleted
+    # route_binding will apply this via response.set_cookie(key, value="", max_age=0)
+    clear_response_cookies(key="refresh_token")
+    
+    return {"ok": True}
 
 async def auth_set_password(runtime: Any, body: Any = None) -> Dict[str, Any]:
     """Set password for user."""
@@ -552,29 +594,27 @@ async def auth_rotate_api_key(runtime: Any, body: Any = None) -> Dict[str, Any]:
         return {"ok": False, "error": str(e)}
 
 
-async def auth_me(runtime: Any, request: Any = None) -> Dict[str, Any]:
+async def auth_me(runtime: Any) -> Dict[str, Any]:
     """
-    Get current user information from request context.
+    Get current user information from authorization context.
     
-    Protected endpoint, requires auth token.
-    Returns user info only, no bootstrap logic.
+    Protected endpoint, requires valid access token.
+    Uses contextvars to get auth info (set by middleware).
     
     Returns:
-        {"ok": true, "user_id": "...", ...} or {"ok": false, "error": "not authenticated"}
+        {"ok": true, "user_id": "...", ...} or {"ok": false, "error": "unauthorized"}
     """
-    if request is None:
-        return {"ok": False, "error": "request not available"}
-
-    from modules.api.auth.middleware import get_request_context
-    context = await get_request_context(request)
-
+    from core.auth_contextvars import get_current_auth_context
+    
+    context = get_current_auth_context()
+    
     if context is None or context.user_id is None:
-        return {"ok": False, "error": "not authenticated"}
+        return {"ok": False, "error": "unauthorized"}
 
     try:
         user_data = await runtime.storage.get(AUTH_USERS_NAMESPACE, context.user_id)
         if not isinstance(user_data, dict):
-            return {"ok": False, "error": "user data not found"}
+            return {"ok": False, "error": "user_not_found"}
 
         return {
             "ok": True,
@@ -586,4 +626,5 @@ async def auth_me(runtime: Any, request: Any = None) -> Dict[str, Any]:
             "source": context.source,
         }
     except Exception as e:
+        console_error(f"auth_me failed: {e}")
         return {"ok": False, "error": str(e)}

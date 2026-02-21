@@ -27,6 +27,7 @@ from .handlers import (
     auth_initialize,
     auth_login,
     auth_refresh,
+    auth_logout,
     auth_set_password,
     auth_change_password,
     auth_list_sessions,
@@ -80,6 +81,7 @@ class AuthModule(RuntimeModule):
             ("auth.initialize", wrap_domain(auth_initialize), False),
             ("auth.login", wrap_domain(auth_login), False),
             ("auth.refresh", wrap_domain(auth_refresh), False),
+            ("auth.logout", wrap_domain(auth_logout), False),
             ("auth.me", wrap_domain(auth_me), False),
             
             # Protected services (admin-only)
@@ -142,14 +144,19 @@ class AuthModule(RuntimeModule):
             auth_config=EndpointAuthConfig(public=True)
         ))
         self.context.http.register(HttpEndpoint(
+            method="POST",
+            path="/auth/v1/logout",
+            service="auth.logout",
+            description="Logout and clear session",
+            auth_config=EndpointAuthConfig(public=True)
+        ))
+        self.context.http.register(HttpEndpoint(
             method="GET",
             path="/auth/v1/me",
             service="auth.me",
             description="Get current user info",
             auth_config=EndpointAuthConfig(public=True)
         ))
-        
-        # Password management endpoints
         self.context.http.register(HttpEndpoint(
             method="POST",
             path="/admin/v1/auth/password/set",

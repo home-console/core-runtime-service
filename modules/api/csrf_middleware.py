@@ -156,10 +156,10 @@ async def rate_limit_middleware(request: Request, call_next: Callable) -> Respon
     
     # Define rate limits for different endpoint types
     rate_limits = {
-        "/admin/v1/yandex/sync": {"max_calls": 5, "window_sec": 60},
-        "/admin/v1/devices": {"max_calls": 100, "window_sec": 60},
-        "/admin/v1/inspector/storage": {"max_calls": 100, "window_sec": 60},
-        "default": {"max_calls": 200, "window_sec": 60},
+        "/admin/v1/yandex/sync": {"max_calls": 60, "window_sec": 60},  # Повышено: 5 → 60 для синхронизации
+        "/admin/v1/devices": {"max_calls": 500, "window_sec": 60},      # Повышено: 100 → 500
+        "/admin/v1/inspector/storage": {"max_calls": 500, "window_sec": 60},  # Повышено: 100 → 500
+        "default": {"max_calls": 1000, "window_sec": 60},                # Повышено: 200 → 1000
     }
     
     # Find matching rate limit

@@ -75,10 +75,10 @@ def _make_api_handler(runtime: Any, endpoint: Any):
         
         # DEBUG: логирование для публичных эндпоинтов
         if "bootstrap" in endpoint.path or "initialize" in endpoint.path:
-            runtime = getattr(request.app.state, "runtime", None)
-            if runtime and hasattr(runtime, "logger"):
+            debug_runtime = getattr(request.app.state, "runtime", None) or runtime
+            if debug_runtime and hasattr(debug_runtime, "logger"):
                 try:
-                    await runtime.service_registry.call(
+                    await debug_runtime.service_registry.call(
                         "logger.log",
                         level="info",
                         message=f"[ROUTE_BINDING] {endpoint.service} auth_config={auth_config} is_public={is_public}",
@@ -229,13 +229,8 @@ def _make_api_handler(runtime: Any, endpoint: Any):
             if body is not None:
                 params["body"] = body
             
-            # Legacy спец-логика для auth endpoints (fallback)
-            if endpoint.service in ["admin.auth.login", "admin.auth.refresh"]:
-                params["request"] = request
-                params["response"] = response
-            elif endpoint.service == "admin.auth.me":
-                params["request"] = request
-            elif endpoint.service == "oauth_yandex.configure" and body and isinstance(body, dict):
+            # OAuth endpoints need special parameter extraction
+            if endpoint.service == "oauth_yandex.configure" and body and isinstance(body, dict):
                 params.pop("body", None)
                 params["client_id"] = body.get("client_id", "")
                 params["client_secret"] = body.get("client_secret", "")
@@ -274,6 +269,36 @@ def _make_api_handler(runtime: Any, endpoint: Any):
             if isinstance(e, ValueError):
                 raise HTTPException(status_code=400, detail=str(e))
             raise HTTPException(status_code=500, detail=str(e))
+
+        # Apply cookies from contextvars (set by service layer)
+        try:
+            from core.auth_contextvars import get_response_cookies
+            cookies = get_response_cookies()
+            if cookies:
+                for cookie_key, cookie_data in cookies.items():
+                    max_age = cookie_data.get("max_age")
+                    httponly = cookie_data.get("httponly", False)
+                    secure = cookie_data.get("secure", False)
+                    samesite = cookie_data.get("samesite", "Lax")
+                    path = cookie_data.get("path", "/")
+                    value = cookie_data.get("value", "")
+                    
+                    # If value is empty or max_age is 0, delete the cookie
+                    if value == "" or max_age == 0:
+                        response.delete_cookie(key=cookie_key, path=path)
+                    else:
+                        response.set_cookie(
+                            key=cookie_key,
+                            value=value,
+                            max_age=max_age,
+                            httponly=httponly,
+                            secure=secure,
+                            samesite=samesite,
+                            path=path
+                        )
+        except Exception:
+            # If cookie setup fails, don't break the response
+            pass
 
         return result
 
