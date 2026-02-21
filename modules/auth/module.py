@@ -35,6 +35,7 @@ from .handlers import (
     auth_revoke_api_key,
     auth_rotate_api_key,
     auth_me,
+    auth_bootstrap,
 )
 
 
@@ -72,8 +73,11 @@ class AuthModule(RuntimeModule):
             return lambda *args, **kw: fn(self.runtime, *args, **kw)
         
         services_config = [
+            # Bootstrap (read-only system state, no auth required)
+            ("auth.bootstrap", wrap_domain(auth_bootstrap), False),
+            
             # Public services (no auth required)
-            ("admin.auth.initialize", wrap_domain(auth_initialize), False),
+            ("auth.initialize", wrap_domain(auth_initialize), False),
             ("auth.login", wrap_domain(auth_login), False),
             ("auth.refresh", wrap_domain(auth_refresh), False),
             ("auth.me", wrap_domain(auth_me), False),
@@ -106,29 +110,37 @@ class AuthModule(RuntimeModule):
                 self.runtime.logger.warning(f"Failed to register {service_name}: {e}")
         
         # --- Register HTTP Endpoints ---
+        # Bootstrap endpoint (check if system initialized)
+        self.context.http.register(HttpEndpoint(
+            method="GET",
+            path="/auth/v1/bootstrap",
+            service="auth.bootstrap",
+            description="Check if system is initialized (bootstrap status)"
+        ))
+        
         # Auth initialization & login endpoints
         self.context.http.register(HttpEndpoint(
             method="POST",
-            path="/admin/v1/auth/initialize",
-            service="admin.auth.initialize",
+            path="/auth/v1/initialize",
+            service="auth.initialize",
             description="Initialize auth system (first-time setup)"
         ))
         self.context.http.register(HttpEndpoint(
             method="POST",
-            path="/admin/v1/auth/login",
-            service="admin.auth.login",
+            path="/auth/v1/login",
+            service="auth.login",
             description="Login with credentials"
         ))
         self.context.http.register(HttpEndpoint(
             method="POST",
-            path="/admin/v1/auth/refresh",
-            service="admin.auth.refresh",
+            path="/auth/v1/refresh",
+            service="auth.refresh",
             description="Refresh access token"
         ))
         self.context.http.register(HttpEndpoint(
             method="GET",
-            path="/admin/v1/auth/me",
-            service="admin.auth.me",
+            path="/auth/v1/me",
+            service="auth.me",
             description="Get current user info"
         ))
         

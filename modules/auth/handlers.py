@@ -4,6 +4,12 @@ Auth service handlers — admin.auth.* services.
 Moved from AdminModule for architectural separation.
 Identity (auth) is a boundary, not mixed with admin UI (control plane).
 Behavior unchanged, only organization different.
+
+Bootstrap Architecture:
+- auth.initialized flag stored in runtime.state (cached)
+- GET /auth/v1/bootstrap returns {"initialized": bool}
+- POST /auth/v1/initialize is one-shot (403 if already initialized)
+- /auth/v1/me returns user info only, no bootstrap logic
 """
 from typing import Any, Dict, List, Optional
 import time
@@ -28,6 +34,76 @@ from modules.api.auth import (
     AUTH_USERS_NAMESPACE,
     AUTH_SESSIONS_NAMESPACE,
 )
+
+
+# --- Bootstrap State Helpers ---
+BOOTSTRAP_STATE_KEY = "initialized"
+AUTH_STATE_NAMESPACE = "auth"
+
+
+async def _check_initialized(runtime: Any) -> bool:
+    """
+    Check if system is initialized (cached in state).
+    
+    Returns True if:
+    1. State has auth.initialized = True, OR
+    2. At least one user with is_admin=True exists
+    """
+    try:
+        # Check state cache first
+        cached = await runtime.state.get(AUTH_STATE_NAMESPACE, BOOTSTRAP_STATE_KEY)
+        if cached is not None:
+            return bool(cached.get("value", False))
+    except Exception:
+        pass
+    
+    # Fall back: scan for admin user
+    try:
+        user_ids = await runtime.storage.list_keys(AUTH_USERS_NAMESPACE)
+        for uid in user_ids:
+            try:
+                user_data = await runtime.storage.get(AUTH_USERS_NAMESPACE, uid)
+                if isinstance(user_data, dict) and user_data.get("is_admin", False):
+                    # Cache the result
+                    try:
+                        await runtime.state.set(AUTH_STATE_NAMESPACE, BOOTSTRAP_STATE_KEY, {"value": True})
+                    except Exception:
+                        pass
+                    return True
+            except Exception:
+                pass
+        return False
+    except Exception:
+        return False
+
+
+async def _mark_initialized(runtime: Any) -> None:
+    """
+    Mark system as initialized in state.
+    Called after successfully creating first admin.
+    """
+    try:
+        await runtime.state.set(AUTH_STATE_NAMESPACE, BOOTSTRAP_STATE_KEY, {"value": True})
+    except Exception:
+        pass
+
+
+async def auth_bootstrap(runtime: Any) -> Dict[str, Any]:
+    """
+    Bootstrap status endpoint — check if system is initialized.
+    
+    Public endpoint, no auth required.
+    Returns only the initialization status, no side effects.
+    
+    Response:
+        {"initialized": true|false}
+    """
+    try:
+        initialized = await _check_initialized(runtime)
+        return {"initialized": initialized}
+    except Exception:
+        # On error, assume not initialized (safe default)
+        return {"initialized": False}
 
 
 async def auth_create_api_key(runtime: Any, body: Any = None) -> Dict[str, Any]:
@@ -130,7 +206,27 @@ async def auth_list_users(runtime: Any) -> List[Dict[str, Any]]:
 
 
 async def auth_initialize(runtime: Any, body: Any = None) -> Dict[str, Any]:
-    """Initialize system by creating first admin user (public endpoint, no auth required)."""
+    """
+    Initialize system by creating first admin user (one-shot).
+    
+    Public endpoint, no auth required.
+    
+    Rules:
+    - If system already initialized → HTTP 403 (Forbidden)
+    - If not initialized → create admin, set initialized flag, return success
+    - Cannot be called twice
+    
+    Args:
+        body: {"user_id": "admin", "username": "Admin", "password": "..."}
+    
+    Returns:
+        {"ok": true, "user_id": "admin"} or {"ok": false, "error": "..."}
+    """
+    # Check if already initialized
+    initialized = await _check_initialized(runtime)
+    if initialized:
+        return {"ok": False, "error": "forbidden", "status": 403}
+    
     if not isinstance(body, dict):
         return {"ok": False, "error": "invalid_body"}
 
@@ -142,20 +238,6 @@ async def auth_initialize(runtime: Any, body: Any = None) -> Dict[str, Any]:
         return {"ok": False, "error": "password required"}
 
     try:
-        user_ids = await runtime.storage.list_keys(AUTH_USERS_NAMESPACE)
-        has_admin = False
-        for uid in user_ids:
-            try:
-                user_data = await runtime.storage.get(AUTH_USERS_NAMESPACE, uid)
-                if isinstance(user_data, dict) and user_data.get("is_admin", False):
-                    has_admin = True
-                    break
-            except Exception:
-                pass
-
-        if has_admin:
-            return {"ok": False, "error": "System already initialized. Admin user exists."}
-
         await create_user(
             runtime,
             user_id,
@@ -164,7 +246,10 @@ async def auth_initialize(runtime: Any, body: Any = None) -> Dict[str, Any]:
             username=username,
             password=password
         )
-
+        
+        # Mark system as initialized
+        await _mark_initialized(runtime)
+        
         return {"ok": True, "user_id": user_id, "message": "System initialized successfully"}
     except ValueError as e:
         return {"ok": False, "error": str(e)}
@@ -468,26 +553,17 @@ async def auth_rotate_api_key(runtime: Any, body: Any = None) -> Dict[str, Any]:
 
 
 async def auth_me(runtime: Any, request: Any = None) -> Dict[str, Any]:
-    """Get current user information from request context."""
+    """
+    Get current user information from request context.
+    
+    Protected endpoint, requires auth token.
+    Returns user info only, no bootstrap logic.
+    
+    Returns:
+        {"ok": true, "user_id": "...", ...} or {"ok": false, "error": "not authenticated"}
+    """
     if request is None:
         return {"ok": False, "error": "request not available"}
-
-    try:
-        user_ids = await runtime.storage.list_keys(AUTH_USERS_NAMESPACE)
-        has_admin = False
-        for user_id in user_ids:
-            try:
-                user_data = await runtime.storage.get(AUTH_USERS_NAMESPACE, user_id)
-                if isinstance(user_data, dict) and user_data.get("is_admin", False):
-                    has_admin = True
-                    break
-            except Exception:
-                pass
-
-        if not has_admin:
-            return {"ok": False, "needs_initialization": True, "error": "System not initialized"}
-    except Exception:
-        pass
 
     from modules.api.auth.middleware import get_request_context
     context = await get_request_context(request)
