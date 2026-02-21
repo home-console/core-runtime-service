@@ -67,14 +67,25 @@ class ApiModule(RuntimeModule):
                 is_dev = getattr(cfg, "env", "production") == "development"
         except Exception:
             pass
-        cors_kw: Dict[str, Any] = {
-            "allow_origins": cors_allowed or ["http://localhost:3000", "http://127.0.0.1:3000"],
-            "allow_credentials": True,
-            "allow_methods": ["*"],
-            "allow_headers": ["*"],
-        }
+        
+        # CORS configuration
         if is_dev:
-            cors_kw["allow_origin_regex"] = r"^http://(localhost|127\.0\.0\.1)(:\d+)?$"
+            # Development: allow any localhost origin (any port)
+            cors_kw: Dict[str, Any] = {
+                "allow_origin_regex": r"^http://(localhost|127\.0\.0\.1)(:\d+)?$",
+                "allow_credentials": True,
+                "allow_methods": ["*"],
+                "allow_headers": ["*"],
+            }
+        else:
+            # Production: use configured origins or restrict to localhost:3000
+            cors_kw: Dict[str, Any] = {
+                "allow_origins": cors_allowed or ["http://localhost:3000", "http://127.0.0.1:3000"],
+                "allow_credentials": True,
+                "allow_methods": ["*"],
+                "allow_headers": ["*"],
+            }
+        
         self.app.add_middleware(CORSMiddleware, **cors_kw)
 
         try:

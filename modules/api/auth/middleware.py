@@ -59,6 +59,10 @@ async def require_auth_middleware(request: Request, call_next):
     # Получаем runtime из app.state (устанавливается в ApiModule)
     runtime = getattr(request.app.state, "runtime", None)
     
+    # Skip middleware для OPTIONS requests (CORS preflight)
+    if request.method == "OPTIONS":
+        return await call_next(request)
+    
     context = None
     identifier = None
     auth_source = None
@@ -72,7 +76,7 @@ async def require_auth_middleware(request: Request, call_next):
     is_auth_endpoint = (
         request_path.startswith("/admin/v1/auth/") or
         request_path.startswith("/admin/auth/") or
-        request_path.startswith("/auth/") or
+        (request_path.startswith("/auth/") and not request_path.startswith("/auth/v1/bootstrap")) or
         "login" in request_path.lower() or
         "create_api_key" in request_path.lower() or
         "refresh" in request_path.lower()

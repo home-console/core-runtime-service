@@ -73,11 +73,26 @@ def _make_api_handler(runtime: Any, endpoint: Any):
         auth_config = endpoint.auth_config
         is_public = auth_config.public if auth_config else False
         
+        # DEBUG: логирование для публичных эндпоинтов
+        if "bootstrap" in endpoint.path or "initialize" in endpoint.path:
+            runtime = getattr(request.app.state, "runtime", None)
+            if runtime and hasattr(runtime, "logger"):
+                try:
+                    await runtime.service_registry.call(
+                        "logger.log",
+                        level="info",
+                        message=f"[ROUTE_BINDING] {endpoint.service} auth_config={auth_config} is_public={is_public}",
+                        component="auth_debug"
+                    )
+                except Exception:
+                    pass
+        
         # Если не указана декларативная конфигурация, используем fallback на старую логику
         # для обратной совместимости
         if auth_config is None:
             # Fallback: определяем публичные endpoints по списку (legacy)
             public_endpoints = [
+                "auth.bootstrap", "auth.initialize", "auth.login", "auth.refresh", "auth.me",
                 "admin.auth.me", "admin.auth.initialize", "admin.auth.login", "admin.auth.refresh",
                 "yandex_device_auth.start", "yandex_device_auth.cookies", "yandex_device_auth.status",
                 "yandex_device_auth.get_session", "yandex_device_auth.cancel",

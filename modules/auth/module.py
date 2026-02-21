@@ -18,7 +18,7 @@ Identity is not mixed with Control Plane (admin UI).
 
 from typing import Any
 from core.runtime_module import RuntimeModule
-from core.http_registry import HttpEndpoint
+from core.http_registry import HttpEndpoint, EndpointAuthConfig
 from .handlers import (
     auth_create_api_key,
     auth_list_api_keys,
@@ -115,7 +115,8 @@ class AuthModule(RuntimeModule):
             method="GET",
             path="/auth/v1/bootstrap",
             service="auth.bootstrap",
-            description="Check if system is initialized (bootstrap status)"
+            description="Check if system is initialized (bootstrap status)",
+            auth_config=EndpointAuthConfig(public=True)
         ))
         
         # Auth initialization & login endpoints
@@ -123,25 +124,29 @@ class AuthModule(RuntimeModule):
             method="POST",
             path="/auth/v1/initialize",
             service="auth.initialize",
-            description="Initialize auth system (first-time setup)"
+            description="Initialize auth system (first-time setup)",
+            auth_config=EndpointAuthConfig(public=True)
         ))
         self.context.http.register(HttpEndpoint(
             method="POST",
             path="/auth/v1/login",
             service="auth.login",
-            description="Login with credentials"
+            description="Login with credentials",
+            auth_config=EndpointAuthConfig(public=True)
         ))
         self.context.http.register(HttpEndpoint(
             method="POST",
             path="/auth/v1/refresh",
             service="auth.refresh",
-            description="Refresh access token"
+            description="Refresh access token",
+            auth_config=EndpointAuthConfig(public=True)
         ))
         self.context.http.register(HttpEndpoint(
             method="GET",
             path="/auth/v1/me",
             service="auth.me",
-            description="Get current user info"
+            description="Get current user info",
+            auth_config=EndpointAuthConfig(public=True)
         ))
         
         # Password management endpoints
