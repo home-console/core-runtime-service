@@ -56,23 +56,7 @@ from .operations import (
     admin_operations_cancel,
     admin_operations_retry,
 )
-from .auth import (
-    admin_auth_create_api_key,
-    admin_auth_list_api_keys,
-    admin_auth_create_user,
-    admin_auth_list_users,
-    admin_auth_initialize,
-    admin_auth_login,
-    admin_auth_refresh,
-    admin_auth_set_password,
-    admin_auth_change_password,
-    admin_auth_list_sessions,
-    admin_auth_revoke_session,
-    admin_auth_revoke_all_sessions,
-    admin_auth_revoke_api_key,
-    admin_auth_rotate_api_key,
-    admin_auth_me,
-)
+# Auth services moved to AuthModule
 
 
 class AdminModule(RuntimeModule):
@@ -279,31 +263,18 @@ class AdminModule(RuntimeModule):
             ("admin.operations.get", wrap_domain(admin_operations_get)),
             ("admin.operations.cancel", wrap_domain(admin_operations_cancel)),
             ("admin.operations.retry", wrap_domain(admin_operations_retry)),
-            ("admin.auth.create_api_key", wrap_domain(admin_auth_create_api_key)),
-            ("admin.auth.list_api_keys", wrap_domain(admin_auth_list_api_keys)),
-            ("admin.auth.create_user", wrap_domain(admin_auth_create_user)),
-            ("admin.auth.list_users", wrap_domain(admin_auth_list_users)),
-            ("admin.auth.initialize", wrap_domain(admin_auth_initialize)),
-            ("admin.auth.login", wrap_domain(admin_auth_login)),
-            ("admin.auth.refresh", wrap_domain(admin_auth_refresh)),
-            ("admin.auth.set_password", wrap_domain(admin_auth_set_password)),
-            ("admin.auth.change_password", wrap_domain(admin_auth_change_password)),
-            ("admin.auth.list_sessions", wrap_domain(admin_auth_list_sessions)),
-            ("admin.auth.revoke_session", wrap_domain(admin_auth_revoke_session)),
-            ("admin.auth.revoke_all_sessions", wrap_domain(admin_auth_revoke_all_sessions)),
-            ("admin.auth.revoke_api_key", wrap_domain(admin_auth_revoke_api_key)),
-            ("admin.auth.rotate_api_key", wrap_domain(admin_auth_rotate_api_key)),
-            ("admin.auth.me", wrap_domain(admin_auth_me)),
+            # Auth services moved to AuthModule
         ]
 
-        public_auth_services = {"admin.auth.initialize", "admin.auth.login", "admin.auth.refresh", "admin.auth.me"}
+        # Public services now managed by AuthModule
         for name, handler in registrations:
             try:
                 # Allow internal calls to inspector/admin.v1.* services without admin ctx
                 if name.startswith("admin.v1."):
                     admin_only = False
                 else:
-                    admin_only = name not in public_auth_services
+                    # Non-inspector admin services require admin auth (auth services in AuthModule)
+                    admin_only = True
                 services = self.context.services
                 if hasattr(services, "register_with_acl"):
                     await services.register_with_acl(name, handler, admin_only=admin_only)
