@@ -80,11 +80,11 @@ class StorageManager:
         """Check if in dual mode."""
         return self._mode == "dual"
     
-    def get_core(self) -> StorageAdapter:
+    def get_core(self) -> IStorageBackend:
         """Get core storage adapter (read-only for vault namespaces)."""
         return self._core_storage
     
-    def get_vault(self) -> StorageAdapter:
+    def get_vault(self) -> IStorageBackend:
         """
         Get vault storage adapter.
         

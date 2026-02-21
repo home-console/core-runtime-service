@@ -8,6 +8,8 @@ REFACTORING: Проблема 6 - упрощённый binding, использу
 и доменные адаптеры вместо хардкода доменной логики.
 """
 
+from __future__ import annotations
+
 from typing import Any, Dict, Optional
 import re
 import inspect

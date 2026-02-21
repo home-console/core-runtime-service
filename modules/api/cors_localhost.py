@@ -3,6 +3,8 @@ CORS: в development разрешаем любой origin с хостом localh
 Фронт (Vite и др.) часто поднимается на случайном порту — preflight и запросы должны проходить.
 """
 
+from __future__ import annotations
+
 from urllib.parse import urlparse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request

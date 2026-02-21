@@ -9,6 +9,8 @@ event_bus.list_subscriptions(), state, storage, operations.list_handler_types().
 Inspector = memory dump runtime, не API.
 """
 
+from __future__ import annotations
+
 from typing import Any, Dict, List
 import time
 

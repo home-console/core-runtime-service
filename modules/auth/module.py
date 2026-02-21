@@ -74,9 +74,9 @@ class AuthModule(RuntimeModule):
         services_config = [
             # Public services (no auth required)
             ("admin.auth.initialize", wrap_domain(auth_initialize), False),
-            ("admin.auth.login", wrap_domain(auth_login), False),
-            ("admin.auth.refresh", wrap_domain(auth_refresh), False),
-            ("admin.auth.me", wrap_domain(auth_me), False),
+            ("auth.login", wrap_domain(auth_login), False),
+            ("auth.refresh", wrap_domain(auth_refresh), False),
+            ("auth.me", wrap_domain(auth_me), False),
             
             # Protected services (admin-only)
             ("admin.auth.create_api_key", wrap_domain(auth_create_api_key), True),

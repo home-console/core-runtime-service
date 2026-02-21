@@ -6,6 +6,8 @@ ApiModule — HTTP API Gateway (FastAPI + uvicorn).
 Маршруты привязываются в run_http() — после старта модулей и плагинов.
 """
 
+from __future__ import annotations
+
 from typing import Any, Dict
 import os
 import asyncio

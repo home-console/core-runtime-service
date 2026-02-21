@@ -7,6 +7,8 @@
 Контракт: sdk/README.md, docs/08-PLUGIN-CONTRACT.md
 """
 
+from __future__ import annotations
+
 import os
 from abc import abstractmethod
 from dataclasses import dataclass, field

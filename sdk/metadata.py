@@ -4,6 +4,9 @@ PluginMetadata — публичный контракт метаданных пл
 Frozen dataclass. Никакой логики. Core читает поля, но не интерпретирует смысл.
 """
 
+from __future__ import annotations
+
+from typing import Optional
 from dataclasses import dataclass, field
 
 
