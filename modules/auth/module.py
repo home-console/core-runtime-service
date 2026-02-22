@@ -37,6 +37,7 @@ from .handlers import (
     auth_rotate_api_key,
     auth_me,
     auth_bootstrap,
+    auth_dev_credentials,
 )
 
 
@@ -76,6 +77,8 @@ class AuthModule(RuntimeModule):
         services_config = [
             # Bootstrap (read-only system state, no auth required)
             ("auth.bootstrap", wrap_domain(auth_bootstrap), False),
+            # Dev-only: api_base_url + api_key для веба (только при DEV_CREDENTIALS=1)
+            ("auth.dev_credentials", wrap_domain(auth_dev_credentials), False),
             
             # Public services (no auth required)
             ("auth.initialize", wrap_domain(auth_initialize), False),
@@ -118,6 +121,13 @@ class AuthModule(RuntimeModule):
             path="/auth/v1/bootstrap",
             service="auth.bootstrap",
             description="Check if system is initialized (bootstrap status)",
+            auth_config=EndpointAuthConfig(public=True)
+        ))
+        self.context.http.register(HttpEndpoint(
+            method="GET",
+            path="/auth/v1/dev-credentials",
+            service="auth.dev_credentials",
+            description="Dev-only: api_base_url and optional api_key for web (when DEV_CREDENTIALS=1)",
             auth_config=EndpointAuthConfig(public=True)
         ))
         

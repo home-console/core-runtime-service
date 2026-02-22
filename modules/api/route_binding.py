@@ -29,8 +29,9 @@ def bind_routes(runtime: Any, app: Any) -> None:
     Must be called AFTER module_manager.start_all() and plugin_manager.start_all().
     """
     endpoints = runtime.http.list()
-    api_endpoints = [ep for ep in endpoints if ep.kind == "api"]
-    webhook_endpoints = [ep for ep in endpoints if ep.kind == "webhook"]
+    # WebSocket endpoints (method=None) не должны попадать в api/webhook — только в ws_endpoints
+    api_endpoints = [ep for ep in endpoints if ep.kind == "api" and not ep.websocket]
+    webhook_endpoints = [ep for ep in endpoints if ep.kind == "webhook" and not ep.websocket]
     ws_endpoints = [ep for ep in endpoints if ep.websocket]
 
     for ep in api_endpoints:
@@ -92,7 +93,7 @@ def _make_api_handler(runtime: Any, endpoint: Any):
         if auth_config is None:
             # Fallback: определяем публичные endpoints по списку (legacy)
             public_endpoints = [
-                "auth.bootstrap", "auth.initialize", "auth.login", "auth.refresh", "auth.me",
+                "auth.bootstrap", "auth.dev_credentials", "auth.initialize", "auth.login", "auth.refresh", "auth.me",
                 "admin.auth.me", "admin.auth.initialize", "admin.auth.login", "admin.auth.refresh",
                 "yandex_device_auth.start", "yandex_device_auth.cookies", "yandex_device_auth.status",
                 "yandex_device_auth.get_session", "yandex_device_auth.cancel",

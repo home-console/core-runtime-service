@@ -5,10 +5,12 @@ Admin HTTP handlers for credentials (SSH hosts and other secrets).
 Если модуль credentials не загружен — использует CredentialRepository напрямую (storage_manager + secret_store).
 """
 
+import io
 from typing import Any, Dict, Optional
 
 from core.system_context import create_system_context
 from core.auth_contextvars import set_current_auth_context, get_current_auth_context
+from core.credentials.domain import CredentialType
 
 
 # SystemContext не имеет user_id; для credential.* передаём явно admin
@@ -277,3 +279,89 @@ async def admin_credentials_update(runtime: Any, credential_id: str, body: Dict[
         updated = current.mutate(**changes)
         await repo.update(updated, secret_bytes)
         return CredentialMetadata.from_domain(updated).to_dict()
+
+
+def _ssh_connect_with_credential(cred, secret_bytes: bytes) -> Dict[str, Any]:
+    """
+    Установить SSH-подключение к хосту по креду из БД.
+    Возвращает { "ok": True } или { "ok": False, "error": "..." }.
+    """
+    try:
+        import paramiko
+    except ImportError:
+        return {"ok": False, "error": "paramiko не установлен (pip install paramiko)"}
+
+    if cred.type not in (CredentialType.SSH_PASSWORD, CredentialType.SSH_KEY):
+        return {"ok": False, "error": f"Тип креда {cred.type} не поддерживает подключение к хосту (нужен ssh_password или ssh_key)"}
+    if not cred.host or not cred.username:
+        return {"ok": False, "error": "У креда должны быть указаны host и username"}
+
+    host = cred.host
+    port = cred.port or 22
+    username = cred.username
+    secret_str = secret_bytes.decode("utf-8", errors="replace").strip()
+
+    client = None
+    try:
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        if cred.type == CredentialType.SSH_PASSWORD:
+            client.connect(
+                hostname=host,
+                port=port,
+                username=username,
+                password=secret_str,
+                timeout=15,
+                allow_agent=False,
+                look_for_keys=False,
+            )
+        else:
+            # SSH_KEY
+            pkey = None
+            for key_cls in (paramiko.RSAKey, paramiko.Ed25519Key, paramiko.ECDSAKey):
+                try:
+                    pkey = key_cls.from_private_key(io.StringIO(secret_str))
+                    break
+                except Exception:
+                    continue
+            if pkey is None:
+                return {"ok": False, "error": "Не удалось прочитать приватный ключ (RSA/Ed25519/ECDSA)"}
+            client.connect(
+                hostname=host,
+                port=port,
+                username=username,
+                pkey=pkey,
+                timeout=15,
+                allow_agent=False,
+                look_for_keys=False,
+            )
+        return {"ok": True, "message": "Подключение установлено"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+    finally:
+        if client:
+            try:
+                client.close()
+            except Exception:
+                pass
+
+
+async def admin_credentials_connect(runtime: Any, credential_id: str = None, **kw: Any) -> Dict[str, Any]:
+    """
+    POST /admin/v1/credentials/{credential_id}/connect — подключиться к хосту по креду из БД.
+    Для SSH-кредов (ssh_password, ssh_key) устанавливает соединение и возвращает ok/error.
+    """
+    cid = credential_id or kw.get("credential_id")
+    if not cid:
+        raise ValueError("credential_id required")
+
+    repo = _get_repo(runtime)
+    if repo is None:
+        raise ValueError("Credentials module not loaded (storage_manager or secret_store missing)")
+
+    pair = await repo.get_with_secret(cid)
+    if pair is None:
+        raise ValueError(f"Credential {cid} not found")
+
+    cred, secret_bytes = pair
+    return _ssh_connect_with_credential(cred, secret_bytes)

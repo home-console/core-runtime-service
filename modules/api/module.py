@@ -166,6 +166,16 @@ class ApiModule(RuntimeModule):
             signal.signal(signal.SIGINT, lambda s, f: loop.call_soon_threadsafe(_on_sigint))
 
         await self._log(runtime, "info", f"[API] HTTP на http://{api_host}:{api_port}")
+        # Креды в терминал: URL и опционально dev API key для подключения веба
+        display_host = "127.0.0.1" if api_host == "0.0.0.0" else api_host
+        api_base_url = f"http://{display_host}:{api_port}"
+        print(f"[Runtime] API: {api_base_url} — для веба: VITE_API_BASE_URL={api_base_url}")
+        if os.getenv("DEV_CREDENTIALS", "").strip() == "1":
+            dev_key = (os.getenv("DEV_API_KEY") or "").strip()
+            if dev_key:
+                print(f"[Runtime] Dev API key (для веба): {dev_key}")
+            else:
+                print("[Runtime] DEV_CREDENTIALS=1, но DEV_API_KEY не задан — создайте API key и укажите в .env")
         await self._log(runtime, "info", f"Server should_exit: {self._server.should_exit}")
         await self._log(runtime, "info", "API: about to call serve()")
         await server.serve()

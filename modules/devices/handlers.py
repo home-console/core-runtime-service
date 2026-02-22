@@ -193,6 +193,14 @@ async def handle_external_state(runtime, data: dict) -> None:
     # ВАЖНО: При обновлении из WebSocket всегда сбрасываем pending
     # Это реальное состояние устройства, независимо от того, кто его изменил
     old_state["pending"] = False
+
+    # Применяем входящее состояние к reported (иначе GET /devices вернёт старые данные)
+    if isinstance(reported_state, dict) and reported_state:
+        rep = old_state.get("reported")
+        if isinstance(rep, dict):
+            rep.update(reported_state)
+        else:
+            old_state["reported"] = dict(reported_state)
     
     # Если состояния не совпадают - это значит устройство изменило состояние извне
     # Синхронизируем desired с reported, чтобы не было рассинхронизации

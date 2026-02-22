@@ -12,6 +12,7 @@ Bootstrap Architecture:
 - /auth/v1/me returns user info only, no bootstrap logic
 """
 from typing import Any, Dict, List, Optional
+import os
 import time
 
 from modules.api.auth import (
@@ -104,6 +105,23 @@ async def auth_bootstrap(runtime: Any) -> Dict[str, Any]:
     except Exception:
         # On error, assume not initialized (safe default)
         return {"initialized": False}
+
+
+async def auth_dev_credentials(runtime: Any) -> Dict[str, Any]:
+    """
+    Dev-only: возвращает api_base_url и опционально api_key для подключения веба.
+    Включено только при DEV_CREDENTIALS=1; иначе возвращает пустой объект (без api_key).
+    Веб в dev может запросить этот endpoint и использовать api_key как Bearer для запросов.
+    """
+    if os.getenv("DEV_CREDENTIALS", "").strip() != "1":
+        return {"api_base_url": None, "api_key": None}
+    api_host = os.getenv("API_HOST", "0.0.0.0")
+    api_port = os.getenv("API_PORT", "8000")
+    # Для веба с того же хоста удобнее localhost
+    display_host = "127.0.0.1" if api_host == "0.0.0.0" else api_host
+    api_base_url = f"http://{display_host}:{api_port}"
+    api_key = (os.getenv("DEV_API_KEY") or "").strip() or None
+    return {"api_base_url": api_base_url, "api_key": api_key}
 
 
 async def auth_create_api_key(runtime: Any, body: Any = None) -> Dict[str, Any]:

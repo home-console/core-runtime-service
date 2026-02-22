@@ -71,6 +71,7 @@ async def create_device(
             "home_name": None,
             "room_id": None,
             "room_name": None,
+            "icon_url": None,
         }
     else:
         # Устройство уже существует - обновляем только поля, не трогая created_at
@@ -95,7 +96,9 @@ async def create_device(
             device["room_id"] = None
         if "room_name" not in device:
             device["room_name"] = None
-    
+        if "icon_url" not in device:
+            device["icon_url"] = None
+
     # Добавляем ACL поля, если указаны
     if owner_id:
         device["owner_id"] = owner_id
@@ -302,7 +305,9 @@ async def auto_map_external(runtime, provider: Optional[str] = None) -> Dict[str
                 device["room_name"] = payload["room_name"]
             if "online" in payload:
                 device["online"] = payload["online"]
-            
+            if "icon_url" in payload:
+                device["icon_url"] = payload["icon_url"]
+
             # Сохраняем обновленное устройство
             await runtime.storage.set("devices", internal_id, device)
             

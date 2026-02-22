@@ -45,6 +45,11 @@ class DeviceTransformer:
             device_state_value = yandex_device.get("state")
             online = device_state_value not in ("offline", None) if device_state_value else True
 
+            # URL иконки Яндекса по типу устройства (devices.types.hub → .../icons-devices-devices.types.hub.svg/orig)
+            icon_url = None
+            if yandex_type:
+                icon_url = f"https://avatars.mds.yandex.net/get-iot/icons-devices-{yandex_type}.svg/orig"
+
             device = {
                 "provider": "yandex",
                 "external_id": device_id,
@@ -55,6 +60,8 @@ class DeviceTransformer:
                 "state": device_state,
             }
 
+            if icon_url:
+                device["icon_url"] = icon_url
             if home_id:
                 device["home_id"] = home_id
             if home_name:
