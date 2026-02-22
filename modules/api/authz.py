@@ -84,6 +84,9 @@ ACTION_SCOPE_MAP: Dict[str, str] = {
     "admin.v1.integrations": "admin.read",
     "admin.v1.inspector.auth": "admin.read",
     
+    # User v1 services (user-scoped operations)
+    "user.v1.integrations": "integrations.read",
+    
     # Admin basic services (legacy names removed — use admin.v1.* services)
     # NOTE: legacy admin.* entries like "admin.list_plugins" and the
     # admin.devices.* proxy services were removed to avoid dead/misleading

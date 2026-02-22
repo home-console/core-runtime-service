@@ -76,8 +76,8 @@ class InProcessBackend:
             )
 
         # IMPORTANT: не используем ops_mgr.execute(), чтобы не зациклиться на execution layer.
-        handlers = getattr(ops_mgr, "_handlers", {})
-        handler = handlers.get(operation_type)
+        # Handlers хранятся в ops_mgr._registry, не в ops_mgr._handlers (OperationManager — фасад).
+        handler = getattr(ops_mgr, "_find_handler", lambda _: None)(operation_type)
         if handler is None:
             return OperationResult(
                 ok=False,

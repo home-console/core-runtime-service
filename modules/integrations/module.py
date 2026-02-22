@@ -12,7 +12,7 @@ from core.http_registry import HttpEndpoint
 class IntegrationsModule(RuntimeModule):
     """
     Модуль HTTP endpoints для интеграций.
-    Владеет GET /admin/v1/integrations и сервисом admin.v1.integrations.
+    Владеет GET /admin/v1/integrations и GET /api/v1/user/integrations.
     """
 
     @property
@@ -21,27 +21,45 @@ class IntegrationsModule(RuntimeModule):
 
     async def register(self) -> None:
         from modules.admin.integrations import admin_v1_integrations
+        from modules.api.user_integrations import user_v1_integrations
 
-        # Сервис: список интеграций (generic, без имён плагинов в контракте)
-        async def _wrap(**kw):
+        # Сервис: список интеграций для admin (с полной информацией о плагинах)
+        async def _admin_wrap(**kw):
             return await admin_v1_integrations(self.runtime)
+
+        # Сервис: список интеграций для пользователя
+        async def _user_wrap(**kw):
+            return await user_v1_integrations(self.runtime)
 
         try:
             services = self.context.services
             if hasattr(services, "register_with_acl"):
                 await services.register_with_acl(
-                    "admin.v1.integrations", _wrap, admin_only=True
+                    "admin.v1.integrations", _admin_wrap, admin_only=True
+                )
+                await services.register_with_acl(
+                    "user.v1.integrations", _user_wrap, admin_only=False
                 )
             else:
-                await services.register("admin.v1.integrations", _wrap)
+                await services.register("admin.v1.integrations", _admin_wrap)
+                await services.register("user.v1.integrations", _user_wrap)
         except ValueError:
             pass
         
+        # Admin endpoint with full information
         self.context.http.register(HttpEndpoint(
             method="GET",
             path="/admin/v1/integrations",
             service="admin.v1.integrations",
-            description="List registered integrations"
+            description="List registered integrations (admin only)"
+        ))
+
+        # User endpoint
+        self.context.http.register(HttpEndpoint(
+            method="GET",
+            path="/api/v1/user/integrations",
+            service="user.v1.integrations",
+            description="List user integrations"
         ))
 
     async def start(self) -> None:

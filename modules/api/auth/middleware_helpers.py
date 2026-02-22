@@ -3,12 +3,24 @@ Middleware helpers — общие функции для rate limiting и audit l
 """
 
 from typing import Any, Optional
-from fastapi import Response
+from fastapi import Request, Response
 
 from .context import RequestContext
 from .constants import RATE_LIMIT_API_REQUESTS, RATE_LIMIT_API_WINDOW
 from .rate_limiting import rate_limit_check
 from .audit import audit_log_auth_event
+
+
+def _add_cors_to_response(request: Optional[Request], response: Response) -> None:
+    """Добавить CORS-заголовки к ответу для localhost origin (чтобы ошибки не блокировались браузером)."""
+    if not request:
+        return
+    origin = request.headers.get("origin")
+    if not origin:
+        return
+    if origin.startswith("http://localhost") or origin.startswith("http://127.0.0.1"):
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
 
 
 async def apply_rate_limiting(
@@ -18,7 +30,8 @@ async def apply_rate_limiting(
     auth_source: str,
     client_ip: str,
     request_path: str,
-    is_auth_endpoint: bool
+    is_auth_endpoint: bool,
+    request: Optional[Request] = None
 ) -> Optional[Response]:
     """
     Применяет rate limiting для авторизованного запроса.
@@ -40,6 +53,7 @@ async def apply_rate_limiting(
         client_ip: IP адрес клиента
         request_path: путь запроса
         is_auth_endpoint: является ли это auth endpoint
+        request: FastAPI request (для CORS headers)
     
     Returns:
         Response с 429 если лимит превышен, None если всё OK
@@ -85,7 +99,7 @@ async def apply_rate_limiting(
             },
             success=False
         )
-        return Response(
+        response = Response(
             content='{"detail": "Rate limit exceeded. Too many requests. Please try again later."}',
             status_code=429,
             media_type="application/json",
@@ -95,6 +109,9 @@ async def apply_rate_limiting(
                 "X-RateLimit-Window": str(window)
             }
         )
+        # Add CORS headers so browser doesn't block the 429 response
+        _add_cors_to_response(request, response)
+        return response
     
     return None
 

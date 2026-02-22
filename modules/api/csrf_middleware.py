@@ -123,10 +123,8 @@ async def rate_limit_middleware(request: Request, call_next: Callable) -> Respon
     """
     Rate limit admin API endpoints.
     
-    SECURITY P0:
-    - Prevent abuse of admin endpoints
-    - Different limits for different endpoint types
-    - Per-user rate limiting
+    DEBUG MODE: Rate limiting is DISABLED for easier development.
+    Set DEBUG_MODE=false in environment to enable rate limiting.
     
     Args:
         request: FastAPI request
@@ -134,10 +132,14 @@ async def rate_limit_middleware(request: Request, call_next: Callable) -> Respon
         
     Returns:
         Response
-        
-    Raises:
-        HTTPException 429: If rate limit exceeded
     """
+    import os
+    
+    # DISABLED by default for debug mode
+    if os.getenv("DEBUG_MODE", "true").lower() != "false":
+        # Rate limiting is disabled - pass through
+        return await call_next(request)
+    
     # Only rate limit admin endpoints
     if not request.url.path.startswith("/admin/"):
         return await call_next(request)

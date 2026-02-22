@@ -601,8 +601,16 @@ async def auth_me(runtime: Any) -> Dict[str, Any]:
     Protected endpoint, requires valid access token.
     Uses contextvars to get auth info (set by middleware).
     
+    RESPONSE FORMAT MATCHES FRONTEND AuthUser INTERFACE:
+    {
+      "id": "user_id",
+      "email": "username@system",  // Use username as email for now
+      "name": "username",
+      "role": "admin" if is_admin else None,
+    }
+    
     Returns:
-        {"ok": true, "user_id": "...", ...} or {"ok": false, "error": "unauthorized"}
+        AuthUser object or error
     """
     from core.auth_contextvars import get_current_auth_context
     
@@ -616,14 +624,12 @@ async def auth_me(runtime: Any) -> Dict[str, Any]:
         if not isinstance(user_data, dict):
             return {"ok": False, "error": "user_not_found"}
 
+        # Return response matching frontend AuthUser interface
         return {
-            "ok": True,
-            "user_id": context.user_id,
-            "username": user_data.get("username"),
-            "scopes": list(context.scopes) if context.scopes else user_data.get("scopes", []),
-            "is_admin": context.is_admin or user_data.get("is_admin", False),
-            "created_at": user_data.get("created_at"),
-            "source": context.source,
+            "id": context.user_id,
+            "email": user_data.get("username", context.user_id),  # Use username as email 
+            "name": user_data.get("username"),
+            "role": "admin" if (context.is_admin or user_data.get("is_admin", False)) else None,
         }
     except Exception as e:
         console_error(f"auth_me failed: {e}")

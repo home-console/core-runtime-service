@@ -9,11 +9,13 @@ AdminModule — Control Plane Host + Inspector Host.
 Не содержит доменной логики, не регистрирует operations handlers, не знает плагины/домены.
 """
 
+from pathlib import Path
 from typing import Any, Optional
-import time
 import asyncio
-import shutil
+import json
 import logging
+import shutil
+import time
 
 from core.runtime_module import RuntimeModule
 from core.http_registry import HttpEndpoint
@@ -48,6 +50,8 @@ from .introspection import (
     get_schedule,
     list_operation_schedules,
     list_capabilities,
+    discover_manifests_for_inspector,
+    get_plugin_details,
 )
 from .operations import (
     admin_operations_create,
@@ -104,6 +108,25 @@ class AdminModule(RuntimeModule):
                 service=service,
                 description=description
             ))
+        # Плагины: discovery и детали одного (из ядра) — регистрируем до /plugins/{name}
+        self.context.http.register(HttpEndpoint(
+            method="GET",
+            path="/admin/v1/inspector/plugins/discover",
+            service="admin.v1.inspector.plugins.discover",
+            description="Inspector: discover plugins on disk (manifests, load_order)"
+        ))
+        self.context.http.register(HttpEndpoint(
+            method="GET",
+            path="/admin/v1/inspector/plugins/{name}",
+            service="admin.v1.inspector.plugins.get",
+            description="Inspector: get single plugin details (loaded + manifest)"
+        ))
+        self.context.http.register(HttpEndpoint(
+            method="GET",
+            path="/admin/v1/marketplace/catalog",
+            service="admin.v1.marketplace.catalog",
+            description="Marketplace: список плагинов (один файл catalog.json, ссылки на репо)"
+        ))
         self.context.http.register(HttpEndpoint(
             method="GET",
             path="/admin/v1/inspector/state/{key}",
@@ -228,9 +251,29 @@ class AdminModule(RuntimeModule):
 
             return handler
 
+        def wrap_plugin_get():
+            async def handler(name=None, **kw):
+                n = name if name is not None else kw.get("name")
+                return await get_plugin_details(self.runtime, n)
+
+            return handler
+
+        async def _marketplace_catalog(*args, **kw):
+            """Список плагинов для маркетплейса: один захардкоженный файл catalog.json (ссылки на репо)."""
+            catalog_path = Path(__file__).resolve().parent.parent / "marketplace" / "catalog.json"
+            try:
+                if catalog_path.exists():
+                    data = json.loads(catalog_path.read_text(encoding="utf-8"))
+                    return {"catalog": data if isinstance(data, list) else []}
+            except Exception as e:
+                logger.warning("marketplace catalog read failed: %s", e)
+            return {"catalog": []}
+
         registrations = [
             ("admin.v1.runtime", wrap_introspection(get_runtime_info, with_started_at=True)),
             ("admin.v1.plugins", wrap_introspection(list_plugins)),
+            ("admin.v1.inspector.plugins.discover", wrap_introspection(discover_manifests_for_inspector)),
+            ("admin.v1.inspector.plugins.get", wrap_plugin_get()),
             ("admin.v1.services", wrap_introspection(list_services)),
             ("admin.v1.http", wrap_introspection(list_http_endpoints)),
             ("admin.v1.events", wrap_introspection(list_events)),
@@ -240,7 +283,7 @@ class AdminModule(RuntimeModule):
             ("admin.v1.state.get", wrap_state_get()),
             ("admin.v1.inspector.operations", wrap_introspection(list_operations_available)),
             ("admin.v1.inspector.auth", wrap_introspection(list_auth_flows)),
-            ("admin.v1.inspector.integrations", wrap_introspection(list_integrations)),
+            ("admin.v1.inspector.integrations", wrap_introspection(integrations_inspector_response)),
             ("admin.v1.inspector.inventory", wrap_introspection(lambda runtime: [])),
             ("admin.v1.inspector.capabilities", wrap_introspection(list_capabilities)),
             ("admin.v1.inspector.executions", wrap_introspection(list_execution_traces)),
@@ -253,6 +296,7 @@ class AdminModule(RuntimeModule):
             ("admin.v1.inspector.operations.schedules", wrap_operation_schedules()),
             ("admin.v1.inspector.auth", wrap_introspection(inspector_auth_summary)),
             ("admin.v1.inspector.dashboard", wrap_introspection(dashboard_inspector_response)),
+            ("admin.v1.marketplace.catalog", _marketplace_catalog),
             # Admin devices read-only proxy services (kept for Admin UI compatibility)
             ("admin.v1.devices.list", wrap_domain(__import__("modules.admin.devices", fromlist=["admin_devices_list"]).admin_devices_list)),
             ("admin.v1.devices.get", wrap_domain(__import__("modules.admin.devices", fromlist=["admin_devices_get"]).admin_devices_get)),
@@ -498,6 +542,55 @@ class AdminModule(RuntimeModule):
                 metadata.container_config
             )
 
+        async def _admin_start_plugin(name: str = None, **kw):
+            """Запустить плагин (ядро: plugin_manager.start_plugin)."""
+            plugin_name = name or kw.get("name")
+            if not plugin_name:
+                return {"ok": False, "error": "Имя плагина не указано"}
+            try:
+                await self.runtime.plugin_manager.start_plugin(plugin_name)
+                return {"ok": True}
+            except Exception as e:
+                return {"ok": False, "error": str(e)}
+
+        async def _admin_stop_plugin(name: str = None, **kw):
+            """Остановить плагин (ядро: plugin_manager.stop_plugin)."""
+            plugin_name = name or kw.get("name")
+            if not plugin_name:
+                return {"ok": False, "error": "Имя плагина не указано"}
+            try:
+                await self.runtime.plugin_manager.stop_plugin(plugin_name)
+                return {"ok": True}
+            except Exception as e:
+                return {"ok": False, "error": str(e)}
+
+        async def _admin_load_plugin_by_name(name: str = None, body: Any = None, **kw):
+            """Загрузить один плагин по имени из каталога (ядро: plugin_manager.load_plugin_by_name)."""
+            plugin_name = name or (isinstance(body, dict) and body.get("name")) or kw.get("name")
+            if not plugin_name:
+                return {"ok": False, "error": "Имя плагина не указано"}
+            try:
+                plugins_dir = None
+                if isinstance(body, dict) and body.get("plugins_dir"):
+                    plugins_dir = Path(body["plugins_dir"])
+                ok = await self.runtime.plugin_manager.load_plugin_by_name(plugin_name, plugins_dir=plugins_dir)
+                if ok:
+                    return {"ok": True}
+                return {"ok": False, "error": f"Не удалось загрузить плагин '{plugin_name}' (нет манифеста или зависимости)"}
+            except Exception as e:
+                return {"ok": False, "error": str(e)}
+
+        async def _admin_auto_load_plugins(body: Any = None, **kw):
+            """Пересканировать каталог и загрузить плагины по манифестам (ядро: plugin_manager.auto_load_plugins)."""
+            plugins_dir = None
+            if isinstance(body, dict) and body.get("plugins_dir"):
+                plugins_dir = Path(body["plugins_dir"])
+            try:
+                await self.runtime.plugin_manager.auto_load_plugins(plugins_dir=plugins_dir)
+                return {"ok": True, "loaded": self.runtime.plugin_manager.list_plugins()}
+            except Exception as e:
+                return {"ok": False, "error": str(e)}
+
         try:
             # Register services (admin-only)
             services = self.context.services
@@ -506,12 +599,24 @@ class AdminModule(RuntimeModule):
                 await services.register_with_acl("admin.v1.plugins.reload", _admin_reload_plugin, admin_only=True)
                 await services.register_with_acl("admin.v1.plugins.restart_container", _admin_restart_plugin_container, admin_only=True)
                 await services.register_with_acl("admin.v1.plugins.ensure_container", _admin_ensure_plugin_container, admin_only=True)
+                await services.register_with_acl("admin.v1.plugins.start", _admin_start_plugin, admin_only=True)
+                await services.register_with_acl("admin.v1.plugins.stop", _admin_stop_plugin, admin_only=True)
+                await services.register_with_acl("admin.v1.plugins.load_by_name", _admin_load_plugin_by_name, admin_only=True)
+                await services.register_with_acl("admin.v1.plugins.auto_load", _admin_auto_load_plugins, admin_only=True)
             else:
                 await services.register("admin.v1.plugins.unload", _admin_unload_plugin)
                 await services.register("admin.v1.plugins.reload", _admin_reload_plugin)
                 await services.register("admin.v1.plugins.restart_container", _admin_restart_plugin_container)
                 await services.register("admin.v1.plugins.ensure_container", _admin_ensure_plugin_container)
-            self._registered_services.extend(["admin.v1.plugins.unload", "admin.v1.plugins.reload", "admin.v1.plugins.restart_container", "admin.v1.plugins.ensure_container"])
+                await services.register("admin.v1.plugins.start", _admin_start_plugin)
+                await services.register("admin.v1.plugins.stop", _admin_stop_plugin)
+                await services.register("admin.v1.plugins.load_by_name", _admin_load_plugin_by_name)
+                await services.register("admin.v1.plugins.auto_load", _admin_auto_load_plugins)
+            self._registered_services.extend([
+                "admin.v1.plugins.unload", "admin.v1.plugins.reload", "admin.v1.plugins.restart_container",
+                "admin.v1.plugins.ensure_container", "admin.v1.plugins.start", "admin.v1.plugins.stop",
+                "admin.v1.plugins.load_by_name", "admin.v1.plugins.auto_load",
+            ])
         except Exception:
             # Best-effort: do not break admin registration
             pass
@@ -541,6 +646,36 @@ class AdminModule(RuntimeModule):
                 path="/admin/v1/plugins/{name}/ensure-container",
                 service="admin.v1.plugins.ensure_container",
                 description="Ensure plugin container exists (build and create if needed, admin only)"
+            ))
+            self.context.http.register(HttpEndpoint(
+                method="POST",
+                path="/admin/v1/plugins/{name}/start",
+                service="admin.v1.plugins.start",
+                description="Start plugin by name (kernel: plugin_manager.start_plugin)"
+            ))
+            self.context.http.register(HttpEndpoint(
+                method="POST",
+                path="/admin/v1/plugins/{name}/stop",
+                service="admin.v1.plugins.stop",
+                description="Stop plugin by name (kernel: plugin_manager.stop_plugin)"
+            ))
+            self.context.http.register(HttpEndpoint(
+                method="POST",
+                path="/admin/v1/plugins/load",
+                service="admin.v1.plugins.load_by_name",
+                description="Load one plugin by name from plugins dir (kernel: load_plugin_by_name). Body: { name?, plugins_dir? }"
+            ))
+            self.context.http.register(HttpEndpoint(
+                method="POST",
+                path="/admin/v1/plugins/{name}/load",
+                service="admin.v1.plugins.load_by_name",
+                description="Load one plugin by name from path (kernel: load_plugin_by_name)"
+            ))
+            self.context.http.register(HttpEndpoint(
+                method="POST",
+                path="/admin/v1/plugins/auto-load",
+                service="admin.v1.plugins.auto_load",
+                description="Rescan plugins dir and load from manifests (kernel: auto_load_plugins). Body: { plugins_dir? }"
             ))
         except Exception:
             pass

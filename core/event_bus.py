@@ -106,13 +106,29 @@ class EventBus:
                         # Игнорируем ошибки логирования
                         pass
 
+    def list_subscriptions(self) -> dict[str, list[dict[str, str]]]:
+        """
+        Список подписок для Inspector (read-only snapshot).
+        Возвращает: event_type -> [{ "plugin": str, "handler": str }, ...].
+        Если обработчик не хранит метаданные — подставляются __module__ и __qualname__.
+        """
+        result: dict[str, list[dict[str, str]]] = {}
+        for event_type, handlers in list(self._handlers.items()):
+            subs = []
+            for h in handlers:
+                plugin = getattr(h, "__plugin__", None) or getattr(h, "__module__", "unknown")
+                handler = getattr(h, "__handler_name__", None) or getattr(h, "__name__", None) or getattr(h, "__qualname__", repr(h))
+                subs.append({"plugin": str(plugin), "handler": str(handler)})
+            result[event_type] = subs
+        return result
+
     async def get_subscribers_count(self, event_type: str) -> int:
         """
         Получить количество подписчиков на событие.
-        
+
         Args:
             event_type: тип события
-            
+
         Returns:
             Количество подписчиков
         """

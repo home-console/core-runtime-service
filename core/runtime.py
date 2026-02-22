@@ -230,7 +230,14 @@ class CoreRuntime:
         if self._running:
             return
         
+        import os
+        debug_mode = os.getenv("DEBUG_MODE", "true").lower() != "false"
+        
         try:
+            # DEBUG KERNEL: Log kernel startup
+            if debug_mode:
+                await info(self, "🔧 KERNEL DEBUG: Starting Core Runtime bootstrap", component="runtime")
+            
             # Модули регистрируются приложением (bootstrap) через register_module_specs() до вызова start().
             # Проверка, что все REQUIRED модули зарегистрированы (список required задаётся приложением)
             self.module_manager.check_required_modules_registered()
@@ -239,29 +246,40 @@ class CoreRuntime:
             modules = self.module_manager.list_modules()
             if modules:
                 await info(self, f"Модули зарегистрированы: {modules}", component="runtime")
+                if debug_mode:
+                    await info(self, f"🔧 KERNEL DEBUG: Registered {len(modules)} modules", component="runtime")
             
             # P0: Hydrate critical state from persistent storage
             # Восстанавливаем критичные данные из storage в StateEngine для быстрого доступа
             # (plugins metadata, agent identities, CA certificate)
+            if debug_mode:
+                await info(self, "🔧 KERNEL DEBUG: Hydrating critical state from storage", component="runtime")
             await self._hydrate_critical_state()
 
             # Запустить все модули (обязательные домены)
             # start_all() выбросит RuntimeError если REQUIRED модуль упал в start()
+            if debug_mode:
+                await info(self, f"🔧 KERNEL DEBUG: Starting {len(modules)} modules", component="runtime")
             await self.module_manager.start_all()
             if modules:
                 await info(self, f"Модули запущены: {modules}", component="runtime")
+                if debug_mode:
+                    await info(self, f"🔧 KERNEL DEBUG: All {len(modules)} modules started successfully", component="runtime")
             
             # P0: Автозагрузка плагинов из папки plugins/ (один раз после модулей)
             # Сканируем папку, в каждой подпапке ищем manifest/plugin.json — если валидный, грузим плагин
-            import os
             if not self.plugin_manager.list_plugins() and not os.getenv('TEST_MODE'):
                 try:
+                    if debug_mode:
+                        await info(self, "🔧 KERNEL DEBUG: Auto-loading plugins from plugins/ directory", component="runtime")
                     await self.plugin_manager.auto_load_plugins()
                 except Exception as e:
                     await warning(self, f"Ошибка автозагрузки плагинов: {e}", component="runtime")
 
             # Запустить все плагины
             plugins = self.plugin_manager.list_plugins()
+            if debug_mode:
+                await info(self, f"🔧 KERNEL DEBUG: Starting {len(plugins)} plugins", component="runtime")
             await info(self, "RUNTIME: about to call plugin_manager.start_all()", component="runtime")
             await self.plugin_manager.start_all()
             await info(self, "RUNTIME: plugin_manager.start_all() returned", component="runtime")
@@ -297,6 +315,12 @@ class CoreRuntime:
                     ),
                     component="runtime",
                 )
+                if debug_mode:
+                    await info(
+                        self,
+                        f"🔧 KERNEL DEBUG: Plugins started={len(started)} blocked={len(blocked)} error={len(error)}",
+                        component="runtime"
+                    )
             # Also print plugin list to stdout for quick visibility in console
             try:
                 if plugins:
@@ -321,10 +345,26 @@ class CoreRuntime:
             await self.state_engine.set("runtime.status", "running")
             self._running = True
             self._start_time = time.time()
+            
+            # DEBUG KERNEL: Log successful startup
+            if debug_mode:
+                uptime_ms = int((time.time() - self._start_time) * 1000)
+                await info(
+                    self,
+                    f"✅ KERNEL DEBUG: Core Runtime started successfully in {uptime_ms}ms",
+                    component="runtime"
+                )
 
         except Exception as e:
             # При любой ошибке старта останавливаем все модули
             # Гарантия: stop_all вызывается даже при частичном старте
+            if debug_mode:
+                await warning(
+                    self,
+                    f"❌ KERNEL DEBUG: Core Runtime startup failed: {type(e).__name__}: {str(e)}",
+                    component="runtime"
+                )
+            
             try:
                 await self.module_manager.stop_all()
             except Exception as stop_error:
@@ -348,6 +388,12 @@ class CoreRuntime:
         if not self._running:
             return
         
+        import os
+        debug_mode = os.getenv("DEBUG_MODE", "true").lower() != "false"
+        
+        if debug_mode:
+            await info(self, "🔧 KERNEL DEBUG: Stopping Core Runtime", component="runtime")
+        
         # Получаем timeout из конфига или используем значение по умолчанию
         timeout = 10
         if self._config is not None:
@@ -355,18 +401,27 @@ class CoreRuntime:
         
         async def _stop_internal() -> None:
             """Внутренняя функция остановки."""
+            if debug_mode:
+                await info(self, "🔧 KERNEL DEBUG: Stopping all plugins", component="runtime")
             # Остановить все плагины
             await self.plugin_manager.stop_all()
             
+            if debug_mode:
+                await info(self, "🔧 KERNEL DEBUG: Stopping all modules", component="runtime")
             # Остановить все модули
             await self.module_manager.stop_all()
             
+            if debug_mode:
+                await info(self, "🔧 KERNEL DEBUG: Closing storage", component="runtime")
             # Закрыть storage
             await self.storage.close()
             
             # Установить состояние runtime
             await self.state_engine.set("runtime.status", "stopped")
             self._running = False
+            
+            if debug_mode:
+                await info(self, "✅ KERNEL DEBUG: Core Runtime stopped successfully", component="runtime")
         
         try:
             await asyncio.wait_for(_stop_internal(), timeout=timeout)
@@ -391,15 +446,28 @@ class CoreRuntime:
         - останавливает runtime
         - очищает все компоненты
         """
+        import os
+        debug_mode = os.getenv("DEBUG_MODE", "true").lower() != "false"
+        
+        if debug_mode:
+            await info(self, "🔧 KERNEL DEBUG: Initiating full shutdown", component="runtime")
+        
         await self.stop()
         
+        if debug_mode:
+            await info(self, "🔧 KERNEL DEBUG: Clearing modules", component="runtime")
         # Очистить модули
         self.module_manager.clear()
 
+        if debug_mode:
+            await info(self, "🔧 KERNEL DEBUG: Clearing event bus, services, state", component="runtime")
         # Очистить компоненты
         await self.event_bus.clear()
         await self.service_registry.clear()
         await self.state_engine.clear()
+        
+        if debug_mode:
+            await info(self, "✅ KERNEL DEBUG: Full shutdown complete", component="runtime")
     
     async def health_check(self) -> Dict[str, Any]:
         """

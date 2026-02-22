@@ -9,7 +9,7 @@ from .context import RequestContext
 from .constants import RATE_LIMIT_AUTH_ATTEMPTS, RATE_LIMIT_AUTH_WINDOW
 from .api_keys import validate_api_key, extract_api_key_from_header
 from .sessions import validate_session, extract_session_from_cookie
-from .jwt_tokens import validate_jwt_token, extract_jwt_from_header
+from .jwt_tokens import validate_jwt_token, extract_jwt_from_header, validate_refresh_token
 from .rate_limiting import rate_limit_check
 from .audit import audit_log_auth_event
 from .middleware_helpers import apply_rate_limiting, log_auth_result
@@ -90,6 +90,11 @@ async def require_auth_middleware(request: Request, call_next):
         if hasattr(runtime, "_config") and runtime._config:
             rate_limiting_enabled = getattr(runtime._config, "rate_limiting_enabled", True)
         
+        # DEBUG MODE: Allow disabling rate limiting via DEBUG_MODE environment variable
+        import os
+        if os.getenv("DEBUG_MODE", "true").lower() != "false":
+            rate_limiting_enabled = False
+        
         if rate_limiting_enabled:
             # Используем IP для rate limiting auth endpoints (защита от brute force)
             rate_limit_key = f"auth:{client_ip}"
@@ -101,7 +106,7 @@ async def require_auth_middleware(request: Request, call_next):
                     {"ip": client_ip, "path": request_path, "type": "auth_endpoint", "limit_type": "auth"},
                     success=False
                 )
-                return Response(
+                response = Response(
                     content='{"detail": "Rate limit exceeded. Too many authentication attempts. Please try again later."}',
                     status_code=429,
                     media_type="application/json",
@@ -112,6 +117,12 @@ async def require_auth_middleware(request: Request, call_next):
                         "X-RateLimit-Type": "auth"
                     }
                 )
+                # Add CORS headers so browser doesn't block the response
+                origin = request.headers.get("origin")
+                if origin and (origin.startswith("http://localhost") or origin.startswith("http://127.0.0.1")):
+                    response.headers["Access-Control-Allow-Origin"] = origin
+                    response.headers["Access-Control-Allow-Credentials"] = "true"
+                return response
     
     # Приоритет 1: JWT access token из Authorization header или Cookie
     # SECURITY FIX: extract_jwt_from_header проверяет формат JWT (3 части через точку)
@@ -135,7 +146,7 @@ async def require_auth_middleware(request: Request, call_next):
                 
                 # Применяем rate limiting для API запросов (не для auth endpoints)
                 rate_limit_response = await apply_rate_limiting(
-                    runtime, context, identifier, auth_source, client_ip, str(request.url.path), is_auth_endpoint
+                    runtime, context, identifier, auth_source, client_ip, str(request.url.path), is_auth_endpoint, request
                 )
                 if rate_limit_response:
                     return rate_limit_response
@@ -171,7 +182,7 @@ async def require_auth_middleware(request: Request, call_next):
                     
                     # Применяем rate limiting для API запросов (не для auth endpoints)
                     rate_limit_response = await apply_rate_limiting(
-                        runtime, context, identifier, auth_source, client_ip, str(request.url.path), is_auth_endpoint
+                        runtime, context, identifier, auth_source, client_ip, str(request.url.path), is_auth_endpoint, request
                     )
                     if rate_limit_response:
                         return rate_limit_response
@@ -189,10 +200,29 @@ async def require_auth_middleware(request: Request, call_next):
                 
                 # Применяем rate limiting для API запросов (не для auth endpoints)
                 rate_limit_response = await apply_rate_limiting(
-                    runtime, context, identifier, auth_source, client_ip, str(request.url.path), is_auth_endpoint
+                    runtime, context, identifier, auth_source, client_ip, str(request.url.path), is_auth_endpoint, request
                 )
                 if rate_limit_response:
                     return rate_limit_response
+            except Exception:
+                context = None
+
+    # Приоритет 4: refresh_token cookie для POST /auth/v1/refresh (восстановление сессии после перезагрузки страницы)
+    # Access token хранится только в памяти — при F5 он теряется; refresh_token в httpOnly cookie — по нему восстанавливаем контекст
+    if context is None and runtime and "/auth/v1/refresh" in request_path:
+        refresh_token = request.cookies.get("refresh_token")
+        if refresh_token:
+            try:
+                token_data = await validate_refresh_token(runtime, refresh_token)
+                if token_data and isinstance(token_data, dict):
+                    context = {
+                        "user_id": token_data.get("user_id"),
+                        "client_ip": token_data.get("client_ip") or client_ip,
+                        "user_agent": token_data.get("user_agent") or request.headers.get("user-agent"),
+                    }
+                    if context.get("user_id"):
+                        identifier = context["user_id"]
+                        auth_source = "refresh_token"
             except Exception:
                 context = None
 

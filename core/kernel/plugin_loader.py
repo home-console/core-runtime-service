@@ -260,6 +260,12 @@ class PluginManifestLoader:
                 # Автоопределение интеграций (если runtime доступен)
                 if detect_integration_func:
                     detect_integration_func(plugin_instance, manifest)
+                    if manifest.get("is_integration"):
+                        await info(
+                            runtime,
+                            f"Плагин '{plugin_name}' зарегистрирован как интеграция",
+                            component="plugin_loader",
+                        )
                 
                 # Логируем успешную загрузку из манифеста
                 try:

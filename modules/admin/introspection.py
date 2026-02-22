@@ -33,6 +33,8 @@ from modules.admin.services.introspection import (
     list_operation_schedules,
     list_capabilities,
     get_system_health,
+    discover_manifests_for_inspector,
+    get_plugin_details,
 )
 
 __all__ = [
@@ -63,4 +65,6 @@ __all__ = [
     "list_operation_schedules",
     "list_capabilities",
     "get_system_health",
+    "discover_manifests_for_inspector",
+    "get_plugin_details",
 ]

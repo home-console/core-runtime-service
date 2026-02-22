@@ -1,0 +1,17 @@
+[
+  {
+    "id": "oauth_yandex",
+    "name": "Yandex OAuth",
+    "description": "OAuth для Яндекса: токены и авторизация",
+    "repo_url": "https://github.com/your-org/home-console-plugins",
+    "version": "0.1.0"
+  },
+  {
+    "id": "yandex_smart_home",
+    "name": "Yandex Smart Home",
+    "description": "Синхронизация устройств с Яндекс Умным Домом",
+    "repo_url": "https://github.com/your-org/home-console-plugins",
+    "version": "0.1.0",
+    "dependencies": ["oauth_yandex"]
+  }
+]

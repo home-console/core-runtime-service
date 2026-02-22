@@ -11,10 +11,13 @@ Inspector = memory dump runtime, не API.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 import time
 
 from core.plugins import PluginState
+from core.logger_helper import debug
+from core.kernel.plugin_loader import PluginManifestLoader
 
 
 async def get_runtime_info(runtime: Any, admin_started_at: float | None) -> Dict[str, Any]:
@@ -126,6 +129,85 @@ async def list_plugins(runtime: Any) -> List[Dict[str, Any]]:
     return result
 
 
+def _get_plugins_dir(runtime: Any) -> Path:
+    """Путь к каталогу плагинов (как в PluginManager)."""
+    config = getattr(runtime, "_config", None)
+    if config is not None and getattr(config, "plugins_dir", None):
+        return Path(config.plugins_dir)
+    if config is not None and hasattr(config, "get") and callable(config.get):
+        pd = config.get("plugins_dir")
+        if pd:
+            return Path(pd)
+    # Тот же default, что в core.plugins.manager
+    try:
+        from core.plugins import manager as _pm
+        return Path(_pm.__file__).resolve().parent.parent.parent / "plugins"
+    except Exception:
+        return Path(__file__).resolve().parent.parent.parent.parent / "plugins"
+
+
+async def discover_manifests_for_inspector(runtime: Any) -> Dict[str, Any]:
+    """
+    Inspector: список плагинов на диске (discovery из ядра).
+    Источник: PluginManifestLoader.discover_manifests + topological_sort.
+    Возвращает: manifests, load_order, plugins_dir, loaded (уже загруженные имена).
+    """
+    plugins_dir = _get_plugins_dir(runtime)
+    loaded = list(runtime.plugin_manager.list_plugins())
+    if not plugins_dir.exists() or not plugins_dir.is_dir():
+        return {
+            "plugins_dir": str(plugins_dir),
+            "manifests": {},
+            "load_order": [],
+            "loaded": loaded,
+        }
+    manifests = await PluginManifestLoader.discover_manifests(plugins_dir, runtime)
+    load_order = PluginManifestLoader.topological_sort(manifests, runtime)
+    return {
+        "plugins_dir": str(plugins_dir),
+        "manifests": manifests,
+        "load_order": load_order,
+        "loaded": loaded,
+    }
+
+
+async def get_plugin_details(runtime: Any, plugin_name: str) -> Optional[Dict[str, Any]]:
+    """
+    Inspector: детальная информация по одному плагину.
+    Объединяет данные из реестра (если загружен) и манифеста на диске (если есть).
+    """
+    pm = runtime.plugin_manager
+    plugins_dir = _get_plugins_dir(runtime)
+    plugin_dir = plugins_dir / plugin_name
+    manifest = PluginManifestLoader.load_manifest(plugin_dir) if plugin_dir.exists() else None
+
+    # Если плагин загружен — полные данные как в list_plugins
+    if pm.get_plugin(plugin_name):
+        plugins_list = await list_plugins(runtime)
+        for p in plugins_list:
+            if p.get("name") == plugin_name:
+                out = dict(p)
+                if manifest is not None:
+                    out["manifest"] = manifest
+                out["on_disk"] = manifest is not None
+                return out
+
+    # Плагин не загружен — только манифест с диска
+    if manifest is not None:
+        return {
+            "name": plugin_name,
+            "version": manifest.get("version", ""),
+            "description": manifest.get("description", ""),
+            "loaded": False,
+            "started": False,
+            "manifest": manifest,
+            "on_disk": True,
+            "dependencies": manifest.get("dependencies", []),
+            "class_path": manifest.get("class_path"),
+        }
+    return None
+
+
 async def list_services(runtime: Any) -> List[Dict[str, str]]:
     """List all registered services."""
     services = await runtime.service_registry.list_services()
@@ -231,6 +313,7 @@ async def list_auth_flows(runtime: Any) -> List[Dict[str, Any]]:
     Inspector view: list auth flows (read-only).
     Source: runtime.state["auth_inspector.flows"] only. No service_registry.call.
     Plugins (OAuth, device auth, etc.) write to this state; Inspector only reads.
+    Если плагин выгружен или не запущен — state="unavailable", message="Временно недоступно".
     Returns list of { id, state, message?, actions: [{ type, label, params? }] }.
     """
     try:
@@ -255,46 +338,157 @@ async def list_auth_flows(runtime: Any) -> List[Dict[str, Any]]:
             if "qr_svg" in item and item["qr_svg"] is not None:
                 flow["qr_svg"] = item["qr_svg"]
             result.append(flow)
+
+        # Пометить привязки выгруженных/незапущенных плагинов как «Временно недоступно»
+        flow_id_to_plugin = _flow_id_to_plugin_map()
+        pm = getattr(runtime, "plugin_manager", None)
+        if pm is not None:
+            for flow in result:
+                if not isinstance(flow, dict):
+                    continue
+                plugin_name = _plugin_name_for_integration_item(flow, flow_id_to_plugin)
+                if not plugin_name:
+                    continue
+                plugin = pm.get_plugin(plugin_name)
+                state = pm.get_plugin_state(plugin_name)
+                if plugin is None or state != PluginState.STARTED:
+                    flow["state"] = "unavailable"
+                    flow["message"] = "Временно недоступно (плагин выгружен или не запущен)"
+                    flow["_unavailable_reason"] = "plugin_unloaded" if plugin is None else "plugin_not_started"
         return result
     except Exception:
         return []
+
+
+def _flow_ids_set(flows: List[Dict[str, Any]]) -> set:
+    """Собрать множество id из списка flow-объектов (id может быть str или None)."""
+    out: set = set()
+    for f in flows:
+        if isinstance(f, dict) and f.get("id") is not None:
+            out.add(f["id"])
+    return out
+
+
+# Плагины, которые пишут в auth_inspector.flows под своим flow id (не plugin_name).
+# Если такой flow уже есть в result, не добавлять ту же интеграцию из реестра.
+_PLUGIN_FLOW_ID_ALIASES: Dict[str, List[str]] = {
+    "yandex_device_auth": ["yandex-device"],
+}
+
+
+def _flow_id_to_plugin_map() -> Dict[str, str]:
+    """Обратный маппинг: flow_id (id в UI) -> plugin_name."""
+    out: Dict[str, str] = {}
+    for plugin_name, ids in _PLUGIN_FLOW_ID_ALIASES.items():
+        for fid in ids:
+            out[fid] = plugin_name
+    return out
+
+
+def _plugin_name_for_integration_item(item: Dict[str, Any], flow_id_to_plugin: Dict[str, str]) -> Optional[str]:
+    """Определить plugin_name для элемента списка интеграций (из state или реестра)."""
+    pid = item.get("id")
+    if isinstance(pid, str):
+        return item.get("plugin_name") or flow_id_to_plugin.get(pid) or pid
+    return item.get("plugin_name")
 
 
 async def list_integrations(runtime: Any) -> List[Dict[str, Any]]:
     """
     Inspector view: list integrations (read-only).
     Source: runtime.state["integration_inspector.integrations"] + auth_inspector.flows.
+    Fallback: runtime.integrations (IntegrationRegistry) — плагины с is_integration: true
+    регистрируются при загрузке; если в state ничего не записали, показываем их как "available".
     Плагины могут писать в integration_inspector.integrations; auth-плагины (yandex_device_auth)
     пишут в auth_inspector.flows. Для единого списка в UI объединяем оба — тогда в «Интеграциях»
     видны и обычные интеграции, и привязки авторизаций (Яндекс и т.д.).
     Returns list of { id, state, message?, actions: [{ type, label, params? }] }.
     """
     result: List[Dict[str, Any]] = []
+    state_count = 0
+    registry_count = 0
     try:
-        if not hasattr(runtime, "state") or runtime.state is None:
-            return result
-        data = await runtime.state.get("integration_inspector.integrations")
-        if isinstance(data, list):
-            for item in data:
-                if isinstance(item, dict):
-                    result.append(item)
-        raw_flows = await runtime.state.get("auth_inspector.flows")
-        if isinstance(raw_flows, list):
-            for item in raw_flows:
+        if hasattr(runtime, "state") and runtime.state is not None:
+            data = await runtime.state.get("integration_inspector.integrations")
+            if isinstance(data, list):
+                for item in data:
+                    if isinstance(item, dict):
+                        result.append(item)
+            raw_flows = await runtime.state.get("auth_inspector.flows")
+            if isinstance(raw_flows, list):
+                for item in raw_flows:
+                    if not isinstance(item, dict):
+                        continue
+                    flow = {
+                        "id": item.get("id"),
+                        "state": item.get("state"),
+                        "actions": item.get("actions") if isinstance(item.get("actions"), list) else [],
+                    }
+                    if "message" in item and item["message"] is not None:
+                        flow["message"] = item["message"]
+                    if "qr_url" in item and item["qr_url"] is not None:
+                        flow["qr_url"] = item["qr_url"]
+                    if "qr_svg" in item and item["qr_svg"] is not None:
+                        flow["qr_svg"] = item["qr_svg"]
+                    result.append(flow)
+            state_count = len(result)
+
+        # Fallback: интеграции из реестра (плагины с is_integration в manifest),
+        # чтобы список не был пустым, если плагины не пишут в state
+        existing_ids = _flow_ids_set(result)
+        if hasattr(runtime, "integrations") and runtime.integrations is not None:
+            for info in runtime.integrations.list():
+                if info.id in existing_ids:
+                    continue
+                # Не дублировать плагин, если у него уже есть flow из state (другой id, напр. yandex-device)
+                alias_ids = _PLUGIN_FLOW_ID_ALIASES.get(info.plugin_name, [])
+                if any(aid in existing_ids for aid in alias_ids):
+                    continue
+                # Тип интеграции из реестра (oauth, capability_provider, integration) — для UI: разная кнопка для OAuth
+                integration_type = getattr(info, "type", "integration") or "integration"
+                is_oauth = (integration_type or "").lower() == "oauth"
+                result.append({
+                    "id": info.id,
+                    "name": info.name,
+                    "state": "available",
+                    "message": info.description or None,
+                    "integration_type": integration_type,
+                    "actions": [
+                        {
+                            "type": "inspector.open_plugin",
+                            "label": "Войти / Настроить OAuth" if is_oauth else "Настроить",
+                            "params": {"plugin": info.plugin_name},
+                        },
+                    ],
+                    "plugin_name": info.plugin_name,
+                })
+                registry_count += 1
+
+        # Пометить привязки выгруженных/незапущенных плагинов как «Временно недоступно»
+        flow_id_to_plugin = _flow_id_to_plugin_map()
+        pm = getattr(runtime, "plugin_manager", None)
+        if pm is not None:
+            for item in result:
                 if not isinstance(item, dict):
                     continue
-                flow = {
-                    "id": item.get("id"),
-                    "state": item.get("state"),
-                    "actions": item.get("actions") if isinstance(item.get("actions"), list) else [],
-                }
-                if "message" in item and item["message"] is not None:
-                    flow["message"] = item["message"]
-                if "qr_url" in item and item["qr_url"] is not None:
-                    flow["qr_url"] = item["qr_url"]
-                if "qr_svg" in item and item["qr_svg"] is not None:
-                    flow["qr_svg"] = item["qr_svg"]
-                result.append(flow)
+                plugin_name = _plugin_name_for_integration_item(item, flow_id_to_plugin)
+                if not plugin_name:
+                    continue
+                plugin = pm.get_plugin(plugin_name)
+                state = pm.get_plugin_state(plugin_name)
+                if plugin is None or state != PluginState.STARTED:
+                    item["state"] = "unavailable"
+                    item["message"] = "Временно недоступно (плагин выгружен или не запущен)"
+                    item["_unavailable_reason"] = "plugin_unloaded" if plugin is None else "plugin_not_started"
+
+        try:
+            await debug(
+                runtime,
+                f"Inspector integrations: всего {len(result)} (из state: {state_count}, из реестра: {registry_count})",
+                component="introspection",
+            )
+        except Exception:
+            pass
         return result
     except Exception:
         return result
