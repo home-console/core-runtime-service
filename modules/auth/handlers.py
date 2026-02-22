@@ -328,7 +328,7 @@ async def auth_login(runtime: Any, body: Any = None) -> Dict[str, Any]:
             httponly=True,              # CRITICAL: JS cannot access
             secure=cookies_secure,      # Only HTTPS in production
             samesite=cookies_samesite,  # CSRF protection
-            path="/auth/v1"            # Limit cookie scope
+            path="/"                    # Send to ALL paths (auth, integrations, etc)
         )
 
         # Return ONLY access token in body
@@ -427,7 +427,7 @@ async def auth_refresh(runtime: Any, body: Any = None) -> Dict[str, Any]:
                 httponly=True,              # CRITICAL: JS cannot access
                 secure=cookies_secure,      # Only HTTPS in production
                 samesite=cookies_samesite,  # CSRF protection
-                path="/auth/v1"            # Limit cookie scope
+                path="/"                    # Send to ALL paths (auth, integrations, etc)
             )
 
         # Return ONLY access token in body
