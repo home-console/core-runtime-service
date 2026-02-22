@@ -13,6 +13,7 @@ from typing import Optional, Any
 from pathlib import Path
 import sys
 import importlib
+import time
 
 from core.base_plugin import BasePlugin
 from core.kernel.plugin_registry import PluginRegistry, PluginState
@@ -105,6 +106,10 @@ class PluginLifecycleManager:
             # Регистрируем в реестре
             self._registry.register(plugin_name, plugin, PluginState.LOADED)
             
+            # Сохраняем метаданные плагина в persistent storage
+            # Это позволяет восстановить информацию о плагине после выгрузки
+            await self._save_plugin_metadata(plugin_name, metadata)
+            
             # CapabilityRegistry / инфраструктура: регистрация capabilities вынесена в координатор
             await self._infra.on_plugin_loaded(plugin)
         except Exception as e:
@@ -191,95 +196,62 @@ class PluginLifecycleManager:
         """
         Остановить Docker контейнер плагина.
         
+        REFACTORING: Проблема 8 - используем OrchestrationService вместо прямого доступа к ContainerOrchestrator.
+        
         Args:
             plugin_name: имя плагина
             container_config: конфигурация контейнера из metadata
         """
-        # Получаем ContainerOrchestrator из runtime (через AdminModule)
+        # Получаем OrchestrationService из runtime
         if not self._runtime:
             return
         
-        # Пытаемся получить ContainerOrchestrator из AdminModule
-        container_orchestrator = None
+        orchestration_service = None
         try:
-            if hasattr(self._runtime, "module_manager"):
-                admin_module = self._runtime.module_manager.get_module("admin")
-                if admin_module and hasattr(admin_module, "_container_orchestrator"):
-                    container_orchestrator = admin_module._container_orchestrator
+            # Пытаемся получить OrchestrationService из runtime
+            if hasattr(self._runtime, "orchestration_service"):
+                orchestration_service = self._runtime.orchestration_service
+            else:
+                # Fallback: пытаемся получить через глобальный singleton
+                from core.orchestration import get_orchestration_service
+                orchestration_service = get_orchestration_service()
         except Exception:
             pass
         
-        if not container_orchestrator:
-            # Если ContainerOrchestrator недоступен, логируем предупреждение
+        if not orchestration_service:
+            # Если OrchestrationService недоступен, логируем предупреждение
             try:
                 await warning(
                     self._runtime,
-                    f"ContainerOrchestrator недоступен для остановки контейнера плагина '{plugin_name}'",
+                    f"OrchestrationService недоступен для остановки контейнера плагина '{plugin_name}'",
                     component="plugin_lifecycle"
                 )
             except Exception:
                 pass
             return
         
-        # Определяем имя контейнера
-        container_name = container_config.get("name")
-        if not container_name:
-            container_name = f"plugin-{plugin_name}"
+        # Останавливаем контейнер через OrchestrationService
+        result = await orchestration_service.stop_plugin_container(
+            plugin_name,
+            container_config,
+            timeout=30.0
+        )
         
-        # Проверяем существование контейнера
-        if not await container_orchestrator.container_exists(container_name):
-            return  # Контейнер не существует, ничего не делаем
-        
-        # Останавливаем контейнер через docker stop
-        import asyncio
-        import shutil
-        docker_cmd = shutil.which("docker")
-        if not docker_cmd:
-            return
-        
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                docker_cmd,
-                "stop",
-                container_name,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30.0)
-            
-            if proc.returncode == 0:
-                try:
-                    await info(
-                        self._runtime,
-                        f"Контейнер '{container_name}' плагина '{plugin_name}' успешно остановлен",
-                        component="plugin_lifecycle"
-                    )
-                except Exception:
-                    pass
-            else:
-                error_msg = stderr.decode("utf-8", errors="replace") if stderr else "Неизвестная ошибка"
-                try:
-                    await warning(
-                        self._runtime,
-                        f"Не удалось остановить контейнер '{container_name}' плагина '{plugin_name}': {error_msg}",
-                        component="plugin_lifecycle"
-                    )
-                except Exception:
-                    pass
-        except asyncio.TimeoutError:
+        if result.get("ok"):
             try:
-                await warning(
+                await info(
                     self._runtime,
-                    f"Таймаут при остановке контейнера '{container_name}' плагина '{plugin_name}'",
+                    result.get("message", f"Контейнер плагина '{plugin_name}' успешно остановлен"),
                     component="plugin_lifecycle"
                 )
             except Exception:
                 pass
-        except Exception as e:
+        else:
+            error = result.get("error", "Неизвестная ошибка")
             try:
                 await warning(
                     self._runtime,
-                    f"Ошибка при остановке контейнера '{container_name}' плагина '{plugin_name}': {e}",
+                    f"Не удалось остановить контейнер плагина '{plugin_name}': {error}",
                     component="plugin_lifecycle"
                 )
             except Exception:
@@ -317,7 +289,11 @@ class PluginLifecycleManager:
             # Инфраструктурная очистка (capabilities, handlers, integrations)
             await self._infra.on_plugin_unloaded(plugin)
 
-            # Удаляем из реестра плагинов
+            # Помечаем плагин как выгруженный в storage, но НЕ удаляем метаданные
+            # Это позволяет системе знать, что плагин был установлен
+            await self._mark_plugin_unloaded(plugin_name)
+
+            # Удаляем из реестра плагинов (in-memory)
             self._registry.unregister(plugin_name)
         except Exception as e:
             self._registry.set_plugin_state(plugin_name, PluginState.ERROR)
@@ -327,38 +303,43 @@ class PluginLifecycleManager:
         """
         Удалить Docker контейнер плагина.
         
+        REFACTORING: Проблема 8 - используем OrchestrationService вместо прямого доступа к ContainerOrchestrator.
+        
         Args:
             plugin_name: имя плагина
             container_config: конфигурация контейнера из metadata
         """
-        # Получаем ContainerOrchestrator из runtime (через AdminModule)
+        # Получаем OrchestrationService из runtime
         if not self._runtime:
             return
         
-        container_orchestrator = None
+        orchestration_service = None
         try:
-            if hasattr(self._runtime, "module_manager"):
-                admin_module = self._runtime.module_manager.get_module("admin")
-                if admin_module and hasattr(admin_module, "_container_orchestrator"):
-                    container_orchestrator = admin_module._container_orchestrator
+            # Пытаемся получить OrchestrationService из runtime
+            if hasattr(self._runtime, "orchestration_service"):
+                orchestration_service = self._runtime.orchestration_service
+            else:
+                # Fallback: пытаемся получить через глобальный singleton
+                from core.orchestration import get_orchestration_service
+                orchestration_service = get_orchestration_service()
         except Exception:
             pass
         
-        if not container_orchestrator:
+        if not orchestration_service:
             return
         
-        # Определяем имя контейнера
-        container_name = container_config.get("name")
-        if not container_name:
-            container_name = f"plugin-{plugin_name}"
+        # Удаляем контейнер через OrchestrationService (с force=True для остановки перед удалением)
+        result = await orchestration_service.remove_plugin_container(
+            plugin_name,
+            container_config,
+            force=True
+        )
         
-        # Удаляем контейнер через ContainerOrchestrator (с force=True для остановки перед удалением)
-        result = await container_orchestrator.remove_container(container_name, force=True)
         if result.get("ok"):
             try:
                 await info(
                     self._runtime,
-                    f"Контейнер '{container_name}' плагина '{plugin_name}' успешно удалён",
+                    result.get("message", f"Контейнер плагина '{plugin_name}' успешно удалён"),
                     component="plugin_lifecycle"
                 )
             except Exception:
@@ -368,11 +349,84 @@ class PluginLifecycleManager:
             try:
                 await warning(
                     self._runtime,
-                    f"Не удалось удалить контейнер '{container_name}' плагина '{plugin_name}': {error}",
+                    f"Не удалось удалить контейнер плагина '{plugin_name}': {error}",
                     component="plugin_lifecycle"
                 )
             except Exception:
                 pass
+    
+    async def _save_plugin_metadata(self, plugin_name: str, metadata: Any) -> None:
+        """
+        Сохранить метаданные плагина в persistent storage.
+        
+        Это позволяет системе знать о плагине даже после его выгрузки.
+        
+        Args:
+            plugin_name: имя плагина
+            metadata: метаданные плагина (PluginMetadata)
+        """
+        if not self._runtime or not hasattr(self._runtime, "storage"):
+            return
+        
+        try:
+            # Сериализуем метаданные в словарь
+            metadata_dict = {
+                "name": metadata.name,
+                "version": metadata.version,
+                "description": getattr(metadata, "description", ""),
+                "author": getattr(metadata, "author", ""),
+                "dependencies": getattr(metadata, "dependencies", []) or [],
+                "default_admin_only": getattr(metadata, "default_admin_only", False),
+                "capabilities_provided": getattr(metadata, "capabilities_provided", []) or [],
+                "capabilities_required": getattr(metadata, "capabilities_required", []) or [],
+                "execution_mode": getattr(metadata, "execution_mode", "in_process"),
+                "remote_config": getattr(metadata, "remote_config", None),
+                "process_config": getattr(metadata, "process_config", None),
+                "container_config": getattr(metadata, "container_config", None),
+                "resource_limits": getattr(metadata, "resource_limits", None),
+                "loaded": True,  # Плагин загружен
+            }
+            
+            # Сохраняем в storage в namespace plugins.metadata
+            await self._runtime.storage.set("plugins.metadata", plugin_name, metadata_dict)
+        except Exception as e:
+            # Логируем ошибку, но не прерываем загрузку плагина
+            try:
+                await warning(
+                    self._runtime,
+                    f"Не удалось сохранить метаданные плагина '{plugin_name}': {e}",
+                    component="plugin_lifecycle"
+                )
+            except Exception:
+                pass
+    
+    async def _mark_plugin_unloaded(self, plugin_name: str) -> None:
+        """
+        Пометить плагин как выгруженный в storage.
+        
+        Метаданные плагина остаются в storage, но помечаются как выгруженные.
+        Это позволяет системе знать, что плагин был установлен, даже после выгрузки.
+        
+        Args:
+            plugin_name: имя плагина
+        """
+        if not self._runtime or not hasattr(self._runtime, "storage"):
+            return
+        
+        try:
+            # Получаем текущие метаданные
+            metadata_dict = await self._runtime.storage.get("plugins.metadata", plugin_name)
+            if metadata_dict:
+                # Обновляем статус
+                metadata_dict["loaded"] = False
+                metadata_dict["unloaded_at"] = time.time()  # Timestamp выгрузки
+                
+                # Сохраняем обратно
+                await self._runtime.storage.set("plugins.metadata", plugin_name, metadata_dict)
+        except Exception:
+            # Если метаданных нет или произошла ошибка - игнорируем
+            # Это не критично, плагин всё равно будет выгружен из реестра
+            pass
     
     async def reload_plugin(
         self,

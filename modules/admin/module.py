@@ -19,7 +19,8 @@ import time
 
 from core.runtime_module import RuntimeModule
 from core.http_registry import HttpEndpoint
-from .container_orchestrator import ContainerOrchestrator
+# REFACTORING: Проблема 8 - используем OrchestrationService вместо прямого ContainerOrchestrator
+from core.orchestration import OrchestrationService, DockerOrchestrationBackend, get_orchestration_service
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +87,15 @@ class AdminModule(RuntimeModule):
         super().__init__(runtime)
         self._admin_started_at: Optional[float] = None
         self._registered_services: list[str] = []
-        self._container_orchestrator = ContainerOrchestrator()
+        # REFACTORING: Проблема 8 - используем OrchestrationService вместо прямого ContainerOrchestrator
+        # Пытаемся получить из runtime, если не доступен - создаём локальный
+        self._orchestration_service = None
+        if hasattr(runtime, "orchestration_service") and runtime.orchestration_service:
+            self._orchestration_service = runtime.orchestration_service
+        else:
+            # Fallback: создаём локальный сервис с Docker backend
+            # В будущем это должно быть инициализировано в CoreRuntime
+            self._orchestration_service = OrchestrationService(DockerOrchestrationBackend())
 
     async def register(self) -> None:
         self._admin_started_at = time.time()
@@ -517,13 +526,14 @@ class AdminModule(RuntimeModule):
             if not docker_cmd:
                 return {"ok": False, "error": "Docker не найден в системе"}
             
+            # REFACTORING: Проблема 8 - используем OrchestrationService
             # Проверяем существование контейнера
-            container_exists = await self._container_orchestrator.container_exists(container_name)
+            container_exists = await self._orchestration_service.container_exists(container_name)
             
             # Если контейнер не существует, пытаемся создать его
             if not container_exists:
                 logger.info(f"Container {container_name} not found, attempting to ensure it exists")
-                ensure_result = await self._container_orchestrator.ensure_container(
+                ensure_result = await self._orchestration_service.ensure_container(
                     container_name,
                     metadata.container_config
                 )
@@ -531,58 +541,40 @@ class AdminModule(RuntimeModule):
                     return ensure_result
                 # После создания контейнера продолжаем с restart
             
-            # Выполняем docker restart
-            try:
-                logger.info(f"Restarting container {container_name} for plugin {plugin_name}")
-                proc = await asyncio.create_subprocess_exec(
-                    docker_cmd,
-                    "restart",
-                    container_name,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
+            # REFACTORING: Проблема 8 - используем OrchestrationService для restart
+            logger.info(f"Restarting container {container_name} for plugin {plugin_name}")
+            restart_result = await self._orchestration_service.restart_container(container_name, timeout=30.0)
+            
+            if restart_result["ok"]:
+                logger.info(f"Container {container_name} restarted successfully")
+                return restart_result
+            else:
+                error_msg = restart_result.get("error", "Неизвестная ошибка")
+                logger.warning(f"Failed to restart container {container_name}: {error_msg}")
                 
-                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30.0)
-                
-                if proc.returncode == 0:
-                    logger.info(f"Container {container_name} restarted successfully")
-                    return {"ok": True, "message": f"Контейнер {container_name} успешно перезапущен"}
-                else:
-                    error_msg = stderr.decode("utf-8", errors="replace") if stderr else "Неизвестная ошибка"
-                    logger.warning(f"Failed to restart container {container_name}: {error_msg}")
-                    
-                    # Если ошибка связана с сетью, удаляем контейнер и пересоздаём
-                    if "network" in error_msg.lower() and "not found" in error_msg.lower():
-                        logger.info(f"Network error detected, removing container {container_name} to recreate it")
-                        remove_result = await self._container_orchestrator.remove_container(container_name, force=True)
-                        if remove_result["ok"]:
-                            # Пересоздаём контейнер с правильной сетью
-                            logger.info(f"Recreating container {container_name} with correct network configuration")
-                            ensure_result = await self._container_orchestrator.ensure_container(
-                                container_name,
-                                metadata.container_config
-                            )
-                            if ensure_result["ok"]:
-                                return {"ok": True, "message": f"Контейнер '{container_name}' пересоздан и запущен (была проблема с сетью)"}
-                            else:
-                                return ensure_result
+                # Если ошибка связана с сетью, удаляем контейнер и пересоздаём
+                if "network" in error_msg.lower() and "not found" in error_msg.lower():
+                    logger.info(f"Network error detected, removing container {container_name} to recreate it")
+                    remove_result = await self._orchestration_service.remove_container(container_name, force=True)
+                    if remove_result["ok"]:
+                        # Пересоздаём контейнер с правильной сетью
+                        logger.info(f"Recreating container {container_name} with correct network configuration")
+                        ensure_result = await self._orchestration_service.ensure_container(
+                            container_name,
+                            metadata.container_config
+                        )
+                        if ensure_result["ok"]:
+                            return {"ok": True, "message": f"Контейнер '{container_name}' пересоздан и запущен (была проблема с сетью)"}
                         else:
-                            return {
-                                "ok": False,
-                                "error": f"Не удалось перезапустить контейнер '{container_name}': {error_msg}. "
-                                        f"Также не удалось удалить контейнер для пересоздания: {remove_result.get('error', 'неизвестная ошибка')}"
-                            }
-                    
-                    return {
-                        "ok": False,
-                        "error": f"Не удалось перезапустить контейнер '{container_name}': {error_msg}"
-                    }
-            except asyncio.TimeoutError:
-                logger.error(f"Timeout while restarting container {container_name}")
-                return {"ok": False, "error": "Таймаут при перезапуске контейнера"}
-            except Exception as e:
-                logger.exception(f"Error restarting container {container_name} for plugin {plugin_name}")
-                return {"ok": False, "error": str(e)}
+                            return ensure_result
+                    else:
+                        return {
+                            "ok": False,
+                            "error": f"Не удалось перезапустить контейнер '{container_name}': {error_msg}. "
+                                    f"Также не удалось удалить контейнер для пересоздания: {remove_result.get('error', 'неизвестная ошибка')}"
+                        }
+                
+                return restart_result
 
         async def _admin_ensure_plugin_container(name: str = None, body: Any = None, **kw):
             """
@@ -638,8 +630,9 @@ class AdminModule(RuntimeModule):
             if not container_name:
                 container_name = f"plugin-{plugin_name}"
             
-            # Используем ContainerOrchestrator для обеспечения существования контейнера
-            return await self._container_orchestrator.ensure_container(
+            # REFACTORING: Проблема 8 - используем OrchestrationService
+            # Используем OrchestrationService для обеспечения существования контейнера
+            return await self._orchestration_service.ensure_container(
                 container_name,
                 metadata.container_config
             )
@@ -834,6 +827,43 @@ class AdminModule(RuntimeModule):
         except Exception:
             # Best-effort: do not break admin registration if HTTP registry unavailable
             pass
+
+        # SSH Terminal endpoints (для веб-версии через WebSocket прокси)
+        try:
+            from .services import ssh_terminal
+            
+            # Регистрируем сервис для создания SSH сессии
+            async def _ssh_terminal_start_handler(body: dict = None, **kw):
+                return await ssh_terminal.ssh_terminal_start_handler(self.context, body)
+            
+            await self.context.services.register("admin.v1.ssh.start", _ssh_terminal_start_handler)
+            self.context.http.register(HttpEndpoint(
+                method="POST",
+                path="/admin/v1/ssh/start",
+                service="admin.v1.ssh.start",
+                description="Start SSH terminal session (returns session_id)"
+            ))
+            
+            # WebSocket эндпоинт для проксирования SSH терминала
+            async def _ssh_terminal_ws_handler(websocket: Any, session_id: str = None, **kw):
+                # session_id передается через path параметр, но нужно извлечь из websocket
+                # Используем query параметр или path
+                if session_id:
+                    await ssh_terminal.handle_ssh_websocket(websocket, session_id, self.context)
+                else:
+                    await websocket.close(code=1008, reason="session_id required")
+            
+            # Регистрируем WebSocket handler как сервис
+            await self.context.services.register("admin.v1.ssh.ws", _ssh_terminal_ws_handler)
+            self.context.http.register(HttpEndpoint(
+                path="/admin/v1/ssh/ws/{session_id}",
+                service="admin.v1.ssh.ws",
+                websocket=True,
+                description="WebSocket proxy for SSH terminal"
+            ))
+        except Exception as e:
+            logger.warning(f"Failed to register SSH terminal endpoints: {e}", exc_info=True)
+            # Best-effort: не ломаем регистрацию если SSH недоступен
 
     async def start(self) -> None:
         pass

@@ -29,16 +29,23 @@ def bind_routes(runtime: Any, app: Any) -> None:
     Must be called AFTER module_manager.start_all() and plugin_manager.start_all().
     """
     endpoints = runtime.http.list()
-    api_endpoints = [ep for ep in endpoints if ep.kind == "api"]
-    webhook_endpoints = [ep for ep in endpoints if ep.kind == "webhook"]
+    # REFACTORING: Фильтруем endpoints правильно - WebSocket endpoints имеют method=None
+    api_endpoints = [ep for ep in endpoints if ep.kind == "api" and not ep.websocket]
+    webhook_endpoints = [ep for ep in endpoints if ep.kind == "webhook" and not ep.websocket]
     ws_endpoints = [ep for ep in endpoints if ep.websocket]
 
     for ep in api_endpoints:
+        # Проверяем, что method не None (для безопасности)
+        if not ep.method:
+            continue
         handler = _make_api_handler(runtime, ep)
         route_name = f"{ep.method}_{ep.path}"
         app.add_api_route(ep.path, handler, methods=[ep.method], name=route_name)
 
     for ep in webhook_endpoints:
+        # Проверяем, что method не None (для безопасности)
+        if not ep.method:
+            continue
         handler = _make_webhook_handler(runtime, ep)
         route_name = f"webhook_{ep.method}_{ep.path}"
         app.add_api_route(ep.path, handler, methods=[ep.method], name=route_name, include_in_schema=False)
@@ -46,7 +53,39 @@ def bind_routes(runtime: Any, app: Any) -> None:
     for ep in ws_endpoints:
         handler = _make_ws_handler(runtime, ep)
         route_name = f"ws_{ep.path.replace('/', '_').lstrip('_')}"
-        app.websocket(ep.path, name=route_name)(handler)
+        # Извлекаем path параметры из пути для передачи в handler
+        path_params = re.findall(r'\{(\w+)\}', ep.path)
+        if path_params:
+            # Если есть path параметры, создаем wrapper который их извлекает
+            async def ws_wrapper(websocket: WebSocket, original_handler=handler, params=path_params, ep_path=ep.path):
+                await websocket.accept()
+                # Извлекаем параметры из URL
+                path = websocket.url.path
+                # Простой парсинг - ищем значения между / и следующими /
+                parts = path.rstrip('/').split('/')
+                ep_parts = ep_path.rstrip('/').split('/')
+                param_values = {}
+                for i, part in enumerate(ep_parts):
+                    if part.startswith('{') and part.endswith('}'):
+                        param_name = part[1:-1]
+                        if i < len(parts):
+                            param_values[param_name] = parts[i]
+                try:
+                    await runtime.service_registry.call(ep.service, websocket=websocket, **param_values)
+                except WebSocketDisconnect:
+                    pass
+                except Exception as e:
+                    import logging
+                    logging.error(f"WebSocket error for {ep.service}: {str(e)}")
+                    import traceback
+                    traceback.print_exc()
+                    try:
+                        await websocket.close(code=1011, reason="Internal Server Error")
+                    except Exception:
+                        pass
+            app.websocket(ep.path, name=route_name)(ws_wrapper)
+        else:
+            app.websocket(ep.path, name=route_name)(handler)
 
     _install_openapi_schema(app)
 
