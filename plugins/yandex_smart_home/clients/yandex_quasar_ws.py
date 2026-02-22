@@ -372,16 +372,26 @@ class YandexQuasarWS:
         except Exception:
             pass
 
-        caps = DeviceTransformer._extract_capabilities(device.get("capabilities", []))
+        # Используем новый метод для извлечения capabilities и state
+        caps_list, cap_state = DeviceTransformer._extract_capabilities(device.get("capabilities", []))
+        
+        # Извлекаем properties и их состояния
+        prop_list, prop_state = DeviceTransformer._extract_properties(device.get("properties", []))
+        
+        # Объединяем состояния: properties переопределяют capabilities
+        state = {**cap_state, **prop_state}
+        
+        # Также учитываем states если они есть (для back-compat)
         states_list: List[Dict[str, Any]] = []
         if isinstance(device.get("states"), list):
             states_list.extend(device.get("states") or [])
         if isinstance(device.get("state"), list):
             states_list.extend(device.get("state") or [])
-        for cap in device.get("capabilities", []) or []:
-            if isinstance(cap, dict) and cap.get("state") is not None:
-                states_list.append({"type": cap.get("type"), "state": cap.get("state")})
-        state = DeviceTransformer._extract_state(states_list, caps)
+        
+        # Если есть states список - применяем извлечение с back-compat методом
+        if states_list:
+            old_state = DeviceTransformer._extract_state(states_list, None)
+            state.update(old_state)
         
         # DEBUG 2C: Log extracted state
         try:
@@ -419,9 +429,20 @@ class YandexQuasarWS:
             device_id = device.get("id")
             if not device_id:
                 continue
-            caps = DeviceTransformer._extract_capabilities(device.get("capabilities", []))
+            
+            # Используем новый метод для извлечения capabilities и state
+            caps_list, cap_state = DeviceTransformer._extract_capabilities(device.get("capabilities", []))
+            prop_list, prop_state = DeviceTransformer._extract_properties(device.get("properties", []))
+            
+            # Объединяем состояния
+            state = {**cap_state, **prop_state}
+            
+            # Также учитываем states если они есть
             raw_states = device.get("states") or []
-            state = DeviceTransformer._extract_state(raw_states, caps)
+            if raw_states:
+                old_state = DeviceTransformer._extract_state(raw_states, None)
+                state.update(old_state)
+            
             if state:
                 self._devices[device_id] = {"state": state, "raw": device}
                 await self._publish_state(device_id, state)

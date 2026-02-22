@@ -214,6 +214,50 @@ class DeviceSync:
                                 "online": device.get("online"),
                             },
                         )
+                        
+                        # DEBUG: Save extracted state from capabilities and properties
+                        try:
+                            extracted_state = device.get("state", {})
+                            capabilities = device.get("capabilities", [])
+                            properties = device.get("properties", [])
+                            
+                            # Count how much we extracted from each source
+                            state_keys = list(extracted_state.keys())
+                            
+                            # Analyze what came from capabilities vs properties
+                            capabilities_with_state = sum(1 for cap in yandex_device.get("capabilities", []) 
+                                                          if cap.get("state", {}).get("value") is not None)
+                            properties_with_state = sum(1 for prop in yandex_device.get("properties", []) 
+                                                       if prop.get("state", {}).get("value") is not None)
+                            
+                            await self.runtime.storage.set(
+                                "yandex_debug_state_extraction",
+                                f"{internal_id}_{int(sync_timestamp * 1000)}",
+                                {
+                                    "timestamp": sync_timestamp,
+                                    "internal_id": internal_id,
+                                    "external_id": external_id,
+                                    "device_name": device_name,
+                                    "device_type": device_type,
+                                    "extracted_state": extracted_state,
+                                    "state_keys_count": len(state_keys),
+                                    "state_keys": state_keys,
+                                    "capabilities": {
+                                        "total": len(capabilities),
+                                        "with_state_value": capabilities_with_state,
+                                        "list": capabilities,
+                                    },
+                                    "properties": {
+                                        "total": len(properties),
+                                        "with_state_value": properties_with_state,
+                                        "list": properties,
+                                    },
+                                    "raw_capability_data": yandex_device.get("capabilities", []),
+                                    "raw_property_data": yandex_device.get("properties", []),
+                                },
+                            )
+                        except Exception:
+                            pass
                 except Exception:
                     pass
                 

@@ -8,6 +8,7 @@ PluginLoader - загрузка манифестов плагинов и discove
 """
 
 import json
+import sys
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Callable, Awaitable
 import importlib
@@ -203,13 +204,22 @@ class PluginManifestLoader:
                 )
             except Exception:
                 pass
-            
+
+            # Если class_path не в пространстве plugins.* — считаем его относительным к plugin_dir
+            # (для папок с дефисом, например client-manager-plugin, где нельзя сделать plugins.client-manager-plugin)
+            path_inserted = False
+            if not class_path.startswith("plugins."):
+                sys.path.insert(0, str(plugin_dir))
+                path_inserted = True
+
             # Импортируем класс плагина
             module_path, class_name = class_path.rsplit(".", 1)
             try:
                 module = importlib.import_module(module_path)
                 plugin_class = getattr(module, class_name)
             except (ImportError, AttributeError) as e:
+                if path_inserted and sys.path and sys.path[0] == str(plugin_dir):
+                    sys.path.pop(0)
                 import traceback
                 tb = traceback.format_exc()
                 await logger_func(
@@ -219,7 +229,7 @@ class PluginManifestLoader:
                     traceback=tb[:800] if len(tb) > 800 else tb,
                 )
                 return False
-            
+
             # Проверяем, что это класс плагина (sdk.BasePlugin или core.BasePlugin)
             if not isinstance(plugin_class, type) or not issubclass(plugin_class, SDKBasePlugin):
                 await logger_func(

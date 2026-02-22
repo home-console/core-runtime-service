@@ -22,11 +22,16 @@ class DeviceTransformer:
             yandex_type = yandex_device.get("type", "")
             device_type = DeviceTransformer._extract_device_type(yandex_type)
 
+            # КРИТИЧНО: Извлекаем capabilities с их СОСТОЯНИЯМИ (state.value)
             yandex_capabilities = yandex_device.get("capabilities", [])
-            capabilities = DeviceTransformer._extract_capabilities(yandex_capabilities)
+            capabilities, device_state = DeviceTransformer._extract_capabilities(yandex_capabilities)
 
-            yandex_states = yandex_device.get("states", [])
-            device_state = DeviceTransformer._extract_state(yandex_states, capabilities)
+            # КРИТИЧНО: Извлекаем properties с их ЗНАЧЕНИЯМИ (state.value)
+            yandex_properties = yandex_device.get("properties", [])
+            properties, properties_state = DeviceTransformer._extract_properties(yandex_properties)
+            
+            # Объединяем состояния: сначала capabilities, потом properties (properties overrides)
+            device_state.update(properties_state)
 
             home_id = yandex_device.get("house_id")
             home_name = yandex_device.get("house_name")
@@ -46,6 +51,7 @@ class DeviceTransformer:
                 "name": name,
                 "type": device_type,
                 "capabilities": capabilities,
+                "properties": properties,
                 "state": device_state,
             }
 
@@ -74,46 +80,151 @@ class DeviceTransformer:
         return "unknown"
 
     @staticmethod
-    def _extract_capabilities(yandex_capabilities: list) -> list[str]:
+    def _extract_capabilities(yandex_capabilities: list) -> tuple[list, dict]:
+        """Извлекает capabilities и их СОСТОЯНИЯ (state.value).
+        
+        Returns:
+            Tuple[capabilities_list, state_dict]
+            - capabilities_list: список типов capabilities
+            - state_dict: словарь с extracted state values
+        """
         capabilities = []
+        state = {}
+        
         for cap in yandex_capabilities:
             cap_type = cap.get("type", "")
             if not cap_type:
                 continue
+            
+            # Извлекаем простое имя capability
             parts = cap_type.split(".")
-            if parts:
-                simple_name = parts[-1]
+            simple_name = parts[-1] if parts else ""
+            if simple_name:
                 capabilities.append(simple_name)
-        return capabilities
+            
+            # КРИТИЧНО: Извлекаем СОСТОЯНИЕ из capability (state.value + instance)
+            cap_state = cap.get("state", {})
+            if isinstance(cap_state, dict):
+                value = cap_state.get("value")
+                instance = cap_state.get("instance", simple_name)
+                
+                if value is not None:
+                    # Нормализуем on_off
+                    if simple_name == "on_off" or cap_type == "devices.capabilities.on_off":
+                        if isinstance(value, bool):
+                            state["on"] = value
+                        elif isinstance(value, str):
+                            v = value.strip().lower()
+                            state["on"] = v in ("on", "true", "1", "yes")
+                        elif isinstance(value, (int, float)):
+                            state["on"] = bool(value)
+                    # Остальные capabilities: сохраняем с instance key
+                    else:
+                        key = instance if instance else simple_name
+                        state[key] = value
+        
+        return capabilities, state
 
     @staticmethod
-    def _extract_state(yandex_states: list, capabilities: list[str]) -> Dict[str, Any]:
+    def _extract_properties(yandex_properties: list) -> tuple[list, dict]:
+        """Извлекает properties и их ЗНАЧЕНИЯ (state.value).
+        
+        Returns:
+            Tuple[properties_list, state_dict]
+            - properties_list: список информации о properties
+            - state_dict: словарь с extracted state values
+        """
+        properties = []
         state = {}
+        
+        for prop in yandex_properties:
+            prop_type = prop.get("type", "")
+            if not prop_type:
+                continue
+            
+            # Сохраняем информацию о property
+            prop_info = {
+                "type": prop_type,
+                "parameters": prop.get("parameters", {}),
+                "retrievable": prop.get("retrievable", False),
+                "reportable": prop.get("reportable", False),
+            }
+            properties.append(prop_info)
+            
+            # КРИТИЧНО: Извлекаем ЗНАЧЕНИЕ из property (state.value)
+            prop_state = prop.get("state")
+            if isinstance(prop_state, dict):
+                value = prop_state.get("value")
+                if value is not None:
+                    # Используем instance как key (или последний part типа)
+                    parameters = prop.get("parameters", {})
+                    instance = parameters.get("instance") if isinstance(parameters, dict) else None
+                    
+                    if instance:
+                        state[instance] = value
+                    else:
+                        # Fallback, если нет instance
+                        parts = prop_type.split(".")
+                        key = parts[-1] if parts else "unknown"
+                        state[key] = value
+        
+        return properties, state
+
+    @staticmethod
+    def _extract_state(yandex_states: list, capabilities: list = None) -> Dict[str, Any]:
+        """BACK-COMPAT: Извлекает состояние из списка states (старый формат).
+        
+        Используется в yandex_quasar_ws.py и operations.py для обратной совместимости.
+        
+        Args:
+            yandex_states: Список объектов со структурой {"type": "...", "state": {...}}
+            capabilities: Игнорируется, нужен только для сигнатуры
+        
+        Returns:
+            Dict со значениями состояния
+        """
+        state = {}
+        
+        if not isinstance(yandex_states, list):
+            return state
+        
         for state_item in yandex_states:
+            if not isinstance(state_item, dict):
+                continue
+            
             cap_type = state_item.get("type", "")
             if not cap_type:
                 continue
-            parts = cap_type.split(".")
-            cap_name = parts[-1] if parts else ""
+            
+            # Извлекаем значение
             state_value = state_item.get("state", {})
+            if not isinstance(state_value, dict):
+                continue
+            
             value = state_value.get("value")
-            if value is not None:
-                if cap_name == "on_off":
-                    norm = None
-                    if isinstance(value, bool):
-                        norm = value
-                    elif isinstance(value, str):
-                        v = value.strip().lower()
-                        if v in ("on", "true", "1", "yes"):
-                            norm = True
-                        elif v in ("off", "false", "0", "no"):
-                            norm = False
-                    elif isinstance(value, (int, float)):
-                        norm = bool(value)
-                    if norm is not None:
-                        state["on"] = norm
-                else:
-                    state[cap_name] = value
+            if value is None:
+                continue
+            
+            # Нормализуем on_off
+            parts = cap_type.split(".")
+            simple_name = parts[-1] if parts else ""
+            
+            if simple_name == "on_off" or cap_type == "devices.capabilities.on_off":
+                if isinstance(value, bool):
+                    state["on"] = value
+                elif isinstance(value, str):
+                    v = value.strip().lower()
+                    state["on"] = v in ("on", "true", "1", "yes")
+                elif isinstance(value, (int, float)):
+                    state["on"] = bool(value)
+            else:
+                # Для остальных используем instance или простое имя
+                instance = state_value.get("instance", simple_name)
+                if instance:
+                    state[instance] = value
+                elif simple_name:
+                    state[simple_name] = value
+        
         return state
 
     @staticmethod

@@ -47,8 +47,19 @@ async def poll_and_publish(
                 break
 
         if target is not None:
-            caps = device_transformer._extract_capabilities(target.get("capabilities", []))
-            state = device_transformer._extract_state(target.get("states", []), caps)
+            # Используем новый метод для извлечения capabilities и properties
+            caps_list, cap_state = DeviceTransformer._extract_capabilities(target.get("capabilities", []))
+            prop_list, prop_state = DeviceTransformer._extract_properties(target.get("properties", []))
+            
+            # Объединяем состояния
+            state = {**cap_state, **prop_state}
+            
+            # Также учитываем states если они есть
+            raw_states = target.get("states") or []
+            if raw_states:
+                old_state = DeviceTransformer._extract_state(raw_states, None)
+                state.update(old_state)
+            
             reported = {"external_id": external_id, "state": {}}
             if isinstance(state, dict) and "on" in state:
                 reported["state"]["on"] = state["on"]

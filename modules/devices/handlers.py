@@ -165,7 +165,10 @@ async def handle_external_state(runtime, data: dict) -> None:
         not all(k in old_state for k in ["desired", "reported", "pending"]):
         old_state = {"desired": {}, "reported": {}, "pending": False}
         device["state"] = old_state
-    
+
+    # Копия состояния до изменений — для события internal.device_state_updated
+    prev_state = copy.deepcopy(old_state)
+
     # ВАЖНО: Обновление из WebSocket - это реальное состояние устройства
     # Оно может прийти от нашей команды ИЛИ от стороннего приложения
     # В любом случае, это актуальное состояние устройства, поэтому:

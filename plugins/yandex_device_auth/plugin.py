@@ -61,6 +61,7 @@ class YandexDeviceAuthPlugin(BasePlugin):
                 state = "authorized"
                 message = "Аккаунт привязан."
                 actions = [
+                    {"type": "yandex.sync_devices", "label": "Синхронизировать устройства", "params": {}},
                     {"type": "yandex_device_auth.unlink", "label": "Отвязать", "params": {}},
                 ]
             elif has_pending:

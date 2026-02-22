@@ -1,6 +1,5 @@
 """
-Client Manager Plugin — интеграция client-manager-service как плагина.
+Папка client_manager отключена. Плагин загружается из plugins/client-manager-plugin/
+(см. plugin.json там). Этот пакет оставлен только для совместимости путей.
 """
-from .plugin import ClientManagerPlugin
-
-__all__ = ["ClientManagerPlugin"]
+__all__ = []
