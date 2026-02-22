@@ -7,6 +7,7 @@ from __future__ import annotations
 from typing import Any, Dict
 import asyncio
 
+from core.utils.operation import operation
 from .clients import YandexAPIClient
 from .transformers.device_transformer import DeviceTransformer
 from .oauth_provider import get_status as oauth_get_status, get_cookies as oauth_get_cookies
@@ -95,103 +96,104 @@ class CommandHandler:
         Args:
             data: данные команды
         """
-        await self._log(
-            "debug",
-            "yandex_smart_home: received internal.device_command_requested",
-            {"data": data},
-        )
-
-        external_id = data.get("external_id")
-        params = data.get("params", {}) or {}
-
-        # Попробовать разрешить external_id (переданный или по mapping)
-        internal_id = data.get("internal_id")
-        external_id = await self._resolve_external_id(internal_id, external_id)
-
-        if not external_id:
-            # Нечем управлять - сбрасываем pending
+        async with operation("yandex.send_device_command", self.plugin_name, self.runtime):
             await self._log(
-                "warning",
-                f"internal.device_command_requested missing external_id: {data}",
+                "debug",
+                "yandex_smart_home: received internal.device_command_requested",
+                {"data": data},
             )
-            # Сбрасываем pending при отсутствии external_id
-            await self._reset_pending_on_error(data.get("internal_id"), None, "Missing external_id")
-            return
 
-        # Авторизация: проверка OAuth и cookies в helper'e
-        oauth_authorized, session_cookies = await self._ensure_authorization()
+            external_id = data.get("external_id")
+            params = data.get("params", {}) or {}
 
-        if not oauth_authorized and not session_cookies:
+            # Попробовать разрешить external_id (переданный или по mapping)
+            internal_id = data.get("internal_id")
+            external_id = await self._resolve_external_id(internal_id, external_id)
+
+            if not external_id:
+                # Нечем управлять - сбрасываем pending
+                await self._log(
+                    "warning",
+                    f"internal.device_command_requested missing external_id: {data}",
+                )
+                # Сбрасываем pending при отсутствии external_id
+                await self._reset_pending_on_error(data.get("internal_id"), None, "Missing external_id")
+                return
+
+            # Авторизация: проверка OAuth и cookies в helper'e
+            oauth_authorized, session_cookies = await self._ensure_authorization()
+
+            if not oauth_authorized and not session_cookies:
+                await self._log(
+                    "warning",
+                    f"Yandex not authorized (no OAuth, no cookies), cannot send command for {external_id}",
+                )
+                await self._reset_pending_on_error(internal_id, external_id, "Yandex not authorized")
+                return
+
+            use_quasar = session_cookies and not oauth_authorized
+
+            # Конвертируем params в действия по Яндекс API
+            actions = DeviceTransformer.convert_params_to_actions(params)
+
             await self._log(
-                "warning",
-                f"Yandex not authorized (no OAuth, no cookies), cannot send command for {external_id}",
-            )
-            await self._reset_pending_on_error(internal_id, external_id, "Yandex not authorized")
-            return
-
-        use_quasar = session_cookies and not oauth_authorized
-
-        # Конвертируем params в действия по Яндекс API
-        actions = DeviceTransformer.convert_params_to_actions(params)
-
-        await self._log(
-            "info",
-            f"Sending command to Yandex device (quasar={use_quasar})",
-            {"device_id": external_id, "internal_id": internal_id, "params": params, "actions": actions},
-        )
-
-        try:
-            # Delegate send logic to commands.send.send_command
-            from .commands.send import send_command
-
-            await send_command(
-                self.runtime,
-                self.api_client,
-                self.runtime.service_registry,
-                self.plugin_name,
-                external_id,
-                actions,
-                use_quasar,
+                "info",
+                f"Sending command to Yandex device (quasar={use_quasar})",
+                {"device_id": external_id, "internal_id": internal_id, "params": params, "actions": actions},
             )
 
-            # After successful send: optimistic update + ws check + schedule poll
-            from .commands.flow import handle_post_send
+            try:
+                # Delegate send logic to commands.send.send_command
+                from .commands.send import send_command
 
-            await handle_post_send(
-                self.runtime,
-                self.tasks,
-                self.runtime.event_bus,
-                self.runtime.service_registry,
-                DeviceTransformer,
-                self.api_client,
-                self.plugin_name,
-                external_id,
-                data.get("internal_id"),
-                params,
-                self.quasar_ws,
-            )
+                await send_command(
+                    self.runtime,
+                    self.api_client,
+                    self.runtime.service_registry,
+                    self.plugin_name,
+                    external_id,
+                    actions,
+                    use_quasar,
+                )
 
-        except RuntimeError as e:
-            # Ошибка от API — сбрасываем pending и логируем ошибку
-            error_msg = str(e)
-            await self._log(
-                "error",
-                f"Yandex API error: {error_msg}",
-                {"device_id": external_id, "error": error_msg},
-            )
+                # After successful send: optimistic update + ws check + schedule poll
+                from .commands.flow import handle_post_send
 
-            # Сбрасываем pending при ошибке API
-            await self._reset_pending_on_error(data.get("internal_id"), external_id, f"API error: {error_msg}")
+                await handle_post_send(
+                    self.runtime,
+                    self.tasks,
+                    self.runtime.event_bus,
+                    self.runtime.service_registry,
+                    DeviceTransformer,
+                    self.api_client,
+                    self.plugin_name,
+                    external_id,
+                    data.get("internal_id"),
+                    params,
+                    self.quasar_ws,
+                )
 
-        except Exception as e:
-            # Прочие ошибки — сбрасываем pending
-            await self._log(
-                "error",
-                f"Error sending command to Yandex device {external_id}: {type(e).__name__}: {e}",
-            )
+            except RuntimeError as e:
+                # Ошибка от API — сбрасываем pending и логируем ошибку
+                error_msg = str(e)
+                await self._log(
+                    "error",
+                    f"Yandex API error: {error_msg}",
+                    {"device_id": external_id, "error": error_msg},
+                )
 
-            # Сбрасываем pending при прочих ошибках
-            await self._reset_pending_on_error(data.get("internal_id"), external_id, f"Error: {type(e).__name__}")
+                # Сбрасываем pending при ошибке API
+                await self._reset_pending_on_error(data.get("internal_id"), external_id, f"API error: {error_msg}")
+
+            except Exception as e:
+                # Прочие ошибки — сбрасываем pending
+                await self._log(
+                    "error",
+                    f"Error sending command to Yandex device {external_id}: {type(e).__name__}: {e}",
+                )
+
+                # Сбрасываем pending при прочих ошибках
+                await self._reset_pending_on_error(data.get("internal_id"), external_id, f"Error: {type(e).__name__}")
 
     async def _poll_and_publish(self, external_id: str, internal_id: str | None, params: Dict[str, Any]) -> None:
         # Delegate to commands.operations.poll_and_publish

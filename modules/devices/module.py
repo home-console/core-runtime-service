@@ -42,6 +42,7 @@ class DevicesModule(RuntimeModule):
             ("devices.auto_map_external", services.auto_map_external),
             ("devices.get_hung_pending", services.get_hung_pending_devices),
             ("devices.clear_pending", services.clear_pending_device),
+            ("devices.update_device_fields", services.update_device_fields),
         ]
 
         acl_meta = {
@@ -51,6 +52,8 @@ class DevicesModule(RuntimeModule):
             "devices.create": {"inject_owner_param": "owner_id"},
             # для set_state делаем preload устройства до выполнения (важно: write)
             "devices.set_state": {"resource": "device", "preload": "device_by_id"},
+            # для update_device_fields делаем preload (для ACL проверки)
+            "devices.update_device_fields": {"resource": "device", "preload": "device_by_id"},
             # инвентарь/маппинги — admin-only при наличии ctx
             "devices.list_external": {"admin_only": True},
             "devices.create_mapping": {"admin_only": True},

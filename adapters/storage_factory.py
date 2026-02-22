@@ -139,9 +139,12 @@ async def build_storage_stack(config: Config, state_engine: StateEngine) -> Stor
         secure_storage = SecureStorageWrapper(vault_adapter)
         await secure_storage.initialize()
 
+    # В dual mode vault идёт через SecureStorage, чтобы все записи обновляли root hash
+    # (иначе при старте проверка целостности падает: expected hash пустого vault, current — с данными)
+    vault_backend = secure_storage if secure_storage else vault_adapter
     manager = StorageManager(
         core_storage=core_adapter,
-        vault_storage=vault_adapter,
+        vault_storage=vault_backend,
         mode=config.storage_mode,
     )
     core_port = CoreStoragePort(core_adapter, state_engine)

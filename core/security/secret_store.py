@@ -222,7 +222,11 @@ class SecretStore:
                 plaintext = decrypt(nonce, ciphertext, tag, self._dek)
                 return plaintext
             except Exception as e:
-                raise ValueError(f"Decryption failed for secret '{key}': {e}")
+                err_msg = str(e).strip() or type(e).__name__
+                raise ValueError(
+                    f"Decryption failed for secret '{key}': {err_msg}. "
+                    "Typical cause: vault was recreated or passphrase changed (AGENT_SECRET_STORE_PASSPHRASE); re-add the credential secret."
+                ) from e
     
     async def delete(self, key: str) -> bool:
         """

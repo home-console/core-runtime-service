@@ -252,8 +252,27 @@ async def list_events(runtime: Any) -> List[Dict[str, Any]]:
     return result
 
 
+def _is_vault_namespace(ns: str) -> bool:
+    """Проверка, что namespace относится к vault (секреты). В production не раскрываем содержимое."""
+    vault_prefixes = ("secrets.store", "agent.private_keys", "agent.enrollment", "oauth.tokens", "ssh.credentials", "vault")
+    return any(ns == p or ns.startswith(p + ".") for p in vault_prefixes)
+
+
+def _is_debug() -> bool:
+    """True если включён debug: DEBUG=1/true или DEBUG_MODE=1/true в .env."""
+    import os
+    v = (os.getenv("DEBUG") or os.getenv("DEBUG_MODE") or "true").lower().strip()
+    return v in ("1", "true", "yes", "on")
+
+
 async def list_storage_namespaces(runtime: Any) -> List[Dict[str, Any]]:
-    """List all storage namespaces with key counts."""
+    """
+    List all storage namespaces with key counts.
+    В debug (DEBUG=1 или DEBUG_MODE=1): добавляет Security Store (secrets.store).
+    В production: содержимое vault-namespace не раскрывается (ручка «закрыта»).
+    """
+    debug_mode = _is_debug()
+
     namespaces = await runtime.storage.list_namespaces()
     result = []
     for ns in namespaces:
@@ -263,8 +282,135 @@ async def list_storage_namespaces(runtime: Any) -> List[Dict[str, Any]]:
             keys_count = len(keys)
         except Exception:
             pass
-        result.append({"namespace": ns, "keys_count": keys_count})
+        item = {"namespace": ns, "keys_count": keys_count}
+        # В production не отдаём содержимое vault — только метаданные
+        if not debug_mode and _is_vault_namespace(ns):
+            item["restricted"] = True
+        result.append(item)
+
+    # В дебаге (DEBUG=1 или DEBUG_MODE=1): всегда показывать Security Store (secrets.store)
+    has_secrets_item = any(item.get("namespace") == "secrets.store" for item in result)
+    if debug_mode:
+        store = getattr(runtime, "secret_store", None)
+        if store is not None:
+            try:
+                if getattr(store, "_initialized", False):
+                    keys_list = await store.list_secrets()
+                    entries = {}
+                    for key in keys_list:
+                        try:
+                            raw = await store.get(key)
+                            if raw is None:
+                                entries[key] = None
+                            else:
+                                try:
+                                    entries[key] = raw.decode("utf-8", errors="replace")
+                                except Exception:
+                                    entries[key] = f"[binary, {len(raw)} bytes]"
+                        except Exception as e:
+                            entries[key] = {"error": str(e)}
+                    if has_secrets_item:
+                        for item in result:
+                            if item.get("namespace") == "secrets.store":
+                                item["debug_decrypted"] = True
+                                item["entries"] = entries
+                                item["keys_count"] = len(keys_list)
+                                break
+                    else:
+                        result.append({
+                            "namespace": "secrets.store",
+                            "keys_count": len(keys_list),
+                            "debug_decrypted": True,
+                            "entries": entries,
+                        })
+                elif not has_secrets_item:
+                    result.append({
+                        "namespace": "secrets.store",
+                        "keys_count": 0,
+                        "debug_decrypted": False,
+                        "_hint": "SecretStore not initialized; click to try loading",
+                    })
+            except Exception:
+                if not has_secrets_item:
+                    result.append({
+                        "namespace": "secrets.store",
+                        "keys_count": None,
+                        "debug_decrypted": False,
+                        "_hint": "Security Store (debug only)",
+                    })
+        elif not has_secrets_item:
+            result.append({
+                "namespace": "secrets.store",
+                "keys_count": None,
+                "debug_decrypted": False,
+                "_hint": "Security Store (debug only); SecretStore not loaded",
+            })
+
     return result
+
+
+async def get_storage_namespace_contents(runtime: Any, namespace: str) -> Dict[str, Any]:
+    """
+    Получить все ключи и значения namespace (для inspector по клику на namespace).
+    В production для vault-namespace возвращаем restricted.
+    В debug (DEBUG=1 или DEBUG_MODE=1) для secrets.store используем SecretStore (расшифровка).
+    """
+    debug_mode = _is_debug()
+
+    if not namespace or not isinstance(namespace, str):
+        return {"namespace": namespace or "", "keys": [], "entries": {}, "error": "namespace required"}
+
+    # Vault в production — не раскрываем содержимое
+    if not debug_mode and _is_vault_namespace(namespace):
+        return {
+            "namespace": namespace,
+            "keys": [],
+            "entries": {},
+            "restricted": True,
+            "message": "Vault namespace content is not available in production.",
+        }
+
+    # secrets.store в debug — данные из SecretStore с расшифровкой
+    if namespace == "secrets.store" and debug_mode and getattr(runtime, "secret_store", None):
+        try:
+            store = runtime.secret_store
+            if getattr(store, "_initialized", False):
+                keys_list = await store.list_secrets()
+                entries = {}
+                for key in keys_list:
+                    try:
+                        raw = await store.get(key)
+                        if raw is None:
+                            entries[key] = None
+                        else:
+                            try:
+                                entries[key] = raw.decode("utf-8", errors="replace")
+                            except Exception:
+                                entries[key] = f"[binary, {len(raw)} bytes]"
+                    except Exception as e:
+                        entries[key] = {"error": str(e)}
+                return {
+                    "namespace": namespace,
+                    "keys": keys_list,
+                    "entries": entries,
+                    "debug_decrypted": True,
+                }
+        except Exception as e:
+            return {"namespace": namespace, "keys": [], "entries": {}, "error": str(e)}
+
+    # Обычный storage: list_keys + get по каждому ключу
+    try:
+        keys = await runtime.storage.list_keys(namespace)
+        entries = {}
+        for key in keys:
+            try:
+                val = await runtime.storage.get(namespace, key)
+                entries[key] = val
+            except Exception as e:
+                entries[key] = {"error": str(e)}
+        return {"namespace": namespace, "keys": keys, "entries": entries}
+    except Exception as e:
+        return {"namespace": namespace, "keys": [], "entries": {}, "error": str(e)}
 
 
 async def get_state(runtime: Any) -> Dict[str, Any]:

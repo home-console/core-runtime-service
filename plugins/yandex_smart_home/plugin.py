@@ -92,9 +92,23 @@ class YandexSmartHomeRealPlugin(BasePlugin):
         # Регистрируем сервис синхронизации устройств
         async def _sync_devices():
             """Синхронизировать устройства из реального API Яндекса."""
-            return await self.device_sync.sync_devices()
+            return await self._sync_devices_internal()
 
         await self.runtime.service_registry.register_with_acl("yandex.sync_devices", _sync_devices, admin_only=True)
+        
+        # Perform initial sync on load
+        try:
+            await self._sync_devices_internal()
+        except Exception as e:
+            try:
+                await self.runtime.service_registry.call(
+                    "logger.log",
+                    level="warning",
+                    message=f"Initial device sync failed: {e}",
+                    plugin=self.metadata.name,
+                )
+            except Exception:
+                pass
 
         # Регистрируем сервис проверки онлайн статуса
         async def _check_devices_online():
@@ -108,6 +122,11 @@ class YandexSmartHomeRealPlugin(BasePlugin):
             return self.quasar_ws.subscribe(device_id, callback)
 
         await self.runtime.service_registry.register_with_acl("yandex.subscribe_device_updates", _subscribe_device_updates, admin_only=True)
+
+        # Start background periodic reconciliation task
+        sync_task = asyncio.create_task(self._periodic_sync_loop())
+        self._tasks.add(sync_task)
+        sync_task.add_done_callback(lambda t, tasks=self._tasks: tasks.discard(t))
 
     async def on_start(self) -> None:
         """Запуск: регистрируем операции, логируем и подписываемся на события."""
@@ -152,43 +171,16 @@ class YandexSmartHomeRealPlugin(BasePlugin):
                 )
                 # Включаем реальный API после успешного device auth (нужно для sync_devices)
                 await self.runtime.storage.set("yandex", "use_real_api", {"enabled": True})
-                # Синхронизация устройств: подтянуть список из API и опубликовать external.device_discovered
+                
+                # Синхронизация устройств и автомаппинг
                 try:
-                    await self.runtime.service_registry.call("yandex.sync_devices")
+                    result = await self._sync_devices_internal()
                     await self.runtime.service_registry.call(
                         "logger.log",
                         level="info",
-                        message="Devices synced after device auth",
+                        message=f"Device auth linked: synced {result.get('synced', 0)} devices, mapped {result.get('mapped', 0)}",
                         plugin=self.metadata.name,
                     )
-                    # Маппинг: создать внутренние устройства (devices + devices_mappings), чтобы они появились в БД и в UI
-                    try:
-                        from core.system_context import create_system_context
-                        from core.auth_contextvars import set_current_auth_context, get_current_auth_context
-                        ctx = create_system_context(self.metadata.name, "devices.auto_map_external")
-                        prev = get_current_auth_context()
-                        set_current_auth_context(ctx)
-                        try:
-                            map_result = await self.runtime.service_registry.call(
-                                "devices.auto_map_external",
-                                provider="yandex",
-                            )
-                            if isinstance(map_result, dict) and map_result.get("created", 0) > 0:
-                                await self.runtime.service_registry.call(
-                                    "logger.log",
-                                    level="info",
-                                    message=f"Auto-mapped {map_result.get('created')} devices to internal list",
-                                    plugin=self.metadata.name,
-                                )
-                        finally:
-                            set_current_auth_context(prev)
-                    except Exception as map_err:
-                        await self.runtime.service_registry.call(
-                            "logger.log",
-                            level="warning",
-                            message=f"Auto-map after sync failed: {map_err}",
-                            plugin=self.metadata.name,
-                        )
                 except Exception as sync_err:
                     await self.runtime.service_registry.call(
                         "logger.log",
@@ -326,6 +318,90 @@ class YandexSmartHomeRealPlugin(BasePlugin):
             await self.quasar_ws.stop()
         except Exception:
             pass
+
+    async def _sync_devices_internal(self) -> dict:
+        """Internal method: sync devices and auto-map external to internal without ACL context."""
+        result = {
+            "synced": 0,
+            "mapped": 0,
+        }
+        
+        try:
+            # Step 1: Sync devices from API
+            devices = await self.device_sync.sync_devices()
+            result["synced"] = len(devices) if devices else 0
+            
+            # Step 2: Auto-map external devices to internal
+            try:
+                from core.system_context import create_system_context
+                from core.auth_contextvars import set_current_auth_context, get_current_auth_context
+                
+                ctx = create_system_context(self.metadata.name, "devices.auto_map_external")
+                prev = get_current_auth_context()
+                set_current_auth_context(ctx)
+                try:
+                    map_result = await self.runtime.service_registry.call(
+                        "devices.auto_map_external",
+                        provider="yandex",
+                    )
+                    if isinstance(map_result, dict):
+                        result["mapped"] = map_result.get("created", 0)
+                finally:
+                    set_current_auth_context(prev)
+            except Exception as map_err:
+                # Log mapping error but don't fail entire sync
+                try:
+                    await self.runtime.service_registry.call(
+                        "logger.log",
+                        level="warning",
+                        message=f"Device auto-mapping failed: {map_err}",
+                        plugin=self.metadata.name,
+                    )
+                except Exception:
+                    pass
+            
+            return result
+        except Exception as e:
+            # Log sync error but don't re-raise
+            try:
+                await self.runtime.service_registry.call(
+                    "logger.log",
+                    level="error",
+                    message=f"Device sync failed: {e}",
+                    plugin=self.metadata.name,
+                )
+            except Exception:
+                pass
+            return result
+    
+    async def _periodic_sync_loop(self) -> None:
+        """Background task: periodically reconcile devices every 300 seconds."""
+        while True:
+            try:
+                await asyncio.sleep(300)
+                # Safety reconciliation: sync devices every 5 minutes
+                try:
+                    await self._sync_devices_internal()
+                except Exception as e:
+                    # Log reconciliation error but don't crash the loop
+                    try:
+                        await self.runtime.service_registry.call(
+                            "logger.log",
+                            level="warning",
+                            message=f"Periodic reconciliation failed: {e}",
+                            plugin=self.metadata.name,
+                        )
+                    except Exception:
+                        pass
+            except asyncio.CancelledError:
+                # Task was cancelled by plugin unload
+                break
+            except Exception:
+                # Unexpected error - sleep and retry
+                try:
+                    await asyncio.sleep(10)
+                except asyncio.CancelledError:
+                    break
 
     async def _is_real_api_enabled(self) -> bool:
         """Проверка feature-флага использования реального API."""

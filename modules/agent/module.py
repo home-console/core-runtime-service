@@ -54,22 +54,28 @@ class AgentControlPlaneModule(RuntimeModule):
                 "Agent module requires SecretStore from core.security; "
                 "ensure core.security.secret_store is available (e.g. cryptography package)."
             )
-        # Get or create SecretStore
-        # For now, we use a simple in-memory or file-based secret store
-        # In production, this would be initialized with a secure passphrase
-        # REFACTORING: Используем context.storage, но для SecretStore нужен _adapter
-        storage = self.context.storage if hasattr(self, "context") and self.context else self.runtime.storage
-        secret_store = SecretStore(storage._adapter)
-        
-        # Initialize SecretStore with a passphrase
-        # In production, this should come from environment or secure input
-        passphrase = os.getenv("AGENT_SECRET_STORE_PASSPHRASE", "default-dev-passphrase")
-        try:
-            await secret_store.initialize(passphrase)
-        except RuntimeError:
-            # Already initialized, which is fine
-            pass
-        
+        # Use SecretStore from runtime if already set (main/bootstrap), otherwise create
+        secret_store = getattr(self.runtime, "secret_store", None)
+        if secret_store is None:
+            from core.security.secret_store_adapter import SecretStoreStorageAdapter
+            # В dual mode обязательно vault через SecureStorage (get_vault), иначе root hash не обновляется
+            manager = getattr(self.runtime, "storage_manager", None)
+            if manager is not None and getattr(manager, "is_dual_mode", False):
+                backend = manager.get_vault()
+            else:
+                storage = self.context.storage if hasattr(self, "context") and self.context else self.runtime.storage
+                backend = getattr(getattr(storage, "_storage", storage), "_adapter", None)
+            if backend is None:
+                raise RuntimeError("Agent module: cannot get storage backend for SecretStore")
+            wrapper = SecretStoreStorageAdapter(backend)
+            secret_store = SecretStore(wrapper)
+            passphrase = os.getenv("AGENT_SECRET_STORE_PASSPHRASE", "default-dev-passphrase")
+            try:
+                await secret_store.initialize(passphrase)
+            except RuntimeError:
+                await secret_store.open_with_passphrase(passphrase)
+            self.runtime.secret_store = secret_store
+
         # Initialize mTLS Certificate Authority
         # Check if CA certificate already exists in storage
         ca_exists = await secret_store.exists("agent:ca:private_key")
@@ -95,7 +101,8 @@ class AgentControlPlaneModule(RuntimeModule):
         # Initialize AgentRegistry
         agent_registry = AgentRegistry()
         
-        # Store in CoreRuntime
+        # Store in CoreRuntime (secret_store — для credentials и inspector в debug)
+        self.runtime.secret_store = secret_store
         self.runtime.agent_manager = agent_manager
         self.runtime.agent_registry = agent_registry
         self.runtime.mtls_ca = mtls_ca

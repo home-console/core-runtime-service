@@ -305,6 +305,43 @@ async def auto_map_external(runtime, provider: Optional[str] = None) -> Dict[str
             
             # Сохраняем обновленное устройство
             await runtime.storage.set("devices", internal_id, device)
+            
+            # Синхронизируем initial state и capabilities из external device
+            external_state = payload.get("state", {})
+            external_capabilities = payload.get("capabilities", [])
+            
+            if isinstance(external_state, dict) and external_state:
+                # Подготавливаем state структуру
+                device_state = device.get("state", {})
+                if not isinstance(device_state, dict):
+                    device_state = {}
+                
+                # Убеждаемся что есть все ключи
+                if "desired" not in device_state:
+                    device_state["desired"] = {}
+                if "reported" not in device_state:
+                    device_state["reported"] = {}
+                if "pending" not in device_state:
+                    device_state["pending"] = False
+                
+                # Обновляем desired и reported на external state
+                device_state["desired"].update(external_state)
+                device_state["reported"].update(external_state)
+                device_state["pending"] = False
+                
+                # Вызываем update_device_fields через service_registry
+                try:
+                    await runtime.service_registry.call(
+                        "devices.update_device_fields",
+                        internal_id,
+                        {
+                            "state": device_state,
+                            "capabilities": external_capabilities if isinstance(external_capabilities, list) else []
+                        }
+                    )
+                except Exception:
+                    # Ошибку логируем но продолжаем - устройство всё равно создано
+                    pass
 
         try:
             dev = await runtime.storage.get("devices", internal_id)
@@ -316,6 +353,43 @@ async def auto_map_external(runtime, provider: Optional[str] = None) -> Dict[str
 
         # Сохраняем dict согласно контракту Storage API
         await runtime.storage.set("devices_mappings", ext_id, {"internal_id": internal_id})
+        
+        # Проверяем есть ли pending state (пришло через WebSocket ДО создания маппинга)
+        try:
+            pending_state = await runtime.storage.get("devices_external_pending_state", ext_id)
+            if pending_state and isinstance(pending_state, dict):
+                # Применяем pending state обновления
+                device_state = device.get("state", {})
+                if not isinstance(device_state, dict):
+                    device_state = {}
+                
+                # Обновляем desired и reported
+                if "desired" not in device_state:
+                    device_state["desired"] = {}
+                if "reported" not in device_state:
+                    device_state["reported"] = {}
+                
+                device_state["desired"].update(pending_state)
+                device_state["reported"].update(pending_state)
+                device_state["pending"] = False
+                
+                # Применяем через update_device_fields
+                await runtime.service_registry.call(
+                    "devices.update_device_fields",
+                    internal_id,
+                    {"state": device_state}
+                )
+                
+                # Удаляем pending запись
+                try:
+                    await runtime.storage.delete("devices_external_pending_state", ext_id)
+                except Exception:
+                    pass
+        except Exception:
+            # Ошибку при обработке pending state игнорируем
+            # устройство уже создано и будет обновлено через WebSocket позже
+            pass
+        
         created += 1
 
     return {"ok": True, "created": created, "skipped": skipped, "errors": errors}
@@ -355,3 +429,94 @@ async def clear_pending_device(runtime, device_id: str) -> Dict[str, Any]:
     from .pending_cleaner import clear_pending_manually
     
     return await clear_pending_manually(runtime, device_id)
+
+
+async def update_device_fields(runtime, device_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Update specific fields of a device (online, pending, last_seen, etc).
+    
+    Used by plugins to update device state without full object replacement.
+    
+    Args:
+        runtime: CoreRuntime instance
+        device_id: Device ID
+        updates: Dict with fields to update
+    
+    Returns:
+        Updated device
+    """
+    device = await runtime.storage.get("devices", device_id)
+    if device is None:
+        raise ValueError(f"device {device_id} not found")
+    
+    # DEBUG 3: Capture old state for diff
+    import copy
+    import time as time_module
+    
+    old_device = copy.deepcopy(device)
+    old_state = old_device.get("state", {})
+    old_online = old_device.get("online")
+    
+    device.update(updates)
+    await runtime.storage.set("devices", device_id, device)
+    
+    # DEBUG 3B: Log write diff
+    try:
+        new_state = device.get("state", {})
+        new_online = device.get("online")
+        
+        # Compute state diff
+        state_diff = {}
+        if isinstance(old_state, dict) and isinstance(new_state, dict):
+            for key in set(list(old_state.keys()) + list(new_state.keys())):
+                old_val = old_state.get(key)
+                new_val = new_state.get(key)
+                if old_val != new_val:
+                    state_diff[key] = {"old": old_val, "new": new_val}
+        
+        if state_diff or old_online != new_online:
+            await runtime.service_registry.call(
+                "logger.log",
+                level="debug",
+                message=f"[DEVICE_WRITE] Fields updated",
+                context={
+                    "device_id": device_id,
+                    "state_changes": len(state_diff),
+                    "online_changed": old_online != new_online,
+                    "new_online": new_online,
+                    "state_diff_keys": list(state_diff.keys()),
+                },
+            )
+        
+        # Save full diff to debug namespace
+        await runtime.storage.set(
+            "yandex_debug_device_writes",
+            f"{device_id}_{int(time_module.time() * 1000)}",
+            {
+                "timestamp": time_module.time(),
+                "device_id": device_id,
+                "old_state": old_state,
+                "new_state": new_state,
+                "state_diff": state_diff,
+                "old_online": old_online,
+                "new_online": new_online,
+            },
+        )
+    except Exception:
+        pass
+    
+    # DEBUG: log final state after save
+    try:
+        await runtime.service_registry.call(
+            "logger.log",
+            level="debug",
+            message=f"[update_device_fields] Device state updated and saved",
+            context={
+                "device_id": device_id,
+                "final_state": device.get("state"),
+            },
+        )
+    except Exception:
+        pass
+    
+    return device

@@ -127,6 +127,12 @@ class StateEngine:
         async with self._lock:
             return list(self._state.keys())
 
+    async def list_keys(self) -> list[str]:
+        """
+        Список всех ключей (алиас для keys(), для совместимости с Inspector API).
+        """
+        return await self.keys()
+
     async def clear(self) -> None:
         """Очистить всё состояние."""
         async with self._lock:

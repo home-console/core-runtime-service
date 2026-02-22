@@ -42,17 +42,58 @@ async def handle_external_state(runtime, data: dict) -> None:
 
     mapping = await runtime.storage.get("devices_mappings", external_id)
 
+    # DEBUG 4: Trace mapping and state flow
+    trace_timestamp = time.time()
+    
     if not mapping or not isinstance(mapping, dict):
+        # Сохраняем pending state на случай если mapping будет создан позже
+        # (например, WebSocket обновление пришло ДО auto_map_external)
         try:
+            await runtime.storage.set("devices_external_pending_state", external_id, reported_state)
             await runtime.service_registry.call(
                 "logger.log",
                 level="debug",
-                message=f"handle_external_state: no mapping found for external_id={external_id}",
+                message=f"[STATE_FLOW] Mapping NOT found, storing pending state",
                 plugin="devices_module",
+                context={
+                    "external_id": external_id,
+                    "incoming_state": reported_state,
+                }
             )
+            
+            # Save trace
+            try:
+                await runtime.storage.set(
+                    "yandex_debug_state_flow",
+                    f"{external_id}_{int(trace_timestamp * 1000)}_pending",
+                    {
+                        "timestamp": trace_timestamp,
+                        "external_id": external_id,
+                        "status": "pending_no_mapping",
+                        "incoming_state": reported_state,
+                    },
+                )
+            except Exception:
+                pass
         except Exception:
             pass
         return
+
+    # DEBUG 4B: Mapping found
+    try:
+        await runtime.service_registry.call(
+            "logger.log",
+            level="debug",
+            message=f"[STATE_FLOW] Mapping FOUND, applying state",
+            plugin="devices_module",
+            context={
+                "external_id": external_id,
+                "internal_id": mapping.get("internal_id"),
+                "incoming_state": reported_state,
+            }
+        )
+    except Exception:
+        pass
 
     internal_id = mapping.get("internal_id")
     if not internal_id:
@@ -89,37 +130,41 @@ async def handle_external_state(runtime, data: dict) -> None:
     device["updated_at"] = now
     
     # Определяем онлайн статус на основе last_seen (функция уже импортирована в начале файла)
+    old_online = device.get("online")
     device["online"] = _is_device_online(device.get("last_seen"))
+    new_online = device.get("online")
 
     old_state = device.get("state", {})
 
     if not isinstance(old_state, dict) or \
         not all(k in old_state for k in ["desired", "reported", "pending"]):
-            await runtime.service_registry.call(
-                "logger.log",
-                level="warning",
-                message=f"Invalid device state format: {internal_id}",
-                plugin="devices_module",
-                context={"state": old_state}
-            )
-            return
+        old_state = {"desired": {}, "reported": {}, "pending": False}
+        device["state"] = old_state
 
-    if not isinstance(old_state["desired"], dict) or \
-       not isinstance(old_state["reported"], dict) or \
-       not isinstance(old_state["pending"], bool):
-            await runtime.service_registry.call(
-                "logger.log",
-                level="warning",
-                message=f"Device state fields have wrong types: {internal_id}",
-                plugin="devices_module",
-            )
-            return
+    # DEBUG 4C: Save full state flow
+    try:
+        await runtime.storage.set(
+            "yandex_debug_state_flow",
+            f"{internal_id}_{int(trace_timestamp * 1000)}_apply",
+            {
+                "timestamp": trace_timestamp,
+                "external_id": external_id,
+                "internal_id": internal_id,
+                "status": "applying",
+                "incoming_state": reported_state,
+                "old_reported": old_state.get("reported", {}),
+                "old_online": old_online,
+                "new_online": new_online,
+                "online_changed": old_online != new_online,
+            },
+        )
+    except Exception:
+        pass
 
-    prev_state = copy.deepcopy(old_state)
-
-    # Обновляем reported если есть данные
-    if isinstance(reported_state, dict) and reported_state:
-        old_state["reported"].update(reported_state)
+    if not isinstance(old_state, dict) or \
+        not all(k in old_state for k in ["desired", "reported", "pending"]):
+        old_state = {"desired": {}, "reported": {}, "pending": False}
+        device["state"] = old_state
     
     # ВАЖНО: Обновление из WebSocket - это реальное состояние устройства
     # Оно может прийти от нашей команды ИЛИ от стороннего приложения

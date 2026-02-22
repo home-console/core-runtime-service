@@ -187,7 +187,15 @@ class DeviceStatusChecker:
                 device["online"] = _is_device_online(device["last_seen"]) if is_online else False
                 device["updated_at"] = now
 
-                await self.runtime.storage.set("devices", device_id, device)
+                await self.runtime.service_registry.call(
+                    "devices.update_device_fields",
+                    device_id,
+                    {
+                        "last_seen": device["last_seen"],
+                        "online": device["online"],
+                        "updated_at": device["updated_at"]
+                    }
+                )
 
                 if is_online:
                     online_count += 1

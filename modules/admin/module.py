@@ -23,6 +23,14 @@ from .container_orchestrator import ContainerOrchestrator
 
 logger = logging.getLogger(__name__)
 
+from .credentials_handlers import (
+    admin_credentials_list,
+    admin_credentials_create,
+    admin_credentials_get,
+    admin_credentials_get_secret,
+    admin_credentials_update,
+    admin_credentials_delete,
+)
 from .introspection import (
     get_runtime_info,
     list_plugins,
@@ -30,6 +38,7 @@ from .introspection import (
     list_http_endpoints,
     list_events,
     list_storage_namespaces,
+    get_storage_namespace_contents,
     get_state,
     list_state_keys,
     get_state_value,
@@ -132,6 +141,49 @@ class AdminModule(RuntimeModule):
             path="/admin/v1/inspector/state/{key}",
             service="admin.v1.state.get",
             description="Inspector: get state value by key"
+        ))
+        self.context.http.register(HttpEndpoint(
+            method="GET",
+            path="/admin/v1/inspector/storage/{namespace}",
+            service="admin.v1.storage.get",
+            description="Inspector: get storage namespace contents (keys + values)"
+        ))
+        # Credentials (SSH hosts, etc.) — admin API
+        self.context.http.register(HttpEndpoint(
+            method="GET",
+            path="/admin/v1/credentials",
+            service="admin.v1.credentials.list",
+            description="Admin: list credentials"
+        ))
+        self.context.http.register(HttpEndpoint(
+            method="POST",
+            path="/admin/v1/credentials",
+            service="admin.v1.credentials.create",
+            description="Admin: create credential"
+        ))
+        self.context.http.register(HttpEndpoint(
+            method="GET",
+            path="/admin/v1/credentials/{credential_id}",
+            service="admin.v1.credentials.get",
+            description="Admin: get credential by id"
+        ))
+        self.context.http.register(HttpEndpoint(
+            method="GET",
+            path="/admin/v1/credentials/{credential_id}/secret",
+            service="admin.v1.credentials.get_secret",
+            description="Admin: get credential secret (for export)"
+        ))
+        self.context.http.register(HttpEndpoint(
+            method="PUT",
+            path="/admin/v1/credentials/{credential_id}",
+            service="admin.v1.credentials.update",
+            description="Admin: update credential"
+        ))
+        self.context.http.register(HttpEndpoint(
+            method="DELETE",
+            path="/admin/v1/credentials/{credential_id}",
+            service="admin.v1.credentials.delete",
+            description="Admin: delete credential"
         ))
         self.context.http.register(HttpEndpoint(
             method="GET",
@@ -258,6 +310,49 @@ class AdminModule(RuntimeModule):
 
             return handler
 
+        def wrap_storage_namespace_get():
+            async def handler(namespace=None, **kw):
+                ns = namespace if namespace is not None else kw.get("namespace")
+                return await get_storage_namespace_contents(self.runtime, ns)
+
+            return handler
+
+        def wrap_credentials_list():
+            async def handler(**kw):
+                return await admin_credentials_list(self.runtime)
+            return handler
+
+        def wrap_credentials_create():
+            async def handler(body=None, **kw):
+                b = body if body is not None else kw.get("body")
+                return await admin_credentials_create(self.runtime, b)
+            return handler
+
+        def wrap_credentials_get():
+            async def handler(credential_id=None, **kw):
+                cid = credential_id or kw.get("credential_id")
+                return await admin_credentials_get(self.runtime, credential_id=cid)
+            return handler
+
+        def wrap_credentials_get_secret():
+            async def handler(credential_id=None, **kw):
+                cid = credential_id or kw.get("credential_id")
+                return await admin_credentials_get_secret(self.runtime, credential_id=cid)
+            return handler
+
+        def wrap_credentials_delete():
+            async def handler(credential_id=None, **kw):
+                cid = credential_id or kw.get("credential_id")
+                return await admin_credentials_delete(self.runtime, credential_id=cid)
+            return handler
+
+        def wrap_credentials_update():
+            async def handler(credential_id=None, body=None, **kw):
+                cid = credential_id or kw.get("credential_id")
+                b = body if body is not None else kw.get("body")
+                return await admin_credentials_update(self.runtime, credential_id=cid, body=b)
+            return handler
+
         async def _marketplace_catalog(*args, **kw):
             """Список плагинов для маркетплейса: один захардкоженный файл catalog.json (ссылки на репо)."""
             catalog_path = Path(__file__).resolve().parent.parent / "marketplace" / "catalog.json"
@@ -278,6 +373,13 @@ class AdminModule(RuntimeModule):
             ("admin.v1.http", wrap_introspection(list_http_endpoints)),
             ("admin.v1.events", wrap_introspection(list_events)),
             ("admin.v1.storage", wrap_introspection(list_storage_namespaces)),
+            ("admin.v1.storage.get", wrap_storage_namespace_get()),
+            ("admin.v1.credentials.list", wrap_credentials_list()),
+            ("admin.v1.credentials.create", wrap_credentials_create()),
+            ("admin.v1.credentials.get", wrap_credentials_get()),
+            ("admin.v1.credentials.get_secret", wrap_credentials_get_secret()),
+            ("admin.v1.credentials.update", wrap_credentials_update()),
+            ("admin.v1.credentials.delete", wrap_credentials_delete()),
             ("admin.v1.state", wrap_introspection(get_state)),
             ("admin.v1.state.keys", wrap_introspection(list_state_keys)),
             ("admin.v1.state.get", wrap_state_get()),

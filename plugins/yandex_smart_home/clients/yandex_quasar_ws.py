@@ -11,6 +11,7 @@ import contextlib
 import inspect
 import json
 import random
+import time
 from urllib.parse import urlparse
 
 import aiohttp
@@ -118,16 +119,22 @@ class YandexQuasarWS:
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                if isinstance(e, ServerTimeoutError) or e.__class__.__name__ == "ServerTimeoutError" or "No PONG received" in str(e):
-                    await self._log(
-                        "debug",
-                        f"Quasar WS heartbeat timeout (server may not respond to PING, reconnecting): {e}",
-                        error_type=type(e).__name__,
-                        error_msg=str(e),
-                    )
-                    await asyncio.sleep(2 + random.random())
-                    backoff = 1.0
-                    continue
+                await self._log(
+                    "warning",
+                    f"[quasar_ws] Connection failed, reconnecting in {backoff}s: {type(e).__name__}: {e}",
+                    error_type=type(e).__name__,
+                    error_msg=str(e),
+                )
+                if self._stop_event.is_set():
+                    break
+
+                # Exponential backoff
+                try:
+                    await asyncio.sleep(backoff)
+                except asyncio.CancelledError:
+                    break
+
+                backoff = min(backoff * 2, 60)
 
                 consecutive_errors += 1
                 await self._log(
@@ -196,56 +203,145 @@ class YandexQuasarWS:
     async def _consume_ws(self, updates_url: str, cookies: Dict[str, str]) -> None:
         if not updates_url or not isinstance(updates_url, str):
             raise ValueError(f"Invalid updates_url: {updates_url}")
-        if self._current_cookies != cookies:
-            if self._session and not self._session.closed:
-                await self._session.close()
-            self._cookie_jar = self._cookie_jar_from(cookies)
-            self._session = aiohttp.ClientSession(cookie_jar=self._cookie_jar)
-            self._current_cookies = cookies.copy()
-        elif not self._session or self._session.closed:
-            self._cookie_jar = self._cookie_jar_from(cookies)
-            self._session = aiohttp.ClientSession(cookie_jar=self._cookie_jar)
-            self._current_cookies = cookies.copy()
-        headers = {
-            "Origin": "https://iot.quasar.yandex.ru",
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-        }
-        assert "Authorization" not in headers, "NEVER use OAuth with Quasar WebSocket!"
-        try:
-            async with self._session.ws_connect(updates_url, headers=headers, heartbeat=60) as ws:
-                self._ws = ws
-                await self._log("info", "Quasar WS connected", url=updates_url[:80])
-                async for msg in ws:
-                    if self._stop_event.is_set():
+        
+        backoff_seconds = 1
+        max_backoff = 60
+        
+        while not self._stop_event.is_set():
+            try:
+                if self._current_cookies != cookies:
+                    if self._session and not self._session.closed:
+                        await self._session.close()
+                    self._cookie_jar = self._cookie_jar_from(cookies)
+                    self._session = aiohttp.ClientSession(cookie_jar=self._cookie_jar)
+                    self._current_cookies = cookies.copy()
+                elif not self._session or self._session.closed:
+                    self._cookie_jar = self._cookie_jar_from(cookies)
+                    self._session = aiohttp.ClientSession(cookie_jar=self._cookie_jar)
+                    self._current_cookies = cookies.copy()
+                
+                headers = {
+                    "Origin": "https://iot.quasar.yandex.ru",
+                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+                }
+                assert "Authorization" not in headers, "NEVER use OAuth with Quasar WebSocket!"
+                
+                try:
+                    async with self._session.ws_connect(updates_url, headers=headers) as ws:
+                        self._ws = ws
+                        await self._log("info", "Quasar WS connected", url=updates_url[:80])
+                        backoff_seconds = 1  # Reset backoff on successful connection
+                        
+                        async for msg in ws:
+                            if self._stop_event.is_set():
+                                break
+                            
+                            # Log message type
+                            await self._log(
+                                "debug",
+                                f"[quasar_ws] Received WS message",
+                                msg_type=str(msg.type),
+                            )
+                            
+                            if msg.type == aiohttp.WSMsgType.TEXT:
+                                await self._handle_message(msg.data)
+                            elif msg.type == aiohttp.WSMsgType.CLOSED:
+                                await self._log(
+                                    "warning",
+                                    f"[quasar_ws] WebSocket closed",
+                                    code=ws.close_code,
+                                    reason=ws.close_reason,
+                                )
+                                raise RuntimeError(f"WebSocket closed: {ws.close_reason}")
+                            elif msg.type == aiohttp.WSMsgType.ERROR:
+                                exc = ws.exception()
+                                await self._log(
+                                    "error",
+                                    f"[quasar_ws] WebSocket error: {exc}",
+                                )
+                                raise exc or RuntimeError("WebSocket error")
+                        
+                        # Normal exit (stop_event set)
+                        await self._log("info", "Quasar WS closed (stop requested)")
                         break
-                    if msg.type == aiohttp.WSMsgType.TEXT:
-                        await self._handle_message(msg.data)
-                    elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
-                        exc = ws.exception()
-                        raise exc or RuntimeError("WebSocket closed")
-                await self._log("warning", "Quasar WS finished (loop exit)")
-        except (TypeError, AttributeError) as e:
-            if "raw_host" in str(e) or "str" in str(e):
-                await self._log("debug", f"Retrying WS connect with URL object: {e}")
-                ws_url = URL(updates_url)
-                async with self._session.ws_connect(ws_url, headers=headers, heartbeat=60) as ws:
-                    self._ws = ws
-                    await self._log("info", "Quasar WS connected (via URL object)", url=updates_url[:80])
-                    async for msg in ws:
-                        if self._stop_event.is_set():
+                        
+                except (TypeError, AttributeError) as e:
+                    if "raw_host" in str(e) or "str" in str(e):
+                        await self._log("debug", f"Retrying WS connect with URL object: {e}")
+                        ws_url = URL(updates_url)
+                        async with self._session.ws_connect(ws_url, headers=headers) as ws:
+                            self._ws = ws
+                            await self._log("info", "Quasar WS connected (via URL object)", url=updates_url[:80])
+                            backoff_seconds = 1
+                            
+                            async for msg in ws:
+                                if self._stop_event.is_set():
+                                    break
+                                
+                                await self._log(
+                                    "debug",
+                                    f"[quasar_ws] Received WS message",
+                                    msg_type=str(msg.type),
+                                )
+                                
+                                if msg.type == aiohttp.WSMsgType.TEXT:
+                                    await self._handle_message(msg.data)
+                                elif msg.type == aiohttp.WSMsgType.CLOSED:
+                                    await self._log(
+                                        "warning",
+                                        f"[quasar_ws] WebSocket closed",
+                                        code=ws.close_code,
+                                        reason=ws.close_reason,
+                                    )
+                                    raise RuntimeError(f"WebSocket closed: {ws.close_reason}")
+                                elif msg.type == aiohttp.WSMsgType.ERROR:
+                                    exc = ws.exception()
+                                    await self._log(
+                                        "error",
+                                        f"[quasar_ws] WebSocket error: {exc}",
+                                    )
+                                    raise exc or RuntimeError("WebSocket error")
+                            
+                            await self._log("info", "Quasar WS closed (stop requested)")
                             break
-                        if msg.type == aiohttp.WSMsgType.TEXT:
-                            await self._handle_message(msg.data)
-                        elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
-                            exc = ws.exception()
-                            raise exc or RuntimeError("WebSocket closed")
-                    await self._log("warning", "Quasar WS finished (loop exit)")
-            else:
-                raise
+                    else:
+                        raise
+                        
+            except Exception as e:
+                await self._log(
+                    "warning",
+                    f"[quasar_ws] Connection failed, reconnecting in {backoff_seconds}s: {type(e).__name__}: {e}",
+                )
+                
+                if self._stop_event.is_set():
+                    break
+                
+                # Exponential backoff
+                try:
+                    await asyncio.sleep(backoff_seconds)
+                except asyncio.CancelledError:
+                    break
+                
+                backoff_seconds = min(backoff_seconds * 2, max_backoff)
 
     async def _handle_message(self, raw: str) -> None:
         try:
             envelope = json.loads(raw)
+            
+            # DEBUG 2: Log raw envelope
+            try:
+                op = envelope.get("operation", "unknown")
+                msg_id = envelope.get("message_id", "N/A")
+                await self._log(
+                    "debug",
+                    f"[WS_RAW_ENVELOPE] Message received",
+                    operation=op,
+                    message_id=msg_id,
+                    has_payload=bool(envelope.get("message")),
+                )
+            except Exception:
+                pass
+            
             if envelope.get("operation") != "update_states":
                 return
             payload_raw = envelope.get("message")
@@ -261,6 +357,21 @@ class YandexQuasarWS:
         if not device_id:
             return
 
+        # DEBUG 2B: Log raw device payload
+        try:
+            ws_timestamp = time.time()
+            await self.runtime.storage.set(
+                "yandex_debug_ws_raw",
+                f"{device_id}_{int(ws_timestamp * 1000)}",
+                {
+                    "timestamp": ws_timestamp,
+                    "external_id": device_id,
+                    "raw_device": device,
+                },
+            )
+        except Exception:
+            pass
+
         caps = DeviceTransformer._extract_capabilities(device.get("capabilities", []))
         states_list: List[Dict[str, Any]] = []
         if isinstance(device.get("states"), list):
@@ -271,6 +382,28 @@ class YandexQuasarWS:
             if isinstance(cap, dict) and cap.get("state") is not None:
                 states_list.append({"type": cap.get("type"), "state": cap.get("state")})
         state = DeviceTransformer._extract_state(states_list, caps)
+        
+        # DEBUG 2C: Log extracted state
+        try:
+            await self.runtime.storage.set(
+                "yandex_debug_ws_parsed",
+                f"{device_id}_{int(ws_timestamp * 1000)}",
+                {
+                    "timestamp": ws_timestamp,
+                    "external_id": device_id,
+                    "extracted_state": state,
+                    "raw_capabilities": device.get("capabilities", []),
+                    "raw_states": states_list,
+                },
+            )
+            await self._log(
+                "debug",
+                f"[WS_PARSED] Extracted state",
+                external_id=device_id,
+                state_keys=list((state or {}).keys()),
+            )
+        except Exception:
+            pass
         self._devices[device_id] = {"state": state or {}, "raw": device}
         await self._publish_state(device_id, state or {})
         await self._log(

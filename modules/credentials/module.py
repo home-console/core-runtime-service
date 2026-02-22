@@ -117,11 +117,13 @@ class CredentialModule(RuntimeModule):
         Abuse Detection:
         Secret access validated for behavioral anomalies (Step 17.7).
         """
-        # Initialize repository
-        storage = self.context.storage if hasattr(self, "context") and self.context else self.runtime.storage
+        # Initialize repository (StorageManager для core/vault, иначе только secret_store)
+        sm = getattr(self.runtime, "storage_manager", None)
+        if sm is None:
+            sm = self.context.storage if hasattr(self, "context") and self.context else self.runtime.storage
         self._repository = CredentialRepository(
-            storage_manager=storage,
-            secret_store=self.runtime.secret_store,  # secret_store пока не в RuntimeContext
+            storage_manager=sm,
+            secret_store=self.runtime.secret_store,
         )
 
         # Initialize RBAC policy engine and enforcer

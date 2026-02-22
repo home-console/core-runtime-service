@@ -47,6 +47,7 @@ APP_MODULES: list[ModuleSpec] = [
     ModuleSpec("auth", required=True),
     ModuleSpec("operations", required=True),
     ModuleSpec("agent", required=False),
+    ModuleSpec("credentials", required=False),
     ModuleSpec("execution", required=True),
     ModuleSpec("integrations", required=True),
     ModuleSpec("devices", required=True),
@@ -75,6 +76,28 @@ async def main() -> None:
         vault_port=storage_stack.vault_port,
         state_engine=state_engine,
     )
+    runtime.storage_manager = storage_stack.manager
+
+    # SecretStore для inspector (debug) и credentials: один раз при старте
+    try:
+        from core.security.secret_store import SecretStore
+        from core.security.secret_store_adapter import SecretStoreStorageAdapter
+        backend = storage_stack.manager.get_vault() if storage_stack.manager.is_dual_mode else storage_stack.manager.get_core()
+        wrapper = SecretStoreStorageAdapter(backend)
+        secret_store = SecretStore(wrapper)
+        passphrase = os.getenv("AGENT_SECRET_STORE_PASSPHRASE", "default-dev-passphrase")
+        # Сначала открыть существующий store (salt уже в vault), иначе — новая инициализация.
+        # Раньше вызывали initialize() первым — он перезаписывал salt, после перезапуска секреты не расшифровывались.
+        try:
+            await secret_store.open_with_passphrase(passphrase)
+        except RuntimeError as e:
+            if "not initialized" in str(e).lower():
+                await secret_store.initialize(passphrase)
+            else:
+                raise
+        runtime.secret_store = secret_store
+    except Exception as e:
+        print(f"[Runtime] SecretStore not available: {e}")
 
     print(f"[Runtime] Storage mode: {config.storage_mode} ({config.storage_type})")
     if config.storage_mode == "dual":

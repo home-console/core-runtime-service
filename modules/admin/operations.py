@@ -49,6 +49,12 @@ async def admin_operations_create(runtime: Any, body: Any = None, **kwargs) -> D
 async def admin_operations_list(runtime: Any, limit: int = 100, offset: int = 0, status: Optional[str] = None, **kwargs) -> Dict[str, Any]:
     """List operations with pagination and filtering."""
     try:
+        # Query params from HTTP are often strings; ensure int for slice
+        limit = int(limit) if limit is not None else 100
+        offset = int(offset) if offset is not None else 0
+        limit = max(1, min(1000, limit))
+        offset = max(0, offset)
+
         ops_mgr = runtime.operations
         if not ops_mgr:
             raise RuntimeError("Operations manager not available")

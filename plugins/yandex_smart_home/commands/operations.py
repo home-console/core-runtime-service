@@ -160,7 +160,14 @@ async def reset_pending_on_error(
         device["state"] = device_state
         device["updated_at"] = time.time()
 
-        await storage.set("devices", internal_id, device)
+        await service_registry.call(
+            "devices.update_device_fields",
+            internal_id,
+            {
+                "state": device_state,
+                "updated_at": device["updated_at"]
+            }
+        )
 
         try:
             await service_registry.call(

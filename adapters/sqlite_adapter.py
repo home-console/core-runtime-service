@@ -10,7 +10,7 @@ import sqlite3
 import threading
 import os
 from pathlib import Path
-from typing import Any, AsyncIterator, Optional
+from typing import Any, AsyncIterator, Callable, Optional
 import asyncio
 from contextlib import asynccontextmanager
 
@@ -225,6 +225,56 @@ class SQLiteAdapter(StorageAdapter):
             return cursor.rowcount > 0
 
         return await asyncio.to_thread(_delete_sync, namespace, key, self._get_in_transaction())
+
+    def _set_with_conn(self, conn: sqlite3.Connection, namespace: str, key: str, value: dict[str, Any]) -> None:
+        """Синхронная запись с явным conn (для run_atomic — одна транзакция в одном потоке)."""
+        json_value = json.dumps(value, ensure_ascii=False)
+        conn.execute(
+            "INSERT OR REPLACE INTO storage (namespace, key, value) VALUES (?, ?, ?)",
+            (namespace, key, json_value),
+        )
+
+    def _get_with_conn(self, conn: sqlite3.Connection, namespace: str, key: str) -> Optional[dict[str, Any]]:
+        """Синхронное чтение с явным conn."""
+        cursor = conn.execute(
+            "SELECT value FROM storage WHERE namespace = ? AND key = ?",
+            (namespace, key),
+        )
+        row = cursor.fetchone()
+        if row is None or row[0] is None:
+            return None
+        parsed = json.loads(row[0])
+        return parsed if isinstance(parsed, dict) else None
+
+    def _list_keys_with_conn(self, conn: sqlite3.Connection, namespace: str) -> list[str]:
+        """Синхронный list_keys с явным conn."""
+        cursor = conn.execute("SELECT key FROM storage WHERE namespace = ?", (namespace,))
+        return [row[0] for row in cursor.fetchall()]
+
+    def _delete_with_conn(self, conn: sqlite3.Connection, namespace: str, key: str) -> bool:
+        """Синхронное удаление с явным conn. Возвращает True если строка удалена."""
+        cursor = conn.execute(
+            "DELETE FROM storage WHERE namespace = ? AND key = ?",
+            (namespace, key),
+        )
+        return cursor.rowcount > 0
+
+    async def run_atomic(self, sync_fn: Callable[[sqlite3.Connection, "SQLiteAdapter"], Any]) -> Any:
+        """
+        Выполнить sync_fn(conn, self) в одном потоке в одной транзакции (BEGIN ... COMMIT).
+        Устраняет "database is locked": все операции в одной conn.
+        """
+        def _run():
+            conn = self._get_connection()
+            conn.execute("BEGIN")
+            try:
+                result = sync_fn(conn, self)
+                conn.commit()
+                return result
+            except Exception:
+                conn.rollback()
+                raise
+        return await asyncio.to_thread(_run)
 
     async def list_keys(self, namespace: str) -> list[str]:
         """Получить список ключей в namespace (выполняется в threadpool)."""

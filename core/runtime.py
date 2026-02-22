@@ -90,6 +90,10 @@ class CoreRuntime:
         self.agent_manager: Optional[AgentEnrollmentManager] = None
         self.agent_registry: Optional[AgentRegistry] = None
         self.mtls_ca: Optional[MTLSCertificateAuthority] = None
+        # SecretStore (vault) — выставляется в main; используется credentials и inspector в debug
+        self.secret_store: Optional[Any] = None
+        # StorageManager (core + vault) — выставляется в main для модуля credentials
+        self.storage_manager: Optional[Any] = None
         
         # Сохраняем config для shutdown_timeout
         self._config = config
