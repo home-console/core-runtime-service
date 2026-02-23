@@ -296,31 +296,55 @@ class DeviceSync:
                         device
                     )
                     
-                    # Если есть состояние — публикуем immediate snapshot для reconciliation
+                    # Если есть состояние — публикуем immediate snapshot для reconciliation,
+                    # но не перезаписываем более свежий WS state.
                     if device.get("state"):
                         ext_id = device.get("external_id")
                         parsed_state = device.get("state")
-                        # DEBUG: log parsed state before publishing
+
+                        # Проверяем, не приходили ли недавние WS-обновления для этого устройства
+                        should_publish_state = True
                         try:
-                            await self.runtime.service_registry.call(
-                                "logger.log",
-                                level="debug",
-                                message=f"[device_sync] Publishing initial state snapshot",
-                                plugin=self.plugin_name,
-                                context={
+                            mapping = await self.runtime.storage.get("devices_mappings", ext_id)
+                            internal_id = mapping.get("internal_id") if isinstance(mapping, dict) else None
+                            if internal_id:
+                                internal_device = await self.runtime.storage.get("devices", internal_id)
+                                if isinstance(internal_device, dict):
+                                    last_ws_update = internal_device.get("last_ws_update")
+                                    if isinstance(last_ws_update, (int, float)):
+                                        now_ts = time.time()
+                                        # N секунд «свежести» WS перед тем, как REST может перезаписать reported
+                                        REST_STATE_GRACE_SEC = 30
+                                        if (now_ts - last_ws_update) <= REST_STATE_GRACE_SEC:
+                                            should_publish_state = False
+                        except Exception:
+                            # В случае ошибок безопасности предпочитаем публиковать snapshot,
+                            # чтобы не нарушить существующее поведение.
+                            should_publish_state = True
+
+                        if should_publish_state:
+                            # DEBUG: log parsed state before publishing
+                            try:
+                                await self.runtime.service_registry.call(
+                                    "logger.log",
+                                    level="debug",
+                                    message=f"[device_sync] Publishing initial state snapshot",
+                                    plugin=self.plugin_name,
+                                    context={
+                                        "external_id": ext_id,
+                                        "state": parsed_state,
+                                    },
+                                )
+                            except Exception:
+                                pass
+                            await self.runtime.event_bus.publish(
+                                "external.device_state_reported",
+                                {
                                     "external_id": ext_id,
                                     "state": parsed_state,
+                                    "source": "rest",
                                 },
                             )
-                        except Exception:
-                            pass
-                        await self.runtime.event_bus.publish(
-                            "external.device_state_reported",
-                            {
-                                "external_id": ext_id,
-                                "state": parsed_state
-                            }
-                        )
                 except Exception as e:
                     # Ошибка публикации одного устройства не должна блокировать остальные
                     # Логируем и продолжаем

@@ -212,11 +212,13 @@ class DeviceTransformer:
             if value is None:
                 continue
             
-            # Нормализуем on_off
+            # Нормализуем по типу capability: on_off / range / mode / sensor
             parts = cap_type.split(".")
             simple_name = parts[-1] if parts else ""
-            
-            if simple_name == "on_off" or cap_type == "devices.capabilities.on_off":
+            instance = state_value.get("instance")
+
+            # on_off → единый логический ключ "on"
+            if cap_type.endswith("on_off") or simple_name == "on_off":
                 if isinstance(value, bool):
                     state["on"] = value
                 elif isinstance(value, str):
@@ -224,13 +226,21 @@ class DeviceTransformer:
                     state["on"] = v in ("on", "true", "1", "yes")
                 elif isinstance(value, (int, float)):
                     state["on"] = bool(value)
-            else:
-                # Для остальных используем instance или простое имя
-                instance = state_value.get("instance", simple_name)
-                if instance:
-                    state[instance] = value
-                elif simple_name:
-                    state[simple_name] = value
+                continue
+
+            # range/mode → всегда state[instance] = value (instance обязателен)
+            if cap_type.endswith("range") or simple_name == "range" or \
+               cap_type.endswith("mode") or simple_name == "mode":
+                key = instance or simple_name
+                if key:
+                    state[key] = value
+                continue
+
+            # sensor / прочие capabilities → тоже state[instance] = value, instance приоритетен
+            if instance:
+                state[instance] = value
+            elif simple_name:
+                state[simple_name] = value
         
         return state
 

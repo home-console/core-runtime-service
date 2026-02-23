@@ -22,6 +22,65 @@ def _is_device_online(last_seen: Optional[float]) -> bool:
     return (now - last_seen) <= DEVICE_ONLINE_TIMEOUT
 
 
+def _apply_capability_driven_state(
+    device_state: Dict[str, Any],
+    state_update: Dict[str, Any],
+    *,
+    has_on_off: bool,
+    sensor_instances: Optional[set] = None,
+) -> Dict[str, Any]:
+    """
+    Нормализует desired/reported исходя из capability-модели.
+
+    Правила:
+    - ключ "on" создаётся только если есть capability on_off;
+    - instance из sensor-only (properties) пишется только в reported;
+    - остальные ключи (range/mode/и т.п.) пишутся и в desired, и в reported;
+    - существующие ключи не удаляются, только обновляются.
+    """
+    if not isinstance(state_update, dict) or not state_update:
+        return device_state
+
+    if not isinstance(device_state, dict):
+        device_state = {}
+
+    desired = device_state.get("desired")
+    reported = device_state.get("reported")
+
+    if not isinstance(desired, dict):
+        desired = {}
+    if not isinstance(reported, dict):
+        reported = {}
+
+    sensor_instances = sensor_instances or set()
+
+    for key, value in state_update.items():
+        # on/off только для устройств с capability on_off
+        if key == "on":
+            if has_on_off:
+                desired["on"] = value
+                reported["on"] = value
+            # Если on_off нет — не создаём универсальный on
+            continue
+
+        # Значения, соответствующие sensor-only (properties), пишем только в reported
+        if key in sensor_instances:
+            reported[key] = value
+            continue
+
+        # Все остальные ключи (range/mode/и т.п.) считаем управляемыми
+        desired[key] = value
+        reported[key] = value
+
+    device_state["desired"] = desired
+    device_state["reported"] = reported
+    # Входящее обновление не помечаем как pending
+    if "pending" not in device_state or not isinstance(device_state["pending"], bool):
+        device_state["pending"] = False
+
+    return device_state
+
+
 async def create_device(
     runtime, 
     device_id: str, 
@@ -57,15 +116,17 @@ async def create_device(
             "id": device_id,
             "name": name,
             "type": device_type,
+            # Изначально состояние пустое, без универсальных ключей
             "state": {
-                "desired": {"on": False},
-                "reported": {"on": False},
+                "desired": {},
+                "reported": {},
                 "pending": False,
             },
             "created_at": now,
             "updated_at": now,
-            "last_seen": None,  # Устройство ещё не видели
-            "online": False,    # По умолчанию оффлайн
+            "last_seen": None,       # Устройство ещё не видели
+            "online": False,         # По умолчанию оффлайн
+            "last_ws_update": None,  # Последнее подтверждённое обновление из WebSocket
             # Поля для домов/комнат (опционально)
             "home_id": None,
             "home_name": None,
@@ -87,6 +148,9 @@ async def create_device(
             device["last_seen"] = None
         if "online" not in device:
             device["online"] = _is_device_online(device.get("last_seen"))
+        # Инициализируем last_ws_update, если его нет
+        if "last_ws_update" not in device:
+            device["last_ws_update"] = None
         # Инициализируем поля домов/комнат, если их нет
         if "home_id" not in device:
             device["home_id"] = None
@@ -246,6 +310,28 @@ async def list_mappings(runtime) -> List[Dict[str, Any]]:
     return out
 
 
+async def get_external_for_device(runtime, internal_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Для внутреннего устройства вернуть внешний объект (Яндекс и т.д.), если есть маппинг.
+
+    Returns:
+        {"external_id": str, "payload": dict} или None, если маппинга нет.
+    """
+    if not internal_id:
+        return None
+    mappings = await list_mappings(runtime)
+    for m in mappings:
+        if isinstance(m, dict) and m.get("internal_id") == internal_id:
+            ext_id = m.get("external_id")
+            if not ext_id:
+                continue
+            payload = await runtime.storage.get("devices_external", ext_id)
+            if payload is not None:
+                return {"external_id": ext_id, "payload": payload}
+            return {"external_id": ext_id, "payload": None}
+    return None
+
+
 async def delete_mapping(runtime, external_id: str) -> Dict[str, Any]:
 
     if not external_id:
@@ -312,28 +398,46 @@ async def auto_map_external(runtime, provider: Optional[str] = None) -> Dict[str
             await runtime.storage.set("devices", internal_id, device)
             
             # Синхронизируем initial state и capabilities из external device
-            external_state = payload.get("state", {})
-            external_capabilities = payload.get("capabilities", [])
-            
+            external_state = payload.get("state", {}) or {}
+            external_capabilities = payload.get("capabilities", []) or []
+            external_properties = payload.get("properties", []) or []
+
+            # Нормализуем список capability-имен (строки) для on_off/range/mode
+            capability_names = set()
+            for cap in external_capabilities:
+                if isinstance(cap, str):
+                    name = cap.split(".")[-1]
+                elif isinstance(cap, dict):
+                    cap_type = cap.get("type") or ""
+                    name = cap_type.split(".")[-1] if cap_type else ""
+                else:
+                    continue
+                if name:
+                    capability_names.add(name)
+
+            has_on_off = "on_off" in capability_names
+
+            # Вычисляем sensor-only instances из properties (датчики)
+            sensor_instances = set()
+            for prop in external_properties:
+                if not isinstance(prop, dict):
+                    continue
+                params = prop.get("parameters") or {}
+                if isinstance(params, dict):
+                    instance = params.get("instance")
+                    if isinstance(instance, str) and instance:
+                        sensor_instances.add(instance)
+
             if isinstance(external_state, dict) and external_state:
                 # Подготавливаем state структуру
                 device_state = device.get("state", {})
-                if not isinstance(device_state, dict):
-                    device_state = {}
-                
-                # Убеждаемся что есть все ключи
-                if "desired" not in device_state:
-                    device_state["desired"] = {}
-                if "reported" not in device_state:
-                    device_state["reported"] = {}
-                if "pending" not in device_state:
-                    device_state["pending"] = False
-                
-                # Обновляем desired и reported на external state
-                device_state["desired"].update(external_state)
-                device_state["reported"].update(external_state)
-                device_state["pending"] = False
-                
+                device_state = _apply_capability_driven_state(
+                    device_state,
+                    external_state,
+                    has_on_off=has_on_off,
+                    sensor_instances=sensor_instances,
+                )
+
                 # Вызываем update_device_fields через service_registry
                 try:
                     await runtime.service_registry.call(
@@ -341,8 +445,8 @@ async def auto_map_external(runtime, provider: Optional[str] = None) -> Dict[str
                         internal_id,
                         {
                             "state": device_state,
-                            "capabilities": external_capabilities if isinstance(external_capabilities, list) else []
-                        }
+                            "capabilities": external_capabilities if isinstance(external_capabilities, list) else [],
+                        },
                     )
                 except Exception:
                     # Ошибку логируем но продолжаем - устройство всё равно создано
@@ -363,26 +467,20 @@ async def auto_map_external(runtime, provider: Optional[str] = None) -> Dict[str
         try:
             pending_state = await runtime.storage.get("devices_external_pending_state", ext_id)
             if pending_state and isinstance(pending_state, dict):
-                # Применяем pending state обновления
+                # Применяем pending state обновления через ту же capability-driven модель
                 device_state = device.get("state", {})
-                if not isinstance(device_state, dict):
-                    device_state = {}
-                
-                # Обновляем desired и reported
-                if "desired" not in device_state:
-                    device_state["desired"] = {}
-                if "reported" not in device_state:
-                    device_state["reported"] = {}
-                
-                device_state["desired"].update(pending_state)
-                device_state["reported"].update(pending_state)
-                device_state["pending"] = False
-                
+                device_state = _apply_capability_driven_state(
+                    device_state,
+                    pending_state,
+                    has_on_off=has_on_off,
+                    sensor_instances=sensor_instances,
+                )
+
                 # Применяем через update_device_fields
                 await runtime.service_registry.call(
                     "devices.update_device_fields",
                     internal_id,
-                    {"state": device_state}
+                    {"state": device_state},
                 )
                 
                 # Удаляем pending запись
@@ -462,7 +560,41 @@ async def update_device_fields(runtime, device_id: str, updates: Dict[str, Any])
     old_state = old_device.get("state", {})
     old_online = old_device.get("online")
     
-    device.update(updates)
+    # Аккуратный merge, без затирания вложенных numeric/state полей
+    for key, value in updates.items():
+        if key == "state" and isinstance(value, dict):
+            existing_state = device.get("state", {})
+            if not isinstance(existing_state, dict):
+                existing_state = {}
+
+            incoming_state = value
+            new_state: Dict[str, Any] = dict(existing_state)
+
+            # Отдельно мержим desired/reported, не удаляя отсутствующие ключи
+            for sub_key in ("desired", "reported"):
+                incoming_sub = incoming_state.get(sub_key)
+                if isinstance(incoming_sub, dict):
+                    existing_sub = new_state.get(sub_key)
+                    if not isinstance(existing_sub, dict):
+                        existing_sub = {}
+                    existing_sub.update(incoming_sub)
+                    new_state[sub_key] = existing_sub
+
+            # pending — скалярный флаг
+            if "pending" in incoming_state:
+                new_state["pending"] = bool(incoming_state.get("pending"))
+
+            # Прочие ключи state (например, агрегированные поля) — простое обновление
+            for sk, sv in incoming_state.items():
+                if sk in ("desired", "reported", "pending"):
+                    continue
+                new_state[sk] = sv
+
+            device["state"] = new_state
+        else:
+            # Прочие поля (online, last_seen, capabilities, last_ws_update и т.п.) обновляем как есть
+            device[key] = value
+
     await runtime.storage.set("devices", device_id, device)
     
     # DEBUG 3B: Log write diff

@@ -448,7 +448,7 @@ class YandexQuasarWS:
                 await self._publish_state(device_id, state)
 
     async def _publish_state(self, device_id: str, state: Dict[str, Any]) -> None:
-        payload = {"external_id": device_id, "state": state}
+        payload = {"external_id": device_id, "state": state, "source": "ws"}
         await self._log(
             "debug",
             f"Publishing state update from WS",

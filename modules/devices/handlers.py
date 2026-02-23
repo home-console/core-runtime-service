@@ -124,14 +124,21 @@ async def handle_external_state(runtime, data: dict) -> None:
             pass
         return
 
-    # Обновляем last_seen и online статус при получении обновления
+    # Обновляем метаданные контакта устройства
     now = time.time()
     device["last_seen"] = now
     device["updated_at"] = now
-    
-    # Определяем онлайн статус на основе last_seen (функция уже импортирована в начале файла)
+
+    # Обновляем last_ws_update только для событий из WebSocket
+    source = data.get("source")
+    if source == "ws":
+        device["last_ws_update"] = now
+
+    # Online — отдельное поле, не часть state.
+    # Не меняем online, если во входящем событии он отсутствует.
     old_online = device.get("online")
-    device["online"] = _is_device_online(device.get("last_seen"))
+    if "online" in data:
+        device["online"] = bool(data.get("online"))
     new_online = device.get("online")
 
     old_state = device.get("state", {})
@@ -241,13 +248,6 @@ async def handle_external_state(runtime, data: dict) -> None:
     new_state = old_state
 
     device["state"] = new_state
-    device["updated_at"] = time.time()
-    
-    # Обновляем last_seen и online статус при реальном контакте с устройством
-    now = time.time()
-    device["last_seen"] = now
-    # Функция _is_device_online уже импортирована в начале файла
-    device["online"] = _is_device_online(device["last_seen"])
 
     await runtime.storage.set("devices", internal_id, device)
     

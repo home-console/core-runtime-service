@@ -88,7 +88,7 @@ class DevicesAdapter(DomainAdapter):
         
         Для этих endpoints нужно получить device и проверить owner_id/shared_with.
         """
-        if service_name not in ["devices.get", "devices.set_state", "product_api.v1.devices.set_state"]:
+        if service_name not in ["devices.get", "devices.set_state", "product_api.v1.devices.set_state", "product_api.v1.devices.get_external"]:
             return None
         
         device_id = request.path_params.get("id") or request.path_params.get("device_id")
@@ -219,6 +219,30 @@ class AuthAdapter(DomainAdapter):
         return params
 
 
+class UserCredentialsAdapter(DomainAdapter):
+    """Адаптер для user credentials: подставляет _user_id и _user_roles из контекста запроса."""
+
+    async def extract_params(
+        self,
+        request: Request,
+        body: Optional[Dict[str, Any]],
+        path_params: Dict[str, Any],
+        query_params: Dict[str, Any],
+        service_name: str,
+        **kwargs: Any
+    ) -> Dict[str, Any]:
+        params: Dict[str, Any] = {}
+        params.update(path_params)
+        params.update(query_params)
+        if body is not None:
+            params["body"] = body
+        ctx = getattr(request.state, "auth_context", None)
+        if ctx and getattr(ctx, "user_id", None):
+            params["_user_id"] = ctx.user_id
+            params["_user_roles"] = ["admin"] if getattr(ctx, "is_admin", False) else ["operator"]
+        return params
+
+
 class OAuthAdapter(DomainAdapter):
     """Адаптер для OAuth endpoints."""
     
@@ -263,6 +287,7 @@ _DOMAIN_ADAPTERS: Dict[str, DomainAdapter] = {
     "devices": DevicesAdapter(),
     "auth": AuthAdapter(),
     "oauth": OAuthAdapter(),
+    "user_credentials": UserCredentialsAdapter(),
 }
 
 

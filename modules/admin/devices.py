@@ -56,3 +56,17 @@ async def admin_devices_list_mappings(runtime: Any) -> Any:
             set_current_auth_context(prev)
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+
+async def admin_devices_get_external_for_device(runtime: Any, id: Optional[str] = None, **kwargs: Any):
+    """Вернуть внешний объект устройства (Яндекс и т.д.) по internal device id."""
+    device_id = id or kwargs.get("device_id") or kwargs.get("deviceId")
+    if not device_id:
+        return None
+    ctx = create_system_context("admin", "devices.get_external_for_device")
+    prev = get_current_auth_context()
+    try:
+        set_current_auth_context(ctx)
+        return await runtime.service_registry.call("devices.get_external_for_device", device_id)
+    finally:
+        set_current_auth_context(prev)

@@ -33,8 +33,10 @@ ACTION_SCOPE_MAP: Dict[str, str] = {
     "devices.get": "devices.read",
     "devices.set_state": "devices.write",
     "product_api.v1.devices.set_state": "devices.write",
+    "product_api.v1.devices.get_external": "devices.read",
     "devices.list_external": "devices.read",
     "devices.list_mappings": "devices.read",
+    "devices.get_external_for_device": "devices.read",
     "devices.create_mapping": "devices.write",
     "devices.delete_mapping": "devices.write",
     "devices.auto_map_external": "devices.write",
@@ -93,6 +95,13 @@ ACTION_SCOPE_MAP: Dict[str, str] = {
     
     # User v1 services (user-scoped operations)
     "user.v1.integrations": "integrations.read",
+    "user.v1.credentials.list": "credentials.read",
+    "user.v1.credentials.get": "credentials.read",
+    "user.v1.credentials.get_secret": "credentials.read",
+    "user.v1.credentials.create": "credentials.write",
+    "user.v1.credentials.update": "credentials.write",
+    "user.v1.credentials.delete": "credentials.write",
+    "user.v1.credentials.connect": "credentials.write",
     
     # Admin basic services (legacy names removed — use admin.v1.* services)
     # NOTE: legacy admin.* entries like "admin.list_plugins" and the
@@ -160,6 +169,10 @@ def check(ctx: Optional[RequestContext], action: str, resource: Optional[Dict[st
     # Специальный случай: yandex_device_auth эндпоинты публичные
     # Они используются для OAuth авторизации пользователя в Яндекс
     if action.startswith("yandex_device_auth."):
+        return True
+
+    # Креды пользователя: доступны любому авторизованному пользователю (свои креды)
+    if action.startswith("user.v1.credentials.") and ctx and ctx.user_id:
         return True
     
     # Специальный случай: login публичный (не требует авторизации)

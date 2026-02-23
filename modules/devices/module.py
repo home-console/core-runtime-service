@@ -38,6 +38,7 @@ class DevicesModule(RuntimeModule):
             ("devices.list_external", services.list_external),
             ("devices.create_mapping", services.create_mapping),
             ("devices.list_mappings", services.list_mappings),
+            ("devices.get_external_for_device", services.get_external_for_device),
             ("devices.delete_mapping", services.delete_mapping),
             ("devices.auto_map_external", services.auto_map_external),
             ("devices.get_hung_pending", services.get_hung_pending_devices),
@@ -58,6 +59,8 @@ class DevicesModule(RuntimeModule):
             "devices.list_external": {"admin_only": True},
             "devices.create_mapping": {"admin_only": True},
             "devices.list_mappings": {"admin_only": True},
+            # get_external_for_device — доступен при devices.read (Product API проверяет доступ через devices.get)
+            "devices.get_external_for_device": {"resource": "device", "preload": "device_by_id"},
             "devices.delete_mapping": {"admin_only": True},
             "devices.auto_map_external": {"admin_only": True},
             # Diagnostics — admin-only

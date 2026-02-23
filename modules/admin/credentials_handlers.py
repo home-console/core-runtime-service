@@ -5,7 +5,9 @@ Admin HTTP handlers for credentials (SSH hosts and other secrets).
 Если модуль credentials не загружен — использует CredentialRepository напрямую (storage_manager + secret_store).
 """
 
+import asyncio
 import io
+import threading
 from typing import Any, Dict, Optional
 
 from core.system_context import create_system_context
@@ -365,3 +367,153 @@ async def admin_credentials_connect(runtime: Any, credential_id: str = None, **k
 
     cred, secret_bytes = pair
     return _ssh_connect_with_credential(cred, secret_bytes)
+
+
+def _ssh_open_shell(cred, secret_bytes: bytes):
+    """
+    Открыть SSH-подключение и интерактивный shell (PTY).
+    Возвращает (client, channel). Вызывающий должен закрыть client.
+    """
+    try:
+        import paramiko
+    except ImportError:
+        raise RuntimeError("paramiko не установлен (pip install paramiko)")
+
+    if cred.type not in (CredentialType.SSH_PASSWORD, CredentialType.SSH_KEY):
+        raise RuntimeError(f"Тип креда {cred.type} не поддерживает терминал (нужен ssh_password или ssh_key)")
+    if not cred.host or not cred.username:
+        raise RuntimeError("У креда должны быть указаны host и username")
+
+    host = cred.host
+    port = cred.port or 22
+    username = cred.username
+    secret_str = secret_bytes.decode("utf-8", errors="replace").strip()
+
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    if cred.type == CredentialType.SSH_PASSWORD:
+        client.connect(
+            hostname=host,
+            port=port,
+            username=username,
+            password=secret_str,
+            timeout=15,
+            allow_agent=False,
+            look_for_keys=False,
+        )
+    else:
+        pkey = None
+        for key_cls in (paramiko.RSAKey, paramiko.Ed25519Key, paramiko.ECDSAKey):
+            try:
+                pkey = key_cls.from_private_key(io.StringIO(secret_str))
+                break
+            except Exception:
+                continue
+        if pkey is None:
+            raise RuntimeError("Не удалось прочитать приватный ключ (RSA/Ed25519/ECDSA)")
+        client.connect(
+            hostname=host,
+            port=port,
+            username=username,
+            pkey=pkey,
+            timeout=15,
+            allow_agent=False,
+            look_for_keys=False,
+        )
+    channel = client.invoke_shell(term="xterm")
+    return client, channel
+
+
+async def admin_credentials_terminal_ws(runtime: Any, websocket: Any) -> None:
+    """
+    WebSocket /admin/v1/credentials/terminal?credential_id=xxx — терминал по креду из БД.
+    Мост: браузер ↔ SSH PTY. Закрытие WebSocket закрывает SSH.
+    """
+    credential_id = websocket.query_params.get("credential_id") if hasattr(websocket, "query_params") else None
+    if not credential_id:
+        await websocket.close(code=4000, reason="credential_id required")
+        return
+
+    repo = _get_repo(runtime)
+    if repo is None:
+        await websocket.close(code=4001, reason="Credentials not available")
+        return
+
+    try:
+        pair = await repo.get_with_secret(credential_id)
+    except Exception as e:
+        await websocket.close(code=4002, reason=str(e)[:120])
+        return
+
+    if pair is None:
+        await websocket.close(code=4003, reason="Credential not found")
+        return
+
+    cred, secret_bytes = pair
+    try:
+        client, channel = await asyncio.get_event_loop().run_in_executor(
+            None, lambda: _ssh_open_shell(cred, secret_bytes)
+        )
+    except Exception as e:
+        await websocket.close(code=4004, reason=str(e)[:120])
+        return
+
+    loop = asyncio.get_event_loop()
+    queue = asyncio.Queue()
+
+    def thread_read_ssh():
+        try:
+            while True:
+                data = channel.recv(4096)
+                if not data:
+                    break
+                loop.call_soon_threadsafe(queue.put_nowait, data)
+        except Exception:
+            pass
+        loop.call_soon_threadsafe(queue.put_nowait, None)
+
+    async def bridge_ssh_to_ws():
+        try:
+            while True:
+                data = await queue.get()
+                if data is None:
+                    break
+                try:
+                    await websocket.send_bytes(data)
+                except Exception:
+                    break
+        finally:
+            try:
+                queue.put_nowait(None)
+            except asyncio.QueueFull:
+                pass
+
+    async def bridge_ws_to_ssh():
+        try:
+            while True:
+                try:
+                    msg = await asyncio.wait_for(websocket.receive(), timeout=0.5)
+                except asyncio.TimeoutError:
+                    continue
+                if msg.get("type") == "websocket.disconnect":
+                    break
+                text = msg.get("text")
+                if text:
+                    data = text.encode("utf-8", errors="replace")
+                    await loop.run_in_executor(None, lambda d=data: channel.send(d))
+        except Exception:
+            pass
+
+    t = threading.Thread(target=thread_read_ssh, daemon=True)
+    t.start()
+    try:
+        await asyncio.gather(bridge_ssh_to_ws(), bridge_ws_to_ssh())
+    finally:
+        try:
+            channel.close()
+        except Exception:
+            pass
+        try:
+            client.close()
+        except Exception:
+            pass

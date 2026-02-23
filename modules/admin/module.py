@@ -31,6 +31,7 @@ from .credentials_handlers import (
     admin_credentials_update,
     admin_credentials_delete,
     admin_credentials_connect,
+    admin_credentials_terminal_ws,
 )
 from .introspection import (
     get_runtime_info,
@@ -191,6 +192,12 @@ class AdminModule(RuntimeModule):
             path="/admin/v1/credentials/{credential_id}/connect",
             service="admin.v1.credentials.connect",
             description="Admin: подключиться к хосту по креду из БД (SSH)"
+        ))
+        self.context.http.register(HttpEndpoint(
+            path="/admin/v1/credentials/terminal",
+            service="admin.v1.credentials.terminal_ws",
+            websocket=True,
+            description="Admin: WebSocket терминал по креду (?credential_id=...)"
         ))
         self.context.http.register(HttpEndpoint(
             method="GET",
@@ -366,6 +373,12 @@ class AdminModule(RuntimeModule):
                 return await admin_credentials_connect(self.runtime, credential_id=cid)
             return handler
 
+        def wrap_credentials_terminal_ws():
+            async def handler(websocket=None, **kw):
+                ws = websocket or kw.get("websocket")
+                return await admin_credentials_terminal_ws(self.runtime, ws)
+            return handler
+
         async def _marketplace_catalog(*args, **kw):
             """Список плагинов для маркетплейса: один захардкоженный файл catalog.json (ссылки на репо)."""
             catalog_path = Path(__file__).resolve().parent.parent / "marketplace" / "catalog.json"
@@ -394,6 +407,7 @@ class AdminModule(RuntimeModule):
             ("admin.v1.credentials.update", wrap_credentials_update()),
             ("admin.v1.credentials.delete", wrap_credentials_delete()),
             ("admin.v1.credentials.connect", wrap_credentials_connect()),
+            ("admin.v1.credentials.terminal_ws", wrap_credentials_terminal_ws()),
             ("admin.v1.state", wrap_introspection(get_state)),
             ("admin.v1.state.keys", wrap_introspection(list_state_keys)),
             ("admin.v1.state.get", wrap_state_get()),
@@ -418,6 +432,7 @@ class AdminModule(RuntimeModule):
             ("admin.v1.devices.get", wrap_domain(__import__("modules.admin.devices", fromlist=["admin_devices_get"]).admin_devices_get)),
             ("admin.v1.devices.list_external", wrap_domain(__import__("modules.admin.devices", fromlist=["admin_devices_list_external"]).admin_devices_list_external)),
             ("admin.v1.devices.list_mappings", wrap_domain(__import__("modules.admin.devices", fromlist=["admin_devices_list_mappings"]).admin_devices_list_mappings)),
+            ("admin.v1.devices.get_external_for_device", wrap_domain(__import__("modules.admin.devices", fromlist=["admin_devices_get_external_for_device"]).admin_devices_get_external_for_device)),
             ("admin.operations.create", wrap_domain(admin_operations_create)),
             ("admin.operations.list", wrap_domain(admin_operations_list)),
             ("admin.operations.get", wrap_domain(admin_operations_get)),
@@ -818,9 +833,21 @@ class AdminModule(RuntimeModule):
             ))
             self.context.http.register(HttpEndpoint(
                 method="GET",
+                path="/admin/v1/devices/external",
+                service="admin.v1.devices.list_external",
+                description="List all external devices (optional ?provider=yandex to filter)"
+            ))
+            self.context.http.register(HttpEndpoint(
+                method="GET",
                 path="/admin/v1/devices/mappings",
                 service="admin.v1.devices.list_mappings",
                 description="List device mappings"
+            ))
+            self.context.http.register(HttpEndpoint(
+                method="GET",
+                path="/admin/v1/devices/{id}/external",
+                service="admin.v1.devices.get_external_for_device",
+                description="Get external device payload (Yandex etc.) for an internal device"
             ))
             # POST to set device state — proxy to devices.set_state (domain service)
             async def _admin_set_state(device_id: str, body: dict = None, **kw):
