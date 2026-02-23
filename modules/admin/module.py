@@ -32,6 +32,7 @@ from .credentials_handlers import (
     admin_credentials_delete,
     admin_credentials_connect,
     admin_credentials_terminal_ws,
+    admin_credentials_terminal_sessions,
 )
 from .introspection import (
     get_runtime_info,
@@ -192,6 +193,12 @@ class AdminModule(RuntimeModule):
             path="/admin/v1/credentials/{credential_id}/connect",
             service="admin.v1.credentials.connect",
             description="Admin: подключиться к хосту по креду из БД (SSH)"
+        ))
+        self.context.http.register(HttpEndpoint(
+            method="GET",
+            path="/admin/v1/credentials/terminal-sessions",
+            service="admin.v1.credentials.terminal_sessions",
+            description="Admin: список активных SSH терминальных сессий"
         ))
         self.context.http.register(HttpEndpoint(
             path="/admin/v1/credentials/terminal",
@@ -379,6 +386,11 @@ class AdminModule(RuntimeModule):
                 return await admin_credentials_terminal_ws(self.runtime, ws)
             return handler
 
+        def wrap_credentials_terminal_sessions():
+            async def handler(**kw):
+                return await admin_credentials_terminal_sessions(self.runtime)
+            return handler
+
         async def _marketplace_catalog(*args, **kw):
             """Список плагинов для маркетплейса: один захардкоженный файл catalog.json (ссылки на репо)."""
             catalog_path = Path(__file__).resolve().parent.parent / "marketplace" / "catalog.json"
@@ -408,6 +420,7 @@ class AdminModule(RuntimeModule):
             ("admin.v1.credentials.delete", wrap_credentials_delete()),
             ("admin.v1.credentials.connect", wrap_credentials_connect()),
             ("admin.v1.credentials.terminal_ws", wrap_credentials_terminal_ws()),
+            ("admin.v1.credentials.terminal_sessions", wrap_credentials_terminal_sessions()),
             ("admin.v1.state", wrap_introspection(get_state)),
             ("admin.v1.state.keys", wrap_introspection(list_state_keys)),
             ("admin.v1.state.get", wrap_state_get()),

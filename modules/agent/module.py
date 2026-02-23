@@ -106,32 +106,36 @@ class AgentControlPlaneModule(RuntimeModule):
         self.runtime.agent_manager = agent_manager
         self.runtime.agent_registry = agent_registry
         self.runtime.mtls_ca = mtls_ca
+
+        # Обёртка для admin-хендлеров, которым нужен runtime первым аргументом
+        def wrap_agent(fn):
+            return lambda *args, **kw: fn(self.runtime, *args, **kw)
         
         # Register services with service registry
         services = self.context.services if hasattr(self, "context") and self.context else self.runtime.service_registry
         await services.register(
             "admin.agent.create_enrollment_token",
-            admin_agent_create_enrollment_token,
+            wrap_agent(admin_agent_create_enrollment_token),
         )
         await services.register(
             "admin.agent.enroll_agent",
-            admin_agent_enroll_agent,
+            wrap_agent(admin_agent_enroll_agent),
         )
         await services.register(
             "admin.agent.list_agents",
-            admin_agent_list_agents,
+            wrap_agent(admin_agent_list_agents),
         )
         await services.register(
             "admin.agent.get_agent",
-            admin_agent_get_agent,
+            wrap_agent(admin_agent_get_agent),
         )
         await services.register(
             "admin.agent.deregister_agent",
-            admin_agent_deregister_agent,
+            wrap_agent(admin_agent_deregister_agent),
         )
         await services.register(
             "admin.agent.list_agents_providing_capability",
-            admin_agent_list_agents_providing_capability,
+            wrap_agent(admin_agent_list_agents_providing_capability),
         )
         
         # Register HTTP endpoints for Agent Control Plane

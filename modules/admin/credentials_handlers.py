@@ -7,8 +7,10 @@ Admin HTTP handlers for credentials (SSH hosts and other secrets).
 
 import asyncio
 import io
+import json
 import threading
 from typing import Any, Dict, Optional
+import time
 
 from core.system_context import create_system_context
 from core.auth_contextvars import set_current_auth_context, get_current_auth_context
@@ -424,6 +426,25 @@ def _ssh_open_shell(cred, secret_bytes: bytes):
     return client, channel
 
 
+_ACTIVE_TERMINAL_SESSIONS: Dict[str, Dict[str, Any]] = {}
+
+
+async def admin_credentials_terminal_sessions(runtime: Any) -> Dict[str, Any]:
+  """
+  GET /admin/v1/credentials/terminal-sessions — список активных SSH терминальных сессий.
+  """
+  now = time.time()
+  sessions = []
+  for sid, info in list(_ACTIVE_TERMINAL_SESSIONS.items()):
+      item = dict(info)
+      item["session_id"] = sid
+      created = info.get("created_at")
+      if isinstance(created, (int, float)):
+          item["age_sec"] = now - created
+      sessions.append(item)
+  return {"sessions": sessions}
+
+
 async def admin_credentials_terminal_ws(runtime: Any, websocket: Any) -> None:
     """
     WebSocket /admin/v1/credentials/terminal?credential_id=xxx — терминал по креду из БД.
@@ -457,6 +478,14 @@ async def admin_credentials_terminal_ws(runtime: Any, websocket: Any) -> None:
     except Exception as e:
         await websocket.close(code=4004, reason=str(e)[:120])
         return
+
+    session_id = f"{credential_id}:{id(channel)}"
+    _ACTIVE_TERMINAL_SESSIONS[session_id] = {
+        "credential_id": credential_id,
+        "host": getattr(cred, "host", None),
+        "username": getattr(cred, "username", None),
+        "created_at": time.time(),
+    }
 
     loop = asyncio.get_event_loop()
     queue = asyncio.Queue()
@@ -499,6 +528,23 @@ async def admin_credentials_terminal_ws(runtime: Any, websocket: Any) -> None:
                     break
                 text = msg.get("text")
                 if text:
+                    # Поддержка JSON‑сообщений от терминала (resize и т.п.)
+                    handled = False
+                    if text.startswith("{"):
+                        try:
+                            payload = json.loads(text)
+                            if isinstance(payload, dict) and payload.get("type") == "resize":
+                                cols = int(payload.get("cols") or 80)
+                                rows = int(payload.get("rows") or 24)
+                                await loop.run_in_executor(
+                                    None, lambda: channel.resize_pty(width=cols, height=rows)
+                                )
+                                handled = True
+                        except Exception:
+                            handled = False
+                    if handled:
+                        continue
+
                     data = text.encode("utf-8", errors="replace")
                     await loop.run_in_executor(None, lambda d=data: channel.send(d))
         except Exception:
@@ -509,6 +555,8 @@ async def admin_credentials_terminal_ws(runtime: Any, websocket: Any) -> None:
     try:
         await asyncio.gather(bridge_ssh_to_ws(), bridge_ws_to_ssh())
     finally:
+        # Очистка SSH и удаление записи о сессии
+        _ACTIVE_TERMINAL_SESSIONS.pop(session_id, None)
         try:
             channel.close()
         except Exception:

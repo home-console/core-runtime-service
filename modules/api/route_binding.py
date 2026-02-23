@@ -358,7 +358,12 @@ def _make_ws_handler(runtime: Any, endpoint: Any):
     async def ws_handler(websocket: WebSocket):
         await websocket.accept()
         try:
-            await runtime.service_registry.call(endpoint.service, websocket=websocket)
+            # WebSocket‑хендлеры по определению долгоживущие, поэтому вызываем
+            # сервис без default_timeout, иначе соединение будет рваться по таймауту.
+            if hasattr(runtime.service_registry, "call_without_timeout"):
+                await runtime.service_registry.call_without_timeout(endpoint.service, websocket=websocket)
+            else:
+                await runtime.service_registry.call(endpoint.service, websocket=websocket)
         except WebSocketDisconnect:
             pass
         except Exception as e:

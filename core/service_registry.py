@@ -323,6 +323,19 @@ class ServiceRegistry:
         else:
             return await func(*args, **kwargs)
     
+    async def call_without_timeout(self, service_name: str, *args, **kwargs) -> Any:
+        """
+        Вызвать сервис, игнорируя default_timeout.
+
+        Используется для долгоживущих операций (например, WebSocket‑хендлеров),
+        которые по определению не укладываются в общий timeout.
+        """
+        async with self._lock:
+            func = self._services.get(service_name)
+            if func is None:
+                raise ValueError(f"Сервис '{service_name}' не найден")
+        return await func(*args, **kwargs)
+    
     async def call_with_timeout(
         self,
         service_name: str,
