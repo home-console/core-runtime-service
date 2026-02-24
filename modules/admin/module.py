@@ -72,6 +72,8 @@ from .operations import (
     admin_operations_cancel,
     admin_operations_retry,
 )
+# Agent deploy (SSH bootstrap)
+from modules.agents.agent_deploy_service import admin_agent_deploy
 # Auth services moved to AuthModule
 
 
@@ -391,6 +393,12 @@ class AdminModule(RuntimeModule):
                 return await admin_credentials_terminal_sessions(self.runtime)
             return handler
 
+        def wrap_agent_deploy():
+            async def handler(body=None, **kw):
+                b = body if body is not None else kw.get("body")
+                return await admin_agent_deploy(self.runtime, b)
+            return handler
+
         async def _marketplace_catalog(*args, **kw):
             """Список плагинов для маркетплейса: один захардкоженный файл catalog.json (ссылки на репо)."""
             catalog_path = Path(__file__).resolve().parent.parent / "marketplace" / "catalog.json"
@@ -451,6 +459,7 @@ class AdminModule(RuntimeModule):
             ("admin.operations.get", wrap_domain(admin_operations_get)),
             ("admin.operations.cancel", wrap_domain(admin_operations_cancel)),
             ("admin.operations.retry", wrap_domain(admin_operations_retry)),
+            ("admin.agents.deploy", wrap_agent_deploy()),
             # Auth services moved to AuthModule
         ]
 
@@ -887,6 +896,17 @@ class AdminModule(RuntimeModule):
             ))
         except Exception:
             # Best-effort: do not break admin registration if HTTP registry unavailable
+            pass
+
+        # HTTP endpoint для SSH‑деплоя агентов (admin‑only через ACL)
+        try:
+            self.context.http.register(HttpEndpoint(
+                method="POST",
+                path="/admin/v1/agents/deploy",
+                service="admin.agents.deploy",
+                description="Deploy agent over SSH using existing credentials (admin only)",
+            ))
+        except Exception:
             pass
 
     async def start(self) -> None:

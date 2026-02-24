@@ -13,6 +13,9 @@ Flow:
 
 import secrets
 import hashlib
+import hmac
+import base64
+import json
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any
@@ -146,6 +149,21 @@ class AgentEnrollmentManager:
         self._identity_factory = identity_factory or AgentIdentityFactory
         self._pending_tokens: Dict[str, EnrollmentToken] = {}  # token_id -> token
         self._enrolled_agents: Dict[str, AgentIdentity] = {}  # agent_id -> identity
+        # Storage key prefix для HMAC и token_hash (одноразовые токены)
+        self._hmac_secret_key = "agent:enrollment:hmac_secret"
+        self._token_hash_prefix = "agent:enrollment_token:"
+
+    async def _get_hmac_key(self) -> bytes:
+        """
+        Получить или сгенерировать HMAC‑ключ для подписания enrollment токенов.
+        """
+        key = await self._secret_store.get(self._hmac_secret_key)
+        if key is not None:
+            return key
+
+        new_key = secrets.token_bytes(32)
+        await self._secret_store.put(self._hmac_secret_key, new_key)
+        return new_key
     
     async def create_enrollment_token(
         self,
@@ -170,6 +188,57 @@ class AgentEnrollmentManager:
         
         # Token secret is shown only to caller
         return token
+
+    async def generate_enrollment_token(self, agent_name: str) -> str:
+        """
+        Сгенерировать HMAC‑подписанный enrollment token (одна строка).
+
+        Требования:
+        - Содержит agent_name и expires_at;
+        - TTL 10 минут;
+        - Хранит token_hash в SecretStore до использования;
+        - Одноразовый (при успешном enroll удаляется из SecretStore).
+        """
+        if not agent_name:
+            raise ValueError("agent_name required")
+
+        # Используем отдельный TTL для bootstrap‑токенов: 10 минут
+        now = datetime.now(timezone.utc).isoformat()
+        token = EnrollmentTokenFactory.generate_token(
+            agent_name=agent_name,
+            created_at=now,
+            ttl_seconds=600,
+        )
+
+        # Формируем payload для HMAC‑подписанной строки
+        payload = {
+            "token_id": token.token_id,
+            "agent_name": token.agent_name,
+            "expires_at": token.expires_at,
+        }
+        payload_json = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+
+        hmac_key = await self._get_hmac_key()
+        signature = hmac.new(hmac_key, payload_json, hashlib.sha256).digest()
+
+        def _b64url(data: bytes) -> str:
+            return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+        signed_token = f"{_b64url(payload_json)}.{_b64url(signature)}"
+
+        # Обновляем secret/hash токена так, чтобы enroll_agent мог проверять
+        # полную подписанную строку (sha256(signed_token) == token_hash).
+        token.token_secret = signed_token
+        token.token_hash = hashlib.sha256(signed_token.encode("utf-8")).hexdigest()
+
+        # Кэшируем токен в памяти (для текущего процесса)
+        self._pending_tokens[token.token_id] = token
+
+        # Храним только hash в SecretStore (без секрета)
+        hash_key = f"{self._token_hash_prefix}{token.token_id}"
+        await self._secret_store.put(hash_key, token.token_hash.encode("utf-8"))
+
+        return signed_token
     
     async def enroll_agent(
         self,
@@ -201,7 +270,7 @@ class AgentEnrollmentManager:
         if not token.is_valid():
             raise ValueError(f"Enrollment token not valid: {token.status}")
         
-        # Verify secret
+        # Verify secret (поддерживает как legacy token_secret, так и HMAC‑подписанную строку)
         if not EnrollmentTokenFactory.verify_token(token_secret, token.token_hash):
             raise ValueError("Enrollment token secret mismatch")
         
@@ -219,6 +288,14 @@ class AgentEnrollmentManager:
         token.status = EnrollmentTokenStatus.USED
         token.used_at = created_at
         token.used_by_agent_id = identity.agent_id
+        
+        # Удаляем hash токена из SecretStore (одноразовый токен)
+        try:
+            hash_key = f"{self._token_hash_prefix}{token.token_id}"
+            await self._secret_store.delete(hash_key)
+        except Exception:
+            # Удаление hash — best effort, не должно ломать enroll flow
+            pass
         
         # Record enrolled agent
         self._enrolled_agents[identity.agent_id] = identity
