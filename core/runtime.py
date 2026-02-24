@@ -34,6 +34,8 @@ from core.agent.enrollment import AgentEnrollmentManager
 from core.agent.registry import AgentRegistry
 from core.agent.tls import MTLSCertificateAuthority
 from core.runtime_context import RuntimeContext
+# REFACTORING: Проблема 8 - добавляем OrchestrationService
+from core.orchestration import OrchestrationService, DockerOrchestrationBackend, set_orchestration_service
 
 
 class CoreRuntime:
@@ -103,6 +105,12 @@ class CoreRuntime:
 
         # Execution controller (опционально; выставляется модулем execution)
         self.execution_controller: Optional[Any] = None
+        
+        # REFACTORING: Проблема 8 - инициализируем OrchestrationService
+        # Создаём Docker backend по умолчанию (можно заменить на k8s backend в будущем)
+        self.orchestration_service = OrchestrationService(DockerOrchestrationBackend())
+        # Устанавливаем глобальный singleton для доступа из других компонентов
+        set_orchestration_service(self.orchestration_service)
     
     async def run(self) -> None:
         """
