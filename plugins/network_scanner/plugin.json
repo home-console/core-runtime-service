@@ -1,0 +1,9 @@
+{
+    "class_path": "plugins.network_scanner.plugin.NetworkScannerPlugin",
+    "name": "network_scanner",
+    "version": "0.1.0",
+    "description": "Сканирование локальной сети и обнаружение устройств",
+    "author": "Home Console",
+    "dependencies": [],
+    "is_integration": false
+}

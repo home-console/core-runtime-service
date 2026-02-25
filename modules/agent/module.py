@@ -4,6 +4,7 @@ import os
 from datetime import datetime, timezone
 from core.runtime_module import RuntimeModule
 from core.http_registry import HttpEndpoint
+from core.agents.deployment_tracker import DeploymentTracker
 
 try:
     from core.security import SecretStore
@@ -20,6 +21,10 @@ from modules.agent.services import (
     admin_agent_get_agent,
     admin_agent_deregister_agent,
     admin_agent_list_agents_providing_capability,
+    admin_agent_deploy,
+    admin_agent_get_deployment_status,
+    admin_agent_get_deployment_metrics,
+    admin_agent_heartbeat,
 )
 
 
@@ -101,11 +106,15 @@ class AgentControlPlaneModule(RuntimeModule):
         # Initialize AgentRegistry
         agent_registry = AgentRegistry()
         
+        # Initialize DeploymentTracker (in-memory with optional DB persistence)
+        deployment_tracker = DeploymentTracker(db_service=getattr(self.runtime, "db", None))
+        
         # Store in CoreRuntime (secret_store — для credentials и inspector в debug)
         self.runtime.secret_store = secret_store
         self.runtime.agent_manager = agent_manager
         self.runtime.agent_registry = agent_registry
         self.runtime.mtls_ca = mtls_ca
+        self.runtime.deployment_tracker = deployment_tracker
 
         # Обёртка для admin-хендлеров, которым нужен runtime первым аргументом
         def wrap_agent(fn):
@@ -136,6 +145,24 @@ class AgentControlPlaneModule(RuntimeModule):
         await services.register(
             "admin.agent.list_agents_providing_capability",
             wrap_agent(admin_agent_list_agents_providing_capability),
+        )
+        
+        # ==== Deployment Services (TASK 1.1) ====
+        await services.register(
+            "admin.agent.deploy",
+            wrap_agent(admin_agent_deploy),
+        )
+        await services.register(
+            "admin.agent.get_deployment_status",
+            wrap_agent(admin_agent_get_deployment_status),
+        )
+        await services.register(
+            "admin.agent.get_deployment_metrics",
+            wrap_agent(admin_agent_get_deployment_metrics),
+        )
+        await services.register(
+            "admin.agent.heartbeat",
+            wrap_agent(admin_agent_heartbeat),
         )
         
         # Register HTTP endpoints for Agent Control Plane
@@ -174,6 +201,35 @@ class AgentControlPlaneModule(RuntimeModule):
             path="/admin/v1/agents/{agent_id}/deregister",
             service="admin.agent.deregister_agent",
             description="Deregister agent"
+        ))
+        
+        # ==== Deployment Endpoints (TASK 1.1) ====
+        self.context.http.register(HttpEndpoint(
+            method="POST",
+            path="/admin/v1/agents/deploy",
+            service="admin.agent.deploy",
+            description="Deploy agent to remote host via SSH"
+        ))
+        
+        self.context.http.register(HttpEndpoint(
+            method="GET",
+            path="/admin/v1/deployments/{deployment_id}",
+            service="admin.agent.get_deployment_status",
+            description="Get agent deployment status"
+        ))
+        
+        self.context.http.register(HttpEndpoint(
+            method="GET",
+            path="/admin/v1/deployments",
+            service="admin.agent.get_deployment_metrics",
+            description="Get deployment metrics and statistics"
+        ))
+        
+        self.context.http.register(HttpEndpoint(
+            method="POST",
+            path="/admin/v1/agents/{agent_id}/heartbeat",
+            service="admin.agent.heartbeat",
+            description="Receive heartbeat from agent"
         ))
         
         # Capability routing endpoints

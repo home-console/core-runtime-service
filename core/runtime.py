@@ -91,6 +91,7 @@ class CoreRuntime:
         # Will be initialized in start() when SecretStore is ready
         self.agent_manager: Optional[AgentEnrollmentManager] = None
         self.agent_registry: Optional[AgentRegistry] = None
+        self.deployment_tracker: Optional[Any] = None  # DeploymentTracker instance
         self.mtls_ca: Optional[MTLSCertificateAuthority] = None
         # SecretStore (vault) — выставляется в main; используется credentials и inspector в debug
         self.secret_store: Optional[Any] = None
