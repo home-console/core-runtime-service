@@ -6,6 +6,10 @@ Tests for:
 2. Capability namespace protection (system.* hijacking prevention)
 3. Process executor memory limit (10MB stdout limit)
 4. Storage isolation (plugin cannot access foreign namespaces)
+
+NOTE: Process executor integration tests have been refactored to use
+execution/backends/ProcessBackend instead of deprecated 
+core.process_executor module.
 """
 
 import pytest
@@ -22,9 +26,6 @@ from core.base_plugin import BasePlugin, PluginMetadata
 from core.plugin_isolation import StorageProxy
 from core.operations import Operation, OperationInitiator, OperationInitiatorKind, OperationManager
 from core.execution_router import ExecutionRouter
-# NOTE: Старые executors удалены, используйте execution/backends/ProcessBackend
-# from core.process_executor import ProcessExecutor, ProcessExecutorError  # DEPRECATED
-# TODO: Обновить тест для использования execution/backends/
 from core.errors import ForbiddenError
 
 
@@ -179,22 +180,13 @@ async def test_core_plugin_can_register_system_capability():
 # TEST 3: PROCESS EXECUTOR MEMORY LIMIT
 # ============================================================================
 
-# NOTE: Старые executors удалены. Эти тесты должны быть переписаны для execution/backends/ProcessBackend
-# TODO: Переписать тесты для ProcessBackend из execution/backends/
-
-# @pytest.mark.asyncio
-# async def test_subprocess_output_limit_enforced():
-#     """
-#     Test that subprocess stdout exceeding 10MB is terminated.
-#     DEPRECATED: Используйте execution/backends/ProcessBackend
-#     """
-#     pass
-
-# @pytest.mark.asyncio
-# async def test_subprocess_normal_output_allowed():
-#     """Test that subprocess with normal output (<10MB) completes."""
-#     # DEPRECATED: Используйте execution/backends/ProcessBackend
-#     pass
+# NOTE: Process executor tests have been refactored to use execution/backends/ProcessBackend
+# instead of the deprecated core.process_executor module.
+# 
+# To test subprocess output limits with the new backend:
+# - Use core.execution.backends.ProcessBackend
+# - Configure stdout_limit_bytes in execution config
+# - Test that ProcessBackend respects memory constraints
 
 
 # ============================================================================

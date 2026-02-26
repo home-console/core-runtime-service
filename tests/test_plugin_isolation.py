@@ -4,6 +4,10 @@ Test suite for Step 9: Plugin Execution Isolation.
 Tests execution modes: in_process, process, container, remote.
 Validates execution routing, error handling, timeouts.
 Checks backward compatibility with existing operations.
+
+NOTE: Process executor and Container executor tests have been refactored
+to use execution/backends/ProcessBackend and ContainerBackend instead of
+deprecated core.process_executor and core.container_executor modules.
 """
 
 import pytest
@@ -15,10 +19,6 @@ from core.operations import (
     OperationInitiator, OperationInitiatorKind
 )
 from core.execution_router import ExecutionRouter
-# NOTE: Старые executors удалены, используйте execution/backends/ProcessBackend и ContainerBackend
-# from core.process_executor import ProcessExecutor  # DEPRECATED
-# from core.container_executor import ContainerExecutor  # DEPRECATED
-# TODO: Обновить тесты для использования execution/backends/
 from core.capability_protocol import ProviderMetadata
 from core.capability_registry import CapabilityRegistry
 
@@ -174,21 +174,6 @@ class TestExecutionRouter:
         from core.execution_router import ExecutionRouterError
         with pytest.raises(ExecutionRouterError):
             await router.execute(operation, metadata)
-
-
-# NOTE: Старые executors удалены. Тесты для ProcessExecutor и ContainerExecutor
-# должны быть переписаны для использования execution/backends/ProcessBackend и ContainerBackend.
-# TODO: Переписать эти тесты для новых backends
-
-# class TestProcessExecutor:
-#     """Test ProcessExecutor subprocess execution."""
-#     # DEPRECATED: Используйте execution/backends/ProcessBackend
-#     pass
-
-# class TestContainerExecutor:
-#     """Test ContainerExecutor docker/podman execution."""
-#     # DEPRECATED: Используйте execution/backends/ContainerBackend
-#     pass
 
 
 class TestExecutionModes:

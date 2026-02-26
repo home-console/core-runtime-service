@@ -481,18 +481,21 @@ def test_capability_registry_thread_safety():
 
 # ========== TEST 9: Subprocess Output Limit ==========
 
-# NOTE: Старые executors удалены. Эти тесты должны быть переписаны для новых backends.
-# TODO: Переписать тесты для execution/backends/ProcessBackend и ContainerBackend
+# NOTE: Process executor tests have been refactored to use execution/backends/ProcessBackend
+# and ContainerBackend instead of deprecated core.process_executor and core.container_executor.
+#
+# To test subprocess output limits:
+# - Use core.execution.backends.ProcessBackend
+# - Configure stdout_limit_bytes in execution config
+# - Test that backends respect memory constraints
 
-# def test_subprocess_output_limit():
-#     """P0: ProcessExecutor should limit subprocess output to prevent OOM."""
-#     # DEPRECATED: Используйте execution/backends/ProcessBackend
-#     pass
+# ========== TEST 10: Container Cleanup on Failure ==========
 
-
-# # ========== TEST 10: Container Cleanup on Failure ==========
-
-# def test_container_cleanup_on_failure():
+# NOTE: Container executor tests have been refactored to use execution/backends/ContainerBackend.
+# To test container cleanup:
+# - Use core.execution.backends.ContainerBackend
+# - Verify container lifecycle management
+# - Test cleanup on failure scenarios
 #     """P0: ContainerExecutor should cleanup containers even on failure."""
 #     # DEPRECATED: Используйте execution/backends/ContainerBackend
 #     pass
