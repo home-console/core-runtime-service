@@ -297,7 +297,7 @@ setup_systemd_service() {
   
   log_info "Setting up systemd service..."
   
-  # Create service file
+  # Create environment file for systemd (contains sensitive tokens)
   cat > "$tmp_service_file" << 'EOF'
 [Unit]
 Description=HomeConsole Remote Agent
@@ -311,27 +311,40 @@ Restart=always
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
+EnvironmentFile=%ENV_FILE%
 Environment="RC_SERVER_HOST=%HOST%"
 Environment="RC_SERVER_PORT=%PORT%"
 Environment="RC_SERVER_PROTOCOL=%PROTOCOL%"
 Environment="RC_USE_TLS=%USE_TLS%"
-Environment="RC_AUTH_TOKEN=%TOKEN%"
 
 [Install]
 WantedBy=multi-user.target
 EOF
   
-  # Substitute variables
+  # Create environment file with sensitive tokens (restrictive permissions)
+  local env_file="/etc/systemd/system/${SERVICE_NAME}.env"
+  cat > "$tmp_service_file.env" << EOFENV
+RC_ENROLLMENT_TOKEN=%TOKEN%
+RC_AUTH_TOKEN=%TOKEN%
+EOFENV
+  
+  chmod 600 "$tmp_service_file.env"
+  
+  # Substitute variables in service file
   sed -i "s|%BINARY_PATH%|$binary_path|g" "$tmp_service_file"
+  sed -i "s|%ENV_FILE%|$env_file|g" "$tmp_service_file"
   sed -i "s|%HOST%|$RC_SERVER_HOST|g" "$tmp_service_file"
   sed -i "s|%PORT%|$RC_SERVER_PORT|g" "$tmp_service_file"
   sed -i "s|%PROTOCOL%|$RC_SERVER_PROTOCOL|g" "$tmp_service_file"
   sed -i "s|%USE_TLS%|$RC_USE_TLS|g" "$tmp_service_file"
-  # Note: TOKEN should NOT be in service file (security risk)
+  
+  # Substitute token in env file
+  sed -i "s|%TOKEN%|$ENROLLMENT_TOKEN|g" "$tmp_service_file.env"
   
   # Copy to system location (requires sudo)
   if sudo -n true 2>/dev/null; then
     sudo mv "$tmp_service_file" "$service_file"
+    sudo mv "$tmp_service_file.env" "$env_file"
     sudo systemctl daemon-reload
     sudo systemctl enable "$SERVICE_NAME"
     sudo systemctl start "$SERVICE_NAME"
@@ -339,7 +352,7 @@ EOF
     return 0
   else
     log_warn "sudo not available or password required, systemd setup skipped"
-    rm -f "$tmp_service_file"
+    rm -f "$tmp_service_file" "$tmp_service_file.env"
     return 0  # Non-fatal
   fi
 }
@@ -442,10 +455,28 @@ main() {
   local binary_path="${INSTALL_DIR}/${BINARY_NAME}"
   setup_systemd_service "$binary_path" || true  # Non-fatal
   
-  # Step 9: Set environment variables for direct execution
+  # Step 9: Create temporary config with enrollment token
+  # This allows remote-client to read enrollment_token on first startup
+  # The config file should be deleted after successful registration
+  log_info "Creating temporary enrollment config..."
+  
+  cat > "${INSTALL_DIR}/bootstrap.yaml" << EOFCONFIG
+# Bootstrap configuration with enrollment token
+# This file should be deleted after successful agent registration
+security:
+  enrollment_token: "$ENROLLMENT_TOKEN"
+EOFCONFIG
+  
+  chmod 600 "${INSTALL_DIR}/bootstrap.yaml"
+  log_info "Bootstrap config created (will be auto-removed after registration)"
+
+  # Step 10: Set environment variables for direct execution
+  # Export enrollment token (primary) and auth token (fallback) for remote-client registration
+  export RC_ENROLLMENT_TOKEN="$ENROLLMENT_TOKEN"
   export RC_AUTH_TOKEN="$ENROLLMENT_TOKEN"
   
-  # Step 10: Start agent process
+  # Additional environment for config file path
+  export RC_CONFIG_BOOTSTRAP="${INSTALL_DIR}/bootstrap.yaml"
   log_info "Starting agent process..."
   
   # Try to start via systemd first
