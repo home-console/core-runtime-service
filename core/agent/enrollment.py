@@ -317,6 +317,23 @@ class AgentEnrollmentManager:
                 elif token.status == EnrollmentTokenStatus.REVOKED:
                     raise ValueError("enrollment_token revoked")
             
+            # Token is valid - mark as used and clean up
+            now = datetime.now(timezone.utc).isoformat()
+            
+            # Update token status in memory
+            if token_id in self._pending_tokens:
+                token = self._pending_tokens[token_id]
+                token.status = EnrollmentTokenStatus.USED
+                token.used_at = now
+            
+            # Delete hash from SecretStore (one-time use enforcement)
+            try:
+                hash_key = f"{self._token_hash_prefix}{token_id}"
+                await self._secret_store.delete(hash_key)
+            except Exception:
+                # Deletion is best effort, doesn't block registration
+                pass
+            
             # Token is valid
             return agent_name
             
