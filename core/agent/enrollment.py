@@ -239,6 +239,91 @@ class AgentEnrollmentManager:
         await self._secret_store.put(hash_key, token.token_hash.encode("utf-8"))
 
         return signed_token
+
+    async def validate_enrollment_token(self, enrollment_token: str) -> str:
+        """
+        Validate HMAC-signed enrollment token during agent registration.
+        
+        This is called when agent sends register message with enrollment_token.
+        
+        Args:
+            enrollment_token: HMAC-signed token string (payload.signature format)
+            
+        Returns:
+            agent_name if token is valid
+            
+        Raises:
+            ValueError: If token invalid, expired, or already used
+        """
+        if not enrollment_token:
+            raise ValueError("enrollment_token required")
+        
+        try:
+            # Split token into payload and signature
+            parts = enrollment_token.split(".")
+            if len(parts) != 2:
+                raise ValueError("Invalid token format")
+            
+            payload_b64, signature_b64 = parts
+            
+            # Decode payload and signature
+            def _b64url_decode(data: str) -> bytes:
+                # Add padding if needed
+                padded = data + "=" * (4 - len(data) % 4)
+                return base64.urlsafe_b64decode(padded)
+            
+            try:
+                payload_json = _b64url_decode(payload_b64)
+                provided_signature = _b64url_decode(signature_b64)
+            except Exception:
+                raise ValueError("Invalid token encoding")
+            
+            # Parse payload
+            try:
+                payload = json.loads(payload_json)
+            except Exception:
+                raise ValueError("Invalid payload JSON")
+            
+            token_id = payload.get("token_id")
+            agent_name = payload.get("agent_name")
+            expires_at_str = payload.get("expires_at")
+            
+            if not all([token_id, agent_name, expires_at_str]):
+                raise ValueError("Missing required token fields")
+            
+            # Check expiration
+            try:
+                expires = datetime.fromisoformat(expires_at_str)
+                now = datetime.now(timezone.utc)
+                if expires <= now:
+                    raise ValueError("enrollment_token expired")
+            except ValueError as e:
+                if "expired" in str(e):
+                    raise
+                raise ValueError("Invalid expiration timestamp")
+            
+            # Verify HMAC signature
+            hmac_key = await self._get_hmac_key()
+            expected_signature = hmac.new(hmac_key, payload_json, hashlib.sha256).digest()
+            
+            if not hmac.compare_digest(provided_signature, expected_signature):
+                raise ValueError("enrollment_token signature invalid")
+            
+            # Check if token already used
+            if token_id in self._pending_tokens:
+                token = self._pending_tokens[token_id]
+                if token.status == EnrollmentTokenStatus.USED:
+                    raise ValueError("enrollment_token already used")
+                elif token.status == EnrollmentTokenStatus.REVOKED:
+                    raise ValueError("enrollment_token revoked")
+            
+            # Token is valid
+            return agent_name
+            
+        except ValueError:
+            raise
+        except Exception as e:
+            raise ValueError(f"enrollment_token validation failed: {e}")
     
     async def enroll_agent(
         self,
