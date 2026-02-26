@@ -1,7 +1,11 @@
 """Step 15: Agent Control Plane Module."""
 
+import asyncio
+import logging
 import os
 from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
 from core.runtime_module import RuntimeModule
 from core.http_registry import HttpEndpoint
 from core.agents.deployment_tracker import DeploymentTracker
@@ -25,6 +29,11 @@ from modules.agent.services import (
     admin_agent_get_deployment_status,
     admin_agent_get_deployment_metrics,
     admin_agent_heartbeat,
+    admin_agent_get_heartbeat_status,
+    admin_agent_check_agents_health,
+    admin_agent_list_online_agents,
+    admin_agent_download_checksum,
+    admin_agent_download_binary,
 )
 
 
@@ -165,6 +174,30 @@ class AgentControlPlaneModule(RuntimeModule):
             wrap_agent(admin_agent_heartbeat),
         )
         
+        # ==== Heartbeat Monitoring Services (TASK 1.3) ====
+        await services.register(
+            "admin.agent.get_heartbeat_status",
+            wrap_agent(admin_agent_get_heartbeat_status),
+        )
+        await services.register(
+            "admin.agent.check_agents_health",
+            wrap_agent(admin_agent_check_agents_health),
+        )
+        await services.register(
+            "admin.agent.list_online_agents",
+            wrap_agent(admin_agent_list_online_agents),
+        )
+        
+        # ==== Download Services (TASK 2.2) ====
+        await services.register(
+            "admin.agent.download_checksum",
+            wrap_agent(admin_agent_download_checksum),
+        )
+        await services.register(
+            "admin.agent.download_binary",
+            wrap_agent(admin_agent_download_binary),
+        )
+        
         # Register HTTP endpoints for Agent Control Plane
         # Enrollment endpoints
         self.context.http.register(HttpEndpoint(
@@ -232,6 +265,42 @@ class AgentControlPlaneModule(RuntimeModule):
             description="Receive heartbeat from agent"
         ))
         
+        self.context.http.register(HttpEndpoint(
+            method="GET",
+            path="/admin/v1/agents/{agent_id}/heartbeat",
+            service="admin.agent.get_heartbeat_status",
+            description="Get heartbeat status for specific agent"
+        ))
+        
+        self.context.http.register(HttpEndpoint(
+            method="GET",
+            path="/admin/v1/agents/health/check",
+            service="admin.agent.check_agents_health",
+            description="Check health of all agents"
+        ))
+        
+        self.context.http.register(HttpEndpoint(
+            method="GET",
+            path="/admin/v1/agents/online",
+            service="admin.agent.list_online_agents",
+            description="List all currently online agents"
+        ))
+        
+        # Download endpoints (TASK 2.2)
+        self.context.http.register(HttpEndpoint(
+            method="GET",
+            path="/admin/v1/agents/download/checksum",
+            service="admin.agent.download_checksum",
+            description="Get SHA256 checksum of agent binary"
+        ))
+        
+        self.context.http.register(HttpEndpoint(
+            method="GET",
+            path="/admin/v1/agents/download/binary",
+            service="admin.agent.download_binary",
+            description="Get agent binary download metadata and URL"
+        ))
+        
         # Capability routing endpoints
         self.context.http.register(HttpEndpoint(
             method="GET",
@@ -242,9 +311,12 @@ class AgentControlPlaneModule(RuntimeModule):
 
     async def start(self) -> None:
         """Start Agent Control Plane module."""
-        # Nothing to do for startup
-        # Agent manager and registry are initialized in register()
-        pass
+        # TASK 1.3: Start background health monitoring task
+        from modules.agent.services import _monitor_agent_health_background
+        
+        if self.runtime:
+            asyncio.create_task(_monitor_agent_health_background(self.runtime))
+            logger.info("✅ Agent health monitoring background task started")
 
     async def stop(self) -> None:
         """Stop Agent Control Plane module."""

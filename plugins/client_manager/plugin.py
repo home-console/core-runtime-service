@@ -228,6 +228,11 @@ class ClientManagerPlugin(BasePlugin):
             from app.core.security.auth_service import AuthService
 
             self.handler = WebSocketHandler()
+            
+            # НОВОЕ (TASK 1.3): Передаем runtime для интеграции с DeploymentTracker
+            if self.runtime:
+                self.handler.set_runtime(self.runtime)
+                logger.info("Runtime передан WebSocketHandler для интеграции с DeploymentTracker\")
 
             try:
                 auth_service = AuthService()

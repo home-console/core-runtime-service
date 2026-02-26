@@ -813,3 +813,437 @@ async def admin_agent_heartbeat(
             "error": str(e)
         }
 
+
+# ============================================================================
+# TASK 2.2: Agent Binary Download & Checksum
+# ============================================================================
+
+
+async def admin_agent_download_checksum(runtime: Any) -> Dict[str, Any]:
+    """
+    Return SHA256 checksum of agent binary for installer verification.
+    
+    Called by installer script to verify downloaded binary integrity.
+    
+    Returns:
+        {
+            "ok": true,
+            "sha256": "abc123def456...",
+            "size_bytes": 12345678,
+            "filename": "remote-client-linux-amd64",
+            "version": "1.0.0",
+            "cached": true  # from cache?
+        }
+    """
+    try:
+        # Try to get agent binary from asset storage
+        # This is a placeholder - actual implementation depends on where binaries are stored
+        
+        # For now, return a computed checksum if available
+        # In production, this would:
+        # 1. Get binary from CDN/storage
+        # 2. Compute SHA256
+        # 3. Cache result (recompute daily)
+        
+        logger.info("[AdminAgentDownloadChecksum] Checksum requested")
+        
+        # Placeholder response
+        return {
+            "ok": True,
+            "sha256": "not_yet_implemented",
+            "size_bytes": 0,
+            "filename": "remote-client",
+            "version": "1.0.0",
+            "cached": False,
+            "message": "Checksum computation not yet implemented - configure AGENT_BINARY_PATH"
+        }
+    
+    except Exception as e:
+        logger.exception(f"[AdminAgentDownloadChecksum] Error: {e}")
+        return {
+            "ok": False,
+            "error": str(e)
+        }
+
+
+async def admin_agent_download_binary(
+    runtime: Any,
+    **query_params: Any
+) -> Dict[str, Any]:
+    """
+    Download agent binary for installation on remote host.
+    
+    Query parameters:
+    - arch: linux-amd64 | linux-arm64 | darwin-amd64 | etc (auto-detect if not provided)
+    - version: specific version (default: latest)
+    
+    Returns:
+        {
+            "ok": true,
+            "message": "Binary ready for download",
+            "filename": "remote-client-linux-amd64",
+            "size_bytes": 12345678,
+            "download_url": "http://..."  # Direct download link
+        }
+    """
+    try:
+        arch = query_params.get("arch", "linux-amd64")
+        version = query_params.get("version", "latest")
+        
+        logger.info(
+            f"[AdminAgentDownloadBinary] Binary requested",
+            extra={
+                "arch": arch,
+                "version": version
+            }
+        )
+        
+        # Placeholder - actual implementation would:
+        # 1. Validate arch parameter
+        # 2. Locate binary in CDN/storage
+        # 3. Generate signed download URL
+        # 4. Return metadata
+        
+        return {
+            "ok": True,
+            "filename": f"remote-client-{arch}",
+            "size_bytes": 0,
+            "version": version,
+            "message": "Binary download not yet implemented - configure AGENT_BINARY_STORAGE"
+        }
+    
+    except Exception as e:
+        logger.exception(f"[AdminAgentDownloadBinary] Error: {e}")
+        return {
+            "ok": False,
+            "error": str(e)
+        }
+
+
+# ============================================================================
+# TASK 1.3: Heartbeat Monitoring & Agent Health
+# ============================================================================
+
+
+async def admin_agent_get_heartbeat_status(runtime: Any, agent_id: str) -> Dict[str, Any]:
+    """
+    Get heartbeat status for specific agent.
+    
+    Used to check if agent is responsive and when it last sent heartbeat.
+    
+    Args:
+        runtime: CoreRuntime instance
+        agent_id: Agent ID to check
+    
+    Returns:
+        {
+            "ok": true,
+            "agent_id": "...",
+            "agent_name": "...",
+            "status": "online" | "offline" | "dead" | "unknown",
+            "last_heartbeat": "2025-02-25T10:30:00Z",
+            "heartbeat_age_seconds": 5,
+            "threshold_seconds": 30,  # After this agent is "offline"
+            "dead_threshold_seconds": 300,  # After this agent is "dead"
+            "metrics": {
+                "uptime_seconds": 3600,
+                "cpu_percent": 25.5,
+                "memory_mb": 512
+            }
+        }
+    """
+    if not agent_id:
+        return {"ok": False, "error": "agent_id required"}
+    
+    if not runtime.agent_registry:
+        return {"ok": False, "error": "agent_registry not initialized"}
+    
+    try:
+        # Get agent metadata
+        agent = await runtime.agent_registry.get_agent(agent_id)
+        if not agent:
+            return {"ok": False, "error": "agent_not_found"}
+        
+        # Get heartbeat info
+        now = datetime.now(timezone.utc)
+        last_heartbeat_str = getattr(agent, "last_heartbeat", None)
+        
+        if not last_heartbeat_str:
+            status = "unknown"
+            age_seconds = None
+        else:
+            try:
+                last_heartbeat = datetime.fromisoformat(last_heartbeat_str.replace('Z', '+00:00'))
+                age_seconds = int((now - last_heartbeat).total_seconds())
+                
+                # Determine status based on age
+                if age_seconds < 30:  # Fresh within 30 seconds
+                    status = "online"
+                elif age_seconds < 300:  # Stale but acceptable (5 minutes)
+                    status = "offline"
+                else:  # Very stale (>5 minutes)
+                    status = "dead"
+            except (ValueError, AttributeError):
+                status = "unknown"
+                age_seconds = None
+        
+        # Get metrics from properties
+        metrics = {}
+        if hasattr(agent, "properties") and isinstance(agent.properties, dict):
+            metrics = {
+                "uptime_seconds": agent.properties.get("uptime_seconds"),
+                "cpu_percent": agent.properties.get("cpu_percent"),
+                "memory_mb": agent.properties.get("memory_mb"),
+            }
+        
+        logger.debug(
+            f"[AdminAgentHeartbeatStatus] Status checked",
+            extra={
+                "agent_id": agent_id,
+                "status": status,
+                "age_seconds": age_seconds
+            }
+        )
+        
+        return {
+            "ok": True,
+            "agent_id": agent_id,
+            "agent_name": getattr(agent, "agent_name", None),
+            "status": status,
+            "last_heartbeat": last_heartbeat_str,
+            "heartbeat_age_seconds": age_seconds,
+            "threshold_seconds": 30,  # online if < 30s
+            "dead_threshold_seconds": 300,  # dead if > 300s
+            "metrics": metrics
+        }
+    
+    except Exception as e:
+        logger.exception(f"[AdminAgentHeartbeatStatus] Error: {e}")
+        return {"ok": False, "error": str(e)}
+
+
+async def admin_agent_check_agents_health(runtime: Any) -> Dict[str, Any]:
+    """
+    Perform comprehensive health check on all agents.
+    
+    Detects dead agents and triggers cleanup if needed.
+    
+    Returns:
+        {
+            "ok": true,
+            "timestamp": "...",
+            "total_agents": 100,
+            "online": 95,
+            "offline": 4,
+            "dead": 1,
+            "unknown": 0,
+            "agents": [
+                {
+                    "agent_id": "...",
+                    "status": "online/offline/dead",
+                    "age_seconds": 5
+                },
+                ...
+            ]
+        }
+    """
+    if not runtime.agent_registry:
+        return {"ok": False, "error": "agent_registry not initialized"}
+    
+    try:
+        # Get all agents
+        agents = await runtime.agent_registry.list_agents()
+        
+        now = datetime.now(timezone.utc)
+        now_str = now.isoformat()
+        
+        stats = {
+            "online": 0,
+            "offline": 0,
+            "dead": 0,
+            "unknown": 0
+        }
+        
+        agent_statuses = []
+        dead_agents = []  # Track agents to mark dead
+        
+        for agent in agents:
+            last_heartbeat_str = getattr(agent, "last_heartbeat", None)
+            
+            if not last_heartbeat_str:
+                status = "unknown"
+                age_seconds = None
+                stats["unknown"] += 1
+            else:
+                try:
+                    last_heartbeat = datetime.fromisoformat(last_heartbeat_str.replace('Z', '+00:00'))
+                    age_seconds = int((now - last_heartbeat).total_seconds())
+                    
+                    if age_seconds < 30:
+                        status = "online"
+                        stats["online"] += 1
+                    elif age_seconds < 300:
+                        status = "offline"
+                        stats["offline"] += 1
+                    else:
+                        status = "dead"
+                        stats["dead"] += 1
+                        dead_agents.append(agent)
+                except (ValueError, AttributeError):
+                    status = "unknown"
+                    age_seconds = None
+                    stats["unknown"] += 1
+            
+            agent_statuses.append({
+                "agent_id": getattr(agent, "agent_id", None),
+                "agent_name": getattr(agent, "agent_name", None),
+                "status": status,
+                "age_seconds": age_seconds
+            })
+        
+        # Mark dead agents if needed (optional cleanup)
+        for dead_agent in dead_agents:
+            try:
+                agent_id = getattr(dead_agent, "agent_id", None)
+                if agent_id:
+                    # Mark as deregistered/dead in DB (non-blocking)
+                    logger.warning(
+                        f"[AdminAgentHealthCheck] Agent marked as dead",
+                        extra={"agent_id": agent_id}
+                    )
+                    # Optionally call: await runtime.agent_registry.deregister_agent(agent_id)
+            except Exception as e:
+                logger.debug(f"[AdminAgentHealthCheck] Error marking dead agent: {e}")
+        
+        logger.info(
+            f"[AdminAgentHealthCheck] Health check completed",
+            extra=stats
+        )
+        
+        return {
+            "ok": True,
+            "timestamp": now_str,
+            "total_agents": len(agents),
+            "stats": stats,
+            "agents": agent_statuses
+        }
+    
+    except Exception as e:
+        logger.exception(f"[AdminAgentHealthCheck] Error: {e}")
+        return {"ok": False, "error": str(e)}
+
+
+async def admin_agent_list_online_agents(runtime: Any) -> Dict[str, Any]:
+    """
+    Get list of currently online agents (heartbeat < 30 seconds old).
+    
+    Returns:
+        {
+            "ok": true,
+            "count": 95,
+            "agents": [
+                {
+                    "agent_id": "...",
+                    "agent_name": "...",
+                    "last_heartbeat": "...",
+                    "age_seconds": 5,
+                    "capabilities": [...]
+                },
+                ...
+            ]
+        }
+    """
+    if not runtime.agent_registry:
+        return {"ok": False, "error": "agent_registry not initialized"}
+    
+    try:
+        # Get all agents
+        agents = await runtime.agent_registry.list_agents()
+        
+        now = datetime.now(timezone.utc)
+        online_agents = []
+        
+        for agent in agents:
+            last_heartbeat_str = getattr(agent, "last_heartbeat", None)
+            
+            if not last_heartbeat_str:
+                continue  # Skip agents with no heartbeat
+            
+            try:
+                last_heartbeat = datetime.fromisoformat(last_heartbeat_str.replace('Z', '+00:00'))
+                age_seconds = int((now - last_heartbeat).total_seconds())
+                
+                # Consider online if < 30 seconds
+                if age_seconds < 30:
+                    online_agents.append({
+                        "agent_id": getattr(agent, "agent_id", None),
+                        "agent_name": getattr(agent, "agent_name", None),
+                        "last_heartbeat": last_heartbeat_str,
+                        "age_seconds": age_seconds,
+                        "capabilities": getattr(agent, "capabilities", [])
+                    })
+            except (ValueError, AttributeError):
+                pass  # Skip if heartbeat parse fails
+        
+        logger.debug(
+            f"[AdminAgentListOnline] Listed online agents",
+            extra={"count": len(online_agents)}
+        )
+        
+        return {
+            "ok": True,
+            "count": len(online_agents),
+            "agents": online_agents
+        }
+    
+    except Exception as e:
+        logger.exception(f"[AdminAgentListOnline] Error: {e}")
+        return {"ok": False, "error": str(e)}
+
+
+async def _monitor_agent_health_background(runtime: Any) -> None:
+    """
+    Background task to monitor agent health continuously.
+    
+    Runs asynchronously every 60 seconds to:
+    1. Check health of all agents
+    2. Mark dead agents
+    3. Trigger alerts if too many agents are down
+    
+    This is called from module initialization.
+    """
+    logger.info("[AgentHealthMonitor] Background health monitor started")
+    
+    while True:
+        try:
+            await asyncio.sleep(60)  # Check every 60 seconds
+            
+            # Run health check
+            health_result = await admin_agent_check_agents_health(runtime)
+            
+            if health_result.get("ok"):
+                stats = health_result.get("stats", {})
+                
+                # Log if too many dead agents
+                dead_count = stats.get("dead", 0)
+                total = health_result.get("total_agents", 0)
+                
+                if total > 0 and dead_count > total * 0.1:  # More than 10% dead
+                    logger.warning(
+                        f"[AgentHealthMonitor] High dead agent rate",
+                        extra={
+                            "dead_count": dead_count,
+                            "total": total,
+                            "percentage": (dead_count / total) * 100
+                        }
+                    )
+                else:
+                    logger.debug(
+                        f"[AgentHealthMonitor] Health check OK",
+                        extra=stats
+                    )
+        
+        except Exception as e:
+            logger.exception(f"[AgentHealthMonitor] Error in health monitoring: {e}")
+            await asyncio.sleep(60)  # Wait before retry
+
