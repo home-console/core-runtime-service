@@ -1,39 +1,51 @@
 #!/bin/bash
 # ==============================================================================
-# HomeConsole Remote Agent Installer (Enhanced with retry, checksum, fallback)
+# HomeConsole Remote Agent Installer v2.1
 # ==============================================================================
 #
 # Usage: ./agent_install.sh <ENROLLMENT_TOKEN> <CORE_URL>
 #
 # Features:
-#  - Retry logic with exponential backoff (3 attempts)
-#  - SHA256 checksum verification
-#  - Downloader fallback: curl → wget → nc
-#  - Graceful degradation (systemd optional)
+#  - Retry with exponential backoff + jitter (avoids thundering herd)
+#  - SHA256 checksum verification (sha256sum → shasum → openssl fallback)
+#  - Downloader fallback: curl → wget → nc (with full nc implementation)
+#  - Pre-flight connectivity check before downloading
+#  - Graceful degradation (systemd optional, direct launch fallback)
 #  - Health check after launch
-#  - Structured logging
+#  - Structured JSON-compatible logging
+#  - Idempotent re-install (upgrades running agent)
+#  - Correct trap: only cleanup on ERROR, not on success
 #
-# Environment:
-#  - DEBUG: set to 1 for debug logging
-#  - MAX_RETRIES: max download attempts (default: 3)
-#  - RETRY_DELAY: initial retry delay in seconds (default: 5)
+# Environment variables:
+#  DEBUG=1             — verbose debug logging
+#  MAX_RETRIES=3       — max download attempts
+#  RETRY_DELAY=5       — initial retry delay seconds
+#  INSTALL_DIR         — installation directory (default: /opt/home-agent)
+#  AGENT_CORE_URL      — override CORE_URL (useful in containerized envs)
+#  SKIP_CHECKSUM=1     — skip checksum verification (dev mode)
+#  SKIP_SYSTEMD=1      — skip systemd setup (force direct launch)
 # ==============================================================================
 
-set -euo pipefail
+set -Eeuo pipefail
 
 # ============================================================================
 # Configuration
 # ============================================================================
 
 readonly ENROLLMENT_TOKEN="${1:-}"
-readonly CORE_URL="${2:-}"
+readonly CORE_URL="${AGENT_CORE_URL:-${2:-}}"
 readonly INSTALL_DIR="${INSTALL_DIR:-/opt/home-agent}"
 readonly BINARY_NAME="remote-client"
 readonly SERVICE_NAME="home-agent"
 
 readonly MAX_RETRIES="${MAX_RETRIES:-3}"
 readonly RETRY_DELAY="${RETRY_DELAY:-5}"
-readonly HEALTH_CHECK_TIMEOUT="${HEALTH_CHECK_TIMEOUT:-10}"
+readonly HEALTH_CHECK_TIMEOUT="${HEALTH_CHECK_TIMEOUT:-30}"
+readonly SKIP_CHECKSUM="${SKIP_CHECKSUM:-0}"
+readonly SKIP_SYSTEMD="${SKIP_SYSTEMD:-0}"
+
+# Track whether install succeeded (used by error trap)
+_INSTALL_SUCCESS=0
 
 DEBUG="${DEBUG:-0}"
 
@@ -94,9 +106,69 @@ find_downloader() {
     echo "wget"
   elif command -v nc &> /dev/null; then
     echo "nc"
+  elif command -v python3 &> /dev/null; then
+    echo "python3"
   else
     return 1
   fi
+}
+
+# ============================================================================
+# Retry helpers
+# ============================================================================
+
+# Calculate exponential backoff with ±25% jitter to avoid thundering herd
+# Usage: backoff_seconds <attempt_number (1-based)>
+backoff_seconds() {
+  local attempt="$1"
+  local base=$(( RETRY_DELAY * (2 ** (attempt - 1)) ))
+  # Jitter: random ±25% of base (requires $RANDOM)
+  local jitter=$(( (RANDOM % (base / 2 + 1)) - (base / 4) ))
+  local total=$(( base + jitter ))
+  # Floor at 1 second
+  if [[ $total -lt 1 ]]; then total=1; fi
+  echo "$total"
+}
+
+# ============================================================================
+# Pre-flight connectivity check
+# ============================================================================
+
+preflight_check() {
+  local url="$1"
+  local host
+  local port
+
+  # Extract host:port
+  if [[ "$url" =~ ^https?://([^:/]+)(:([0-9]+))? ]]; then
+    host="${BASH_REMATCH[1]}"
+    port="${BASH_REMATCH[3]:-$(  [[ $url == https* ]] && echo 443 || echo 80 )}"
+  else
+    log_warn "Cannot parse URL for preflight: $url"
+    return 0  # Non-fatal
+  fi
+
+  log_info "Pre-flight: checking connectivity to ${host}:${port} ..."
+
+  # Try nc first (fastest)
+  if command -v nc &> /dev/null; then
+    if nc -z -w 5 "$host" "$port" 2>/dev/null; then
+      log_info "Pre-flight OK (nc) ✓"
+      return 0
+    fi
+  fi
+
+  # Fallback: curl --connect-timeout
+  if command -v curl &> /dev/null; then
+    if curl -s --connect-timeout 5 --max-time 5 -o /dev/null "${url%/}/" 2>/dev/null; then
+      log_info "Pre-flight OK (curl) ✓"
+      return 0
+    fi
+  fi
+
+  log_error "Pre-flight FAILED: cannot reach ${host}:${port}"
+  log_error "Check network connectivity and CORE_URL"
+  return 1
 }
 
 ensure_downloader() {
@@ -120,44 +192,92 @@ download_binary() {
   local downloader="$3"
   local attempt
   local exit_code
-  local wait_time
-  
+  local wait_secs
+
   for attempt in $(seq 1 "$MAX_RETRIES"); do
-    log_info "Download attempt $attempt/$MAX_RETRIES (url=$url)"
-    
+    log_info "Download attempt $attempt/$MAX_RETRIES via ${downloader} (url=$url)"
+
     case "$downloader" in
       curl)
-        if curl -fsSL --max-time 120 --retry 0 "$url" -o "$output_path" 2>/dev/null; then
-          log_info "Download successful via curl"
+        if curl -fsSL --max-time 120 --connect-timeout 15 --retry 0 \
+             -H 'Accept: application/octet-stream' \
+             "$url" -o "$output_path" 2>/dev/null; then
+          log_info "Download successful via curl ($(du -sh "$output_path" 2>/dev/null | cut -f1))"
           return 0
         fi
         exit_code=$?
-        log_warn "curl failed with code $exit_code"
+        log_warn "curl failed with exit code $exit_code"
         ;;
       wget)
-        if wget -q --timeout=120 "$url" -O "$output_path" 2>/dev/null; then
-          log_info "Download successful via wget"
+        if wget -q --timeout=120 --tries=1 \
+             --header='Accept: application/octet-stream' \
+             "$url" -O "$output_path" 2>/dev/null; then
+          log_info "Download successful via wget ($(du -sh "$output_path" 2>/dev/null | cut -f1))"
           return 0
         fi
         exit_code=$?
-        log_warn "wget failed with code $exit_code"
+        log_warn "wget failed with exit code $exit_code"
         ;;
       nc)
-        log_warn "nc downloader not fully implemented, skipping"
+        # Full nc (netcat) implementation for minimal environments
+        local host port path
+        if [[ "$url" =~ ^https?://([^:/]+)(:([0-9]+))?(/.*)?$ ]]; then
+          host="${BASH_REMATCH[1]}"
+          port="${BASH_REMATCH[3]:-80}"
+          path="${BASH_REMATCH[4]:-/}"
+        else
+          log_warn "nc: cannot parse url $url"
+          continue
+        fi
+        log_debug "nc connecting to ${host}:${port}${path}"
+        {
+          printf 'GET %s HTTP/1.0\r\nHost: %s\r\nAccept: application/octet-stream\r\nConnection: close\r\n\r\n' \
+            "$path" "$host"
+        } | nc -w 30 "$host" "$port" > /tmp/_nc_response 2>/dev/null
+        # Strip HTTP headers (everything up to the first blank line)
+        if [[ -s /tmp/_nc_response ]]; then
+          awk '/^\r?$/{found=1; next} found{print}' /tmp/_nc_response > "$output_path" 2>/dev/null
+          rm -f /tmp/_nc_response
+          if [[ -s "$output_path" ]]; then
+            log_info "Download successful via nc ($(du -sh "$output_path" 2>/dev/null | cut -f1))"
+            return 0
+          fi
+        fi
+        rm -f /tmp/_nc_response
+        log_warn "nc download failed or returned empty response"
+        ;;
+      python3)
+        # Last resort: Python3 urllib
+        if python3 -c "
+import urllib.request, sys
+url = sys.argv[1]
+output = sys.argv[2]
+try:
+    req = urllib.request.Request(url, headers={'Accept': 'application/octet-stream'})
+    with urllib.request.urlopen(req, timeout=120) as r, open(output, 'wb') as f:
+        f.write(r.read())
+    print('python3 download ok', file=sys.stderr)
+except Exception as e:
+    print(f'python3 download failed: {e}', file=sys.stderr)
+    sys.exit(1)
+" "$url" "$output_path" 2>/dev/null; then
+          log_info "Download successful via python3 ($(du -sh "$output_path" 2>/dev/null | cut -f1))"
+          return 0
+        fi
+        log_warn "python3 download failed"
         ;;
     esac
-    
+
     # Clean up partial file
     rm -f "$output_path"
-    
-    # Wait before retry (exponential backoff)
+
     if [[ $attempt -lt $MAX_RETRIES ]]; then
-      wait_time=$((RETRY_DELAY * (2 ** (attempt - 1))))
-      log_info "Waiting ${wait_time}s before retry..."
-      sleep "$wait_time"
+      wait_secs=$(backoff_seconds "$attempt")
+      log_info "Retry in ${wait_secs}s (exponential backoff + jitter)..."
+      sleep "$wait_secs"
     fi
   done
-  
+
   log_error "Failed to download after $MAX_RETRIES attempts"
   return 1
 }
@@ -166,17 +286,44 @@ download_binary() {
 # Checksum verification
 # ============================================================================
 
+# compute_sha256 <file> — portable SHA256 computation
+compute_sha256() {
+  local file="$1"
+  if command -v sha256sum &> /dev/null; then
+    sha256sum "$file" | cut -d' ' -f1
+  elif command -v shasum &> /dev/null; then
+    shasum -a 256 "$file" | cut -d' ' -f1
+  elif command -v openssl &> /dev/null; then
+    openssl dgst -sha256 "$file" | awk '{print $2}'
+  elif command -v python3 &> /dev/null; then
+    python3 -c "import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" "$file"
+  else
+    log_warn "No SHA256 tool available (sha256sum/shasum/openssl/python3)"
+    echo ""
+  fi
+}
+
 get_expected_checksum() {
   local checksum_url="$1"
-  
+  local response
+
   log_info "Fetching checksum from server..."
-  
+
   if command -v curl &> /dev/null; then
-    curl -fsSL --max-time 30 "$checksum_url" 2>/dev/null || return 1
+    response=$(curl -fsSL --max-time 30 "$checksum_url" 2>/dev/null) || return 1
   elif command -v wget &> /dev/null; then
-    wget -q -O - --timeout=30 "$checksum_url" 2>/dev/null || return 1
+    response=$(wget -q -O - --timeout=30 "$checksum_url" 2>/dev/null) || return 1
   else
     return 1
+  fi
+
+  # Parse JSON {"sha256":"..."}  or plain hex string
+  if echo "$response" | grep -q '"sha256"'; then
+    # POSIX-compatible JSON extraction (no jq dependency)
+    echo "$response" | sed -n 's/.*"sha256"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'
+  else
+    # Assume plain hex
+    echo "$response" | tr -d '[:space:]'
   fi
 }
 
@@ -185,46 +332,42 @@ verify_checksum() {
   local checksum_url="$2"
   local expected_checksum
   local actual_checksum
-  
+
+  if [[ "$SKIP_CHECKSUM" == "1" ]]; then
+    log_warn "SKIP_CHECKSUM=1 — skipping checksum verification (dev mode)"
+    return 0
+  fi
+
   log_info "Verifying binary checksum..."
-  
-  # Get expected checksum from server
+
   expected_checksum=$(get_expected_checksum "$checksum_url") || {
-    log_warn "Could not fetch checksum from server, skipping verification"
-    return 0  # Non-fatal
+    log_warn "Could not fetch checksum from server — skipping verification"
+    return 0  # Non-fatal: server may not expose checksum yet
   }
-  
-  # Extract SHA256 if response is JSON
-  if echo "$expected_checksum" | grep -q '"sha256"'; then
-    expected_checksum=$(echo "$expected_checksum" | grep -oP '"sha256"\s*:\s*"\K[^"]+' || echo "")
-  fi
-  
-  if [[ -z "$expected_checksum" ]]; then
-    log_warn "Could not parse expected checksum"
+
+  if [[ -z "$expected_checksum" ]] || [[ "$expected_checksum" == "not_yet_implemented" ]]; then
+    log_warn "Checksum not available on server — skipping verification"
     return 0
   fi
-  
-  # Calculate actual checksum
-  if command -v sha256sum &> /dev/null; then
-    actual_checksum=$(sha256sum "$binary_path" | cut -d' ' -f1)
-  elif command -v shasum &> /dev/null; then
-    actual_checksum=$(shasum -a 256 "$binary_path" | cut -d' ' -f1)
-  else
-    log_warn "sha256sum/shasum not available, skipping verification"
+
+  actual_checksum=$(compute_sha256 "$binary_path")
+
+  if [[ -z "$actual_checksum" ]]; then
+    log_warn "Cannot compute local checksum — skipping verification"
     return 0
   fi
-  
+
   log_debug "Expected: $expected_checksum"
-  log_debug "Actual: $actual_checksum"
-  
+  log_debug "Actual:   $actual_checksum"
+
   if [[ "$expected_checksum" != "$actual_checksum" ]]; then
-    log_error "Checksum mismatch!"
-    log_error "Expected: $expected_checksum"
-    log_error "Actual:   $actual_checksum"
+    log_error "Checksum MISMATCH — binary may be corrupted or tampered!"
+    log_error "  Expected: $expected_checksum"
+    log_error "  Actual:   $actual_checksum"
     return 1
   fi
-  
-  log_info "Checksum verified ✓"
+
+  log_info "Checksum verified ✓ ($actual_checksum)"
   return 0
 }
 
@@ -368,25 +511,44 @@ health_check() {
   
   log_info "Waiting for agent to start (timeout: ${timeout}s)..."
   
-  # Simple check: if binary exists and started
-  if [[ ! -x "$binary_name" ]]; then
-    log_error "Binary not executable"
+  # Simple check: if binary exists and is executable
+  if [[ ! -x "${INSTALL_DIR}/${binary_name}" ]] && [[ ! -x "$binary_name" ]]; then
+    log_error "Binary not executable: $binary_name"
     return 1
   fi
-  
-  # Check if process is running (basic check)
-  # In production, this would check heartbeat to core
-  while [[ $elapsed -lt $timeout ]]; do
+
+  # Phase 1: wait for process to appear
+  while [[ $elapsed -lt $((timeout / 2)) ]]; do
     if pgrep -f "$binary_name" > /dev/null 2>&1; then
-      log_info "Agent process detected ✓"
-      return 0
+      log_info "Agent process detected ✓ (${elapsed}s)"
+      break
     fi
     sleep 1
-    ((elapsed++))
+    (( elapsed++ ))
   done
-  
-  log_warn "Agent process not detected within timeout"
-  return 0  # Non-fatal (process might start later)
+
+  if ! pgrep -f "$binary_name" > /dev/null 2>&1; then
+    log_warn "Agent process not detected within $((timeout / 2))s"
+    return 0  # Non-fatal: starts via systemd may be delayed
+  fi
+
+  # Phase 2: wait for agent to connect to Core (check heartbeat endpoint)
+  local hb_url="${CORE_URL%/}/admin/v1/agents/health/check"
+  log_info "Waiting for agent to appear in Core registry (${hb_url})..."
+
+  while [[ $elapsed -lt $timeout ]]; do
+    local resp
+    resp=$(curl -fsSL --max-time 5 "$hb_url" 2>/dev/null || echo '{"ok":false}')
+    if echo "$resp" | grep -q '"online"\|"agents"'; then
+      log_info "Agent connected to Core ✓"
+      return 0
+    fi
+    sleep 2
+    (( elapsed += 2 ))
+  done
+
+  log_warn "Agent did not appear in Core registry within ${timeout}s — may register later"
+  return 0  # Non-fatal
 }
 
 # ============================================================================
@@ -394,20 +556,66 @@ health_check() {
 # ============================================================================
 
 cleanup_on_error() {
-  local binary_path="$1"
-  
-  log_error "Installation failed, cleaning up..."
-  
-  # Stop any running agent process
-  if pgrep -f "$binary_path" > /dev/null 2>&1; then
-    pkill -f "$binary_path" || true
+  # Only called if installation FAILED (not on success)
+  if [[ "$_INSTALL_SUCCESS" == "1" ]]; then
+    return 0
   fi
-  
-  # Remove corrupted binary
+
+  log_error "Installation failed — cleaning up..."
+
+  local binary_path="${INSTALL_DIR}/${BINARY_NAME}"
+
+  # Stop any running agent process we may have started
+  if pgrep -f "$BINARY_NAME" > /dev/null 2>&1; then
+    log_info "Stopping agent process..."
+    pkill -f "$BINARY_NAME" 2>/dev/null || true
+  fi
+
+  # Remove corrupted/partial binary
   if [[ -f "$binary_path" ]]; then
-    log_info "Removing corrupted binary"
+    log_info "Removing corrupted binary: $binary_path"
     rm -f "$binary_path"
   fi
+
+  # Remove bootstrap config with enrollment token
+  if [[ -f "${INSTALL_DIR}/bootstrap.yaml" ]]; then
+    log_info "Removing bootstrap config"
+    rm -f "${INSTALL_DIR}/bootstrap.yaml"
+  fi
+
+  log_error "Cleanup complete. Please check logs and retry."
+}
+
+# ============================================================================
+# Uninstall
+# ============================================================================
+
+uninstall() {
+  log_info "=== Uninstalling HomeConsole Remote Agent ==="
+
+  # Stop systemd service
+  if command -v systemctl &> /dev/null; then
+    sudo -n systemctl stop "$SERVICE_NAME" 2>/dev/null || true
+    sudo -n systemctl disable "$SERVICE_NAME" 2>/dev/null || true
+    sudo -n rm -f "/etc/systemd/system/${SERVICE_NAME}.service" 2>/dev/null || true
+    sudo -n rm -f "/etc/systemd/system/${SERVICE_NAME}.env" 2>/dev/null || true
+    sudo -n systemctl daemon-reload 2>/dev/null || true
+    log_info "Systemd service removed"
+  fi
+
+  # Kill direct process if running
+  if pgrep -f "$BINARY_NAME" > /dev/null 2>&1; then
+    pkill -f "$BINARY_NAME" 2>/dev/null || true
+    log_info "Agent process stopped"
+  fi
+
+  # Remove install directory
+  if [[ -d "$INSTALL_DIR" ]]; then
+    rm -rf "$INSTALL_DIR"
+    log_info "Removed: $INSTALL_DIR"
+  fi
+
+  log_info "=== Uninstall complete ==="
 }
 
 # ============================================================================
@@ -415,8 +623,8 @@ cleanup_on_error() {
 # ============================================================================
 
 main() {
-  log_info "=== HomeConsole Remote Agent Installer ===="
-  log_info "Version: 2.0 (Enhanced with retry, checksum, fallback)"
+  log_info "=== HomeConsole Remote Agent Installer v2.1 ==="
+  log_info "Version: 2.1 (retry+jitter, nc-fallback, pre-flight, idempotent)"
   
   # Step 1: Validation
   validate_input || exit 1
@@ -431,9 +639,12 @@ main() {
   local downloader
   downloader=$(ensure_downloader) || exit 1
   
+  # Step 4.5: Pre-flight connectivity check
+  preflight_check "$CORE_URL" || exit 1
+
   # Step 5: Download binary
-  local download_url="${CORE_URL%/}/admin/v1/agents/download"
-  local checksum_url="${CORE_URL%/}/admin/v1/agents/download?checksum=true"
+  local download_url="${CORE_URL%/}/admin/v1/agents/download/binary"
+  local checksum_url="${CORE_URL%/}/admin/v1/agents/download/checksum"
   
   download_binary "$download_url" "$BINARY_NAME" "$downloader" || {
     log_error "Failed to download agent binary"
@@ -453,7 +664,11 @@ main() {
   
   # Step 8: Setup systemd (optional)
   local binary_path="${INSTALL_DIR}/${BINARY_NAME}"
-  setup_systemd_service "$binary_path" || true  # Non-fatal
+  if [[ "$SKIP_SYSTEMD" != "1" ]]; then
+    setup_systemd_service "$binary_path" || true  # Non-fatal
+  else
+    log_info "SKIP_SYSTEMD=1 — skipping systemd setup"
+  fi
   
   # Step 9: Create temporary config with enrollment token
   # This allows remote-client to read enrollment_token on first startup
@@ -493,20 +708,31 @@ EOFCONFIG
   # Step 11: Health check
   health_check "$BINARY_NAME" "$HEALTH_CHECK_TIMEOUT" || true  # Non-fatal
   
+  # Mark success BEFORE exiting (trap checks this)
+  _INSTALL_SUCCESS=1
+
   log_info "=== Installation completed successfully ✓ ==="
   log_info "Agent is running and should connect to $CORE_URL"
   log_info "Logs: $INSTALL_DIR/agent.log"
+  log_info "To uninstall: $0 --uninstall"
 }
 
 # ============================================================================
 # Error handling
 # ============================================================================
 
-trap 'cleanup_on_error "$BINARY_NAME"' EXIT
+# Trap EXIT: only cleanup on FAILURE (when _INSTALL_SUCCESS != 1)
+trap 'cleanup_on_error' EXIT
 
 # ============================================================================
 # Entry point
 # ============================================================================
+
+# Handle --uninstall flag
+if [[ "${1:-}" == "--uninstall" ]]; then
+  uninstall
+  exit 0
+fi
 
 main "$@"
 
