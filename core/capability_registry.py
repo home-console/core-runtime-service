@@ -142,9 +142,18 @@ class CapabilityRegistry:
         # plugin_name -> list of capability_ids that plugin requires
         self._consumers: Dict[str, List[str]] = {}
         
-        # Use threading.Lock for sync getter methods that need lock protection
-        # Async methods can also use threading.Lock safely in asyncio
-        self._lock = threading.Lock()
+        # Thread-safe lock for sync methods (threading.RLock works across threads)
+        self._sync_lock = threading.RLock()
+        # asyncio.Lock for async methods — created lazily per event loop
+        # (asyncio.Lock cannot be shared across event loops)
+        self._async_lock: Optional[asyncio.Lock] = None
+
+    @property
+    def _lock(self) -> asyncio.Lock:
+        """asyncio.Lock for async methods. Created lazily on first access."""
+        if self._async_lock is None:
+            self._async_lock = asyncio.Lock()
+        return self._async_lock
 
     @staticmethod
     def trust_level_to_privilege(trust_level: Optional[Any]) -> str:
@@ -222,7 +231,7 @@ class CapabilityRegistry:
         # This enforces the capability security rules from the trust layer
         _check_capability_namespace_permission(capability_id, plugin_name, plugin_privilege)
         
-        with self._lock:
+        async with self._lock:
             if capability_id not in self._providers:
                 self._providers[capability_id] = []
             
@@ -274,7 +283,7 @@ class CapabilityRegistry:
             process_config: конфиг для process execution 
             container_config: конфиг для container execution 
         """
-        with self._lock:
+        async with self._lock:
             provider = self._get_provider_entry(capability_id, plugin_name)
             if not provider:
                 return
@@ -304,7 +313,7 @@ class CapabilityRegistry:
         """
         Обновить health status провайдера.
         """
-        with self._lock:
+        async with self._lock:
             provider = self._get_provider_entry(capability_id, plugin_name)
             if not provider:
                 return
@@ -315,7 +324,7 @@ class CapabilityRegistry:
 
     async def register_consumer(self, plugin_name: str, capability_id: str) -> None:
         """Зарегистрировать плагин как потребитель capability."""
-        with self._lock:
+        async with self._lock:
             if plugin_name not in self._consumers:
                 self._consumers[plugin_name] = []
             if capability_id not in self._consumers[plugin_name]:
@@ -323,7 +332,7 @@ class CapabilityRegistry:
 
     async def unregister_plugin(self, plugin_name: str) -> None:
         """Удалить плагин из реестра (как провайдер и как потребитель)."""
-        with self._lock:
+        async with self._lock:
             for cap_id, providers in list(self._providers.items()):
                 # Удаляем провайдер по имени
                 self._providers[cap_id] = [
@@ -339,7 +348,7 @@ class CapabilityRegistry:
         
         Приоритет: здоровые провайдеры первыми, локальные перед remote.
         """
-        with self._lock:
+        with self._sync_lock:
             providers = self._providers.get(capability_id, [])
             
             # Сортируем: здоровые первыми, затем локальные перед remote
@@ -355,7 +364,7 @@ class CapabilityRegistry:
         Список провайдеров, отсортированные по здоровью (только здоровые).
         Используется при выборе провайдера для операции.
         """
-        with self._lock:
+        with self._sync_lock:
             providers = self._providers.get(capability_id, [])
             
             # Только здоровые: локальные перед remote
@@ -384,7 +393,7 @@ class CapabilityRegistry:
         provider_name: str
     ) -> Optional[Dict[str, Any]]:
         """Получить информацию о конкретном провайдере capability."""
-        with self._lock:
+        with self._sync_lock:
             provider = self._get_provider_entry(capability_id, provider_name)
             if provider:
                 return dict(provider)  # Copy для безопасности
@@ -395,13 +404,13 @@ class CapabilityRegistry:
         capability_id: str
     ) -> List[Dict[str, Any]]:
         """Получить полную информацию всех провайдеров capability."""
-        with self._lock:
+        with self._sync_lock:
             providers = self._providers.get(capability_id, [])
             return [dict(p) for p in providers]  # Копируем для безопасности
 
     def get_required_capabilities(self, plugin_name: str) -> List[str]:
         """Получить список capability, требуемых плагином."""
-        with self._lock:
+        with self._sync_lock:
             return list(self._consumers.get(plugin_name, []))
 
     def provider_info_to_metadata(self, provider_info: Dict[str, Any]) -> ProviderMetadata:
@@ -444,7 +453,7 @@ class CapabilityRegistry:
             является snapshot'ом состояния на момент выбора. Провайдер может
             измениться или исчезнуть после возврата из метода.
         """
-        with self._lock:
+        with self._sync_lock:
             providers = self._providers.get(capability_id, [])
             if not providers:
                 return None

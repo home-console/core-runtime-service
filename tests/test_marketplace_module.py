@@ -62,10 +62,13 @@ def mock_runtime(temp_dir):
     runtime.config = {"plugins_dir": str(temp_dir / "plugins")}
     runtime.storage = Mock()
     runtime.storage.get = Mock(return_value={})
+    runtime.storage.get_sync = Mock(return_value={})
     runtime.storage.set = Mock()
     runtime.plugin_manager = AsyncMock()
     runtime.operations = AsyncMock()
     runtime.capabilities = AsyncMock()
+    # Prevent auto-create of context (so module uses storage directly)
+    runtime.create_context = Mock(return_value=None)
     return runtime
 
 
@@ -410,7 +413,7 @@ class TestMarketplaceModule:
         module = MarketplaceModule(mock_runtime)
         caps = module.list_capabilities()
         
-        assert len(caps) == 6
+        assert len(caps) == 11
         cap_names = [cap["name"] for cap in caps]
         
         assert "marketplace.install" in cap_names
@@ -426,6 +429,7 @@ class TestMarketplaceModule:
             "test_plugin": {"name": "test_plugin", "version": "1.0.0"},
         }
         mock_runtime.storage.get = Mock(return_value=installed)
+        mock_runtime.storage.get_sync = Mock(return_value=installed)
         
         module = MarketplaceModule(mock_runtime)
         result = module.list_installed_plugins()
@@ -442,6 +446,7 @@ class TestMarketplaceModule:
         }
         installed = {"test_plugin": plugin_manifest}
         mock_runtime.storage.get = Mock(return_value=installed)
+        mock_runtime.storage.get_sync = Mock(return_value=installed)
         
         module = MarketplaceModule(mock_runtime)
         manifest = module.get_manifest("test_plugin")
@@ -452,6 +457,7 @@ class TestMarketplaceModule:
     def test_get_manifest_not_found(self, mock_runtime):
         """Test getting non-existent manifest."""
         mock_runtime.storage.get = Mock(return_value={})
+        mock_runtime.storage.get_sync = Mock(return_value={})
         
         module = MarketplaceModule(mock_runtime)
         manifest = module.get_manifest("nonexistent")
@@ -470,7 +476,7 @@ class TestMarketplaceModule:
         await module.register()
         
         # Verify operations registered
-        assert mock_runtime.operations.register_handler.call_count == 6
+        assert mock_runtime.operations.register_handler.call_count == 11
     
     @pytest.mark.asyncio
     async def test_health_check(self, mock_runtime):
@@ -480,13 +486,14 @@ class TestMarketplaceModule:
             "plugin2": {"name": "plugin2"},
         }
         mock_runtime.storage.get = Mock(return_value=installed)
+        mock_runtime.storage.get_sync = Mock(return_value=installed)
         
         module = MarketplaceModule(mock_runtime)
         health = await module.health_check()
         
         assert health["status"] == "healthy"
         assert health["installed_plugins_count"] == 2
-        assert len(health["operations_available"]) == 6
+        assert len(health["operations_available"]) == 11
 
 
 # ============================================================================

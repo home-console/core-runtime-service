@@ -112,8 +112,8 @@ async def test_capability_registry_register():
     registry = CapabilityRegistry()
     
     # Register provider
-    registry.register_provider("plugin_a", "cap_a")
-    registry.register_provider("plugin_b", "cap_b")
+    await registry.register_provider("plugin_a", "cap_a")
+    await registry.register_provider("plugin_b", "cap_b")
     
     # Check providers
     assert registry.get_providers("cap_a") == ["plugin_a"]
@@ -127,7 +127,7 @@ async def test_capability_registry_consumer():
     registry = CapabilityRegistry()
     
     # Register consumer
-    registry.register_consumer("plugin_x", "cap_required")
+    await registry.register_consumer("plugin_x", "cap_required")
     
     # Check consumers
     assert registry.get_required_capabilities("plugin_x") == ["cap_required"]
@@ -140,17 +140,17 @@ async def test_capability_registry_validation():
     registry = CapabilityRegistry()
     
     # Register provider
-    registry.register_provider("plugin_a", "cap_available")
+    await registry.register_provider("plugin_a", "cap_available")
     
     # Consumer with available capability
-    registry.register_consumer("plugin_b", "cap_available")
-    ok, missing = registry.validate_plugin_requirements("plugin_b")
+    await registry.register_consumer("plugin_b", "cap_available")
+    ok, missing = await registry.validate_plugin_requirements("plugin_b")
     assert ok is True
     assert missing == []
     
     # Consumer with missing capability
-    registry.register_consumer("plugin_c", "cap_missing")
-    ok, missing = registry.validate_plugin_requirements("plugin_c")
+    await registry.register_consumer("plugin_c", "cap_missing")
+    ok, missing = await registry.validate_plugin_requirements("plugin_c")
     assert ok is False
     assert "cap_missing" in missing
 
@@ -295,15 +295,15 @@ async def test_capability_unregister():
     registry = CapabilityRegistry()
     
     # Register provider
-    registry.register_provider("plugin_a", "cap_a")
-    registry.register_provider("plugin_a", "cap_b")
+    await registry.register_provider("plugin_a", "cap_a")
+    await registry.register_provider("plugin_a", "cap_b")
     
     # Check registered
     assert "plugin_a" in registry.get_providers("cap_a")
     assert "plugin_a" in registry.get_providers("cap_b")
     
     # Unregister
-    registry.unregister_plugin("plugin_a")
+    await registry.unregister_plugin("plugin_a")
     
     # Check unregistered
     assert registry.get_providers("cap_a") == []

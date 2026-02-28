@@ -168,7 +168,8 @@ async def test_core_plugin_can_register_system_capability():
     await registry.register_provider(
         plugin_name="core_auth",
         capability_id="system.auth",
-        provider_type="local"
+        provider_type="local",
+        plugin_privilege="core"
     )
     
     # Should be registered

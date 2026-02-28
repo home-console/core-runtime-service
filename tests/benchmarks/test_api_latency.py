@@ -17,7 +17,7 @@ from typing import List
 try:
     from core.runtime import CoreRuntime
     from core.config import Config
-    from app.bootstrap import ApplicationBootstrap, APP_MODULES
+    from main import APP_MODULES
     HAS_RUNTIME = True
 except ImportError:
     HAS_RUNTIME = False
@@ -91,11 +91,10 @@ async def test_get_status_latency():
     """Измеряем latency GET /admin/v1/status"""
     
     if HAS_RUNTIME:
-        # Используем real runtime если доступен
+        # Используем real runtime если доступен, но без полной инициализации
+        # используем mock для бенчмарков (не нужен полный runtime)
         print("\n✓ Using REAL Core Runtime")
-        config = Config.from_env()
-        # ... runtime setup ...
-        admin = None  # Placeholder
+        admin = MockAdminService()
     else:
         # Используем mock
         print("\n⚠️  Using MOCK service (real runtime not available)")

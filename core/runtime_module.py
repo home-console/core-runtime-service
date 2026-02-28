@@ -81,12 +81,12 @@ class RuntimeModule(ABC):
             else:
                 # Fallback: создаём минимальный context вручную (RuntimeContext уже импортирован выше)
                 self.context = RuntimeContext(
-                    storage=runtime_or_context.storage,
+                    storage=getattr(runtime_or_context, 'storage', None),
                     vault=getattr(runtime_or_context, 'vault', None),
-                    services=runtime_or_context.service_registry,
-                    http=runtime_or_context.http,
-                    capabilities=runtime_or_context.capability_registry,
-                    operations=runtime_or_context.operations,
+                    services=getattr(runtime_or_context, 'service_registry', None),
+                    http=getattr(runtime_or_context, 'http', None),
+                    capabilities=getattr(runtime_or_context, 'capability_registry', None),
+                    operations=getattr(runtime_or_context, 'operations', None),
                     state=getattr(runtime_or_context, 'state_engine', None),
                 )
 

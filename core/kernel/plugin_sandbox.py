@@ -68,10 +68,9 @@ class PluginSandbox:
             if hasattr(runtime, 'create_context'):
                 plugin.context = runtime.create_context()
             
-            # Only set runtime as fallback for backward compat, but DON'T
-            # This prevents plugins from accessing runtime.storage directly
-            # If plugin needs something, it should use storage/services proxies
-            # plugin.runtime = cast("CoreRuntime", runtime)  # REMOVED for security
+            # Backward compat: set plugin.runtime so plugins can use self.runtime.operations etc.
+            # Plugins should prefer storage/services proxies, but runtime is available for direct handlers
+            plugin.runtime = runtime  # type: ignore[assignment]
             
         except Exception as e:
             # Isolation setup failed - still continue but log

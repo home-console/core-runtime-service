@@ -9,6 +9,8 @@ import pytest
 
 from core.runtime import CoreRuntime
 from core.plugins import PluginManager
+from core.storage_port import CoreStoragePort
+from core.state_engine import StateEngine
 from plugins.remote_plugin_proxy import RemotePluginProxy
 from tests.conftest import InMemoryStorageAdapter
 
@@ -136,7 +138,7 @@ async def test_remote_metrics_proxy_lifecycle_and_service(mock_remote_server):
     base_url = f"http://127.0.0.1:{port}"
 
     # Инициализируем runtime
-    runtime = CoreRuntime(InMemoryStorageAdapter())
+    runtime = CoreRuntime(CoreStoragePort(InMemoryStorageAdapter(), StateEngine()))
 
     proxy = RemotePluginProxy(runtime, base_url)
 

@@ -70,8 +70,6 @@ class CoreRuntime:
         
         # Vault port для vault storage (если dual-mode)
         self.vault = vault_port if vault_port else None
-        self.plugin_manager = PluginManager(self)
-        self.module_manager = ModuleManager(self)
         # Регистр HTTP-интерфейсов (каталог контрактов)
         self.http = HttpRegistry()
         # Реестр интеграций (минимальный каталог для admin API)
@@ -80,6 +78,8 @@ class CoreRuntime:
         self.capability_registry = CapabilityRegistry()
         # Operations manager (инфраструктура для всех модулей)
         self.operations = OperationManager(self)
+        self.plugin_manager = PluginManager(self)
+        self.module_manager = ModuleManager(self)
         # Dependency resolver для проверки integrity (не знает про HTTP/marketplace)
         self.dependency_resolver = DependencyResolver(
             self.capability_registry,

@@ -110,16 +110,27 @@ async def create_device(
     existing_device = await runtime.storage.get("devices", device_id)
     now = time.time()
     
+    # Определяем default state по типу устройства
+    _DEVICE_TYPE_DEFAULTS: Dict[str, Dict[str, Any]] = {
+        "light":      {"on": False},
+        "switch":     {"on": False},
+        "outlet":     {"on": False},
+        "fan":        {"on": False, "speed": 0},
+        "thermostat": {"on": False, "target_temperature": 20},
+        "lock":       {"locked": True},
+        "cover":      {"position": 0},
+    }
+    _default_state = _DEVICE_TYPE_DEFAULTS.get(device_type, {})
+
     if existing_device is None:
         # Создаём новое устройство
         device = {
             "id": device_id,
             "name": name,
             "type": device_type,
-            # Изначально состояние пустое, без универсальных ключей
             "state": {
-                "desired": {},
-                "reported": {},
+                "desired": dict(_default_state),
+                "reported": dict(_default_state),
                 "pending": False,
             },
             "created_at": now,

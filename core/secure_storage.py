@@ -498,16 +498,21 @@ class SecureStorageWrapper:
         return await self._adapter.get(namespace, key)
     
     async def set(self, namespace: str, key: str, value: dict[str, Any]) -> None:
-        """Записать значение. Для критичных namespace — через secure_set (epoch + audit + root hash)."""
+        """Записать значение. Для критичных namespace — запрещено напрямую, используйте secure_set."""
         if namespace in CRITICAL_NAMESPACES:
-            await self.secure_set(namespace, key, value)
-            return
+            raise ValueError(
+                f"Direct set() on critical namespace '{namespace}' is not allowed. "
+                f"Use secure_set() instead for audit trail and integrity protection."
+            )
         await self._adapter.set(namespace, key, value)
     
     async def delete(self, namespace: str, key: str) -> bool:
-        """Удалить значение. Для критичных namespace — через secure_delete (epoch + audit + root hash)."""
+        """Удалить значение. Для критичных namespace — запрещено напрямую, используйте secure_delete."""
         if namespace in CRITICAL_NAMESPACES:
-            return await self.secure_delete(namespace, key)
+            raise ValueError(
+                f"Direct delete() on critical namespace '{namespace}' is not allowed. "
+                f"Use secure_delete() instead."
+            )
         return await self._adapter.delete(namespace, key)
     
     async def list_keys(self, namespace: str) -> list[str]:

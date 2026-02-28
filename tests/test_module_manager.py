@@ -3,9 +3,24 @@
 """
 
 import pytest
+from unittest.mock import MagicMock
 
 from core.module_manager import ModuleManager
 from core.runtime_module import RuntimeModule
+
+
+def _make_mock_runtime():
+    """Создать минимальный mock runtime для тестов."""
+    from types import SimpleNamespace
+    return SimpleNamespace(
+        storage=MagicMock(),
+        service_registry=MagicMock(),
+        http=MagicMock(),
+        capability_registry=MagicMock(),
+        operations=MagicMock(),
+        vault=None,
+        state_engine=MagicMock(),
+    )
 
 
 class MockModule(RuntimeModule):
@@ -36,7 +51,7 @@ class MockModule(RuntimeModule):
 async def test_register_module():
     """Тест регистрации модуля."""
     manager = ModuleManager()
-    runtime = object()
+    runtime = _make_mock_runtime()
     module = MockModule(runtime, "test_module")
 
     await manager.register(module)
@@ -50,7 +65,7 @@ async def test_register_module():
 async def test_register_duplicate_raises():
     """Тест, что регистрация модуля с существующим именем вызывает ошибку."""
     manager = ModuleManager()
-    runtime = object()
+    runtime = _make_mock_runtime()
     module1 = MockModule(runtime, "test")
     module2 = MockModule(runtime, "test")
 
@@ -64,7 +79,7 @@ async def test_register_duplicate_raises():
 async def test_register_idempotent():
     """Тест идемпотентности регистрации."""
     manager = ModuleManager()
-    runtime = object()
+    runtime = _make_mock_runtime()
     module = MockModule(runtime, "test")
 
     # Первая регистрация
@@ -80,7 +95,7 @@ async def test_register_idempotent():
 async def test_unregister_module():
     """Тест отмены регистрации модуля."""
     manager = ModuleManager()
-    runtime = object()
+    runtime = _make_mock_runtime()
     module = MockModule(runtime, "test")
 
     await manager.register(module)
@@ -95,7 +110,7 @@ async def test_unregister_module():
 async def test_start_all_modules():
     """Тест запуска всех модулей."""
     manager = ModuleManager()
-    runtime = object()
+    runtime = _make_mock_runtime()
     module1 = MockModule(runtime, "module1")
     module2 = MockModule(runtime, "module2")
 
@@ -112,7 +127,7 @@ async def test_start_all_modules():
 async def test_stop_all_modules():
     """Тест остановки всех модулей."""
     manager = ModuleManager()
-    runtime = object()
+    runtime = _make_mock_runtime()
     module1 = MockModule(runtime, "module1")
     module2 = MockModule(runtime, "module2")
 
@@ -130,7 +145,7 @@ async def test_stop_all_modules():
 async def test_start_all_handles_errors():
     """Тест, что ошибка в одном модуле не ломает запуск других."""
     manager = ModuleManager()
-    runtime = object()
+    runtime = _make_mock_runtime()
 
     class FailingModule(MockModule):
         async def start(self) -> None:
@@ -155,7 +170,7 @@ async def test_start_all_handles_errors():
 async def test_stop_all_handles_errors():
     """Тест, что ошибка в одном модуле не ломает остановку других."""
     manager = ModuleManager()
-    runtime = object()
+    runtime = _make_mock_runtime()
 
     class FailingModule(MockModule):
         async def stop(self) -> None:
@@ -181,7 +196,7 @@ async def test_stop_all_handles_errors():
 async def test_clear_modules():
     """Тест очистки всех модулей."""
     manager = ModuleManager()
-    runtime = object()
+    runtime = _make_mock_runtime()
     module1 = MockModule(runtime, "module1")
     module2 = MockModule(runtime, "module2")
 
@@ -197,11 +212,10 @@ async def test_clear_modules():
 async def test_register_app_modules_via_bootstrap(memory_adapter):
     """Тест регистрации модулей приложения через bootstrap."""
     from core.runtime import CoreRuntime
-    from app.bootstrap import ApplicationBootstrap, APP_MODULES
+    from main import APP_MODULES
 
     runtime = CoreRuntime(memory_adapter)
-    bootstrap = ApplicationBootstrap(APP_MODULES)
-    await bootstrap.start(runtime)
+    await runtime.module_manager.register_module_specs(runtime, APP_MODULES)
     await runtime.start()
     manager = runtime.module_manager
 

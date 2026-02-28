@@ -6,9 +6,10 @@ from modules.api.auth.constants import AUTH_USERS_NAMESPACE
 
 
 class MockRequest:
-    def __init__(self, headers, runtime, path="/api/resource", cookies=None):
+    def __init__(self, headers, runtime, path="/api/resource", cookies=None, method="GET"):
         self.headers = headers
         self.cookies = cookies or {}
+        self.method = method
         self.client = SimpleNamespace(host="127.0.0.1")
         self.url = SimpleNamespace(path=path)
         self.app = SimpleNamespace(state=SimpleNamespace(runtime=runtime))

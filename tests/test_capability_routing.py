@@ -14,6 +14,7 @@ import asyncio
 import os
 from typing import Any, Dict, Optional
 from core.runtime import CoreRuntime
+from core.module_manager import ModuleSpec
 from core.base_plugin import BasePlugin, PluginMetadata
 from core.operations import OperationInitiator, OperationInitiatorKind, OperationStatus
 
@@ -21,11 +22,20 @@ from core.operations import OperationInitiator, OperationInitiatorKind, Operatio
 os.environ['TEST_MODE'] = '1'
 
 
+async def _make_runtime(memory_adapter) -> CoreRuntime:
+    """Создаёт runtime с execution module для тестов операций."""
+    runtime = CoreRuntime(memory_adapter)
+    await runtime.module_manager.register_module_specs(
+        runtime, [ModuleSpec("execution", required=True)]
+    )
+    await runtime.start()
+    return runtime
+
+
 @pytest.mark.asyncio
 async def test_capability_based_operation_invocation(memory_adapter):
     """Test that operation can be invoked by capability name."""
-    runtime = CoreRuntime(memory_adapter)
-    await runtime.start()
+    runtime = await _make_runtime(memory_adapter)
     
     # Ensure capability registry exists
     assert runtime.capability_registry is not None
@@ -80,8 +90,7 @@ async def test_capability_based_operation_invocation(memory_adapter):
 @pytest.mark.asyncio
 async def test_backward_compatibility_legacy_operations(memory_adapter):
     """Test that old plugin-namespaced operations still work."""
-    runtime = CoreRuntime(memory_adapter)
-    await runtime.start()
+    runtime = await _make_runtime(memory_adapter)
     
     class LegacyOperationPlugin(BasePlugin):
         @property
@@ -130,8 +139,7 @@ async def test_backward_compatibility_legacy_operations(memory_adapter):
 @pytest.mark.asyncio
 async def test_capability_registry_integration(memory_adapter):
     """Test that capability registry is populated when plugin loads."""
-    runtime = CoreRuntime(memory_adapter)
-    await runtime.start()
+    runtime = await _make_runtime(memory_adapter)
     
     cap_reg = runtime.capability_registry
     
@@ -169,15 +177,14 @@ async def test_capability_registry_integration(memory_adapter):
 @pytest.mark.asyncio
 async def test_primary_provider_selection(memory_adapter):
     """Test that primary provider is selected for capability."""
-    runtime = CoreRuntime(memory_adapter)
-    await runtime.start()
+    runtime = await _make_runtime(memory_adapter)
     
     cap_reg = runtime.capability_registry
     
     # Simulate multiple providers for same capability
     # register_provider(plugin_name, capability_id)
-    cap_reg.register_provider("provider_1", "test.capability")
-    cap_reg.register_provider("provider_2", "test.capability")
+    await cap_reg.register_provider("provider_1", "test.capability")
+    await cap_reg.register_provider("provider_2", "test.capability")
     
     # Get providers - primary should be first registered
     providers = cap_reg.get_providers("test.capability")
@@ -191,8 +198,7 @@ async def test_primary_provider_selection(memory_adapter):
 @pytest.mark.asyncio
 async def test_missing_capability_fails_gracefully(memory_adapter):
     """Test that missing capability results in failed operation."""
-    runtime = CoreRuntime(memory_adapter)
-    await runtime.start()
+    runtime = await _make_runtime(memory_adapter)
     
     # Try to execute operation for non-existent capability
     initiator = OperationInitiator(kind=OperationInitiatorKind.ADMIN)
@@ -215,8 +221,7 @@ async def test_missing_capability_fails_gracefully(memory_adapter):
 @pytest.mark.asyncio
 async def test_operation_isolation_between_providers(memory_adapter):
     """Test that operations to different capabilities work independently."""
-    runtime = CoreRuntime(memory_adapter)
-    await runtime.start()
+    runtime = await _make_runtime(memory_adapter)
     
     class ProviderA(BasePlugin):
         @property
@@ -290,8 +295,7 @@ async def test_operation_isolation_between_providers(memory_adapter):
 @pytest.mark.asyncio
 async def test_multiple_capabilities_same_plugin(memory_adapter):
     """Test plugin providing multiple capabilities."""
-    runtime = CoreRuntime(memory_adapter)
-    await runtime.start()
+    runtime = await _make_runtime(memory_adapter)
     
     cap_reg = runtime.capability_registry
     

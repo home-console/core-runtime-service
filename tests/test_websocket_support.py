@@ -12,7 +12,6 @@ import pytest
 import asyncio
 from core.runtime import CoreRuntime
 from core.http_registry import HttpEndpoint
-from app.bootstrap import ApplicationBootstrap, APP_MODULES
 
 
 @pytest.mark.asyncio

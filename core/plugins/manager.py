@@ -49,6 +49,23 @@ class PluginManager:
         self._runtime = runtime
         self._registry = PluginRegistry()
         self._lifecycle = PluginLifecycleManager(self._registry, runtime)
+
+    # ========== COMPATIBILITY PROPERTIES (для обратной совместимости с тестами) ==========
+
+    @property
+    def _plugin_lock(self):
+        """Прямой доступ к lock реестра (для совместимости с тестами)."""
+        return self._registry._plugin_lock
+
+    @property
+    def _plugins(self):
+        """Прямой доступ к _plugins реестра (для совместимости с тестами)."""
+        return self._registry._plugins
+
+    @property
+    def _states(self):
+        """Прямой доступ к _states реестра (для совместимости с тестами)."""
+        return self._registry._states
     
     # ========== LIFECYCLE METHODS ==========
     
@@ -303,15 +320,51 @@ class PluginManager:
                 )
                 continue
             
-            # Загружаем плагин из манифеста
-            await PluginManifestLoader.load_plugin_from_manifest(
-                manifest=manifest,
-                plugin_dir=plugin_dir,
-                runtime=self._runtime,
-                load_plugin_func=self.load_plugin,
-                logger_func=actual_logger_func,
-                detect_integration_func=self._detect_and_register_integration
-            )
+            # Загружаем плагин через _load_plugin_from_manifest (monkey-patchable)
+            await self._load_plugin_from_manifest(manifest, plugin_dir, actual_logger_func)
+
+    async def _load_plugin_from_manifest(
+        self,
+        manifest: Dict[str, Any],
+        plugin_dir: Path,
+        logger_func: Optional[Callable[..., Awaitable[None]]] = None,
+    ) -> bool:
+        """
+        Внутренний метод загрузки плагина из манифеста.
+        
+        Вынесен как отдельный метод для возможности monkey-patching в тестах.
+        
+        Args:
+            manifest: данные манифеста
+            plugin_dir: путь к каталогу плагина
+            logger_func: функция для логирования
+        
+        Returns:
+            True если плагин успешно загружен
+        """
+        actual_logger_func = logger_func or warning
+        return await PluginManifestLoader.load_plugin_from_manifest(
+            manifest=manifest,
+            plugin_dir=plugin_dir,
+            runtime=self._runtime,
+            load_plugin_func=self.load_plugin,
+            logger_func=actual_logger_func,
+            detect_integration_func=self._detect_and_register_integration
+        )
+
+    def _load_plugin_manifest(self, plugin_dir: Path) -> Optional[Dict[str, Any]]:
+        """
+        Загрузить манифест плагина из каталога.
+        
+        Alias для PluginManifestLoader.load_manifest для monkey-patching в тестах.
+        
+        Args:
+            plugin_dir: путь к каталогу плагина
+        
+        Returns:
+            Манифест плагина или None
+        """
+        return PluginManifestLoader.load_manifest(plugin_dir)
     
     # ========== INTEGRATION DETECTION ==========
     

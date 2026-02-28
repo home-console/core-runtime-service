@@ -38,6 +38,11 @@ class MockRuntime:
         self.secret_store = MagicMock()
         self.audit = MagicMock()
         self.service_registry = MagicMock()
+        self.http = MagicMock()
+        self.capability_registry = MagicMock()
+        self.operations = MagicMock()
+        self.vault = None
+        self.state_engine = MagicMock()
         self._services = {}
 
     async def register_service(self, name, func, **kwargs):

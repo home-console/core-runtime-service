@@ -11,7 +11,7 @@ from unittest.mock import patch, MagicMock
 from core.runtime import CoreRuntime
 from core.module_manager import ModuleManager, ModuleSpec
 from core.runtime_module import RuntimeModule
-from app.bootstrap import ApplicationBootstrap, APP_MODULES
+from main import APP_MODULES
 
 
 class DummyModule(RuntimeModule):
@@ -73,11 +73,9 @@ class FailingStopModule(DummyModule):
 async def test_app_modules_registration_via_bootstrap(memory_adapter):
     """Тест: модули приложения регистрируются через bootstrap, затем runtime.start()."""
     runtime = CoreRuntime(memory_adapter)
-    bootstrap = ApplicationBootstrap(APP_MODULES)
-
     assert len(runtime.module_manager.list_modules()) == 0
 
-    await bootstrap.start(runtime)
+    await runtime.module_manager.register_module_specs(runtime, APP_MODULES)
     await runtime.start()
 
     registered_modules = runtime.module_manager.list_modules()
@@ -281,8 +279,7 @@ async def test_module_manager_check_required_modules(memory_adapter):
     manager._required_names.clear()
 
     # После bootstrap все required модули зарегистрированы — проверка проходит
-    bootstrap = ApplicationBootstrap(APP_MODULES)
-    await bootstrap.start(runtime)
+    await runtime.module_manager.register_module_specs(runtime, APP_MODULES)
     manager.check_required_modules_registered()
 
     await runtime.start()

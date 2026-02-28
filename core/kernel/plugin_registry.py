@@ -67,12 +67,16 @@ class PluginRegistry:
         """
         Удалить плагин из реестра.
         
+        Плагин удаляется из активного реестра, но состояние остаётся как UNLOADED.
+        Это позволяет запрашивать состояние после выгрузки.
+        
         Args:
             name: имя плагина
         """
         with self._plugin_lock:
             self._plugins.pop(name, None)
-            self._states.pop(name, None)
+            # Устанавливаем UNLOADED вместо удаления записи
+            self._states[name] = PluginState.UNLOADED.value
             self._block_reasons.pop(name, None)
     
     def get_plugin(self, plugin_name: str) -> Optional[BasePlugin]:
@@ -113,7 +117,9 @@ class PluginRegistry:
             state: новое состояние
         """
         with self._plugin_lock:
-            if plugin_name in self._plugins:
+            # Разрешаем установку состояния ERROR даже если плагин не зарегистрирован
+            # (например при ошибке загрузки до register())
+            if plugin_name in self._plugins or state == PluginState.ERROR:
                 self._states[plugin_name] = state
     
     def get_plugin_block_reason(self, plugin_name: str) -> Optional[Dict[str, Any]]:

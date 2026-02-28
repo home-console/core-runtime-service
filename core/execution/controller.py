@@ -282,8 +282,40 @@ class ExecutionControllerImpl:
         - эмитит события execution.started/execution.finished (best-effort)
         """
         # Глобальный concurrency-лимит (MVP): чтобы не уронить Core при наплыве задач.
+        # Проверяем лимит max_running из policy
+        policy_dict = await self._load_policy()
+        limits = policy_dict.get("limits") or {}
+        max_running = limits.get("max_running")
+
         async with self._running_lock:
+            if max_running is not None and self._running >= int(max_running):
+                # Лимит превышен — создаём trace с ошибкой и возвращаем
+                execution_id = context.get("execution_id") or self._generate_execution_id()
+                started_at_dt = datetime.now(UTC)
+                trace = ExecutionTrace(
+                    execution_id=execution_id,
+                    operation_id=operation_id,
+                    operation_type=operation_type,
+                    backend="in_process",
+                    status="error",
+                    started_at=started_at_dt,
+                    finished_at=started_at_dt,
+                    duration_ms=0,
+                    error_code="execution_limit_exceeded",
+                    error_message=f"Concurrency limit exceeded: max_running={max_running}",
+                    stderr_tail=None,
+                    parent_execution_id=context.get("parent_execution_id"),
+                    retry_index=int(context.get("retry_index") or 0),
+                )
+                await self.on_execution_start(trace)
+                await self.on_execution_finish(trace)
+                return OperationResult(
+                    ok=False,
+                    error={"code": "execution_limit_exceeded", "message": f"Concurrency limit exceeded: max_running={max_running}"},
+                    backend="in_process",
+                )
             self._running += 1
+
         started_at = time.time()
         try:
             execution_id = context.get("execution_id") or self._generate_execution_id()
@@ -308,8 +340,7 @@ class ExecutionControllerImpl:
             # Сначала пишем старт trace
             await self.on_execution_start(trace)
 
-            # Грузим policy (async) и выбираем backend
-            policy_dict = await self._load_policy()
+            # Грузим policy (уже загружен выше, переиспользуем)
             ctx_metadata = context.get("metadata") or {}
             metadata = dict(ctx_metadata)
             metadata["_execution_policy"] = policy_dict or {}
@@ -327,7 +358,7 @@ class ExecutionControllerImpl:
             result = await backend.execute(
                 operation_type=operation_type,
                 params=params,
-                context={**context, "_execution_policy": metadata.get("_execution_policy")},
+                context={**context, "execution_id": execution_id, "_execution_policy": metadata.get("_execution_policy")},
                 timeout=context.get("timeout"),
             )
 
@@ -340,10 +371,112 @@ class ExecutionControllerImpl:
             trace.error_message = err_fields["message"]
             trace.stderr_tail = self._extract_stderr_tail(result)
 
+            # Если отменена — фиксируем cancelled_at, но только если cancel_execution
+            # ещё не выставил их (во избежание перезатирания reason)
+            if trace.status == "cancelled":
+                # Пробуем загрузить актуальный trace из storage
+                stored_trace = await self._load_execution_trace(execution_id)
+                if stored_trace is not None and stored_trace.cancelled_at is not None:
+                    # cancel_execution уже обновил — берём его значения
+                    trace.cancelled_at = stored_trace.cancelled_at
+                    trace.cancel_reason = stored_trace.cancel_reason
+                else:
+                    trace.cancelled_at = datetime.now(UTC)
+                    trace.cancel_reason = "cancelled"
+
             await self.on_execution_finish(trace)
 
             return result
         finally:
             async with self._running_lock:
                 self._running -= 1
+
+    async def cancel_execution(self, execution_id: str, reason: str = "user") -> bool:
+        """
+        Отменяет выполняющийся execution по execution_id.
+
+        - Вызывает backend.cancel(execution_id)
+        - Обновляет trace: status=cancelled, cancelled_at, cancel_reason
+        """
+        # Пробуем отменить задачу в каждом backend
+        cancelled = False
+        for backend in self._backends.values():
+            if hasattr(backend, "cancel"):
+                try:
+                    result = await backend.cancel(execution_id)
+                    if result:
+                        cancelled = True
+                        break
+                except Exception:
+                    pass
+
+        # Обновляем trace в storage
+        trace = await self._load_execution_trace(execution_id)
+        if trace is not None:
+            trace.status = "cancelled"
+            trace.cancelled_at = datetime.now(UTC)
+            trace.cancel_reason = reason
+            if trace.finished_at is None:
+                trace.finished_at = datetime.now(UTC)
+            await self.on_execution_finish(trace)
+
+        return cancelled
+
+    async def retry_execution(self, execution_id: str) -> OperationResult:
+        """
+        Создаёт повторное выполнение (retry) для завершённого execution.
+
+        - Загружает оригинальный trace по execution_id
+        - Если execution ещё running — возвращает ошибку
+        - Проверяет ограничения retry policy
+        - Запускает новый execute_operation с parent_execution_id и retry_index+1
+        """
+        trace = await self._load_execution_trace(execution_id)
+        if trace is None:
+            return OperationResult(
+                ok=False,
+                error={"code": "execution_not_found", "message": f"Execution {execution_id} not found"},
+                backend="in_process",
+            )
+
+        if trace.status == "running":
+            return OperationResult(
+                ok=False,
+                error={"code": "execution_still_running", "message": f"Execution {execution_id} is still running"},
+                backend="in_process",
+            )
+
+        # Проверяем retry policy
+        policy_dict = await self._load_policy()
+        retry_policy = policy_dict.get("retry") or {}
+        max_attempts = retry_policy.get("max_attempts")
+        if max_attempts is not None:
+            # Считаем сколько реальных retry уже произошло через by_parent индекс
+            try:
+                storage = getattr(self._runtime, "storage", None)
+                if storage is not None:
+                    all_keys = await storage.list_keys("execution")
+                    existing_retries = [k for k in all_keys if k.startswith(f"by_parent/{execution_id}/")]
+                    if len(existing_retries) >= int(max_attempts):
+                        return OperationResult(
+                            ok=False,
+                            error={"code": "retry_limit_exceeded", "message": f"Retry limit exceeded: max_attempts={max_attempts}"},
+                            backend="in_process",
+                        )
+            except Exception:
+                pass
+
+        # Создаём новый execution с расширенным контекстом
+        new_retry_index = trace.retry_index + 1
+        context = {
+            "parent_execution_id": execution_id,
+            "retry_index": new_retry_index,
+        }
+
+        return await self.execute_operation(
+            operation_id=trace.operation_id,
+            operation_type=trace.operation_type,
+            params={},  # оригинальные params не хранятся в trace, выполняем с пустыми
+            context=context,
+        )
 

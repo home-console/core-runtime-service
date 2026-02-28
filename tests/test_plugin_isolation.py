@@ -350,9 +350,10 @@ class TestCapabilityRegistryIntegration:
         """Create CapabilityRegistry."""
         return CapabilityRegistry()
     
-    def test_register_provider_with_execution_mode(self, registry):
+    @pytest.mark.asyncio
+    async def test_register_provider_with_execution_mode(self, registry):
         """Test registering provider with execution_mode."""
-        registry.register_provider(
+        await registry.register_provider(
             plugin_name="test_plugin",
             capability_id="test.capability",
             execution_mode="process",
@@ -362,9 +363,10 @@ class TestCapabilityRegistryIntegration:
         providers = registry.get_providers("test.capability")
         assert "test_plugin" in providers
     
-    def test_provider_info_includes_execution_mode(self, registry):
+    @pytest.mark.asyncio
+    async def test_provider_info_includes_execution_mode(self, registry):
         """Test provider info includes execution_mode."""
-        registry.register_provider(
+        await registry.register_provider(
             plugin_name="container_plugin",
             capability_id="test.container",
             execution_mode="container",
@@ -375,9 +377,10 @@ class TestCapabilityRegistryIntegration:
         assert info["execution_mode"] == "container"
         assert info["container_config"]["image"] == "ubuntu"
     
-    def test_provider_info_to_metadata_conversion(self, registry):
+    @pytest.mark.asyncio
+    async def test_provider_info_to_metadata_conversion(self, registry):
         """Test converting provider_info dict to ProviderMetadata."""
-        registry.register_provider(
+        await registry.register_provider(
             plugin_name="convert_test",
             capability_id="test.convert",
             execution_mode="process",
@@ -391,14 +394,15 @@ class TestCapabilityRegistryIntegration:
         assert metadata.execution_mode == "process"
         assert metadata.process_config["timeout"] == 45
     
-    def test_update_provider_metadata_with_execution_mode(self, registry):
+    @pytest.mark.asyncio
+    async def test_update_provider_metadata_with_execution_mode(self, registry):
         """Test updating provider metadata with execution_mode."""
-        registry.register_provider(
+        await registry.register_provider(
             plugin_name="update_test",
             capability_id="test.update"
         )
         
-        registry.update_provider_metadata(
+        await registry.update_provider_metadata(
             plugin_name="update_test",
             capability_id="test.update",
             execution_mode="container",

@@ -69,7 +69,7 @@ class BasePlugin(SDKBasePlugin):
     _loaded: bool = False
     _started: bool = False
 
-    def __init__(self, runtime_or_context: Optional[Union["CoreRuntime", RuntimeContext]] = None) -> None:
+    def __init__(self, runtime_or_context: Optional[Union["CoreRuntime", RuntimeContext]] = None, *, runtime: Optional[Union["CoreRuntime", RuntimeContext]] = None) -> None:
         """
         Инициализация плагина.
         
@@ -77,7 +77,11 @@ class BasePlugin(SDKBasePlugin):
             runtime_or_context: экземпляр CoreRuntime или RuntimeContext
                 Если передан CoreRuntime, создаётся RuntimeContext автоматически
                 Если None, context будет установлен позже через PluginManager
+            runtime: alias для runtime_or_context (для обратной совместимости)
         """
+        # Support passing runtime as keyword argument (backward compat)
+        if runtime is not None and runtime_or_context is None:
+            runtime_or_context = runtime
         # Для обратной совместимости передаём runtime в SDKBasePlugin
         runtime = runtime_or_context if not isinstance(runtime_or_context, RuntimeContext) else None
         super().__init__(runtime)

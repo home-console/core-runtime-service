@@ -20,12 +20,16 @@ if str(CLIENT_MANAGER_PATH) not in sys.path:
 
 from core.runtime import CoreRuntime
 from tests.conftest import InMemoryStorageAdapter
+from core.storage_port import CoreStoragePort
+from core.state_engine import StateEngine
 
 
 @pytest.mark.asyncio
 async def test_client_manager_endpoints_registered():
     """Тест: client-manager регистрирует endpoints через HttpRegistry."""
-    memory_adapter = InMemoryStorageAdapter()
+    _adapter = InMemoryStorageAdapter()
+
+    memory_adapter = CoreStoragePort(_adapter, StateEngine())
     runtime = CoreRuntime(memory_adapter)
     
     # Импортируем плагин
@@ -63,7 +67,9 @@ async def test_client_manager_endpoints_registered():
 @pytest.mark.asyncio
 async def test_client_manager_services_registered():
     """Тест: client-manager регистрирует сервисы через service_registry."""
-    memory_adapter = InMemoryStorageAdapter()
+    _adapter = InMemoryStorageAdapter()
+
+    memory_adapter = CoreStoragePort(_adapter, StateEngine())
     runtime = CoreRuntime(memory_adapter)
     
     # Импортируем плагин
@@ -90,7 +96,9 @@ async def test_client_manager_services_registered():
 @pytest.mark.asyncio
 async def test_client_manager_no_internal_server():
     """Тест: client-manager НЕ запускает собственный uvicorn сервер."""
-    memory_adapter = InMemoryStorageAdapter()
+    _adapter = InMemoryStorageAdapter()
+
+    memory_adapter = CoreStoragePort(_adapter, StateEngine())
     runtime = CoreRuntime(memory_adapter)
     
     # Импортируем плагин
@@ -112,7 +120,10 @@ async def test_client_manager_websocket_endpoints_in_inspector():
     """Тест: WebSocket endpoints видны в inspector как WebSocket'ы."""
     from modules.admin.services.introspection import list_http_endpoints
     
-    memory_adapter = InMemoryStorageAdapter()
+    _adapter = InMemoryStorageAdapter()
+
+    
+    memory_adapter = CoreStoragePort(_adapter, StateEngine())
     runtime = CoreRuntime(memory_adapter)
     
     # Импортируем плагин

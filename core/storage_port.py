@@ -74,6 +74,11 @@ class CoreStoragePort:
     async def close(self) -> None:
         """Закрыть соединение."""
         await self._storage.close()
+
+    @property
+    def closed(self) -> bool:
+        """Проверить, закрыт ли адаптер."""
+        return getattr(self._adapter, 'closed', False)
     
     @asynccontextmanager
     async def transaction(self):

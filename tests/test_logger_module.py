@@ -2,6 +2,7 @@ import os
 import sys
 import asyncio
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -9,6 +10,20 @@ import pytest
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from modules.logger.module import LoggerModule
+
+
+def _make_mock_runtime(reg):
+    """Создать минимальный mock runtime для тестов."""
+    from types import SimpleNamespace
+    return SimpleNamespace(
+        storage=MagicMock(),
+        service_registry=reg,
+        http=MagicMock(),
+        capability_registry=MagicMock(),
+        operations=MagicMock(),
+        vault=None,
+        state_engine=MagicMock(),
+    )
 
 
 class FakeRegistry:
@@ -34,7 +49,7 @@ class FakeRegistry:
 @pytest.mark.asyncio
 async def test_register_registers_service(monkeypatch):
     reg = FakeRegistry()
-    runtime = SimpleNamespace(service_registry=reg)
+    runtime = _make_mock_runtime(reg)
     mod = LoggerModule(runtime)
 
     await mod.register()
@@ -45,7 +60,7 @@ async def test_register_registers_service(monkeypatch):
 @pytest.mark.asyncio
 async def test_log_service_filters_and_prints(monkeypatch, capsys):
     reg = FakeRegistry()
-    runtime = SimpleNamespace(service_registry=reg)
+    runtime = _make_mock_runtime(reg)
     mod = LoggerModule(runtime)
 
     monkeypatch.setenv("LOG_LEVEL", "WARNING")
@@ -66,7 +81,7 @@ async def test_log_service_filters_and_prints(monkeypatch, capsys):
 @pytest.mark.asyncio
 async def test_start_logs_message(capfd):
     reg = FakeRegistry()
-    runtime = SimpleNamespace(service_registry=reg)
+    runtime = _make_mock_runtime(reg)
     mod = LoggerModule(runtime)
 
     # default LOG_LEVEL is INFO

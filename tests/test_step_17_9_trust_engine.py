@@ -252,8 +252,8 @@ class TestTrustEngineStateManagement:
     async def test_freeze_to_unfreeze_flow(self):
         """Account frozen → unfreeze → cooldown → recovery."""
         config = TrustConfig(
-            freeze_duration_seconds=10,
-            cooldown_period_seconds=5,
+            freeze_duration_seconds=2,
+            cooldown_period_seconds=1,
         )
         engine = TrustEngine(config=config)
         user_id = "charlie"
@@ -264,13 +264,13 @@ class TestTrustEngineStateManagement:
         assert decision1.new_state.level == TrustLevel.FROZEN
         
         # Step 2: Wait for freeze to expire
-        await asyncio.sleep(11)
+        await asyncio.sleep(3)
         now2 = time.time()
         decision2 = await engine.evaluate(user_id, 20.0, now2)
         assert decision2.new_state.level == TrustLevel.COOLDOWN
         
         # Step3: Wait for cooldown to expire
-        await asyncio.sleep(6)
+        await asyncio.sleep(2)
         now3 = time.time()
         decision3 = await engine.evaluate(user_id, 10.0, now3)
         assert decision3.new_state.level == TrustLevel.NORMAL

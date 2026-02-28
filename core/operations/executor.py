@@ -294,26 +294,29 @@ class OperationExecutor:
             operation.started_at = time.time()
             await self.storage.persist(operation)
             
-            # REFACTORING: ExecutionRouter удалён, execution_controller теперь обязателен
-            # Если execution_controller отсутствует, это ошибка конфигурации
+            # Используем ExecutionController (из модуля execution или lazy fallback)
             controller = self.runtime.execution_controller
             
             if controller is None:
-                # Execution controller должен быть доступен (устанавливается модулем execution)
-                operation.status = OperationStatus.FAILED
-                operation.error = OperationError(
-                    code="execution_controller_unavailable",
-                    message="Execution controller is not available. Ensure 'execution' module is registered."
-                )
-                await self.storage.persist(operation)
-                
-                # Record metrics
-                metrics.increment_counter("operations_total", label_value=operation.type)
-                metrics.increment_counter("operations_failed_total", label_value=operation.type)
-                latency = (time.time() - start_time) * 1000  # ms
-                metrics.observe_histogram("operation_latency_seconds", latency / 1000.0)
-                
-                return operation
+                # Lazy fallback: создаём in-process controller без персистентного policy
+                # Используется в тестах и в окружениях без registered execution-модуля
+                try:
+                    from core.execution.controller import ExecutionControllerImpl
+                    controller = ExecutionControllerImpl(self.runtime)
+                    # Кэшируем для следующих вызовов
+                    self.runtime.execution_controller = controller
+                except Exception as _ctrl_err:
+                    operation.status = OperationStatus.FAILED
+                    operation.error = OperationError(
+                        code="execution_controller_unavailable",
+                        message=f"Execution controller is not available: {_ctrl_err}"
+                    )
+                    await self.storage.persist(operation)
+                    metrics.increment_counter("operations_total", label_value=operation.type)
+                    metrics.increment_counter("operations_failed_total", label_value=operation.type)
+                    latency = (time.time() - start_time) * 1000
+                    metrics.observe_histogram("operation_latency_seconds", latency / 1000.0)
+                    return operation
             
             # Используем ExecutionController
             context = {

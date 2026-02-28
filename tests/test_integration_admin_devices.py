@@ -3,7 +3,7 @@ import pytest
 
 from core.runtime import CoreRuntime
 from plugins.test import SystemLoggerPlugin
-from app.bootstrap import ApplicationBootstrap, APP_MODULES
+from main import APP_MODULES
 
 
 async def _call_http(runtime: CoreRuntime, method: str, path: str, body=None):
@@ -49,8 +49,7 @@ async def _call_http(runtime: CoreRuntime, method: str, path: str, body=None):
 @pytest.mark.asyncio
 async def test_admin_devices_end_to_end(memory_adapter):
     runtime = CoreRuntime(memory_adapter)
-    bootstrap = ApplicationBootstrap(APP_MODULES)
-    await bootstrap.start(runtime)
+    await runtime.module_manager.register_module_specs(runtime, APP_MODULES)
 
     # Load necessary plugins
     logger = SystemLoggerPlugin(runtime)

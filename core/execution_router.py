@@ -97,9 +97,23 @@ class ExecutionRouter:
         Raises:
             ExecutionRouterError: if routing or execution fails
         """
+        # Определяем режим выполнения
+        exec_mode = None
+        if provider_metadata:
+            exec_mode = getattr(provider_metadata, "execution_mode", None)
+
+        # "in_process" и None — всегда локальный fallback, без контроллера
+        if exec_mode in (None, "in_process"):
+            return await self._execute_in_process_fallback(operation)
+
+        # Неизвестный режим — немедленно ошибка
+        _KNOWN_MODES = {"process", "container"}
+        if exec_mode not in _KNOWN_MODES:
+            raise ExecutionRouterError(f"Unknown execution mode: {exec_mode!r}")
+
         # Пытаемся использовать ExecutionControllerImpl если доступен
         controller = self.runtime.execution_controller
-        
+
         if controller is not None:
             # Используем новый ExecutionController
             try:
@@ -133,6 +147,8 @@ class ExecutionRouter:
                         error_msg = str(op_res.error.get("message", error_msg))
                     raise ExecutionRouterError(error_msg)
                     
+            except ExecutionRouterError:
+                raise
             except Exception as e:
                 logger.warning(f"ExecutionController failed, falling back to legacy: {e}")
                 # Fallback на старый код
@@ -163,6 +179,11 @@ class ExecutionRouter:
             "operation_id": operation.operation_id
         }
         
-        # Execute - return result directly
-        result = await handler(context, operation)
+        # Execute - return result directly, wrapping handler errors
+        try:
+            result = await handler(context, operation)
+        except ExecutionRouterError:
+            raise
+        except Exception as e:
+            raise ExecutionRouterError(f"Handler raised: {e}") from e
         return result

@@ -125,7 +125,7 @@ class MetricsRegistry:
         self._counters: Dict[str, Counter] = {}
         self._gauges: Dict[str, Gauge] = {}
         self._histograms: Dict[str, Histogram] = {}
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         
         # Initialize built-in metrics
         self._init_builtin_metrics()
