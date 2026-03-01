@@ -34,6 +34,9 @@ from modules.agent.services import (
     admin_agent_list_online_agents,
     admin_agent_download_checksum,
     admin_agent_download_binary,
+    admin_agent_submit_logs,
+    admin_agent_get_logs,
+    admin_agent_get_status,
 )
 
 
@@ -125,6 +128,10 @@ class AgentControlPlaneModule(RuntimeModule):
         self.runtime.mtls_ca = mtls_ca
         self.runtime.deployment_tracker = deployment_tracker
 
+        # Initialize AgentLogStore (TASK 3.1)
+        from core.agents.log_store import AgentLogStore
+        self.runtime.agent_log_store = AgentLogStore()
+
         # Обёртка для admin-хендлеров, которым нужен runtime первым аргументом
         def wrap_agent(fn):
             return lambda *args, **kw: fn(self.runtime, *args, **kw)
@@ -196,6 +203,20 @@ class AgentControlPlaneModule(RuntimeModule):
         await services.register(
             "admin.agent.download_binary",
             wrap_agent(admin_agent_download_binary),
+        )
+
+        # ==== Logs + Status Services (TASK 3.1 / 3.2) ====
+        await services.register(
+            "admin.agent.submit_logs",
+            wrap_agent(admin_agent_submit_logs),
+        )
+        await services.register(
+            "admin.agent.get_logs",
+            wrap_agent(admin_agent_get_logs),
+        )
+        await services.register(
+            "admin.agent.get_status",
+            wrap_agent(admin_agent_get_status),
         )
         
         # Register HTTP endpoints for Agent Control Plane
@@ -307,6 +328,29 @@ class AgentControlPlaneModule(RuntimeModule):
             path="/admin/v1/agents/capabilities/{capability_id}",
             service="admin.agent.list_agents_providing_capability",
             description="List agents providing capability"
+        ))
+
+        # TASK 3.1: Agent Logs API
+        self.context.http.register(HttpEndpoint(
+            method="POST",
+            path="/admin/v1/agents/{agent_id}/logs",
+            service="admin.agent.submit_logs",
+            description="Agent pushes log entries to Core"
+        ))
+
+        self.context.http.register(HttpEndpoint(
+            method="GET",
+            path="/admin/v1/agents/{agent_id}/logs",
+            service="admin.agent.get_logs",
+            description="Get stored logs for agent"
+        ))
+
+        # TASK 3.2: Agent Status endpoint
+        self.context.http.register(HttpEndpoint(
+            method="GET",
+            path="/admin/v1/agents/{agent_id}/status",
+            service="admin.agent.get_status",
+            description="Get real-time status of agent"
         ))
 
     async def start(self) -> None:

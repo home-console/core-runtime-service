@@ -1201,6 +1201,229 @@ async def admin_agent_list_online_agents(runtime: Any) -> Dict[str, Any]:
         return {"ok": False, "error": str(e)}
 
 
+# ============================================================================
+# TASK 3.1: Agent Logs API
+# ============================================================================
+
+
+async def admin_agent_submit_logs(
+    runtime: Any,
+    agent_id: str,
+    body: Dict[str, Any] = None,
+) -> Dict[str, Any]:
+    """
+    Accept a batch of log entries pushed by the remote agent.
+
+    Body: {
+        "logs": [
+            {"level": "info", "message": "...", "source": "main",
+             "timestamp": "2026-02-28T..." (optional)},
+            ...
+        ]
+    }
+    Returns: {"ok": true, "accepted": N}
+    """
+    if not agent_id:
+        return {"ok": False, "error": "agent_id required"}
+
+    if not hasattr(runtime, "agent_log_store") or runtime.agent_log_store is None:
+        return {"ok": False, "error": "agent_log_store not initialized"}
+
+    entries = []
+    if body and isinstance(body, dict):
+        entries = body.get("logs", [])
+        if not isinstance(entries, list):
+            return {"ok": False, "error": "logs must be a list"}
+
+    accepted = runtime.agent_log_store.push_batch(agent_id, entries)
+
+    logger.debug(
+        "[AdminAgentSubmitLogs] Logs accepted",
+        extra={"agent_id": agent_id, "accepted": accepted},
+    )
+    return {"ok": True, "accepted": accepted}
+
+
+async def admin_agent_get_logs(
+    runtime: Any,
+    agent_id: str,
+    filter: Optional[str] = None,
+    tail: Optional[int] = 100,
+) -> Dict[str, Any]:
+    """
+    Get stored log entries for a specific agent.
+
+    Query params:
+        filter: error|warn|info|debug  (comma-separated; default: all)
+        tail:   number of last entries  (default: 100)
+
+    Returns: {
+        "ok": true,
+        "agent_id": "...",
+        "logs": [{"timestamp": ..., "level": ..., "message": ..., "source": ...}],
+        "total": N,
+        "agent_online": true|false
+    }
+    """
+    if not agent_id:
+        return {"ok": False, "error": "agent_id required"}
+
+    if not hasattr(runtime, "agent_log_store") or runtime.agent_log_store is None:
+        return {"ok": False, "error": "agent_log_store not initialized"}
+
+    try:
+        tail_int: Optional[int] = None
+        if tail is not None:
+            try:
+                tail_int = int(tail)
+                if tail_int <= 0:
+                    tail_int = None
+            except (ValueError, TypeError):
+                tail_int = 100
+
+        entries = runtime.agent_log_store.get(
+            agent_id,
+            level_filter=filter,
+            tail=tail_int,
+        )
+
+        # Determine online status from registry
+        agent_online = False
+        if runtime.agent_registry:
+            agent = await runtime.agent_registry.get_agent(agent_id)
+            if agent and agent.last_heartbeat:
+                try:
+                    last_hb = datetime.fromisoformat(
+                        agent.last_heartbeat.replace("Z", "+00:00")
+                    )
+                    age = (datetime.now(timezone.utc) - last_hb).total_seconds()
+                    agent_online = age < 30
+                except (ValueError, AttributeError):
+                    pass
+
+        return {
+            "ok": True,
+            "agent_id": agent_id,
+            "logs": [e.to_dict() for e in entries],
+            "total": runtime.agent_log_store.count(agent_id),
+            "returned": len(entries),
+            "agent_online": agent_online,
+        }
+
+    except Exception as e:
+        logger.exception(f"[AdminAgentGetLogs] Error: {e}")
+        return {"ok": False, "error": str(e)}
+
+
+# ============================================================================
+# TASK 3.2: Agent Status endpoint
+# ============================================================================
+
+
+async def admin_agent_get_status(
+    runtime: Any,
+    agent_id: str,
+) -> Dict[str, Any]:
+    """
+    Get real-time status of a specific agent.
+
+    Combines:
+    - AgentRegistry metadata  (name, version, capabilities, last heartbeat)
+    - Heartbeat metrics       (uptime, cpu, memory)
+    - DeploymentTracker       (linked deployment_id, if any)
+
+    Returns: {
+        "ok": true,
+        "agent_id": "...",
+        "name": "...",
+        "status": "online" | "offline" | "degraded" | "dead" | "unknown",
+        "version": "1.0.0",
+        "address": "10.0.0.1:8080",
+        "last_heartbeat": "2026-02-28T...",
+        "heartbeat_age_seconds": 3,
+        "uptime_seconds": 3600,
+        "cpu_percent": 12.5,
+        "memory_mb": 256,
+        "capabilities": [...],
+        "deployment_id": "deploy-uuid" | null
+    }
+    """
+    if not agent_id:
+        return {"ok": False, "error": "agent_id required"}
+
+    if not runtime.agent_registry:
+        return {"ok": False, "error": "agent_registry not initialized"}
+
+    try:
+        agent = await runtime.agent_registry.get_agent(agent_id)
+        if not agent:
+            return {"ok": False, "error": "agent_not_found", "agent_id": agent_id}
+
+        # ── Compute status from last heartbeat age ───────────────────────
+        now = datetime.now(timezone.utc)
+        heartbeat_age: Optional[int] = None
+        status = "unknown"
+
+        if agent.last_heartbeat:
+            try:
+                last_hb = datetime.fromisoformat(
+                    agent.last_heartbeat.replace("Z", "+00:00")
+                )
+                heartbeat_age = int((now - last_hb).total_seconds())
+
+                if heartbeat_age < 30:
+                    # Check if agent self-reported degraded status
+                    reported = agent.properties.get("status", "ok")
+                    status = "degraded" if reported not in ("ok", "online") else "online"
+                elif heartbeat_age < 300:
+                    status = "offline"
+                else:
+                    status = "dead"
+            except (ValueError, AttributeError):
+                status = "unknown"
+
+        # ── Find linked deployment_id from DeploymentTracker ──────────────
+        deployment_id: Optional[str] = None
+        if runtime.deployment_tracker:
+            try:
+                all_deps = await runtime.deployment_tracker.list_deployments(
+                    limit=200
+                )
+                for dep in all_deps:
+                    if dep.agent_id == agent_id:
+                        deployment_id = dep.deployment_id
+                        break
+            except Exception:
+                pass
+
+        props = agent.properties or {}
+
+        logger.debug(
+            "[AdminAgentGetStatus] Status retrieved",
+            extra={"agent_id": agent_id, "status": status},
+        )
+
+        return {
+            "ok": True,
+            "agent_id": agent_id,
+            "name": agent.agent_name,
+            "status": status,
+            "version": agent.version or "",
+            "address": agent.address,
+            "last_heartbeat": agent.last_heartbeat,
+            "heartbeat_age_seconds": heartbeat_age,
+            "uptime_seconds": props.get("uptime_seconds"),
+            "cpu_percent": props.get("cpu_percent"),
+            "memory_mb": props.get("memory_mb"),
+            "capabilities": agent.capabilities or [],
+            "deployment_id": deployment_id,
+        }
+
+    except Exception as e:
+        logger.exception(f"[AdminAgentGetStatus] Error: {e}")
+        return {"ok": False, "error": str(e)}
+
+
 async def _monitor_agent_health_background(runtime: Any) -> None:
     """
     Background task to monitor agent health continuously.

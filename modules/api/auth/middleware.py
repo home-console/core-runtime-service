@@ -242,16 +242,16 @@ async def require_auth_middleware(request: Request, call_next):
                 except Exception:
                     method = "GET"
             unsafe_method = str(method).upper() in ("POST", "PUT", "PATCH", "DELETE")
-        cookie_based = (auth_source == "session") or (auth_source == "jwt" and jwt_from_cookie)
-        if unsafe_method and cookie_based and not is_auth_endpoint:
-            csrf_cookie_name = getattr(cfg, "csrf_cookie_name", "csrf_token") if cfg is not None else "csrf_token"
-            csrf_header_name = getattr(cfg, "csrf_header_name", "X-CSRF-Token") if cfg is not None else "X-CSRF-Token"
+            cookie_based = (auth_source == "session") or (auth_source == "jwt" and jwt_from_cookie)
+            if unsafe_method and cookie_based and not is_auth_endpoint:
+                csrf_cookie_name = getattr(cfg, "csrf_cookie_name", "csrf_token") if cfg is not None else "csrf_token"
+                csrf_header_name = getattr(cfg, "csrf_header_name", "X-CSRF-Token") if cfg is not None else "X-CSRF-Token"
 
-            csrf_cookie = request.cookies.get(csrf_cookie_name)
-            csrf_header = request.headers.get(csrf_header_name)
+                csrf_cookie = request.cookies.get(csrf_cookie_name)
+                csrf_header = request.headers.get(csrf_header_name)
 
-            # Требуем double-submit token: cookie == header
-            if not csrf_cookie or not csrf_header or csrf_cookie != csrf_header:
+                # Требуем double-submit token: cookie == header
+                if not csrf_cookie or not csrf_header or csrf_cookie != csrf_header:
                     return Response(
                         content='{"detail": "CSRF token missing or invalid"}',
                         status_code=403,
