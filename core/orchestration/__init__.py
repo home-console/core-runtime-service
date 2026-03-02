@@ -1,7 +1,7 @@
 """
 Orchestration Service — управление инфраструктурой плагинов.
 
-REFACTORING: Проблема 8 - выделяем orchestration из AdminModule в отдельный слой.
+Абстракция orchestration (Docker/k8s) для плагинов.
 
 Orchestration Service отвечает за:
 - Управление жизненным циклом контейнеров плагинов

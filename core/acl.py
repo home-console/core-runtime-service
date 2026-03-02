@@ -1,11 +1,8 @@
 """
-Централизованный ACL helper.
+Централизованный ACL helper (фасад над PolicyEngine).
 
 SECURITY P0: ctx=None больше НЕ считается trusted.
 Internal calls должны использовать SystemContext.
-
-REFACTORING: Проблема 7 - этот модуль теперь является фасадом над PolicyEngine
-для обратной совместимости. Новый код должен использовать PolicyEngine напрямую.
 
 Идея:
 - Сервисы/плагины не размазывают проверки везде.
@@ -26,9 +23,8 @@ def is_privileged(ctx: Any) -> bool:
     """
     Публичный helper для проверки привилегий (admin.* / is_admin / *).
     
-    REFACTORING: Проблема 7 - делегирует в PolicyEngine для обратной совместимости.
+    Делегирует в PolicyEngine.
     """
-    # REFACTORING: Проблема 7 - используем PolicyEngine
     policy_engine = get_policy_engine()
     return policy_engine.is_privileged(ctx)
 
@@ -40,15 +36,12 @@ def enforce_admin(ctx: Any) -> None:
     SECURITY P0: ctx=None больше НЕ считается privileged.
     Internal calls должны быть явно разрешены через allow-list.
     
-    REFACTORING: Проблема 7 - делегирует в PolicyEngine для обратной совместимости.
-    
     Args:
         ctx: RequestContext или None
         
     Raises:
         ForbiddenError: если нет админ-прав или ctx=None
     """
-    # REFACTORING: Проблема 7 - используем PolicyEngine
     policy_engine = get_policy_engine()
     policy_engine.enforce_admin(ctx)
 
@@ -59,9 +52,8 @@ def enforce_policy(ctx: Any, resource: str, obj: Any) -> None:
     - Если ctx None — считается trusted internal.
     - Если политика не найдена — no-op (fail-open для обратной совместимости, можно ужесточить).
     
-    REFACTORING: Проблема 7 - делегирует в PolicyEngine для обратной совместимости.
+    Делегирует в PolicyEngine.
     """
-    # REFACTORING: Проблема 7 - используем PolicyEngine
     policy_engine = get_policy_engine()
     policy_engine.enforce_policy(ctx, resource, obj)
 
@@ -70,23 +62,18 @@ def filter_with_policy(ctx: Any, resource: str, items: Iterable[Dict[str, Any]])
     """
     Фильтрует список объектов по политике. Если ctx None — возвращает как есть.
     
-    REFACTORING: Проблема 7 - делегирует в PolicyEngine для обратной совместимости.
+    Делегирует в PolicyEngine.
     """
-    # REFACTORING: Проблема 7 - используем PolicyEngine
     policy_engine = get_policy_engine()
     return policy_engine.filter_with_policy(ctx, resource, items)
-
-
-# REFACTORING: Проблема 7 - _policy_device удалена, логика перенесена в PolicyEngine.DevicePolicy
 
 
 def current_context() -> Any:
     """
     Утилита для явного доступа к текущему RequestContext (может быть None).
     
-    REFACTORING: Проблема 7 - делегирует в PolicyEngine для обратной совместимости.
+    Делегирует в PolicyEngine.
     """
-    # REFACTORING: Проблема 7 - используем PolicyEngine
     policy_engine = get_policy_engine()
     return policy_engine.current_context()
 

@@ -132,19 +132,9 @@ async def test_event_publishing_latency():
     print("\n⚠️  Event Bus latency benchmark")
     print("  (requires running Core Runtime)")
     
-    # Placeholder для future реализации
-    # когда Event Bus будет доступен из тестов
-    
+    # Требует runtime с event_bus; в тестах без runtime — skip
     results = BenchmarkResults("Event publish latency")
-    
-    # TODO: Реализовать когда runtime доступен
-    # for i in range(1000):
-    #     start = time.time()
-    #     await runtime.event_bus.publish("test.event", {"data": i})
-    #     elapsed_ms = (time.time() - start) * 1000
-    #     results.add(elapsed_ms)
-    
-    pytest.skip("Event Bus not available in test context yet")
+    pytest.skip("Event Bus not available in test context")
 
 
 @pytest.mark.benchmark

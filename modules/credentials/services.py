@@ -449,8 +449,11 @@ class CredentialService:
             await self._audit_failure("update", user_id, str(e))
             raise
 
-        # Audit
-        await self._audit_success("update", user_id, result.id, result.fingerprint)
+        # Audit (track old vs new fingerprint)
+        await self._audit_success(
+            "update", user_id, result.id, result.fingerprint,
+            old_fingerprint=current.fingerprint,
+        )
 
         return CredentialMetadata.from_domain(result)
 
@@ -574,6 +577,7 @@ class CredentialService:
         credential_id: str,
         fingerprint: str,
         access_level: Optional[str] = None,
+        old_fingerprint: Optional[str] = None,
     ) -> None:
         """
         Log successful operation to P0 protected audit trail (Step 17.5).
@@ -609,7 +613,7 @@ class CredentialService:
                 event = credential_updated_event(
                     user_id=user_id or "system",
                     credential_id=credential_id,
-                    old_fingerprint=fingerprint,  # TODO: track old vs new
+                    old_fingerprint=old_fingerprint or fingerprint,
                     new_fingerprint=fingerprint,
                 )
             elif operation == "delete":

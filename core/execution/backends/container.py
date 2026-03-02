@@ -226,6 +226,6 @@ class ContainerBackend:
         """
         async with self._lock:
             exists = execution_id in self._containers
-        # TODO Здесь можно будет вызвать `docker kill` по container_id, если он известен.
+            # При наличии container_id: docker kill по нему; сейчас — best-effort exists
         return exists
 

@@ -192,16 +192,20 @@ class WebAuthnMethod(MFAMethod):
         return "webauthn"
     
     async def is_configured(self, user_id: str, secret_store) -> bool:
-        # TODO: implement
-        return False
-    
+        # WebAuthn: check credential_id in secret_store (mfa.secrets.webauthn.{user_id})
+        try:
+            data = await secret_store.get("mfa.secrets.webauthn", user_id)
+            return data is not None
+        except Exception:
+            return False
+
     async def verify(
         self,
         user_id: str,
         proof: Dict[str, Any],
         secret_store,
     ) -> MFAVerificationResult:
-        # TODO: implement
+        # WebAuthn: verify assertion (webauthn.py verify_assertion); stub until webauthn lib
         return MFAVerificationResult(
             success=False,
             method_used=self.method_name,
@@ -224,16 +228,20 @@ class PasskeyMethod(MFAMethod):
         return "passkey"
     
     async def is_configured(self, user_id: str, secret_store) -> bool:
-        # TODO: implement
-        return False
-    
+        # Passkey: check credential in secret_store (mfa.secrets.passkey.{user_id})
+        try:
+            data = await secret_store.get("mfa.secrets.passkey", user_id)
+            return data is not None
+        except Exception:
+            return False
+
     async def verify(
         self,
         user_id: str,
         proof: Dict[str, Any],
         secret_store,
     ) -> MFAVerificationResult:
-        # TODO: implement
+        # Passkey: verify via platform authenticator; stub until passkey lib
         return MFAVerificationResult(
             success=False,
             method_used=self.method_name,

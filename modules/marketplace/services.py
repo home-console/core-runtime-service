@@ -161,7 +161,7 @@ class MarketplaceService:
                             "error": f"Cannot remove {plugin_name}: " + "\n".join(errors)
                         }
                 except (TypeError, AttributeError):
-                    # TODO In test environments with mocks, skip strict validation
+                    # В тестах с mock runtime dependency_resolver может отсутствовать
                     pass
             
             # Uninstall
@@ -364,7 +364,7 @@ class MarketplaceService:
                             "error": f"Cannot disable {plugin_name}: " + "\n".join(errors)
                         }
                 except (TypeError, AttributeError):
-                    # TODO In test environments with mocks, skip strict validation
+                    # В тестах с mock runtime dependency_resolver может отсутствовать
                     pass
             
             # Stop plugin if manager available

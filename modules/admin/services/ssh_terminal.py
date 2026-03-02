@@ -53,9 +53,17 @@ async def start_ssh_session(
         if password:
             conn_kwargs["password"] = password
         elif private_key:
-            # TODO: парсинг приватного ключа
-            pass
-        
+            # Поддержка: путь к файлу или PEM-содержимое
+            if "\n" in private_key or "-----" in private_key:
+                try:
+                    conn_kwargs["client_keys"] = [
+                        asyncssh.import_private_key(private_key.encode() if isinstance(private_key, str) else private_key)
+                    ]
+                except Exception as e:
+                    return {"error": f"Invalid private key: {e}"}
+            else:
+                conn_kwargs["client_keys"] = [private_key]
+
         conn = await asyncssh.connect(**conn_kwargs)
         
         # Создаём интерактивную shell сессию с PTY
@@ -258,11 +266,14 @@ async def ssh_terminal_start_handler(runtime: Any, body: Optional[Dict[str, Any]
         port = body.get("port", 22)
         username = body.get("username")
         password = body.get("password")
-        
+        private_key = body.get("private_key")
+
         if not host or not username:
             return {"error": "host and username required"}
-        
-        result = await start_ssh_session(host, port, username, password)
+        if not password and not private_key:
+            return {"error": "password or private_key required"}
+
+        result = await start_ssh_session(host, port, username, password, private_key)
         if "error" in result:
             logger.error(f"Failed to start SSH session: {result.get('error')}")
         else:

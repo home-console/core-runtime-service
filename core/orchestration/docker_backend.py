@@ -1,7 +1,7 @@
 """
 Docker Orchestration Backend — реализация OrchestrationBackend для Docker.
 
-REFACTORING: Проблема 8 - выносим ContainerOrchestrator в отдельный backend.
+Docker backend для OrchestrationService.
 """
 
 import asyncio
@@ -19,7 +19,7 @@ class DockerOrchestrationBackend(OrchestrationBackend):
     """
     Backend оркестрации на основе Docker.
     
-    REFACTORING: Проблема 8 - инкапсулирует всю логику работы с Docker,
+    Инкапсулирует логику работы с Docker,
     ранее находившуюся в ContainerOrchestrator.
     """
     

@@ -52,6 +52,12 @@ PLUGIN_JSON_SCHEMA = {
             "type": "array",
             "items": {"type": "string"},
             "default": []
+        },
+        "allowed_services": {
+            "type": "array",
+            "items": {"type": "string"},
+            "default": [],
+            "description": "Service names the plugin is allowed to call (restricts ServiceProxy)"
         }
     }
 }

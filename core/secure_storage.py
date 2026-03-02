@@ -197,7 +197,7 @@ class SecureStorageWrapper:
         root_data = {
             "root_hash": current_root,
             "epoch": self._current_epoch,
-            "signed_by": "core_key",  # TODO: реальная підписка
+            "signed_by": "core_key",  # Placeholder; real Ed25519/ECDSA signing in Step 17+
             "calculated_at": datetime.utcnow().isoformat(),
         }
         

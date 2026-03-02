@@ -245,6 +245,10 @@ class PluginManifestLoader:
                 
                 # Зависимости из манифеста: передаём в load_plugin через атрибут (для sdk.PluginMetadata нет merge)
                 manifest_dependencies = manifest.get("dependencies", [])
+                # allowed_services: если указано в manifest — ограничивает ServiceProxy
+                manifest_allowed = manifest.get("allowed_services")
+                if isinstance(manifest_allowed, list) and manifest_allowed:
+                    setattr(plugin_instance, "_manifest_allowed_services", manifest_allowed)
                 if isinstance(manifest_dependencies, list) and manifest_dependencies:
                     setattr(plugin_instance, "_manifest_dependencies", manifest_dependencies)
                 # Для core.PluginMetadata можно обновить metadata.dependencies (mutable)

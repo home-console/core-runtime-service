@@ -18,11 +18,8 @@ async def user_v1_integrations(runtime: Any) -> List[Dict[str, Any]]:
     Returns:
         List of user's connected integrations
     """
-    # TODO: Implement user-specific integration tracking
-    # For now, return empty list as user integration management
-    # is not yet implemented in backend
-    
-    # Future implementation would:
+    # User-specific OAuth/integration tracking — placeholder.
+    # Future: query user OAuth token storage, provider status, connectedAt, etc.
     # 1. Query user-specific OAuth token storage
     # 2. Get integration status from each provider
     # 3. Return list of {id, provider, status, connectedAt, etc.}

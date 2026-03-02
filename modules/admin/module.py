@@ -19,7 +19,7 @@ import time
 
 from core.runtime_module import RuntimeModule
 from core.http_registry import HttpEndpoint
-# REFACTORING: Проблема 8 - используем OrchestrationService вместо прямого ContainerOrchestrator
+# OrchestrationService (Docker/k8s абстракция)
 from core.orchestration import OrchestrationService, DockerOrchestrationBackend, get_orchestration_service
 
 logger = logging.getLogger(__name__)
@@ -92,7 +92,7 @@ class AdminModule(RuntimeModule):
         super().__init__(runtime)
         self._admin_started_at: Optional[float] = None
         self._registered_services: list[str] = []
-        # REFACTORING: Проблема 8 - используем OrchestrationService вместо прямого ContainerOrchestrator
+        # OrchestrationService (Docker/k8s абстракция)
         # Пытаемся получить из runtime, если не доступен - создаём локальный
         self._orchestration_service = None
         if hasattr(runtime, "orchestration_service") and runtime.orchestration_service:
@@ -577,7 +577,7 @@ class AdminModule(RuntimeModule):
             if not docker_cmd:
                 return {"ok": False, "error": "Docker не найден в системе"}
             
-            # REFACTORING: Проблема 8 - используем OrchestrationService
+            # OrchestrationService
             # Проверяем существование контейнера
             container_exists = await self._orchestration_service.container_exists(container_name)
             
@@ -592,7 +592,7 @@ class AdminModule(RuntimeModule):
                     return ensure_result
                 # После создания контейнера продолжаем с restart
             
-            # REFACTORING: Проблема 8 - используем OrchestrationService для restart
+            # OrchestrationService для restart
             logger.info(f"Restarting container {container_name} for plugin {plugin_name}")
             restart_result = await self._orchestration_service.restart_container(container_name, timeout=30.0)
             
@@ -681,7 +681,7 @@ class AdminModule(RuntimeModule):
             if not container_name:
                 container_name = f"plugin-{plugin_name}"
             
-            # REFACTORING: Проблема 8 - используем OrchestrationService
+            # OrchestrationService
             # Используем OrchestrationService для обеспечения существования контейнера
             return await self._orchestration_service.ensure_container(
                 container_name,

@@ -56,11 +56,12 @@ class PluginSandbox:
             
             # Create ServiceProxy for plugin (limited service access)
             if hasattr(runtime, 'service_registry'):
-                # TODO: Load allowed_services from plugin manifest
-                # For now, use default allowed services
+                allowed = getattr(plugin, "_manifest_allowed_services", None)
+                if not allowed or not isinstance(allowed, list):
+                    allowed = DEFAULT_ALLOWED_SERVICES
                 plugin.services = ServiceProxy(
                     runtime.service_registry,
-                    allowed_services=DEFAULT_ALLOWED_SERVICES,
+                    allowed_services=allowed,
                     plugin_name=plugin_name
                 )
             

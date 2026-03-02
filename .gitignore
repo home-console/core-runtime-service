@@ -34,3 +34,10 @@ Thumbs.db
 
 # pytest
 .pytest_cache/
+.coverage
+htmlcov/
+
+# Environment (secrets)
+.env
+.env.*
+!.env.example

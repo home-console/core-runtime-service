@@ -180,7 +180,7 @@ class PluginLifecycleManager:
             return  # Не запущен
         
         try:
-            # REFACTORING: Проблема с lifecycle контейнеров - останавливаем контейнер перед on_stop()
+            # Останавливаем контейнер перед on_stop()
             # Для плагинов с execution_mode="container" нужно остановить Docker контейнер
             metadata = plugin.metadata
             if metadata.execution_mode == "container" and metadata.container_config:
@@ -196,7 +196,7 @@ class PluginLifecycleManager:
         """
         Остановить Docker контейнер плагина.
         
-        REFACTORING: Проблема 8 - используем OrchestrationService вместо прямого доступа к ContainerOrchestrator.
+        OrchestrationService для управления контейнерами.
         
         Args:
             plugin_name: имя плагина
@@ -280,7 +280,7 @@ class PluginLifecycleManager:
             await plugin.on_unload()
             self._registry.clear_plugin_block_reason(plugin_name)
             
-            # REFACTORING: Проблема с lifecycle контейнеров - удаляем контейнер при unload
+            # Удаляем контейнер при unload
             # Для плагинов с execution_mode="container" удаляем Docker контейнер
             metadata = plugin.metadata
             if metadata.execution_mode == "container" and metadata.container_config:
@@ -303,7 +303,7 @@ class PluginLifecycleManager:
         """
         Удалить Docker контейнер плагина.
         
-        REFACTORING: Проблема 8 - используем OrchestrationService вместо прямого доступа к ContainerOrchestrator.
+        OrchestrationService для управления контейнерами.
         
         Args:
             plugin_name: имя плагина

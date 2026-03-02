@@ -3,12 +3,7 @@ ExecutionRouter — Legacy adapter для обратной совместимо�
 
 ⚠️ DEPRECATED: Этот класс больше не используется в прод-коде и будет удалён в будущем.
 
-REFACTORING STATUS:
-- OperationExecutor больше не использует ExecutionRouter как fallback
-- OperationManager больше не создаёт ExecutionRouter
-- OperationHandlerRegistry больше не регистрирует handler'ы в ExecutionRouter
-
-Используйте ExecutionControllerImpl напрямую через runtime.execution_controller.
+ExecutionControllerImpl используется через runtime.execution_controller.
 
 Этот класс остаётся только для обратной совместимости со старым кодом,
 который использует Operation + ProviderMetadata → Dict[str, Any].

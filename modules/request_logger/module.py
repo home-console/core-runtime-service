@@ -286,8 +286,7 @@ class RequestLoggerModule(RuntimeModule):
             LoggedClientSession обёртка
         """
         from modules.request_logger.http_client import create_logged_session
-        # REFACTORING: Передаём runtime для обратной совместимости с http_client
-        # TODO: В будущем можно передавать только context
+        # Передаём runtime (в будущем — только context)
         runtime = self.runtime if hasattr(self, "runtime") else None
         return create_logged_session(runtime, source, **session_kwargs)
 

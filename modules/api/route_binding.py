@@ -4,8 +4,7 @@ Route binding: attaches HttpRegistry endpoints to a FastAPI app.
 Used by Runtime after modules and plugins have registered routes.
 Runtime owns the app; this module only provides bind_routes(runtime, app).
 
-REFACTORING: Проблема 6 - упрощённый binding, использующий декларативную конфигурацию
-и доменные адаптеры вместо хардкода доменной логики.
+Использует декларативную auth_config и доменные адаптеры.
 """
 
 from __future__ import annotations
@@ -29,7 +28,7 @@ def bind_routes(runtime: Any, app: Any) -> None:
     Must be called AFTER module_manager.start_all() and plugin_manager.start_all().
     """
     endpoints = runtime.http.list()
-    # WebSocket endpoints (method=None) не попадают в api/webhook — только в ws_endpoints (REFACTORING: фильтруем правильно)
+    # WebSocket endpoints (method=None) не попадают в api/webhook — только в ws_endpoints
     api_endpoints = [ep for ep in endpoints if ep.kind == "api" and not ep.websocket]
     webhook_endpoints = [ep for ep in endpoints if ep.kind == "webhook" and not ep.websocket]
     ws_endpoints = [ep for ep in endpoints if ep.websocket]
@@ -94,8 +93,7 @@ def _make_api_handler(runtime: Any, endpoint: Any):
     """
     Создать FastAPI handler для API endpoint.
     
-    REFACTORING: Проблема 6 - использует декларативную конфигурацию из endpoint.auth_config
-    и доменные адаптеры вместо хардкода доменной логики.
+    Использует endpoint.auth_config и доменные адаптеры.
     """
     path_params = re.findall(r'\{(\w+)\}', endpoint.path)
 
@@ -108,7 +106,7 @@ def _make_api_handler(runtime: Any, endpoint: Any):
         # Получаем контекст запроса
         context = await get_request_context(request)
         
-        # REFACTORING: Проблема 6 - используем декларативную конфигурацию auth
+        # Декларативная конфигурация auth
         auth_config = endpoint.auth_config
         is_public = auth_config.public if auth_config else False
         
@@ -145,7 +143,7 @@ def _make_api_handler(runtime: Any, endpoint: Any):
         resource: Optional[Dict[str, Any]] = None
         
         if not is_public:
-            # REFACTORING: Проблема 6 - используем доменный адаптер для получения resource
+            # Доменный адаптер для resource
             if auth_config and auth_config.resource_adapter:
                 adapter = get_domain_adapter(auth_config.resource_adapter)
                 if adapter:
@@ -190,7 +188,7 @@ def _make_api_handler(runtime: Any, endpoint: Any):
                     detail="Unauthorized" if context is None else "Forbidden: insufficient permissions"
                 )
         
-        # REFACTORING: Проблема 6 - используем доменный адаптер для resource check
+        # Доменный адаптер для resource check
         if auth_config and auth_config.requires_resource_check:
             if auth_config.resource_adapter:
                 adapter = get_domain_adapter(auth_config.resource_adapter)
@@ -233,7 +231,7 @@ def _make_api_handler(runtime: Any, endpoint: Any):
             except Exception:
                 body = None
         
-        # REFACTORING: Проблема 6 - используем доменный адаптер для маппинга параметров
+        # Доменный адаптер для маппинга параметров
         if auth_config and auth_config.resource_adapter:
             adapter = get_domain_adapter(auth_config.resource_adapter)
             if adapter:

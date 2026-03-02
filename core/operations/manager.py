@@ -40,7 +40,7 @@ class OperationManager:
         """
         self.runtime = runtime
         
-        # REFACTORING: ExecutionRouter удалён, больше не нужен для registry
+        # ExecutionController используется через runtime
         # Создаём компоненты
         self._registry = OperationHandlerRegistry(execution_router=None)
         self._storage = OperationStorage(runtime)

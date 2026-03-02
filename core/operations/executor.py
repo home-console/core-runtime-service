@@ -60,7 +60,6 @@ class OperationExecutor:
             if hasattr(self.runtime, 'capability_registry') and self.runtime.capability_registry:
                 cap_reg = self.runtime.capability_registry
                 
-                # REFACTORING: Используем высокоуровневый API для поиска провайдеров
                 # Сначала пробуем select_provider_for для получения метаданных
                 provider_metadata = cap_reg.select_provider_for(operation_type)
                 if provider_metadata and provider_metadata.provider_type == "remote":
@@ -249,7 +248,6 @@ class OperationExecutor:
             handler = self.registry.find_handler(operation.type, self.runtime)
             provider_metadata = None  # Get metadata for execution mode decision
             
-            # REFACTORING: Используем инкапсулированный метод вместо прямого доступа к _lock
             # Метод select_provider_for() атомарно выбирает провайдера и возвращает ProviderMetadata
             try:
                 if hasattr(self.runtime, 'capability_registry') and self.runtime.capability_registry:

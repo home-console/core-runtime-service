@@ -41,7 +41,7 @@ class LoggedClientSession:
             **session_kwargs: параметры для aiohttp.ClientSession
         """
         self.runtime = runtime
-        # REFACTORING: Поддержка RuntimeContext
+        # RuntimeContext для cross-request tracing
         self.context = getattr(runtime, "context", None) if hasattr(runtime, "context") else None
         self.source = source
         self._has_request_logger = None

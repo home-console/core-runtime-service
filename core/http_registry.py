@@ -14,7 +14,7 @@ class EndpointAuthConfig:
     """
     Декларативная конфигурация авторизации для endpoint.
     
-    REFACTORING: Проблема 6 - выносим authz-логику из route_binding в декларацию.
+    Декларативная authz и param_mapping для endpoints.
     """
     # Публичный endpoint (не требует авторизации)
     public: bool = False
@@ -36,7 +36,7 @@ class EndpointParamMapping:
     """
     Декларативная конфигурация маппинга параметров для endpoint.
     
-    REFACTORING: Проблема 6 - выносим доменную логику маппинга параметров.
+    Декларативная конфигурация маппинга параметров.
     """
     # Функция для извлечения/преобразования параметров из request
     # Принимает: (request, body, path_params, query_params) -> dict для service call
@@ -60,8 +60,8 @@ class HttpEndpoint:
       - deprecated: флаг устаревшей версии (True если версия помечена как deprecated)
       - kind: тип endpoint ("api" или "webhook") — определяет обработку и авторизацию
       - tags: опциональный список тегов для группировки в документации
-      - auth_config: декларативная конфигурация авторизации (REFACTORING: Проблема 6)
-      - param_mapping: декларативная конфигурация маппинга параметров (REFACTORING: Проблема 6)
+      - auth_config: декларативная конфигурация авторизации
+      - param_mapping: декларативная конфигурация маппинга параметров
 
     Правила валидации:
       - Если websocket=True → method должен быть None
@@ -76,7 +76,7 @@ class HttpEndpoint:
     deprecated: bool = False
     kind: Literal["api", "webhook"] = "api"
     tags: Optional[list[str]] = None
-    # REFACTORING: Проблема 6 - декларативная конфигурация authz и доменной логики
+    # Декларативная authz и param_mapping
     auth_config: Optional[EndpointAuthConfig] = None
     param_mapping: Optional[EndpointParamMapping] = None
 

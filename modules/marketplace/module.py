@@ -228,9 +228,7 @@ class MarketplaceModule(RuntimeModule):
     
     def list_installed_plugins(self) -> Dict[str, Any]:
         """Get installed plugins from storage."""
-        # REFACTORING: Синхронный метод, но storage асинхронный
-        # Для обратной совместимости используем runtime.storage напрямую
-        # TODO: Переделать на async или добавить синхронный wrapper
+        # Legacy: синхронный метод (storage.get асинхронный); при необходимости переделать на async
         storage = self.context.storage if hasattr(self, "context") and self.context else self.runtime.storage
         # Внимание: это синхронный вызов, но storage.get асинхронный
         # Это legacy код, который нужно будет переделать

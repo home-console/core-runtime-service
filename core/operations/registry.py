@@ -47,7 +47,7 @@ class OperationHandlerRegistry:
         """
         with self._handlers_lock:
             self._handlers[op_type] = handler
-            # REFACTORING: ExecutionRouter удалён, больше не регистрируем handler'ы там
+            # ExecutionRouter удалён; handler'ы в ExecutionController
     
     def unregister(self, op_type: str) -> None:
         """
@@ -58,7 +58,7 @@ class OperationHandlerRegistry:
         """
         with self._handlers_lock:
             self._handlers.pop(op_type, None)
-            # REFACTORING: ExecutionRouter удалён, больше не нужно дерегистрировать
+            # ExecutionRouter удалён; дерегистрация не нужна
     
     def list_types(self) -> List[str]:
         """

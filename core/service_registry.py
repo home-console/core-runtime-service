@@ -173,7 +173,7 @@ class ServiceRegistry:
                 effective_admin_only = False
 
         async def wrapped(*args, **kwargs):
-            # REFACTORING: Проблема 7 - используем PolicyEngine вместо прямого импорта core.acl
+            # PolicyEngine для authz
             from core.policy_engine import get_policy_engine
             
             policy_engine = get_policy_engine()
