@@ -34,3 +34,7 @@ qrcode[pil]>=7.4.0
 # SSH connect (подключение к хосту по креду из БД)
 paramiko>=3.4.0
 
+uvicorn[standard]
+websockets
+wsproto
+

@@ -34,6 +34,7 @@ from .credentials_handlers import (
     admin_credentials_connect,
     admin_credentials_terminal_ws,
     admin_credentials_terminal_sessions,
+    admin_credentials_terminal_session_close,
 )
 from .introspection import (
     get_runtime_info,
@@ -205,11 +206,19 @@ class AdminModule(RuntimeModule):
             service="admin.v1.credentials.connect",
             description="Admin: подключиться к хосту по креду из БД (SSH)"
         ))
+        # Active SSH terminal sessions are exposed under a separate sub-path
+        # to avoid collision with /admin/v1/credentials/{credential_id}.
         self.context.http.register(HttpEndpoint(
             method="GET",
-            path="/admin/v1/credentials/terminal-sessions",
+            path="/admin/v1/credentials/terminal/sessions",
             service="admin.v1.credentials.terminal_sessions",
             description="Admin: список активных SSH терминальных сессий"
+        ))
+        self.context.http.register(HttpEndpoint(
+            method="DELETE",
+            path="/admin/v1/credentials/terminal/sessions/{session_id}",
+            service="admin.v1.credentials.terminal_session_close",
+            description="Admin: закрыть SSH терминальную сессию по id"
         ))
         self.context.http.register(HttpEndpoint(
             path="/admin/v1/credentials/terminal",
@@ -402,6 +411,11 @@ class AdminModule(RuntimeModule):
                 return await admin_credentials_terminal_sessions(self.runtime)
             return handler
 
+        def wrap_credentials_terminal_session_close():
+            async def handler(session_id: str, **kw):
+                return await admin_credentials_terminal_session_close(self.runtime, session_id=session_id)
+            return handler
+
         def wrap_agent_deploy():
             async def handler(body=None, **kw):
                 b = body if body is not None else kw.get("body")
@@ -438,6 +452,7 @@ class AdminModule(RuntimeModule):
             ("admin.v1.credentials.connect", wrap_credentials_connect()),
             ("admin.v1.credentials.terminal_ws", wrap_credentials_terminal_ws()),
             ("admin.v1.credentials.terminal_sessions", wrap_credentials_terminal_sessions()),
+            ("admin.v1.credentials.terminal_session_close", wrap_credentials_terminal_session_close()),
             ("admin.v1.state", wrap_introspection(get_state)),
             ("admin.v1.state.keys", wrap_introspection(list_state_keys)),
             ("admin.v1.state.get", wrap_state_get()),
@@ -902,36 +917,45 @@ class AdminModule(RuntimeModule):
         except Exception:
             pass
 
-        # SSH Terminal endpoints (для веб-версии через WebSocket прокси)
+        # SSH Terminal Session Manager
+        # POST   /admin/v1/ssh/sessions          — создать PTY-сессию (возвращает session_id)
+        # GET    /admin/v1/ssh/sessions          — список сессий
+        # DELETE /admin/v1/ssh/sessions/{id}    — закрыть сессию
+        # WS     /admin/v1/ssh/ws/{session_id}  — attach/detach к PTY
         try:
-            from .services import ssh_terminal
+            from .services import ssh_terminal as _ssh_mod
 
-            # Регистрируем сервис для создания SSH сессии
-            async def _ssh_terminal_start_handler(body: dict = None, **kw):
-                return await ssh_terminal.ssh_terminal_start_handler(self.context, body)
+            async def _ssh_create(body: dict = None, **kw):
+                return await _ssh_mod.http_create_session(self.runtime, body)
 
-            await self.context.services.register("admin.v1.ssh.start", _ssh_terminal_start_handler)
-            self.context.http.register(HttpEndpoint(
-                method="POST",
-                path="/admin/v1/ssh/start",
-                service="admin.v1.ssh.start",
-                description="Start SSH terminal session (returns session_id)"
-            ))
+            async def _ssh_list(**kw):
+                return await _ssh_mod.http_list_sessions(self.runtime)
 
-            # WebSocket эндпоинт для проксирования SSH терминала
-            async def _ssh_terminal_ws_handler(websocket: Any, session_id: str = None, **kw):
-                if session_id:
-                    await ssh_terminal.handle_ssh_websocket(websocket, session_id, self.context)
-                else:
+            async def _ssh_close(session_id: str, **kw):
+                return await _ssh_mod.http_close_session(self.runtime, session_id)
+
+            async def _ssh_ws(websocket: Any, session_id: str = None, **kw):
+                if not session_id:
                     await websocket.close(code=1008, reason="session_id required")
+                    return
+                await _ssh_mod.attach_websocket(websocket, session_id)
 
-            await self.context.services.register("admin.v1.ssh.ws", _ssh_terminal_ws_handler)
-            self.context.http.register(HttpEndpoint(
-                path="/admin/v1/ssh/ws/{session_id}",
-                service="admin.v1.ssh.ws",
-                websocket=True,
-                description="WebSocket proxy for SSH terminal"
-            ))
+            for svc, handler in [
+                ("admin.v1.ssh.sessions.create", _ssh_create),
+                ("admin.v1.ssh.sessions.list",   _ssh_list),
+                ("admin.v1.ssh.sessions.close",  _ssh_close),
+                ("admin.v1.ssh.ws",              _ssh_ws),
+            ]:
+                await self.context.services.register(svc, handler)
+
+            for ep in [
+                HttpEndpoint(method="POST",   path="/admin/v1/ssh/sessions",             service="admin.v1.ssh.sessions.create", description="Create SSH PTY session"),
+                HttpEndpoint(method="GET",    path="/admin/v1/ssh/sessions",             service="admin.v1.ssh.sessions.list",   description="List SSH PTY sessions"),
+                HttpEndpoint(method="DELETE", path="/admin/v1/ssh/sessions/{session_id}", service="admin.v1.ssh.sessions.close",  description="Close SSH PTY session"),
+                HttpEndpoint(path="/admin/v1/ssh/ws/{session_id}", service="admin.v1.ssh.ws", websocket=True, description="Attach WebSocket to SSH PTY session"),
+            ]:
+                self.context.http.register(ep)
+
         except Exception as e:
             logger.warning(f"Failed to register SSH terminal endpoints: {e}", exc_info=True)
 

@@ -70,7 +70,8 @@ def bind_routes(runtime: Any, app: Any) -> None:
                         if i < len(parts):
                             param_values[param_name] = parts[i]
                 try:
-                    await runtime.service_registry.call(ep.service, websocket=websocket, **param_values)
+                    # WebSocket handlers are long-lived — bypass default_timeout
+                    await runtime.service_registry.call_without_timeout(ep.service, websocket=websocket, **param_values)
                 except WebSocketDisconnect:
                     pass
                 except Exception as e:

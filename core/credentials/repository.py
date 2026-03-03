@@ -103,6 +103,12 @@ class CredentialRepository:
             CredentialAlreadyExists: if credential ID already exists
             CredentialSecretLeakage: if metadata contains secret
         """
+        if self._secrets is None:
+            raise RuntimeError(
+                "Secret store is not configured. Credentials cannot be stored. "
+                "Start core-runtime with SecretStore (e.g. passphrase/vault) to enable credential create."
+            )
+
         # Validate metadata safety
         _validate_metadata_not_contains_secret(credential.metadata)
 
@@ -178,6 +184,11 @@ class CredentialRepository:
         Returns:
             Tuple of (Credential, secret_bytes) if found, None otherwise
         """
+        if self._secrets is None:
+            raise RuntimeError(
+                "Secret store is not configured. Cannot retrieve credential secret."
+            )
+
         # Get metadata
         credential = await self.get(credential_id)
         if credential is None:
@@ -217,6 +228,11 @@ class CredentialRepository:
             CredentialVersionConflict: if version mismatch
             CredentialSecretLeakage: if metadata contains secret
         """
+        if self._secrets is None:
+            raise RuntimeError(
+                "Secret store is not configured. Cannot update credential secret."
+            )
+
         # Validate metadata safety
         _validate_metadata_not_contains_secret(credential.metadata)
 
@@ -284,8 +300,9 @@ class CredentialRepository:
                 METADATA_NAMESPACE, credential_id, target="core"
             )
 
-            # Step 2: Delete secret from vault
-            await self._secrets.delete(_make_secret_key(credential_id))
+            # Step 2: Delete secret from vault (no-op if secret store not configured)
+            if self._secrets is not None:
+                await self._secrets.delete(_make_secret_key(credential_id))
 
             # Both deletions attempted regardless of individual results
             # (idempotent operations)

@@ -19,7 +19,8 @@ from core.credentials.domain import CredentialType
 
 # SystemContext не имеет user_id; для credential.* передаём явно admin
 _ADMIN_USER_ID = "admin"
-_ADMIN_ROLES = ["ADMIN"]
+# RBAC Role values are lowercase (see core.security.rbac_models.Role)
+_ADMIN_ROLES = ["admin"]
 
 
 def _service_not_loaded(e: Exception) -> bool:
@@ -427,22 +428,30 @@ def _ssh_open_shell(cred, secret_bytes: bytes):
 
 
 _ACTIVE_TERMINAL_SESSIONS: Dict[str, Dict[str, Any]] = {}
+# Internal map: session_id -> underlying SSH client/channel handles for admin WebSocket terminal
+_TERMINAL_HANDLES: Dict[str, Dict[str, Any]] = {}
 
 
 async def admin_credentials_terminal_sessions(runtime: Any) -> Dict[str, Any]:
-  """
-  GET /admin/v1/credentials/terminal-sessions — список активных SSH терминальных сессий.
-  """
-  now = time.time()
-  sessions = []
-  for sid, info in list(_ACTIVE_TERMINAL_SESSIONS.items()):
-      item = dict(info)
-      item["session_id"] = sid
-      created = info.get("created_at")
-      if isinstance(created, (int, float)):
-          item["age_sec"] = now - created
-      sessions.append(item)
-  return {"sessions": sessions}
+    """
+    GET /admin/v1/credentials/terminal/sessions — список активных SSH терминальных сессий.
+    """
+    now = time.time()
+    sessions = []
+    for sid, info in list(_ACTIVE_TERMINAL_SESSIONS.items()):
+        # Expose only serializable metadata to API
+        item = {
+            "session_id": sid,
+            "credential_id": info.get("credential_id"),
+            "host": info.get("host"),
+            "username": info.get("username"),
+            "created_at": info.get("created_at"),
+        }
+        created = info.get("created_at")
+        if isinstance(created, (int, float)):
+            item["age_sec"] = now - created
+        sessions.append(item)
+    return {"sessions": sessions}
 
 
 async def admin_credentials_terminal_ws(runtime: Any, websocket: Any) -> None:
@@ -486,6 +495,8 @@ async def admin_credentials_terminal_ws(runtime: Any, websocket: Any) -> None:
         "username": getattr(cred, "username", None),
         "created_at": time.time(),
     }
+    # Keep SSH handles separately so they can be closed from API
+    _TERMINAL_HANDLES[session_id] = {"client": client, "channel": channel}
 
     loop = asyncio.get_event_loop()
     queue = asyncio.Queue()
@@ -557,11 +568,42 @@ async def admin_credentials_terminal_ws(runtime: Any, websocket: Any) -> None:
     finally:
         # Очистка SSH и удаление записи о сессии
         _ACTIVE_TERMINAL_SESSIONS.pop(session_id, None)
+        handles = _TERMINAL_HANDLES.pop(session_id, None)
+        ch = handles.get("channel") if handles else channel
+        cl = handles.get("client") if handles else client
         try:
-            channel.close()
+            if ch:
+                ch.close()
         except Exception:
             pass
         try:
-            client.close()
+            if cl:
+                cl.close()
         except Exception:
             pass
+
+
+async def admin_credentials_terminal_session_close(runtime: Any, session_id: str) -> Dict[str, Any]:
+    """
+    DELETE /admin/v1/credentials/terminal/sessions/{session_id} — принудительно закрыть SSH терминальную сессию.
+    """
+    info = _ACTIVE_TERMINAL_SESSIONS.pop(session_id, None)
+    handles = _TERMINAL_HANDLES.pop(session_id, None)
+    closed = False
+
+    if handles:
+        ch = handles.get("channel")
+        cl = handles.get("client")
+        try:
+            if ch:
+                ch.close()
+            closed = True
+        except Exception:
+            pass
+        try:
+            if cl:
+                cl.close()
+        except Exception:
+            pass
+
+    return {"deleted": closed or info is not None}

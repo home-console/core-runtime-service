@@ -44,11 +44,20 @@ class SecretStoreStorageAdapter:
 
     async def set_async(self, key: str, value: str) -> None:
         ns, k = self._ns_key(key)
-        await self._backend.set(ns, k, {"_v": value})
+        backend = self._backend
+        # For critical secrets namespace behind SecureStorageWrapper, use secure_set
+        if hasattr(backend, "secure_set") and ns == SECRETS_NS:
+            await backend.secure_set(ns, k, {"_v": value})
+        else:
+            await backend.set(ns, k, {"_v": value})
 
     async def delete_async(self, key: str) -> bool:
         ns, k = self._ns_key(key)
-        return await self._backend.delete(ns, k)
+        backend = self._backend
+        # For critical secrets namespace behind SecureStorageWrapper, use secure_delete
+        if hasattr(backend, "secure_delete") and ns == SECRETS_NS:
+            return await backend.secure_delete(ns, k)
+        return await backend.delete(ns, k)
 
     async def list_keys_async(self, pattern: str) -> list[str]:
         if not pattern.startswith(SECRETS_NS) or "*" not in pattern:

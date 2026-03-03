@@ -1,285 +1,417 @@
 """
-SSH Terminal Service — проксирование SSH терминала через WebSocket для веб-версии.
+SSH Terminal Session Manager.
 
-Использует asyncssh для асинхронного SSH подключения и проксирует ввод/вывод через WebSocket.
+Архитектура:
+  - Сессия создаётся через POST /admin/v1/ssh/start (возвращает session_id)
+  - Сессия живёт независимо от WebSocket — PTY не закрывается при дисконнекте браузера
+  - Несколько WebSocket могут attach/detach к одной сессии одновременно (broadcast)
+  - DELETE /admin/v1/ssh/sessions/{session_id} явно убивает сессию
+
+Broadcast:
+  - Один поток читает из SSH PTY и кладёт в asyncio.Event (shared bytes buffer)
+  - Каждый WS-subscriber имеет свой asyncio.Queue, в который пишет read-loop
+
+Transport: paramiko (уже в requirements.txt).
 """
 
 import asyncio
+import io
+import json
 import logging
-import base64
-from typing import Dict, Any, Optional
+import threading
+import time
+from typing import Any, Dict, List, Optional
 from uuid import uuid4
-
-try:
-    import asyncssh
-except ImportError:
-    asyncssh = None
 
 logger = logging.getLogger(__name__)
 
-# Активные SSH сессии: session_id -> SSHConnection
-_ssh_sessions: Dict[str, Any] = {}
+# ──────────────────────────────────────────────────────────────────────────────
+# Session store
+# ──────────────────────────────────────────────────────────────────────────────
 
-# Активные WebSocket подключения к сессиям: session_id -> list of websockets
-_active_websockets: Dict[str, list] = {}
+class _SshSession:
+    """Один PTY-сеанс SSH, к которому могут attach-иться несколько WebSocket."""
+
+    def __init__(self, session_id: str, credential_id: Optional[str], host: str, username: str):
+        self.session_id = session_id
+        self.credential_id = credential_id
+        self.host = host
+        self.username = username
+        self.created_at = time.time()
+
+        # paramiko objects (set after _open_shell)
+        self.client: Any = None
+        self.channel: Any = None
+
+        # asyncio event loop (set when first WS attaches)
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+
+        # Subscribers: set of asyncio.Queue[bytes | None]
+        self._subscribers: List[asyncio.Queue] = []
+        self._lock = threading.Lock()
+
+        # Background read thread
+        self._reader_thread: Optional[threading.Thread] = None
+        self._closed = False
+
+    # ── subscriber management ──────────────────────────────────────────────
+
+    def subscribe(self, loop: asyncio.AbstractEventLoop) -> asyncio.Queue:
+        """Зарегистрировать нового subscriber; возвращает его очередь."""
+        q: asyncio.Queue = asyncio.Queue()
+        with self._lock:
+            if self._loop is None:
+                self._loop = loop
+            self._subscribers.append(q)
+        return q
+
+    def unsubscribe(self, q: asyncio.Queue) -> None:
+        with self._lock:
+            try:
+                self._subscribers.remove(q)
+            except ValueError:
+                pass
+
+    def _broadcast(self, data: Optional[bytes]) -> None:
+        """Положить данные во все очереди subscribers (вызывается из read-thread)."""
+        with self._lock:
+            loop = self._loop
+            subs = list(self._subscribers)
+        if loop is None:
+            return
+        for q in subs:
+            try:
+                loop.call_soon_threadsafe(q.put_nowait, data)
+            except Exception:
+                pass
+
+    # ── PTY read loop (background thread) ─────────────────────────────────
+
+    def _start_reader(self) -> None:
+        if self._reader_thread and self._reader_thread.is_alive():
+            return
+        t = threading.Thread(target=self._read_loop, daemon=True, name=f"ssh-reader-{self.session_id[:8]}")
+        self._reader_thread = t
+        t.start()
+
+    def _read_loop(self) -> None:
+        try:
+            while not self._closed:
+                try:
+                    data = self.channel.recv(4096)
+                except Exception:
+                    break
+                if not data:
+                    break
+                self._broadcast(data)
+        finally:
+            self._broadcast(None)  # EOF — скажем всем WS что сессия закончилась
+            self._closed = True
+            logger.info(f"[ssh-session] {self.session_id[:8]} read loop done")
+
+    # ── lifecycle ──────────────────────────────────────────────────────────
+
+    def close(self) -> None:
+        self._closed = True
+        self._broadcast(None)
+        try:
+            if self.channel:
+                self.channel.close()
+        except Exception:
+            pass
+        try:
+            if self.client:
+                self.client.close()
+        except Exception:
+            pass
+
+    def is_alive(self) -> bool:
+        return not self._closed and (self.channel is not None) and not self.channel.closed
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "session_id": self.session_id,
+            "credential_id": self.credential_id,
+            "host": self.host,
+            "username": self.username,
+            "created_at": self.created_at,
+            "age_sec": time.time() - self.created_at,
+            "alive": self.is_alive(),
+            "subscribers": len(self._subscribers),
+        }
 
 
-async def start_ssh_session(
+# Global registry
+_sessions: Dict[str, _SshSession] = {}
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# SSH helpers (paramiko)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _open_shell_paramiko(host: str, port: int, username: str, password: Optional[str], private_key_pem: Optional[str]):
+    """Synchronous — вызывать через run_in_executor."""
+    try:
+        import paramiko
+    except ImportError:
+        raise RuntimeError("paramiko не установлен (pip install paramiko)")
+
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+    connect_kwargs: Dict[str, Any] = dict(
+        hostname=host,
+        port=port,
+        username=username,
+        timeout=15,
+        allow_agent=False,
+        look_for_keys=False,
+    )
+    if password:
+        connect_kwargs["password"] = password
+    elif private_key_pem:
+        pkey = None
+        for key_cls in (paramiko.RSAKey, paramiko.Ed25519Key, paramiko.ECDSAKey):
+            try:
+                pkey = key_cls.from_private_key(io.StringIO(private_key_pem))
+                break
+            except Exception:
+                continue
+        if pkey is None:
+            raise RuntimeError("Не удалось распарсить приватный ключ (RSA/Ed25519/ECDSA)")
+        connect_kwargs["pkey"] = pkey
+    else:
+        raise RuntimeError("Нужен password или private_key")
+
+    client.connect(**connect_kwargs)
+    channel = client.invoke_shell(term="xterm-256color", width=220, height=50)
+    return client, channel
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Public API — create / list / get / close
+# ──────────────────────────────────────────────────────────────────────────────
+
+async def create_session(
     host: str,
     port: int,
     username: str,
     password: Optional[str] = None,
-    private_key: Optional[str] = None,
-) -> Dict[str, Any]:
-    """
-    Создать SSH сессию и вернуть session_id.
-    
-    Returns:
-        {"session_id": str, "error": Optional[str]}
-    """
-    if asyncssh is None:
-        return {"error": "asyncssh not installed. Install with: pip install asyncssh"}
-    
-    session_id = str(uuid4())
-    
-    try:
-        # Подключаемся по SSH
-        conn_kwargs = {
-            "host": host,
-            "port": port,
-            "username": username,
-        }
-        
-        if password:
-            conn_kwargs["password"] = password
-        elif private_key:
-            # Поддержка: путь к файлу или PEM-содержимое
-            if "\n" in private_key or "-----" in private_key:
-                try:
-                    conn_kwargs["client_keys"] = [
-                        asyncssh.import_private_key(private_key.encode() if isinstance(private_key, str) else private_key)
-                    ]
-                except Exception as e:
-                    return {"error": f"Invalid private key: {e}"}
-            else:
-                conn_kwargs["client_keys"] = [private_key]
-
-        conn = await asyncssh.connect(**conn_kwargs)
-        
-        # Создаём интерактивную shell сессию с PTY
-        # Используем start_shell для создания интерактивного терминала
-        stdin, stdout, stderr = await conn.start_shell(
-            term_type="xterm-256color",
-            term_size=(80, 24)
-        )
-        
-        _ssh_sessions[session_id] = {
-            "connection": conn,
-            "stdin": stdin,
-            "stdout": stdout,
-            "stderr": stderr,
-            "host": host,
-            "port": port,
-            "username": username,
-            "created_at": asyncio.get_event_loop().time(),
-            "read_task": None,  # Задача чтения из stdout (одна на сессию)
-        }
-        _active_websockets[session_id] = []
-        
-        logger.info(f"SSH session {session_id} created for {username}@{host}:{port}")
-        
-        return {"session_id": session_id}
-        
-    except Exception as e:
-        logger.error(f"Failed to create SSH session: {e}", exc_info=True)
-        return {"error": str(e)}
+    private_key_pem: Optional[str] = None,
+    credential_id: Optional[str] = None,
+) -> _SshSession:
+    """Создать новую PTY-сессию. Возвращает объект сессии."""
+    loop = asyncio.get_event_loop()
+    client, channel = await loop.run_in_executor(
+        None, lambda: _open_shell_paramiko(host, port, username, password, private_key_pem)
+    )
+    session = _SshSession(
+        session_id=str(uuid4()),
+        credential_id=credential_id,
+        host=host,
+        username=username,
+    )
+    session.client = client
+    session.channel = channel
+    session._start_reader()
+    _sessions[session.session_id] = session
+    logger.info(f"[ssh-session] Created {session.session_id[:8]} for {username}@{host}:{port}")
+    return session
 
 
-async def handle_ssh_websocket(websocket: Any, session_id: str, runtime: Any) -> None:
+def list_sessions() -> List[Dict[str, Any]]:
+    """Список всех сессий (живых и мёртвых)."""
+    return [s.to_dict() for s in list(_sessions.values())]
+
+
+def get_session(session_id: str) -> Optional[_SshSession]:
+    return _sessions.get(session_id)
+
+
+def close_session(session_id: str) -> bool:
+    """Закрыть сессию по id. Возвращает True если нашли."""
+    session = _sessions.pop(session_id, None)
+    if session is None:
+        return False
+    session.close()
+    logger.info(f"[ssh-session] Closed {session_id[:8]}")
+    return True
+
+
+def gc_dead_sessions() -> None:
+    """Удалить мёртвые сессии из реестра."""
+    dead = [sid for sid, s in list(_sessions.items()) if not s.is_alive()]
+    for sid in dead:
+        _sessions.pop(sid, None)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# WebSocket attach handler
+# ──────────────────────────────────────────────────────────────────────────────
+
+async def attach_websocket(websocket: Any, session_id: str) -> None:
     """
-    Обработчик WebSocket для SSH терминала.
-    Проксирует данные между браузером и SSH сессией.
+    Attach WebSocket к существующей PTY-сессии.
+    Двунаправленный мост: WS → SSH PTY, SSH PTY → WS.
+    При дисконнекте WS сессия остаётся живой (detach).
     """
-    logger.info(f"WebSocket connection attempt for SSH session {session_id}")
-    if session_id not in _ssh_sessions:
-        logger.warning(f"SSH session {session_id} not found. Available sessions: {list(_ssh_sessions.keys())}")
-        await websocket.send_text('{"type":"error","message":"Session not found"}')
+    session = _sessions.get(session_id)
+    if session is None or not session.is_alive():
+        await websocket.send_text(json.dumps({"type": "error", "message": "Session not found or closed"}))
         await websocket.close(code=1008)
         return
-    
-    logger.info(f"WebSocket connected for SSH session {session_id}")
-    
-    # Регистрируем WebSocket подключение
-    if session_id not in _active_websockets:
-        _active_websockets[session_id] = []
-    _active_websockets[session_id].append(websocket)
-    
-    session_data = _ssh_sessions[session_id]
-    conn = session_data["connection"]
-    stdin = session_data["stdin"]
-    stdout = session_data["stdout"]
-    
-    # Запускаем задачу чтения из SSH только если её еще нет
-    if session_data["read_task"] is None or session_data["read_task"].done():
-        async def read_from_ssh_broadcast():
-            """Читаем вывод из SSH и отправляем во все подключенные WebSocket."""
-            try:
-                while True:
-                    data = await stdout.read(1024)
-                    if not data:
-                        break
-                    
-                    # Отправляем данные во все активные WebSocket подключения этой сессии
-                    message = None
-                    if isinstance(data, bytes):
-                        # Отправляем как base64
-                        b64_data = base64.b64encode(data).decode('ascii')
-                        message = f'{{"type":"output","data":"{b64_data}"}}'
-                    else:
-                        # Текст
-                        message = f'{{"type":"output","text":"{data}"}}'
-                    
-                    # Отправляем во все активные WebSocket
-                    active_ws = _active_websockets.get(session_id, [])
-                    for ws in active_ws[:]:  # Копируем список для безопасной итерации
-                        try:
-                            await ws.send_text(message)
-                        except Exception:
-                            # Удаляем неактивные WebSocket из списка
-                            if ws in active_ws:
-                                active_ws.remove(ws)
-            except Exception as e:
-                logger.error(f"Error reading from SSH: {e}", exc_info=True)
-                # Отправляем ошибку во все активные WebSocket
-                error_msg = f'{{"type":"error","message":"SSH read error: {e}"}}'
-                active_ws = _active_websockets.get(session_id, [])
-                for ws in active_ws[:]:
-                    try:
-                        await ws.send_text(error_msg)
-                    except Exception:
-                        if ws in active_ws:
-                            active_ws.remove(ws)
-        
-        session_data["read_task"] = asyncio.create_task(read_from_ssh_broadcast())
-    
-    async def read_from_websocket():
-        """Читаем из WebSocket и отправляем в SSH."""
-        try:
-            async for message in websocket:
-                if isinstance(message, str):
-                    # JSON control сообщения
-                    import json
-                    try:
-                        msg = json.loads(message)
-                        if msg.get("type") == "resize":
-                            cols = msg.get("cols", 80)
-                            rows = msg.get("rows", 24)
-                            # Изменяем размер терминала через stdin (asyncssh поддерживает это через conn)
-                            try:
-                                # В asyncssh изменение размера терминала делается через изменение размера канала
-                                # Но для start_shell это может не поддерживаться напрямую
-                                # Пока пропускаем resize, можно добавить позже если нужно
-                                pass
-                            except Exception:
-                                pass
-                        elif msg.get("type") == "input":
-                            # Ввод данных (base64)
-                            data = base64.b64decode(msg.get("data", ""))
-                            stdin.write(data)
-                            await stdin.drain()
-                        elif msg.get("type") == "text":
-                            # Прямой текст
-                            stdin.write(msg.get("text", "").encode())
-                            await stdin.drain()
-                    except Exception as e:
-                        logger.error(f"Error processing WebSocket message: {e}", exc_info=True)
-                elif isinstance(message, bytes):
-                    # Прямые байты
-                    stdin.write(message)
-                    await stdin.drain()
-        except Exception as e:
-            logger.error(f"Error reading from WebSocket: {e}", exc_info=True)
-    
-    # Запускаем задачу чтения из WebSocket (чтение из SSH уже запущено выше)
-    try:
-        await read_from_websocket()
-    except Exception as e:
-        logger.error(f"SSH WebSocket handler error: {e}", exc_info=True)
-    finally:
-        # Удаляем WebSocket из списка активных подключений
-        if session_id in _active_websockets:
-            if websocket in _active_websockets[session_id]:
-                _active_websockets[session_id].remove(websocket)
-            # Если больше нет активных подключений, можно закрыть SSH сессию через таймаут
-            # Но пока оставляем сессию активной для возможности переподключения
-            logger.info(f"WebSocket disconnected for SSH session {session_id}, active connections: {len(_active_websockets.get(session_id, []))}")
 
+    loop = asyncio.get_event_loop()
+    queue = session.subscribe(loop)
+    channel = session.channel
+    logger.info(f"[ssh-ws] attach to {session_id[:8]}, subscribers now: {len(session._subscribers)}")
 
-async def close_ssh_session(session_id: str) -> None:
-    """Закрыть SSH сессию."""
-    if session_id in _ssh_sessions:
-        session_data = _ssh_sessions[session_id]
+    # SSH → WS
+    async def _ssh_to_ws():
         try:
-            # Останавливаем задачу чтения из stdout
-            if "read_task" in session_data and session_data["read_task"] and not session_data["read_task"].done():
-                session_data["read_task"].cancel()
-                try:
-                    await session_data["read_task"]
-                except asyncio.CancelledError:
-                    pass
-            
-            # Закрываем все активные WebSocket подключения
-            if session_id in _active_websockets:
-                for ws in _active_websockets[session_id][:]:
+            while True:
+                data = await queue.get()
+                if data is None:
+                    # SSH сессия завершилась
                     try:
-                        await ws.close(code=1000, reason="SSH session closed")
+                        await websocket.send_text(json.dumps({"type": "closed", "message": "SSH session ended"}))
+                        await websocket.close(code=1000)
                     except Exception:
                         pass
-                del _active_websockets[session_id]
-            
-            # Закрываем SSH соединение
-            if "stdin" in session_data and session_data["stdin"]:
-                session_data["stdin"].close()
-                await session_data["stdin"].wait_closed()
-            if "stdout" in session_data and session_data["stdout"]:
-                session_data["stdout"].close()
-                await session_data["stdout"].wait_closed()
-            if "connection" in session_data:
-                session_data["connection"].close()
-        except Exception as e:
-            logger.debug(f"Error closing SSH session: {e}")
-        del _ssh_sessions[session_id]
+                    break
+                try:
+                    await websocket.send_bytes(data)
+                except Exception:
+                    break
+        except Exception:
+            pass
 
+    # WS → SSH
+    async def _ws_to_ssh():
+        try:
+            while True:
+                try:
+                    msg = await asyncio.wait_for(websocket.receive(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    if not session.is_alive():
+                        break
+                    continue
+                except Exception:
+                    break
 
-async def ssh_terminal_start_handler(runtime: Any, body: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """
-    HTTP handler для создания SSH сессии.
-    POST /admin/v1/ssh/start
-    Body: {"host": str, "port": int, "username": str, "password": Optional[str]}
-    """
+                if msg.get("type") == "websocket.disconnect":
+                    break
+
+                # binary
+                raw_bytes = msg.get("bytes")
+                if raw_bytes:
+                    await loop.run_in_executor(None, lambda d=raw_bytes: channel.send(d))
+                    continue
+
+                text = msg.get("text")
+                if text:
+                    if text.startswith("{"):
+                        try:
+                            payload = json.loads(text)
+                            ptype = payload.get("type")
+                            if ptype == "resize":
+                                cols = int(payload.get("cols") or 80)
+                                rows = int(payload.get("rows") or 24)
+                                await loop.run_in_executor(
+                                    None, lambda: channel.resize_pty(width=cols, height=rows)
+                                )
+                                continue
+                            elif ptype == "ping":
+                                try:
+                                    await websocket.send_text(json.dumps({"type": "pong"}))
+                                except Exception:
+                                    pass
+                                continue
+                        except Exception:
+                            pass
+                    data = text.encode("utf-8", errors="replace")
+                    await loop.run_in_executor(None, lambda d=data: channel.send(d))
+        except Exception:
+            pass
+
     try:
-        # body уже является словарем, переданным из route_binding
-        if body is None:
-            return {"error": "request body required"}
-        
-        host = body.get("host")
-        port = body.get("port", 22)
-        username = body.get("username")
-        password = body.get("password")
-        private_key = body.get("private_key")
+        await asyncio.gather(_ssh_to_ws(), _ws_to_ssh())
+    finally:
+        session.unsubscribe(queue)
+        logger.info(f"[ssh-ws] detach from {session_id[:8]}, subscribers now: {len(session._subscribers)}")
 
-        if not host or not username:
-            return {"error": "host and username required"}
-        if not password and not private_key:
-            return {"error": "password or private_key required"}
 
-        result = await start_ssh_session(host, port, username, password, private_key)
-        if "error" in result:
-            logger.error(f"Failed to start SSH session: {result.get('error')}")
+# ──────────────────────────────────────────────────────────────────────────────
+# HTTP handlers
+# ──────────────────────────────────────────────────────────────────────────────
+
+async def http_create_session(runtime: Any, body: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    POST /admin/v1/ssh/sessions
+    Body:
+      { "credential_id": "..." }                     — использовать кред из БД
+      { "host": ..., "username": ..., "password": ... }  — прямые параметры
+    """
+    if not body:
+        return {"error": "body required"}
+
+    credential_id = body.get("credential_id")
+    host = body.get("host")
+    port = int(body.get("port") or 22)
+    username = body.get("username")
+    password = body.get("password")
+    private_key_pem = body.get("private_key")
+
+    # Если передан credential_id — загрузить из БД
+    if credential_id:
+        sm = getattr(runtime, "storage_manager", None)
+        ss = getattr(runtime, "secret_store", None)
+        if sm is None or ss is None:
+            return {"error": "Storage not available"}
+        try:
+            from core.credentials.repository import CredentialRepository
+            repo = CredentialRepository(storage_manager=sm, secret_store=ss)
+            pair = await repo.get_with_secret(credential_id)
+        except Exception as e:
+            return {"error": f"Cannot load credential: {e}"}
+        if pair is None:
+            return {"error": f"Credential {credential_id} not found"}
+        cred, secret_bytes = pair
+        host = cred.host
+        port = cred.port or 22
+        username = cred.username
+        secret_str = secret_bytes.decode("utf-8", errors="replace").strip()
+        from core.credentials.domain import CredentialType
+        if cred.type == CredentialType.SSH_PASSWORD:
+            password = secret_str
         else:
-            logger.info(f"SSH session started successfully: {result.get('session_id')}")
-        return result
-        
+            private_key_pem = secret_str
+
+    if not host or not username:
+        return {"error": "host and username required (or credential_id)"}
+
+    try:
+        session = await create_session(
+            host=host,
+            port=port,
+            username=username,
+            password=password,
+            private_key_pem=private_key_pem,
+            credential_id=credential_id,
+        )
+        return session.to_dict()
     except Exception as e:
-        logger.error(f"Error in ssh_terminal_start_handler: {e}", exc_info=True)
+        logger.error(f"[ssh] create_session failed: {e}", exc_info=True)
         return {"error": str(e)}
+
+
+async def http_list_sessions(runtime: Any) -> Dict[str, Any]:
+    """GET /admin/v1/ssh/sessions"""
+    gc_dead_sessions()
+    return {"sessions": list_sessions()}
+
+
+async def http_close_session(runtime: Any, session_id: str) -> Dict[str, Any]:
+    """DELETE /admin/v1/ssh/sessions/{session_id}"""
+    deleted = close_session(session_id)
+    return {"deleted": deleted}
