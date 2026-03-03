@@ -93,8 +93,9 @@ class AgentDeployService:
         Определить CORE_URL для удалённого агента.
 
         Приоритет:
-        1. Переменная окружения AGENT_CORE_URL (явный публичный URL core runtime).
-        2. Конфигурация API_HOST/API_PORT (как в ApiModule).
+        1. AGENT_CORE_URL — явный публичный URL (рекомендуется для prod).
+        2. API_HOST/API_PORT — если хост задан явно (не 0.0.0.0).
+        3. Авто-определение LAN IP через socket.
         """
         env_url = os.getenv("AGENT_CORE_URL")
         if env_url:
@@ -102,10 +103,33 @@ class AgentDeployService:
 
         api_host = os.getenv("API_HOST", "0.0.0.0")
         api_port = int(os.getenv("API_PORT", "8000"))
-        display_host = "127.0.0.1" if api_host == "0.0.0.0" else api_host
-        return f"http://{display_host}:{api_port}"
 
-    async def deploy(self, credential_id: str, agent_name: str) -> Dict[str, Any]:
+        if api_host and api_host != "0.0.0.0":
+            return f"http://{api_host}:{api_port}"
+
+        # Автоматически определяем реальный LAN IP (не loopback),
+        # чтобы удалённый агент мог связаться с ядром.
+        lan_ip = self._get_lan_ip()
+        return f"http://{lan_ip}:{api_port}"
+
+    @staticmethod
+    def _get_lan_ip() -> str:
+        """Получить реальный LAN IP этой машины (не loopback 127.0.0.1)."""
+        import socket
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                # Не устанавливает реального соединения, только определяет маршрут
+                s.connect(("8.8.8.8", 80))
+                return s.getsockname()[0]
+        except Exception:
+            return "127.0.0.1"
+
+    async def deploy(
+        self,
+        credential_id: str,
+        agent_name: str,
+        core_url: str | None = None,
+    ) -> Dict[str, Any]:
         """
         Запустить SSH‑деплой агента на удалённом хосте.
 
@@ -117,6 +141,9 @@ class AgentDeployService:
            - загрузить installer script;
            - выполнить installer с параметрами: enrollment_token, core_url.
         4. Вернуть статус запуска деплоя.
+
+        Args:
+            core_url: явный URL ядра для агента (переопределяет авто-определение).
 
         НЕ логирует enrollment token и секреты.
         """
@@ -140,7 +167,7 @@ class AgentDeployService:
 
         # 2. Enrollment token (одноразовый, TTL 10 минут)
         enrollment_token = await self._generate_enrollment_token(agent_name)
-        core_url = self._compute_core_url()
+        core_url = (core_url or "").strip().rstrip("/") or self._compute_core_url()
 
         # 3. SSH: временная директория + upload + exec
         remote_dir = os.path.join(
@@ -225,6 +252,9 @@ class AgentDeployService:
         return {
             "status": "deploy_started",
             "agent_name": agent_name,
+            "install_exit_code": install_result["exit_code"],
+            "install_stdout": install_result.get("stdout", ""),
+            "install_stderr": install_result.get("stderr", ""),
         }
 
 

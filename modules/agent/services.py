@@ -94,6 +94,50 @@ async def admin_agent_enroll_agent(runtime: Any, body: Any = None) -> Dict[str, 
         }
     except ValueError as e:
         return {"ok": False, "error": str(e)}
+
+
+async def admin_agent_generate_bootstrap_token(runtime: Any, body: Any = None) -> Dict[str, Any]:
+    """
+    Generate one-time HMAC-signed enrollment token for installer / manual bootstrap.
+
+    This is a thin admin wrapper around AgentEnrollmentManager.generate_enrollment_token().
+
+    Args:
+        runtime: CoreRuntime instance
+        body: {agent_name: str}
+
+    Returns:
+        {ok: bool, token: str, agent_name: str, expires_at: str, error?: str}
+    """
+    if not isinstance(body, dict):
+        return {"ok": False, "error": "invalid_body"}
+
+    agent_name = str(body.get("agent_name") or "").strip()
+    if not agent_name:
+        return {"ok": False, "error": "agent_name required"}
+
+    if not getattr(runtime, "agent_manager", None):
+        return {"ok": False, "error": "agent_manager not initialized"}
+
+    try:
+        # AgentEnrollmentManager.generate_enrollment_token() internally uses TTL 600s (10 минут)
+        token = await runtime.agent_manager.generate_enrollment_token(agent_name)
+        expires_at = (datetime.now(timezone.utc) + timedelta(seconds=600)).isoformat()
+
+        logger.info(
+            "[AdminAgentBootstrapToken] Token generated",
+            extra={"agent_name": agent_name},
+        )
+
+        return {
+            "ok": True,
+            "agent_name": agent_name,
+            "token": token,
+            "expires_at": expires_at,
+        }
+    except Exception as e:
+        logger.exception("[AdminAgentBootstrapToken] Error generating token: %s", e)
+        return {"ok": False, "error": str(e)}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
@@ -258,6 +302,7 @@ async def admin_agent_deploy(runtime: Any, body: Dict[str, Any] = None) -> Dict[
     agent_name = str(body.get("agent_name") or "").strip()
     credential_id = str(body.get("credential_id") or "").strip()
     custom_host = body.get("host")
+    custom_core_url = (body.get("core_url") or "").strip() or None
     custom_env = body.get("env", {})
     
     if not agent_name:
@@ -278,25 +323,26 @@ async def admin_agent_deploy(runtime: Any, body: Dict[str, Any] = None) -> Dict[
     
     # Infer host from credential or request
     try:
-        # Get credential to extract host
-        storage_manager = getattr(runtime, "storage_manager", None)
-        if not storage_manager:
-            return {"ok": False, "error": "storage_manager not initialized"}
-        
         host = custom_host
         if not host:
-            # Try to get from credential
+            storage_manager = getattr(runtime, "storage_manager", None)
+            secret_store = getattr(runtime, "secret_store", None)
+            if storage_manager is None:
+                return {"ok": False, "error": "storage_manager not initialized"}
             try:
-                credential_obj = await storage_manager.get(credential_id)
-                if credential_obj:
-                    host = credential_obj.get("host") if isinstance(credential_obj, dict) else getattr(credential_obj, "host", None)
-            except Exception:
-                pass
-        
+                from core.credentials.repository import CredentialRepository
+                repo = CredentialRepository(storage_manager=storage_manager, secret_store=secret_store)
+                cred = await repo.get(credential_id)
+                if cred is None:
+                    return {"ok": False, "error": f"Credential {credential_id} not found"}
+                host = cred.host
+            except Exception as e:
+                return {"ok": False, "error": f"Failed to read credential: {e}"}
+
         if not host:
             return {
                 "ok": False,
-                "error": "Cannot determine host (not in credential, not in request)"
+                "error": "Cannot determine host: credential has no host field. Please set the host in the SSH credential."
             }
     except Exception as e:
         logger.exception(f"[AdminAgentDeploy] Failed to get credential: {e}")
@@ -351,7 +397,8 @@ async def admin_agent_deploy(runtime: Any, body: Dict[str, Any] = None) -> Dict[
             credential_id=credential_id,
             enrollment_token=enrollment_token,
             host=host,
-            custom_env=custom_env
+            custom_env=custom_env,
+            core_url=custom_core_url,
         )
     )
     
@@ -386,7 +433,8 @@ async def _execute_deployment(
     credential_id: str,
     enrollment_token: str,
     host: str,
-    custom_env: Dict[str, str]
+    custom_env: Dict[str, str],
+    core_url: str | None = None,
 ) -> None:
     """
     Background task: Execute SSH deployment and monitor.
@@ -417,7 +465,8 @@ async def _execute_deployment(
         try:
             deploy_result = await deploy_service.deploy(
                 credential_id=credential_id,
-                agent_name=agent_name
+                agent_name=agent_name,
+                core_url=core_url,
             )
             
             logger.info(
@@ -441,7 +490,9 @@ async def _execute_deployment(
         await runtime.deployment_tracker.update_status(
             deployment_id,
             status="deployed",
-            progress=50
+            progress=50,
+            install_stdout=deploy_result.get("install_stdout", ""),
+            install_stderr=deploy_result.get("install_stderr", ""),
         )
         
         # ========== STEP 2: WAIT FOR ENROLLMENT ==========
@@ -647,6 +698,11 @@ async def admin_agent_get_deployment_status(runtime: Any, deployment_id: str) ->
             duration = deployment.duration_seconds()
             if duration is not None:
                 result["duration_seconds"] = duration
+        
+        if deployment.install_stdout is not None:
+            result["install_stdout"] = deployment.install_stdout
+        if deployment.install_stderr is not None:
+            result["install_stderr"] = deployment.install_stderr
         
         return result
     

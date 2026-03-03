@@ -40,6 +40,8 @@ class DeploymentInfo:
     enrollment_token_id: Optional[str] = None
     enrollment_token_str: Optional[str] = None
     custom_env: Dict[str, str] = field(default_factory=dict)
+    install_stdout: Optional[str] = None
+    install_stderr: Optional[str] = None
     
     def duration_seconds(self) -> Optional[float]:
         """Calculate duration if completed."""
@@ -115,6 +117,8 @@ class DeploymentTracker:
         agent_id: str = None,
         error_message: str = None,
         completed_at: str = None,
+        install_stdout: str = None,
+        install_stderr: str = None,
         **kwargs
     ) -> bool:
         """Update deployment status."""
@@ -138,6 +142,10 @@ class DeploymentTracker:
             deployment.agent_id = agent_id
         if error_message:
             deployment.error_message = error_message
+        if install_stdout is not None:
+            deployment.install_stdout = install_stdout
+        if install_stderr is not None:
+            deployment.install_stderr = install_stderr
         if completed_at:
             try:
                 deployment.completed_at = datetime.fromisoformat(completed_at)

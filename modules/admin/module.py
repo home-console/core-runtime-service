@@ -483,7 +483,7 @@ class AdminModule(RuntimeModule):
             ("admin.operations.get", wrap_domain(admin_operations_get)),
             ("admin.operations.cancel", wrap_domain(admin_operations_cancel)),
             ("admin.operations.retry", wrap_domain(admin_operations_retry)),
-            ("admin.agents.deploy", wrap_agent_deploy()),
+            # Admin SSH deploy endpoint is now owned by AgentControlPlaneModule (admin.agent.deploy)
             # Auth services moved to AuthModule
         ]
 
@@ -906,16 +906,7 @@ class AdminModule(RuntimeModule):
             # Best-effort: do not break admin registration if HTTP registry unavailable
             pass
 
-        # HTTP endpoint для SSH‑деплоя агентов (admin‑only через ACL)
-        try:
-            self.context.http.register(HttpEndpoint(
-                method="POST",
-                path="/admin/v1/agents/deploy",
-                service="admin.agents.deploy",
-                description="Deploy agent over SSH using existing credentials (admin only)",
-            ))
-        except Exception:
-            pass
+        # HTTP endpoint для SSH‑деплоя агентов теперь регистрируется в AgentControlPlaneModule
 
         # SSH Terminal Session Manager
         # POST   /admin/v1/ssh/sessions          — создать PTY-сессию (возвращает session_id)

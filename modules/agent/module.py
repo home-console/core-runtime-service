@@ -21,6 +21,7 @@ from core.agent.tls import MTLSCertificateAuthority
 from modules.agent.services import (
     admin_agent_create_enrollment_token,
     admin_agent_enroll_agent,
+    admin_agent_generate_bootstrap_token,
     admin_agent_list_agents,
     admin_agent_get_agent,
     admin_agent_deregister_agent,
@@ -143,6 +144,10 @@ class AgentControlPlaneModule(RuntimeModule):
             wrap_agent(admin_agent_create_enrollment_token),
         )
         await services.register(
+            "admin.agent.generate_bootstrap_token",
+            wrap_agent(admin_agent_generate_bootstrap_token),
+        )
+        await services.register(
             "admin.agent.enroll_agent",
             wrap_agent(admin_agent_enroll_agent),
         )
@@ -226,6 +231,14 @@ class AgentControlPlaneModule(RuntimeModule):
             path="/admin/v1/agents/enrollment-token",
             service="admin.agent.create_enrollment_token",
             description="Create enrollment token for new agent"
+        ))
+
+        # Bootstrap token for installer / manual agent installation (HMAC-signed, TTL 10m)
+        self.context.http.register(HttpEndpoint(
+            method="POST",
+            path="/admin/v1/agents/bootstrap-token",
+            service="admin.agent.generate_bootstrap_token",
+            description="Generate one-time bootstrap enrollment token for installer"
         ))
         
         self.context.http.register(HttpEndpoint(
