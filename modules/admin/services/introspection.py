@@ -234,6 +234,21 @@ async def list_http_endpoints(runtime: Any) -> List[Dict[str, Any]]:
     ]
 
 
+async def list_ws_endpoints(runtime: Any) -> List[Dict[str, Any]]:
+    """List only WebSocket endpoints."""
+    endpoints = runtime.http.list()
+    return [
+        {
+            "path": ep.path,
+            "service": ep.service,
+            "description": ep.description,
+            "tags": ep.tags or [],
+        }
+        for ep in endpoints
+        if ep.websocket
+    ]
+
+
 async def list_events(runtime: Any) -> List[Dict[str, Any]]:
     """List event subscriptions."""
     if not hasattr(runtime, "event_bus") or runtime.event_bus is None:

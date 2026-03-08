@@ -63,35 +63,27 @@ async def csrf_protection_middleware(request: Request, call_next: Callable) -> R
     if request.url.path.startswith("/admin/v1/auth/"):
         return await call_next(request)
     
-    # Get session from request context populated by auth middleware (must run before this middleware).
+    # Auth context is set by require_auth_middleware which must run before this middleware.
     ctx = getattr(request.state, "auth_context", None)
     if not ctx:
-        return JSONResponse(status_code=403, content={"detail": "Authentication required for CSRF validation"})
-    
+        # Unauthenticated request — not vulnerable to CSRF (no session to hijack).
+        # Pass through; the route handler will return 401.
+        return await call_next(request)
+
     # JWT и API key (Bearer в заголовке) не уязвимы к CSRF — токен не отправляется браузером автоматически.
     # CSRF обязателен только для cookie-based сессий.
     source = getattr(ctx, "source", None) or ""
     if source in ("jwt", "api_key"):
         return await call_next(request)
-    
+
     # Для session/cookie — требуем X-CSRF-Token
     csrf_token = request.headers.get("X-CSRF-Token")
     if not csrf_token:
         r = JSONResponse(status_code=403, content={"detail": "CSRF token required"})
         _add_cors_to_response(request, r)
         return r
-    
-    # Get session from request context populated by auth middleware.
-    # NOTE: auth middleware stores context in `request.state.auth_context`.
-    # Older code used `request.state.context` which caused CSRF checks to
-    # always fail (no context) and return 403 even for authenticated sessions.
-    ctx = getattr(request.state, "auth_context", None)
-    if not ctx:
-        r = JSONResponse(status_code=403, content={"detail": "Authentication required for CSRF validation"})
-        _add_cors_to_response(request, r)
-        return r
-    
-    # Get session_id for CSRF validation
+
+    # session_id for CSRF validation
     session_id = getattr(ctx, "session_id", None) or getattr(ctx, "user_id", None)
     if not session_id:
         r = JSONResponse(status_code=403, content={"detail": "Session required for CSRF validation"})

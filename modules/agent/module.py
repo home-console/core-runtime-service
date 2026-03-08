@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 from core.runtime_module import RuntimeModule
-from core.http_registry import HttpEndpoint
+from core.http_registry import HttpEndpoint, EndpointAuthConfig
 from core.agents.deployment_tracker import DeploymentTracker
 
 try:
@@ -310,7 +310,8 @@ class AgentControlPlaneModule(RuntimeModule):
             method="GET",
             path="/admin/v1/agents/health/check",
             service="admin.agent.check_agents_health",
-            description="Check health of all agents"
+            description="Check health of all agents",
+            auth_config=EndpointAuthConfig(public=True),
         ))
         
         self.context.http.register(HttpEndpoint(
@@ -321,18 +322,23 @@ class AgentControlPlaneModule(RuntimeModule):
         ))
         
         # Download endpoints (TASK 2.2)
+        # Public: installer runs unauthenticated; admin_access_middleware already
+        # restricts these paths to private-network clients only.
+        _public = EndpointAuthConfig(public=True)
         self.context.http.register(HttpEndpoint(
             method="GET",
-            path="/admin/v1/agents/download/checksum",
+            path="/media/checksum",
             service="admin.agent.download_checksum",
-            description="Get SHA256 checksum of agent binary"
+            description="Get SHA256 checksum of agent binary",
+            auth_config=_public,
         ))
         
         self.context.http.register(HttpEndpoint(
             method="GET",
-            path="/admin/v1/agents/download/binary",
+            path="/media/download/binary",
             service="admin.agent.download_binary",
-            description="Get agent binary download metadata and URL"
+            description="Stream agent binary to installer",
+            auth_config=_public,
         ))
         
         # Capability routing endpoints

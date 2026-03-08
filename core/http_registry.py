@@ -171,7 +171,9 @@ class HttpRegistry:
             description=endpoint.description,
             version=api_version,
             kind=endpoint.kind,
-            tags=endpoint.tags or []
+            tags=endpoint.tags or [],
+            auth_config=endpoint.auth_config,
+            param_mapping=endpoint.param_mapping,
         )
         self._endpoints.append(ep)
         self._index.add(key)

@@ -89,9 +89,22 @@ ACTION_SCOPE_MAP: Dict[str, str] = {
     "admin.v1.credentials.create": "admin.write",
     "admin.v1.credentials.update": "admin.write",
     "admin.v1.credentials.delete": "admin.write",
+    "admin.v1.credentials.connect": "admin.write",
+    "admin.v1.credentials.terminal_ws": "admin.write",
+    "admin.v1.credentials.terminal_sessions": "admin.read",
+    "admin.v1.credentials.terminal_session_close": "admin.write",
     "admin.v1.state": "admin.read",
     "admin.v1.integrations": "admin.read",
     "admin.v1.inspector.auth": "admin.read",
+
+    # Admin SSH terminal session manager
+    "admin.v1.ssh.sessions.create": "admin.write",
+    "admin.v1.ssh.sessions.list": "admin.read",
+    "admin.v1.ssh.sessions.close": "admin.write",
+    "admin.v1.ssh.ws": "admin.write",
+
+    # Agent deploy
+    "admin.agents.deploy": "admin.write",
     
     # User v1 services (user-scoped operations)
     "user.v1.integrations": "integrations.read",
@@ -108,9 +121,39 @@ ACTION_SCOPE_MAP: Dict[str, str] = {
     # admin.devices.* proxy services were removed to avoid dead/misleading
     # mappings. Inspector read-only services live under admin.v1.*.
 
-    # Explicitly add inspector operations mapping for clarity
+    # Inspector — read-only (все inspector endpoints)
     "admin.v1.inspector.operations": "admin.read",
-    
+    "admin.v1.inspector.dashboard": "admin.read",
+    "admin.v1.inspector.plugins.discover": "admin.read",
+    "admin.v1.inspector.plugins.get": "admin.read",
+    "admin.v1.inspector.executions": "admin.read",
+    "admin.v1.inspector.executions.get": "admin.read",
+    "admin.v1.inspector.executions.retries": "admin.read",
+    "admin.v1.inspector.executions.tree": "admin.read",
+    "admin.v1.inspector.operations.executions": "admin.read",
+    "admin.v1.inspector.schedules": "admin.read",
+    "admin.v1.inspector.schedules.get": "admin.read",
+    "admin.v1.inspector.operations.schedules": "admin.read",
+    "admin.v1.inspector.integrations": "admin.read",
+    "admin.v1.inspector.inventory": "admin.read",
+    "admin.v1.inspector.system_health": "admin.read",
+    "admin.v1.state.keys": "admin.read",
+    "admin.v1.state.get": "admin.read",
+    "admin.v1.marketplace.catalog": "admin.read",
+
+    # Admin operations (CRUD)
+    "admin.operations.create": "admin.write",
+    "admin.operations.list": "admin.read",
+    "admin.operations.get": "admin.read",
+    "admin.operations.cancel": "admin.write",
+    "admin.operations.retry": "admin.write",
+
+    # Admin devices proxy
+    "admin.v1.devices.list": "admin.read",
+    "admin.v1.devices.list_mappings": "admin.read",
+    "admin.v1.devices.get_external_for_device": "admin.read",
+    "admin.v1.devices.set_state": "admin.write",
+
     # Admin (wildcard - все остальные admin.* действия требуют admin.*)
     # Проверяется отдельно через action.startswith("admin.")
 }

@@ -26,7 +26,7 @@ def _ensure_client_manager_plugin_on_path() -> None:
     """Добавляет каталог client-manager-plugin в sys.path для импорта app."""
     plugin_dir = Path(__file__).resolve().parent
     plugins_root = plugin_dir.parent
-    cm_plugin_dir = plugins_root / "client-manager-plugin"
+    cm_plugin_dir = plugins_root / "client-manager-service"
     if cm_plugin_dir.is_dir() and str(cm_plugin_dir) not in sys.path:
         sys.path.insert(0, str(cm_plugin_dir))
 
@@ -140,14 +140,14 @@ class ClientManagerPlugin(BasePlugin):
 
         ws_endpoints = [
             HttpEndpoint(
-                path="/client-manager/ws",
+                path="/ws",
                 service="client_manager.websocket",
                 websocket=True,
                 description="WebSocket для агентских соединений",
                 tags=["client_manager", "websocket"]
             ),
             HttpEndpoint(
-                path="/client-manager/admin/ws",
+                path="/admin/ws",
                 service="client_manager.admin_websocket",
                 websocket=True,
                 description="Админский WebSocket (JWT защита)",
@@ -232,7 +232,7 @@ class ClientManagerPlugin(BasePlugin):
             # НОВОЕ (TASK 1.3): Передаем runtime для интеграции с DeploymentTracker
             if self.runtime:
                 self.handler.set_runtime(self.runtime)
-                logger.info("Runtime передан WebSocketHandler для интеграции с DeploymentTracker\")
+                logger.info("Runtime передан WebSocketHandler для интеграции с DeploymentTracker")
 
             try:
                 auth_service = AuthService()

@@ -93,14 +93,17 @@ class ApiModule(RuntimeModule):
             self.app.middleware("http")(request_logger_middleware)
         except ImportError:
             pass
+        # Middleware execution order (first registered = outermost = runs first on request):
+        # require_auth → admin_access → csrf → rate_limit → security_headers
+        # require_auth must run BEFORE csrf so that auth_context is populated when csrf checks it.
+        self.app.middleware("http")(require_auth_middleware)
+        self.app.middleware("http")(admin_access_middleware)
         try:
             from modules.api.csrf_middleware import csrf_protection_middleware, rate_limit_middleware
             self.app.middleware("http")(csrf_protection_middleware)
             self.app.middleware("http")(rate_limit_middleware)
         except ImportError:
             pass
-        self.app.middleware("http")(require_auth_middleware)
-        self.app.middleware("http")(admin_access_middleware)
         from modules.api.security_headers import security_headers_middleware
         self.app.middleware("http")(security_headers_middleware)
 
@@ -129,6 +132,12 @@ class ApiModule(RuntimeModule):
         from modules.api.route_binding import bind_routes
         bind_routes(runtime, self.app)
         await self._log(runtime, "info", "API: routes bound")
+
+        # Log registered WebSocket endpoints for easy debugging
+        ws_eps = [ep for ep in runtime.http.list() if ep.websocket]
+        if ws_eps:
+            ws_paths = ", ".join(ep.path for ep in ws_eps)
+            await self._log(runtime, "info", f"[API] WebSocket endpoints: {ws_paths}")
 
         api_host = os.getenv("API_HOST", "0.0.0.0")
         api_port = int(os.getenv("API_PORT", "8000"))

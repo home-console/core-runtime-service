@@ -227,7 +227,8 @@ class AgentDeployService:
         install_cmd = f"cd {shlex.quote(remote_dir)} && ./agent_install.sh {safe_token} {safe_core_url}"
 
         # ВАЖНО: не логируем команду целиком, чтобы не утечь token.
-        install_result = await self._ssh.run_command(credential, install_cmd)
+        # Installer downloads a binary and waits for the agent to start — allow up to 5 minutes.
+        install_result = await self._ssh.run_command(credential, install_cmd, timeout=300)
 
         await log_info(
             self._runtime,

@@ -134,11 +134,13 @@ class SSHExecutionService:
         self,
         credential: CredentialWithSecret,
         command: str,
+        timeout: int | None = None,
     ) -> Dict[str, Any]:
         cred, secret_bytes = credential
         client = self._connect(cred, secret_bytes)
+        effective_timeout = timeout if timeout is not None else self._timeout
         try:
-            stdin, stdout, stderr = client.exec_command(command, timeout=self._timeout)
+            stdin, stdout, stderr = client.exec_command(command, timeout=effective_timeout)
 
             out_bytes = stdout.read()
             err_bytes = stderr.read()
@@ -168,9 +170,12 @@ class SSHExecutionService:
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, self._upload_file_sync, cred_pair, local_path, remote_path)
 
-    async def run_command(self, credential: Any, command: str) -> Dict[str, Any]:
+    async def run_command(self, credential: Any, command: str, timeout: int | None = None) -> Dict[str, Any]:
         """
         Выполнить команду на удалённом хосте по SSH через exec_command.
+
+        Args:
+            timeout: override channel timeout in seconds (uses instance default if None)
 
         Возвращает:
             {
@@ -181,5 +186,7 @@ class SSHExecutionService:
         """
         cred_pair = self._normalize_credential(credential)
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, self._run_command_sync, cred_pair, command)
+        return await loop.run_in_executor(
+            None, self._run_command_sync, cred_pair, command, timeout
+        )
 

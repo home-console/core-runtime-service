@@ -539,8 +539,8 @@ class TestHTTPEndpointRegistration:
         await runtime.start()
 
         paths = {ep.path for ep in runtime.http.list()}
-        assert "/admin/v1/agents/download/checksum" in paths
-        assert "/admin/v1/agents/download/binary" in paths
+        assert "/media/checksum" in paths
+        assert "/media/download/binary" in paths
 
         await runtime.stop()
 

@@ -57,7 +57,6 @@ def bind_routes(runtime: Any, app: Any) -> None:
         if path_params:
             # Если есть path параметры, создаем wrapper который их извлекает
             async def ws_wrapper(websocket: WebSocket, original_handler=handler, params=path_params, ep_path=ep.path):
-                await websocket.accept()
                 # Извлекаем параметры из URL
                 path = websocket.url.path
                 # Простой парсинг - ищем значения между / и следующими /
@@ -87,7 +86,7 @@ def bind_routes(runtime: Any, app: Any) -> None:
         else:
             app.websocket(ep.path, name=route_name)(handler)
 
-    _install_openapi_schema(app)
+    _install_openapi_schema(app, ws_endpoints)
 
 
 def _make_api_handler(runtime: Any, endpoint: Any):
@@ -393,7 +392,6 @@ def _make_webhook_handler(runtime: Any, endpoint: Any):
 
 def _make_ws_handler(runtime: Any, endpoint: Any):
     async def ws_handler(websocket: WebSocket):
-        await websocket.accept()
         try:
             # WebSocket‑хендлеры по определению долгоживущие, поэтому вызываем
             # сервис без default_timeout, иначе соединение будет рваться по таймауту.
@@ -415,7 +413,9 @@ def _make_ws_handler(runtime: Any, endpoint: Any):
     return ws_handler
 
 
-def _install_openapi_schema(app: Any) -> None:
+def _install_openapi_schema(app: Any, ws_endpoints: list | None = None) -> None:
+    _ws_endpoints = list(ws_endpoints or [])
+
     def custom_openapi():
         if app.openapi_schema:
             return app.openapi_schema
@@ -440,6 +440,33 @@ def _install_openapi_schema(app: Any) -> None:
                 if method.lower() in ["get", "post", "put", "delete", "patch"]:
                     if "security" not in path_item[method]:
                         path_item[method]["security"] = [{"BearerAuth": []}]
+
+        # Inject WebSocket endpoints as GET stubs — OpenAPI 3.0 has no native WS support.
+        if "paths" not in openapi_schema:
+            openapi_schema["paths"] = {}
+        for ep in _ws_endpoints:
+            ws_path = ep.path
+            description = ep.description or ""
+            tags = ep.tags or ["websocket"]
+            if "websocket" not in tags:
+                tags = list(tags) + ["websocket"]
+            openapi_schema["paths"][ws_path] = {
+                "get": {
+                    "tags": tags,
+                    "summary": f"WS {ws_path}",
+                    "description": (
+                        f"**WebSocket endpoint**  \n"
+                        f"{description}  \n\n"
+                        f"Подключение: `ws://HOST:PORT{ws_path}`  \n"
+                        f"Тест: `wscat -c ws://HOST:PORT{ws_path}`"
+                    ),
+                    "operationId": f"ws_{ws_path.replace('/', '_').strip('_')}",
+                    "responses": {
+                        "101": {"description": "Switching Protocols — WebSocket upgrade"}
+                    },
+                }
+            }
+
         app.openapi_schema = openapi_schema
         return openapi_schema
     app.openapi = custom_openapi

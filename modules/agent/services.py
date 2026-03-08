@@ -507,11 +507,25 @@ async def _execute_deployment(
         # Now agent should start and try to enroll
         deadline = datetime.now(timezone.utc) + timedelta(seconds=60)  # 60s to enroll
         enrolled_agent_id = None
+        poll_count = 0
         
         while datetime.now(timezone.utc) < deadline:
             # Check if agent is enrolled
             try:
                 agents = await runtime.agent_manager.list_enrolled_agents()
+                poll_count += 1
+
+                # Log every 5 polls (~10s) to trace enrollment status
+                if poll_count <= 3 or poll_count % 5 == 0:
+                    enrolled_names = []
+                    for _aid in agents:
+                        _ident = await runtime.agent_manager.get_agent_identity(_aid)
+                        if _ident:
+                            enrolled_names.append(_ident.agent_name)
+                    logger.warning(
+                        f"[ExecuteDeployment] Poll #{poll_count}: looking for {agent_name!r}, "
+                        f"enrolled_agents={enrolled_names}"
+                    )
                 
                 # Try to find our agent
                 for agent_id in agents:
@@ -523,7 +537,7 @@ async def _execute_deployment(
                 if enrolled_agent_id:
                     break
             except Exception as e:
-                logger.debug(f"[ExecuteDeployment] Error checking enrollment: {e}")
+                logger.warning(f"[ExecuteDeployment] Error checking enrollment: {e}")
                 # Continue polling on error
                 pass
             
@@ -875,105 +889,118 @@ async def admin_agent_heartbeat(
 # ============================================================================
 
 
-async def admin_agent_download_checksum(runtime: Any) -> Dict[str, Any]:
+def _resolve_binary_path(arch: str) -> Optional["Path"]:
+    """
+    Resolve agent binary file path from AGENT_BINARY_PATH env var.
+
+    Lookup order:
+      1. $AGENT_BINARY_PATH/remote-client-{arch}   (arch-specific)
+      2. $AGENT_BINARY_PATH/remote-client           (generic fallback)
+      3. $AGENT_BINARY_PATH itself                  (if it points to a file directly)
+    """
+    import os
+    from pathlib import Path
+
+    base = os.environ.get("AGENT_BINARY_PATH", "").strip()
+    if not base:
+        return None
+
+    base_path = Path(base)
+
+    candidates = [
+        base_path / f"remote-client-{arch}",
+        base_path / "remote-client",
+        base_path,
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+async def admin_agent_download_checksum(runtime: Any, **query_params: Any) -> Dict[str, Any]:
     """
     Return SHA256 checksum of agent binary for installer verification.
-    
-    Called by installer script to verify downloaded binary integrity.
-    
-    Returns:
-        {
-            "ok": true,
-            "sha256": "abc123def456...",
-            "size_bytes": 12345678,
-            "filename": "remote-client-linux-amd64",
-            "version": "1.0.0",
-            "cached": true  # from cache?
-        }
+
+    Reads AGENT_BINARY_PATH to locate the binary and compute its checksum.
+
+    Query parameters:
+      - arch: target architecture string (default: linux-amd64)
     """
-    try:
-        # Try to get agent binary from asset storage
-        # This is a placeholder - actual implementation depends on where binaries are stored
-        
-        # For now, return a computed checksum if available
-        # In production, this would:
-        # 1. Get binary from CDN/storage
-        # 2. Compute SHA256
-        # 3. Cache result (recompute daily)
-        
-        logger.info("[AdminAgentDownloadChecksum] Checksum requested")
-        
-        # Placeholder response
-        return {
-            "ok": True,
-            "sha256": "not_yet_implemented",
-            "size_bytes": 0,
-            "filename": "remote-client",
-            "version": "1.0.0",
-            "cached": False,
-            "message": "Checksum computation not yet implemented - configure AGENT_BINARY_PATH"
-        }
-    
-    except Exception as e:
-        logger.exception(f"[AdminAgentDownloadChecksum] Error: {e}")
+    import hashlib
+    from pathlib import Path
+
+    arch = query_params.get("arch", "linux-amd64")
+    binary_path = _resolve_binary_path(arch)
+    if binary_path is None:
+        logger.warning("[AdminAgentDownloadChecksum] AGENT_BINARY_PATH not set or binary not found")
         return {
             "ok": False,
-            "error": str(e)
+            "error": "binary_not_found",
+            "message": "Agent binary not configured — set AGENT_BINARY_PATH env var",
         }
+
+    try:
+        data = binary_path.read_bytes()
+        sha256 = hashlib.sha256(data).hexdigest()
+        logger.info(f"[AdminAgentDownloadChecksum] sha256={sha256} file={binary_path}")
+        return {
+            "ok": True,
+            "sha256": sha256,
+            "size_bytes": len(data),
+            "filename": binary_path.name,
+            "version": "latest",
+            "cached": False,
+        }
+    except Exception as e:
+        logger.exception(f"[AdminAgentDownloadChecksum] Error reading binary: {e}")
+        return {"ok": False, "error": str(e)}
 
 
 async def admin_agent_download_binary(
     runtime: Any,
-    **query_params: Any
-) -> Dict[str, Any]:
+    **query_params: Any,
+) -> Any:
     """
-    Download agent binary for installation on remote host.
-    
+    Stream agent binary directly to the installer.
+
+    Reads the binary from AGENT_BINARY_PATH and returns a FileResponse so
+    the installer can pipe it straight to disk.  No authentication is required
+    (the endpoint is marked public) because admin_access_middleware already
+    restricts /admin/* to private-network clients.
+
     Query parameters:
-    - arch: linux-amd64 | linux-arm64 | darwin-amd64 | etc (auto-detect if not provided)
-    - version: specific version (default: latest)
-    
-    Returns:
-        {
-            "ok": true,
-            "message": "Binary ready for download",
-            "filename": "remote-client-linux-amd64",
-            "size_bytes": 12345678,
-            "download_url": "http://..."  # Direct download link
-        }
+      - arch: target architecture string (default: linux-amd64)
     """
-    try:
-        arch = query_params.get("arch", "linux-amd64")
-        version = query_params.get("version", "latest")
-        
-        logger.info(
-            f"[AdminAgentDownloadBinary] Binary requested",
-            extra={
-                "arch": arch,
-                "version": version
-            }
+    from fastapi.responses import FileResponse, JSONResponse
+
+    arch = query_params.get("arch", "linux-amd64")
+    logger.info(f"[AdminAgentDownloadBinary] requested arch={arch}")
+
+    binary_path = _resolve_binary_path(arch)
+    if binary_path is None:
+        logger.warning(
+            f"[AdminAgentDownloadBinary] Binary not found for arch={arch}. "
+            "Set AGENT_BINARY_PATH env var."
         )
-        
-        # Placeholder - actual implementation would:
-        # 1. Validate arch parameter
-        # 2. Locate binary in CDN/storage
-        # 3. Generate signed download URL
-        # 4. Return metadata
-        
-        return {
-            "ok": True,
-            "filename": f"remote-client-{arch}",
-            "size_bytes": 0,
-            "version": version,
-            "message": "Binary download not yet implemented - configure AGENT_BINARY_STORAGE"
-        }
-    
-    except Exception as e:
-        logger.exception(f"[AdminAgentDownloadBinary] Error: {e}")
-        return {
-            "ok": False,
-            "error": str(e)
-        }
+        return JSONResponse(
+            status_code=404,
+            content={
+                "ok": False,
+                "error": "binary_not_found",
+                "message": (
+                    f"No binary found for arch={arch}. "
+                    "Configure AGENT_BINARY_PATH on the server."
+                ),
+            },
+        )
+
+    logger.info(f"[AdminAgentDownloadBinary] Serving {binary_path} ({binary_path.stat().st_size} bytes)")
+    return FileResponse(
+        path=str(binary_path),
+        filename=f"remote-client-{arch}",
+        media_type="application/octet-stream",
+    )
 
 
 # ============================================================================

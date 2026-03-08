@@ -33,13 +33,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy wheels from builder
-COPY --from=builder /build/wheels /wheels
-COPY --from=builder /build/requirements.txt .
+# Copy requirements first
+COPY requirements.txt .
 
-# Install Python dependencies
-RUN pip install --no-cache-dir --no-index --find-links=/wheels -r requirements.txt && \
-    rm -rf /wheels
+# Install Python dependencies (directly from PyPI, not wheels - for dev we don't need optimization)
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY . .

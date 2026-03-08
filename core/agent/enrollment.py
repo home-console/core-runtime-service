@@ -449,6 +449,44 @@ class AgentEnrollmentManager:
         self._pending_tokens[token_id].status = EnrollmentTokenStatus.REVOKED
         return True
     
+    async def register_agent_from_ws(self, agent_name: str, ws_client_id: str) -> str:
+        """
+        Register an agent that enrolled via WebSocket register message.
+
+        Called by the WebSocket RegistrationHandler after validate_enrollment_token()
+        succeeds.  Creates a fresh AgentIdentity (Ed25519 keys), stores the private
+        key in SecretStore, and adds the identity to _enrolled_agents so that
+        _execute_deployment can detect it via list_enrolled_agents().
+
+        Args:
+            agent_name:    Human-readable agent name (from enrollment token payload).
+            ws_client_id:  WebSocket client_id assigned by client_manager.
+
+        Returns:
+            agent_id of the newly registered agent.
+        """
+        from core.agent.identity import AgentIdentityFactory
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc).isoformat()
+        identity, private_pem = AgentIdentityFactory.create_identity(agent_name, now)
+
+        # Persist private key in SecretStore (best-effort)
+        try:
+            secret_key = f"agent:{identity.agent_id}:private_key"
+            await self._secret_store.put(secret_key, private_pem)
+        except Exception:
+            pass
+
+        self._enrolled_agents[identity.agent_id] = identity
+
+        import logging
+        logging.getLogger(__name__).warning(
+            f"[AgentEnrollment] ✅ Registered agent from WS: agent_name={agent_name!r} "
+            f"agent_id={identity.agent_id} ws_client_id={ws_client_id}"
+        )
+        return identity.agent_id
+
     async def deregister_agent(self, agent_id: str) -> bool:
         """
         Deregister an agent.
