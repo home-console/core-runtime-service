@@ -182,6 +182,10 @@ class AgentEnrollmentManager:
             payload_b64, signature_b64 = parts
 
             def _b64url_decode(data: str) -> bytes:
+                # Add base64 padding if needed (RFC 4648)
+                pad_len = (-len(data)) % 4
+                return base64.urlsafe_b64decode(data + ("=" * pad_len))
+            
                 padded = data + "=" * (4 - len(data) % 4)
                 return base64.urlsafe_b64decode(padded)
 
@@ -220,11 +224,30 @@ class AgentEnrollmentManager:
 
             if not hmac.compare_digest(provided_signature, expected_signature):
                 raise ValueError("enrollment_token signature invalid")
+            
+            # Enforce one-time use across restarts/processes via SecretStore:
+            # generate_enrollment_token() persisted sha256(enrollment_token) under token_id key.
+            hash_key = f"{self._token_hash_prefix}{token_id}"
+            stored_hash_bytes = await self._secret_store.get(hash_key)
+            if stored_hash_bytes is None:
+                # Token hash missing => already used (or never issued / revoked externally).
+                raise ValueError("enrollment_token already used")
+
+            expected_hash = hashlib.sha256(enrollment_token.encode("utf-8")).hexdigest().encode("utf-8")
+            if not hmac.compare_digest(stored_hash_bytes, expected_hash):
+                # Token signature may be valid, but it's not the issued token string for this token_id.
+                raise ValueError("enrollment_token secret mismatch")
+
+            # Also respect in-process revoke/used markers where available.
 
             if token_id in self._pending_tokens:
                 token = self._pending_tokens[token_id]
+                if token.status == EnrollmentTokenStatus.REVOKED:
+                    raise ValueError("enrollment_token revoked")
                 if token.status == EnrollmentTokenStatus.USED:
                     raise ValueError("enrollment_token already used")
+            
+            # Token is valid - mark as used and clean up
                 elif token.status == EnrollmentTokenStatus.REVOKED:
                     raise ValueError("enrollment_token revoked")
 
@@ -233,9 +256,22 @@ class AgentEnrollmentManager:
                 token = self._pending_tokens[token_id]
                 token.status = EnrollmentTokenStatus.USED
                 token.used_at = now
+            else:
+                # Keep a minimal in-process marker (helps avoid repeat within same process)
+                self._pending_tokens[token_id] = EnrollmentToken(
+                    token_id=token_id,
+                    token_secret="",
+                    token_hash="",
+                    agent_name=agent_name,
+                    status=EnrollmentTokenStatus.USED,
+                    created_at="",
+                    expires_at=expires_at_str,
+                    used_at=now,
+                )
+            
+            # Delete hash from SecretStore (one-time use enforcement)
 
             try:
-                hash_key = f"{self._token_hash_prefix}{token_id}"
                 await self._secret_store.delete(hash_key)
             except Exception:
                 pass

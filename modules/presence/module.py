@@ -31,7 +31,13 @@ class PresenceModule(RuntimeModule):
         Регистрирует сервис presence.set и HTTP endpoints.
         """
         # Регистрация сервиса
-        await self.context.services.register("presence.set", self._set_service)
+        # TODO: remove fallback after full KernelContext migration
+        services = (
+            self.context.get_service("service_registry")
+            if hasattr(self.context, "get_service")
+            else self.context.services
+        )
+        await services.register("presence.set", self._set_service)
 
         # Регистрация HTTP контрактов
         try:
@@ -76,7 +82,12 @@ class PresenceModule(RuntimeModule):
         """
         # Отмена регистрации сервиса
         try:
-            await self.context.services.unregister("presence.set")
+            services = (
+                self.context.get_service("service_registry")
+                if hasattr(self.context, "get_service")
+                else self.context.services
+            )
+            await services.unregister("presence.set")
         except Exception:
             pass
 
@@ -130,7 +141,12 @@ class PresenceModule(RuntimeModule):
         except Exception as exc:
             # Логируем ошибки, но не ломаем Core
             try:
-                await self.context.services.call(
+                services = (
+                    self.context.get_service("service_registry")
+                    if hasattr(self.context, "get_service")
+                    else self.context.services
+                )
+                await services.call(
                     "logger.log",
                     level="error",
                     message=f"presence.set error: {str(exc)}",

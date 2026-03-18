@@ -385,7 +385,13 @@ parse_core_url() {
   # Extract protocol, host, port
   if [[ "$core_url" =~ ^https?://([^:/]+)(:([0-9]+))? ]]; then
     export RC_SERVER_HOST="${BASH_REMATCH[1]}"
-    export RC_SERVER_PORT="${BASH_REMATCH[3]:-8000}"
+    if [[ -n "${BASH_REMATCH[3]:-}" ]]; then
+      export RC_SERVER_PORT="${BASH_REMATCH[3]}"
+    elif [[ "$core_url" == https* ]]; then
+      export RC_SERVER_PORT="443"
+    else
+      export RC_SERVER_PORT="80"
+    fi
     
     if [[ "$core_url" == https* ]]; then
       export RC_SERVER_PROTOCOL="websocket"
@@ -472,6 +478,8 @@ EOF
   cat > "$tmp_service_file.env" << EOFENV
 RC_ENROLLMENT_TOKEN=%TOKEN%
 RC_AUTH_TOKEN=%TOKEN%
+RC_PINNED_SPKIS=%PINNED_SPKIS%
+RC_STRICT_SECURITY=%STRICT_SECURITY%
 # Per-agent encryption keys (populated automatically after first enrollment)
 RC_ENCRYPTION_KEY=
 RC_ENCRYPTION_SALT=
@@ -489,6 +497,8 @@ EOFENV
   
   # Substitute token in env file
   sed -i "s|%TOKEN%|$ENROLLMENT_TOKEN|g" "$tmp_service_file.env"
+  sed -i "s|%PINNED_SPKIS%|${RC_PINNED_SPKIS:-}|g" "$tmp_service_file.env"
+  sed -i "s|%STRICT_SECURITY%|${RC_STRICT_SECURITY:-false}|g" "$tmp_service_file.env"
   
   # Copy to system location (requires sudo)
   if sudo -n true 2>/dev/null; then
@@ -731,6 +741,8 @@ EOFCONFIG
   # Export enrollment token (primary) and auth token (fallback) for remote-client registration
   export RC_ENROLLMENT_TOKEN="$ENROLLMENT_TOKEN"
   export RC_AUTH_TOKEN="$ENROLLMENT_TOKEN"
+  export RC_PINNED_SPKIS="${RC_PINNED_SPKIS:-}"
+  export RC_STRICT_SECURITY="${RC_STRICT_SECURITY:-false}"
   
   # Additional environment for config file path
   export RC_CONFIG_BOOTSTRAP="${INSTALL_DIR}/bootstrap.yaml"
@@ -754,7 +766,9 @@ EOFCONFIG
     "Path": "/ws"
   },
   "security": {
-    "UseTLS": ${use_tls_json}
+    "UseTLS": ${use_tls_json},
+    "StrictSecurity": ${RC_STRICT_SECURITY:-false},
+    "PinnedSPKIs": [$(if [[ -n "${RC_PINNED_SPKIS:-}" ]]; then printf '"%s"' "${RC_PINNED_SPKIS}"; fi)]
   }
 }
 EOFCFG

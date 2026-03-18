@@ -194,6 +194,39 @@ class DockerOrchestrationBackend(OrchestrationBackend):
         
         # Создаём контейнер
         return await self._create_container(container_name, image_name, container_config)
+
+    async def start_container(self, container_name: str) -> Dict[str, Any]:
+        """Запустить существующий контейнер (docker start)."""
+        if not self._docker_cmd:
+            return {"ok": False, "error": "Docker не найден в системе"}
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                self._docker_cmd,
+                "start",
+                container_name,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30.0)
+            if proc.returncode == 0:
+                return {"ok": True, "message": f"Контейнер '{container_name}' успешно запущен"}
+            error_msg = stderr.decode("utf-8", errors="replace") if stderr else "Неизвестная ошибка"
+            return {"ok": False, "error": f"Не удалось запустить контейнер: {error_msg}"}
+        except asyncio.TimeoutError:
+            return {"ok": False, "error": "Таймаут при запуске контейнера"}
+        except Exception as e:
+            logger.exception(f"Error starting container {container_name}")
+            return {"ok": False, "error": f"Ошибка при запуске контейнера: {str(e)}"}
+
+    async def restart_container(
+        self, container_name: str, timeout: Optional[float] = None
+    ) -> Dict[str, Any]:
+        """Перезапустить контейнер (stop + start)."""
+        stop_result = await self.stop_container(container_name, timeout)
+        if not stop_result.get("ok"):
+            return stop_result
+        return await self.start_container(container_name)
     
     async def _image_exists(self, image_name: str) -> bool:
         """Проверить существование образа."""

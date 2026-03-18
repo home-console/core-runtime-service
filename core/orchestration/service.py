@@ -39,6 +39,18 @@ class OrchestrationBackend(ABC):
         """Убедиться, что контейнер существует и запущен."""
         pass
 
+    @abstractmethod
+    async def start_container(self, container_name: str) -> Dict[str, Any]:
+        """Запустить существующий контейнер."""
+        pass
+
+    @abstractmethod
+    async def restart_container(
+        self, container_name: str, timeout: Optional[float] = None
+    ) -> Dict[str, Any]:
+        """Перезапустить контейнер."""
+        pass
+
 
 class OrchestrationService:
     """
@@ -201,13 +213,7 @@ class OrchestrationService:
         Returns:
             {"ok": True} при успехе, {"ok": False, "error": "..."} при ошибке
         """
-        # Останавливаем контейнер
-        stop_result = await self.stop_container(container_name, timeout)
-        if not stop_result["ok"]:
-            return stop_result
-        
-        # Запускаем контейнер через docker start
-        return await self._start_container(container_name)
+        return await self._backend.restart_container(container_name, timeout)
     
     async def _start_container(self, container_name: str) -> Dict[str, Any]:
         """
@@ -219,35 +225,8 @@ class OrchestrationService:
         Returns:
             {"ok": True} при успехе, {"ok": False, "error": "..."} при ошибке
         """
-        # Это должно быть реализовано в backend, но для совместимости делаем здесь
-        # В будущем можно добавить в интерфейс OrchestrationBackend
-        import asyncio
-        import shutil
-        
-        docker_cmd = shutil.which("docker")
-        if not docker_cmd:
-            return {"ok": False, "error": "Docker не найден в системе"}
-        
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                docker_cmd,
-                "start",
-                container_name,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30.0)
-            
-            if proc.returncode == 0:
-                return {"ok": True, "message": f"Контейнер '{container_name}' успешно запущен"}
-            else:
-                error_msg = stderr.decode("utf-8", errors="replace") if stderr else "Неизвестная ошибка"
-                return {"ok": False, "error": f"Не удалось запустить контейнер: {error_msg}"}
-        except asyncio.TimeoutError:
-            return {"ok": False, "error": "Таймаут при запуске контейнера"}
-        except Exception as e:
-            return {"ok": False, "error": f"Ошибка при запуске контейнера: {str(e)}"}
+        # Backward-compat shim: delegate to backend.
+        return await self._backend.start_container(container_name)
 
 
 # Глобальный экземпляр OrchestrationService (singleton)

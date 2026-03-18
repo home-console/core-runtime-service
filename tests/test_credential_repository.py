@@ -755,5 +755,50 @@ class TestCredentialRepositoryWorkflow:
         assert await repository.exists(created.id) is False
 
 
+class TestCredentialRepositoryPolicies:
+    """Tests for credential access policy persistence."""
+
+    @pytest.mark.asyncio
+    async def test_create_and_update_policy(self, repository):
+        """Policy CRUD works with StorageManager compatibility methods."""
+        from core.security.rbac_models import CredentialPolicy, Role
+
+        policy = CredentialPolicy(
+            credential_id="cred-1",
+            owner_user_id="admin",
+            allowed_roles=[Role.ADMIN],
+            secret_read_roles=[Role.ADMIN],
+            allowed_users=["admin"],
+            version=1,
+            created_at="2026-01-01T00:00:00",
+            updated_at="2026-01-01T00:00:00",
+        )
+
+        created = await repository.create_policy(policy)
+        assert created.credential_id == "cred-1"
+
+        stored = await repository.get_policy("cred-1")
+        assert stored is not None
+        assert stored.owner_user_id == "admin"
+
+        updated_policy = CredentialPolicy(
+            credential_id="cred-1",
+            owner_user_id="admin",
+            allowed_roles=[Role.ADMIN],
+            secret_read_roles=[Role.ADMIN],
+            allowed_users=["admin", "ops"],
+            version=2,
+            created_at=stored.created_at,
+            updated_at="2026-01-02T00:00:00",
+        )
+
+        updated = await repository.update_policy(updated_policy)
+        assert "ops" in updated.allowed_users
+
+        stored_after_update = await repository.get_policy("cred-1")
+        assert stored_after_update is not None
+        assert "ops" in stored_after_update.allowed_users
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

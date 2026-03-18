@@ -315,6 +315,21 @@ class TestAgentEnrollmentManager:
         assert identity.agent_name == "node1"
         assert len(identity.agent_id) == 16
         assert b"-----BEGIN PRIVATE KEY-----" in private_key
+
+    @pytest.mark.asyncio
+    async def test_generate_token_validate_is_one_time(self):
+        """HMAC-signed token is one-time via SecretStore hash presence."""
+        secret_store = MockSecretStore()
+        manager = AgentEnrollmentManager(secret_store)
+
+        token_str = await manager.generate_enrollment_token("node1")
+        # First validation OK
+        agent_name = await manager.validate_enrollment_token(token_str)
+        assert agent_name == "node1"
+
+        # Second validation must fail (hash deleted / one-time use)
+        with pytest.raises(ValueError, match="already used"):
+            await manager.validate_enrollment_token(token_str)
     
     @pytest.mark.asyncio
     async def test_enrollment_wrong_token_fails(self):

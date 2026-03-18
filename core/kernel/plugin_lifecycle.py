@@ -211,10 +211,6 @@ class PluginLifecycleManager:
             # Пытаемся получить OrchestrationService из runtime
             if hasattr(self._runtime, "orchestration_service"):
                 orchestration_service = self._runtime.orchestration_service
-            else:
-                # Fallback: пытаемся получить через глобальный singleton
-                from core.orchestration import get_orchestration_service
-                orchestration_service = get_orchestration_service()
         except Exception:
             pass
         
@@ -318,10 +314,6 @@ class PluginLifecycleManager:
             # Пытаемся получить OrchestrationService из runtime
             if hasattr(self._runtime, "orchestration_service"):
                 orchestration_service = self._runtime.orchestration_service
-            else:
-                # Fallback: пытаемся получить через глобальный singleton
-                from core.orchestration import get_orchestration_service
-                orchestration_service = get_orchestration_service()
         except Exception:
             pass
         

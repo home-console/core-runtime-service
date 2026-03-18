@@ -48,7 +48,12 @@ class RequestLoggerModule(RuntimeModule):
         Регистрирует сервисы для записи и чтения логов.
         """
         # Регистрируем сервисы (ACL-метаданные в ядре: чтение/очистка — admin_only)
-        services = self.context.services if hasattr(self, "context") and self.context else self.runtime.service_registry
+        # TODO: remove fallback after full KernelContext migration
+        services = (
+            self.context.get_service("service_registry")
+            if hasattr(self.context, "get_service")
+            else self.context.services
+        ) if hasattr(self, "context") and self.context else self.runtime.service_registry
 
         await services.register_with_acl("request_logger.log", self._log_service)
         await services.register_with_acl("request_logger.set_request_metadata", self._set_request_metadata_service)
@@ -64,7 +69,12 @@ class RequestLoggerModule(RuntimeModule):
         from modules.request_logger.middleware import RequestLoggerOperationContext
         set_operation_context_provider(RequestLoggerOperationContext())
         try:
-            services = self.context.services if hasattr(self, "context") and self.context else self.runtime.service_registry
+            # TODO: remove fallback after full KernelContext migration
+            services = (
+                self.context.get_service("service_registry")
+                if hasattr(self.context, "get_service")
+                else self.context.services
+            ) if hasattr(self, "context") and self.context else self.runtime.service_registry
             await services.call(
                 "logger.log",
                 level="info",
@@ -79,7 +89,12 @@ class RequestLoggerModule(RuntimeModule):
         from core.operation_context import set_operation_context_provider
         set_operation_context_provider(None)
         try:
-            services = self.context.services if hasattr(self, "context") and self.context else self.runtime.service_registry
+            # TODO: remove fallback after full KernelContext migration
+            services = (
+                self.context.get_service("service_registry")
+                if hasattr(self.context, "get_service")
+                else self.context.services
+            ) if hasattr(self, "context") and self.context else self.runtime.service_registry
             await services.call(
                 "logger.log",
                 level="info",
@@ -91,7 +106,12 @@ class RequestLoggerModule(RuntimeModule):
 
         # Отменяем регистрацию сервисов
         try:
-            services = self.context.services if hasattr(self, "context") and self.context else self.runtime.service_registry
+            # TODO: remove fallback after full KernelContext migration
+            services = (
+                self.context.get_service("service_registry")
+                if hasattr(self.context, "get_service")
+                else self.context.services
+            ) if hasattr(self, "context") and self.context else self.runtime.service_registry
             await services.unregister("request_logger.log")
             await services.unregister("request_logger.get_request_logs")
             await services.unregister("request_logger.list_requests")
