@@ -6,6 +6,7 @@ import pytest
 import json
 from fastapi import Request, Response
 from modules.api.security import get_idempotency_key, IdempotencyStore
+from modules.api.security.idempotency import idempotency_middleware
 
 
 class TestGetIdempotencyKey:
@@ -128,6 +129,71 @@ class TestIdempotencyStore:
         
         assert result1 is None
         assert result2 is None
+
+
+@pytest.mark.asyncio
+class TestIdempotencyMiddleware:
+    async def test_same_key_same_request_replays_cached_response(self):
+        class MockURL:
+            path = "/x"
+
+        class MockRequest:
+            method = "POST"
+            url = MockURL()
+            headers = {"Idempotency-Key": "k1"}
+
+            async def body(self):
+                return b'{"a":1}'
+
+        called = {"n": 0}
+
+        async def call_next(_req):
+            called["n"] += 1
+            return Response(content=b'{"ok":true}', status_code=200, media_type="application/json")
+
+        req1 = MockRequest()
+        r1 = await idempotency_middleware(req1, call_next)
+        assert r1.status_code == 200
+        assert called["n"] == 1
+
+        req2 = MockRequest()
+        r2 = await idempotency_middleware(req2, call_next)
+        assert r2.status_code == 200
+        assert r2.headers.get("Idempotency-Replay") == "true"
+        assert called["n"] == 1  # not executed again
+
+    async def test_same_key_different_body_does_not_replay(self):
+        class MockURL:
+            path = "/x"
+
+        class ReqA:
+            method = "POST"
+            url = MockURL()
+            headers = {"Idempotency-Key": "k2"}
+
+            async def body(self):
+                return b'{"a":1}'
+
+        class ReqB:
+            method = "POST"
+            url = MockURL()
+            headers = {"Idempotency-Key": "k2"}
+
+            async def body(self):
+                return b'{"a":2}'
+
+        called = {"n": 0}
+
+        async def call_next(_req):
+            called["n"] += 1
+            return Response(content=b'{"ok":true}', status_code=200, media_type="application/json")
+
+        r1 = await idempotency_middleware(ReqA(), call_next)
+        assert r1.status_code == 200
+        r2 = await idempotency_middleware(ReqB(), call_next)
+        assert r2.status_code == 200
+        assert r2.headers.get("Idempotency-Replay") != "true"
+        assert called["n"] == 2
 
 
 if __name__ == "__main__":

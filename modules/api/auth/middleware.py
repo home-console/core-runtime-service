@@ -90,9 +90,11 @@ async def require_auth_middleware(request: Request, call_next):
         if hasattr(runtime, "_config") and runtime._config:
             rate_limiting_enabled = getattr(runtime._config, "rate_limiting_enabled", True)
         
-        # DEBUG MODE: Allow disabling rate limiting via DEBUG_MODE environment variable
+        # DEBUG MODE: Allow disabling rate limiting ONLY when explicitly enabled.
+        # Safe default: rate limiting stays ON unless DEBUG_MODE is set to a truthy value.
         import os
-        if os.getenv("DEBUG_MODE", "true").lower() != "false":
+        debug_mode = os.getenv("DEBUG_MODE", "").lower() in ("1", "true", "yes", "on")
+        if debug_mode:
             rate_limiting_enabled = False
         
         if rate_limiting_enabled:

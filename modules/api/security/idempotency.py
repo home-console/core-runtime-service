@@ -7,6 +7,7 @@ Idempotency support для защиты от race conditions.
 
 from typing import Optional, Dict, Any, Callable
 from fastapi import Request, Response
+from starlette.responses import StreamingResponse
 import json
 import time
 import hashlib
@@ -109,14 +110,25 @@ async def idempotency_middleware(request: Request, call_next: Callable) -> Respo
         # Нет Idempotency-Key — просто выполняем запрос
         return await call_next(request)
     
+    # Fingerprint the request to prevent key reuse across different operations.
+    # We bind the stored result to method+path+body hash.
+    try:
+        body_bytes = await request.body()
+    except Exception:
+        body_bytes = b""
+    body_hash = hashlib.sha256(body_bytes).hexdigest()
+    fingerprint = f"{request.method}:{request.url.path}:{body_hash}"
+    storage_key = hashlib.sha256(f"{idempotency_key}:{fingerprint}".encode("utf-8")).hexdigest()
+
     # Проверяем, есть ли уже сохранённый результат
-    cached = await _idempotency_store.get(idempotency_key)
+    cached = await _idempotency_store.get(storage_key)
     if cached:
-        # Возвращаем сохранённый результат с статусом 200
+        # Возвращаем сохранённый результат (status_code и body) с пометкой replay
         response = Response(
-            content=json.dumps(cached.get("response", {})),
+            content=cached.get("body", b"") if isinstance(cached.get("body"), (bytes, bytearray)) else json.dumps(cached.get("response", {})),
             status_code=cached.get("status_code", 200),
-            media_type="application/json"
+            media_type=cached.get("media_type", "application/json"),
+            headers=cached.get("headers") or None,
         )
         # Добавляем заголовок, который показывает, что это replayed response
         response.headers["Idempotency-Replay"] = "true"
@@ -124,22 +136,35 @@ async def idempotency_middleware(request: Request, call_next: Callable) -> Respo
     
     # Выполняем настоящий запрос
     response = await call_next(request)
+
+    # Do not attempt to cache streaming responses (would consume the stream).
+    if isinstance(response, StreamingResponse):
+        return response
     
     # Сохраняем результат (но только для успешных ответов)
     if response.status_code < 400:
         try:
-            # Пытаемся прочитать body для сохранения
-            body = b""
-            async for chunk in response.body_iterator:
-                body += chunk
+            # Prefer response.body when available (avoids consuming iterators).
+            body = getattr(response, "body", None)
+            if body is None:
+                body = b""
+                async for chunk in response.body_iterator:
+                    body += chunk
             
-            response_data = {
+            headers = dict(response.headers)
+            # Avoid caching hop-by-hop / non-deterministic headers
+            headers.pop("content-length", None)
+            headers.pop("date", None)
+            headers.pop("server", None)
+
+            response_data: Dict[str, Any] = {
                 "status_code": response.status_code,
-                "response": json.loads(body) if body else {},
-                "headers": dict(response.headers)
+                "media_type": response.media_type,
+                "headers": headers,
+                "body": body,
             }
             
-            await _idempotency_store.set(idempotency_key, response_data)
+            await _idempotency_store.set(storage_key, response_data)
             
             # Возвращаем новый Response с тем же content
             return Response(

@@ -68,7 +68,7 @@ class ServiceRegistry:
     - Все вызовы защищены timeout по умолчанию
     """
 
-    def __init__(self, default_timeout: Optional[float] = None):
+    def __init__(self, default_timeout: Optional[float] = None, *, policy_engine: Optional[Any] = None):
         """
         Инициализация ServiceRegistry.
         
@@ -87,6 +87,12 @@ class ServiceRegistry:
         self._lock = asyncio.Lock()
         # Дефолтный timeout для всех вызовов
         self._default_timeout: Optional[float] = default_timeout
+        # Policy engine used by register_with_acl wrapper (avoid hidden global singletons).
+        if policy_engine is None:
+            from core.policy_engine import PolicyEngine
+            self._policy_engine = PolicyEngine()
+        else:
+            self._policy_engine = policy_engine
 
     async def register(self, service_name: str, func: ServiceFunc, version: Optional[str] = None) -> None:
         """
@@ -173,10 +179,8 @@ class ServiceRegistry:
                 effective_admin_only = False
 
         async def wrapped(*args, **kwargs):
-            # PolicyEngine для authz
-            from core.policy_engine import get_policy_engine
-            
-            policy_engine = get_policy_engine()
+            # PolicyEngine для authz (injected per ServiceRegistry)
+            policy_engine = self._policy_engine
             ctx = policy_engine.current_context()
 
             # Админ-флажок
@@ -301,9 +305,12 @@ class ServiceRegistry:
         Пример:
             result = await service_registry.call("devices.turn_on", "lamp_kitchen")
         
-        SECURITY NOTE: ServiceRegistry не выполняет проверки авторизации. Сервисы считаются trusted.
-        Authorization выполняется на boundary-слое (ApiModule, AdminModule) перед вызовом сервисов.
-        Прямые вызовы через service_registry.call() допустимы только из trusted-кода (модулей и плагинов).
+        SECURITY NOTE:
+        - ServiceRegistry.call() вызывает зарегистрированную функцию как есть.
+        - Если сервис зарегистрирован через register_with_acl(), то проверки admin/policy выполняются
+          внутри обёртки (до вызова исходного handler'а).
+        - Boundary слой (ApiModule/AdminModule) всё равно должен ограничивать доступ к sensitive endpoints,
+          но register_with_acl() является дополнительным уровнем защиты внутри процесса.
         
         TIMEOUT NOTE: Если установлен default_timeout, все вызовы защищены timeout автоматически.
         """

@@ -69,6 +69,10 @@ class CoreRuntime:
         """
         # Инициализация компонентов
         self.event_bus = EventBus()
+        # PolicyEngine (per-runtime instance; also exported for backward compatibility)
+        self.policy_engine = PolicyEngine()
+        set_policy_engine(self.policy_engine)
+
         # ServiceRegistry с timeout из конфига (защита от зависших вызовов)
         default_timeout = config.service_call_timeout if config else None
         self.service_registry = ServiceRegistry(default_timeout=default_timeout)
@@ -137,9 +141,11 @@ class CoreRuntime:
 
         await info(self, "RUNTIME: about to run HTTP", component="runtime")
         api_module = self.module_manager.get_module("api")
-        if api_module is not None and hasattr(api_module, "run_http"):
+        run_http = getattr(api_module, "run_http", None) if api_module is not None else None
+        if callable(run_http):
             try:
-                await api_module.run_http(self)
+                run_http_fn = cast(Callable[[Any], Awaitable[Any]], run_http)
+                await run_http_fn(self)
                 await info(self, "RUNTIME: run_http returned", component="runtime")
             except Exception as e:
                 await warning(self, f"Ошибка HTTP: {e}", component="runtime")

@@ -138,6 +138,22 @@ class TestValidateExternalUrl:
         assert validate_external_url("http://127.0.0.1:8080", allow_private=True) is True
         assert validate_external_url("http://192.168.1.1", allow_private=True) is True
 
+    def test_hostname_dns_to_private_ip_fails(self, monkeypatch):
+        """Hostname that resolves to private IP must be rejected (SSRF protection)."""
+        import socket
+
+        def fake_getaddrinfo(host, *args, **kwargs):
+            assert host == "evil.example"
+            # Return IPv4 loopback
+            return [
+                (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 0)),
+            ]
+
+        monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+
+        with pytest.raises(BadRequestError):
+            validate_external_url("https://evil.example/path")
+
 
 class TestValidateUrlForPlugin:
     """Тесты для строгой валидации (для плагинов)."""

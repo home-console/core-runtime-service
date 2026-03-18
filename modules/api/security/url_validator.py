@@ -9,6 +9,8 @@ URL validator для защиты от SSRF атак.
 """
 
 import ipaddress
+import socket
+from functools import lru_cache
 from typing import Optional
 from urllib.parse import urlparse
 
@@ -43,8 +45,32 @@ def is_private_ip(host: str) -> bool:
         return False
     except ValueError:
         # Не IP адрес, возможно hostname — пока считаем OK
-        # (DNS resolution делается позже при реальном запросе)
+        # DNS resolution делается в validate_external_url()
         return False
+
+
+@lru_cache(maxsize=1024)
+def _resolve_host_ips(host: str) -> tuple[str, ...]:
+    """
+    Resolve hostname to IP addresses (A/AAAA).
+
+    Cached to avoid repeated DNS lookups.
+    """
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except Exception:
+        return tuple()
+    ips: list[str] = []
+    for family, _socktype, _proto, _canonname, sockaddr in infos:
+        try:
+            if family == socket.AF_INET:
+                ips.append(sockaddr[0])
+            elif family == socket.AF_INET6:
+                ips.append(sockaddr[0])
+        except Exception:
+            continue
+    # De-duplicate while preserving determinism
+    return tuple(sorted(set(ips)))
 
 
 def is_allowed_scheme(url: str) -> bool:
@@ -122,6 +148,18 @@ def validate_external_url(url: str, allow_private: bool = False) -> bool:
         if is_private_ip(host):
             if not allow_private:
                 raise BadRequestError(f"Private IP not allowed: {host}")
+
+        # 4. Если host — hostname (не IP), проверяем DNS resolution на private IPs (SSRF protection).
+        # This blocks cases like example.com -> 127.0.0.1 via DNS rebinding / internal DNS.
+        if not allow_private:
+            try:
+                # If host parses as IP, ipaddress.ip_address won't throw and we skip DNS.
+                ipaddress.ip_address(host)
+            except ValueError:
+                resolved_ips = _resolve_host_ips(host)
+                for ip in resolved_ips:
+                    if is_private_ip(ip):
+                        raise BadRequestError(f"Private IP not allowed (DNS): {host} -> {ip}")
         
         return True
     
