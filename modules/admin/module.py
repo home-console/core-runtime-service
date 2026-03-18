@@ -20,7 +20,7 @@ import time
 from core.runtime_module import RuntimeModule
 from core.http_registry import HttpEndpoint
 # OrchestrationService (Docker/k8s абстракция)
-from core.orchestration import OrchestrationService, DockerOrchestrationBackend, get_orchestration_service
+from core.orchestration import OrchestrationService
 
 logger = logging.getLogger(__name__)
 
@@ -94,15 +94,10 @@ class AdminModule(RuntimeModule):
         super().__init__(runtime)
         self._admin_started_at: Optional[float] = None
         self._registered_services: list[str] = []
-        # OrchestrationService (Docker/k8s абстракция)
-        # Пытаемся получить из runtime, если не доступен - создаём локальный
-        self._orchestration_service = None
-        if hasattr(runtime, "orchestration_service") and runtime.orchestration_service:
-            self._orchestration_service = runtime.orchestration_service
-        else:
-            # Fallback: создаём локальный сервис с Docker backend
-            # В будущем это должно быть инициализировано в CoreRuntime
-            self._orchestration_service = OrchestrationService(DockerOrchestrationBackend())
+        # OrchestrationService приходит через runtime DI.
+        self._orchestration_service: Optional[OrchestrationService] = getattr(
+            runtime, "orchestration_service", None
+        )
 
     async def register(self) -> None:
         self._admin_started_at = time.time()
@@ -560,7 +555,7 @@ class AdminModule(RuntimeModule):
                 return {"ok": False, "error": "Имя плагина не указано"}
             
             # Получаем плагин
-            plugin = self.runtime.plugin_manager.get_plugin(plugin_name)
+            plugin = await self.runtime.plugin_manager.get_plugin(plugin_name)
             if not plugin:
                 return {"ok": False, "error": f"Плагин '{plugin_name}' не найден"}
             
@@ -669,7 +664,7 @@ class AdminModule(RuntimeModule):
                 return {"ok": False, "error": "Имя плагина не указано"}
             
             # Получаем плагин
-            plugin = self.runtime.plugin_manager.get_plugin(plugin_name)
+            plugin = await self.runtime.plugin_manager.get_plugin(plugin_name)
             if not plugin:
                 return {"ok": False, "error": f"Плагин '{plugin_name}' не найден"}
             
@@ -751,7 +746,7 @@ class AdminModule(RuntimeModule):
                 plugins_dir = Path(body["plugins_dir"])
             try:
                 await self.runtime.plugin_manager.auto_load_plugins(plugins_dir=plugins_dir)
-                return {"ok": True, "loaded": self.runtime.plugin_manager.list_plugins()}
+                return {"ok": True, "loaded": await self.runtime.plugin_manager.list_plugins()}
             except Exception as e:
                 return {"ok": False, "error": str(e)}
 

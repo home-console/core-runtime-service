@@ -1,6 +1,11 @@
 import pytest
 
 from core.runtime.runtime import CoreRuntime
+from core.config import Config
+from core.orchestration import NullOrchestrationBackend
+from core.policy_engine import PolicyEngine
+from core.runtime import CoreRuntime
+from core.state_engine import StateEngine
 
 
 class DummyAdapter:
@@ -27,7 +32,8 @@ class DummyAdapter:
 
 
 @pytest.mark.asyncio
-async def test_core_start_stop_shutdown(memory_adapter):
+async def test_core_start_stop_shutdown(memory_adapter, monkeypatch):
+    monkeypatch.setenv("TEST_MODE", "1")
     runtime = CoreRuntime(memory_adapter)
     assert runtime.is_running is False
 
@@ -46,8 +52,9 @@ async def test_core_start_stop_shutdown(memory_adapter):
 
 
 @pytest.mark.asyncio
-async def test_health_check_healthy(memory_adapter):
+async def test_health_check_healthy(memory_adapter, monkeypatch):
     """Тест health_check для здорового runtime."""
+    monkeypatch.setenv("TEST_MODE", "1")
     runtime = CoreRuntime(memory_adapter)
     await runtime.start()
     
@@ -64,8 +71,9 @@ async def test_health_check_healthy(memory_adapter):
 
 
 @pytest.mark.asyncio
-async def test_health_check_before_start(memory_adapter):
+async def test_health_check_before_start(memory_adapter, monkeypatch):
     """Тест health_check до старта runtime."""
+    monkeypatch.setenv("TEST_MODE", "1")
     runtime = CoreRuntime(memory_adapter)
     
     health = await runtime.health_check()
@@ -76,8 +84,9 @@ async def test_health_check_before_start(memory_adapter):
 
 
 @pytest.mark.asyncio
-async def test_get_metrics(memory_adapter):
+async def test_get_metrics(memory_adapter, monkeypatch):
     """Тест get_metrics для runtime."""
+    monkeypatch.setenv("TEST_MODE", "1")
     runtime = CoreRuntime(memory_adapter)
     await runtime.start()
     
@@ -99,3 +108,23 @@ async def test_get_metrics(memory_adapter):
     assert isinstance(metrics["http_endpoints"], dict)
     
     await runtime.stop()
+
+
+@pytest.mark.asyncio
+async def test_runtime_uses_configured_null_orchestration_backend(memory_adapter, monkeypatch):
+    """Runtime должен уметь отключать orchestration через config."""
+    monkeypatch.setenv("TEST_MODE", "1")
+    config = Config(orchestration_backend="none")
+    runtime = CoreRuntime(memory_adapter, config=config)
+
+    assert isinstance(runtime.orchestration_service._backend, NullOrchestrationBackend)
+
+
+@pytest.mark.asyncio
+async def test_runtime_accepts_injected_policy_engine(memory_adapter, monkeypatch):
+    """Runtime должен принимать PolicyEngine через DI, а не только создавать сам."""
+    monkeypatch.setenv("TEST_MODE", "1")
+    engine = PolicyEngine()
+    runtime = CoreRuntime(memory_adapter, policy_engine=engine)
+
+    assert runtime.policy_engine is engine

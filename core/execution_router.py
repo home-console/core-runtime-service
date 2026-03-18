@@ -11,8 +11,8 @@ ExecutionControllerImpl используется через runtime.execution_co
 Новый код должен использовать ExecutionControllerImpl.execute_operation() напрямую.
 """
 
+import asyncio
 import logging
-import threading
 from typing import Any, Callable, Awaitable, Optional, Dict
 
 from core.operations.models import Operation
@@ -54,9 +54,9 @@ class ExecutionRouter:
         self.runtime = runtime
         # Храним handlers для fallback (если ExecutionController недоступен)
         self._local_handlers: Dict[str, Callable[[Dict[str, Any], Operation], Awaitable[Dict[str, Any]]]] = {}
-        self._handler_lock = threading.Lock()
+        self._handler_lock = asyncio.Lock()
     
-    def register_handler(
+    async def register_handler(
         self,
         operation_type: str,
         handler: Callable[[Dict[str, Any], Operation], Awaitable[Dict[str, Any]]]
@@ -66,12 +66,12 @@ class ExecutionRouter:
         
         DEPRECATED: Handlers должны регистрироваться через OperationManager.register_handler().
         """
-        with self._handler_lock:
+        async with self._handler_lock:
             self._local_handlers[operation_type] = handler
     
-    def unregister_handler(self, operation_type: str) -> None:
+    async def unregister_handler(self, operation_type: str) -> None:
         """Unregister handler."""
-        with self._handler_lock:
+        async with self._handler_lock:
             self._local_handlers.pop(operation_type, None)
     
     async def execute(
@@ -162,7 +162,7 @@ class ExecutionRouter:
         Используется только если ExecutionController недоступен.
         """
         # Find handler with lock protection
-        with self._handler_lock:
+        async with self._handler_lock:
             handler = self._local_handlers.get(operation.type)
         
         if not handler:

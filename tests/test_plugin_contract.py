@@ -117,7 +117,7 @@ class TestPlugin(BasePlugin):
         
         # БЕЗ manifest - плагин НЕ должен загрузиться
         await manager.auto_load_plugins(plugins_dir=Path(tmpdir))
-        assert "test_plugin" not in manager.list_plugins()
+        assert "test_plugin" not in await manager.list_plugins()
         
         # С manifest - плагин должен загрузиться
         create_manifest_file(
@@ -133,7 +133,7 @@ class TestPlugin(BasePlugin):
         try:
             await manager.auto_load_plugins(plugins_dir=Path(tmpdir))
             # Плагин должен быть загружен
-            assert "test_plugin" in manager.list_plugins()
+            assert "test_plugin" in await manager.list_plugins()
         finally:
             sys.path.remove(str(plugin_dir.parent))
 
@@ -224,7 +224,7 @@ async def test_plugin_missing_dependency_not_loaded(memory_adapter):
             await manager.auto_load_plugins(plugins_dir=plugins_dir)
             
             # Плагин с отсутствующей зависимостью не должен быть загружен
-            assert "dependent_plugin" not in load_called or "dependent_plugin" not in manager.list_plugins()
+            assert "dependent_plugin" not in load_called or "dependent_plugin" not in await manager.list_plugins()
         finally:
             setattr(manager, '_load_plugin_from_manifest', original_load)
 
@@ -276,7 +276,7 @@ async def test_plugin_cyclic_dependency_detected(memory_adapter):
             await manager.auto_load_plugins(plugins_dir=plugins_dir)
             
             # Независимый плагин должен быть загружен
-            assert "plugin_c" in load_called or "plugin_c" in manager.list_plugins()
+            assert "plugin_c" in load_called or "plugin_c" in await manager.list_plugins()
         finally:
             setattr(manager, '_load_plugin_from_manifest', original_load)
 
@@ -332,7 +332,7 @@ async def test_plugin_dependency_check_before_load():
     
     # Теперь зависимый плагин должен загрузиться
     await manager.load_plugin(dependent_plugin)
-    assert "dependent" in manager.list_plugins()
+    assert "dependent" in await manager.list_plugins()
 
 
 @pytest.mark.asyncio
@@ -347,7 +347,7 @@ async def test_plugin_load_error_sets_error_state():
     
     # Состояние должно быть ERROR
     from core.plugins import PluginState
-    assert manager.get_plugin_state("failing") == PluginState.ERROR
+    assert await manager.get_plugin_state("failing") == PluginState.ERROR
 
 
 @pytest.mark.asyncio

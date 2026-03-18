@@ -48,9 +48,9 @@ async def list_plugins(runtime: Any) -> List[Dict[str, Any]]:
     
     # Get all loaded plugins
     pm = runtime.plugin_manager
-    for name in pm.list_plugins():
+    for name in await pm.list_plugins():
         # Get plugin instance
-        plugin = pm.get_plugin(name)
+        plugin = await pm.get_plugin(name)
         if not plugin:
             continue
         
@@ -83,12 +83,12 @@ async def list_plugins(runtime: Any) -> List[Dict[str, Any]]:
             pass
         
         # Get plugin state
-        state = pm.get_plugin_state(name)
+        state = await pm.get_plugin_state(name)
         # Compare with PluginState enum value
         started = state == PluginState.STARTED
         
         # Get block reason if plugin is not started
-        block_reason = pm.get_plugin_block_reason(name)
+        block_reason = await pm.get_plugin_block_reason(name)
         error_msg = None
         unresolved_capabilities = []
         if block_reason:
@@ -153,7 +153,7 @@ async def discover_manifests_for_inspector(runtime: Any) -> Dict[str, Any]:
     Возвращает: manifests, load_order, plugins_dir, loaded (уже загруженные имена).
     """
     plugins_dir = _get_plugins_dir(runtime)
-    loaded = list(runtime.plugin_manager.list_plugins())
+    loaded = list(await runtime.plugin_manager.list_plugins())
     if not plugins_dir.exists() or not plugins_dir.is_dir():
         return {
             "plugins_dir": str(plugins_dir),
@@ -182,7 +182,7 @@ async def get_plugin_details(runtime: Any, plugin_name: str) -> Optional[Dict[st
     manifest = PluginManifestLoader.load_manifest(plugin_dir) if plugin_dir.exists() else None
 
     # Если плагин загружен — полные данные как в list_plugins
-    if pm.get_plugin(plugin_name):
+    if await pm.get_plugin(plugin_name):
         plugins_list = await list_plugins(runtime)
         for p in plugins_list:
             if p.get("name") == plugin_name:
@@ -510,8 +510,8 @@ async def list_auth_flows(runtime: Any) -> List[Dict[str, Any]]:
                 plugin_name = _plugin_name_for_integration_item(flow, flow_id_to_plugin)
                 if not plugin_name:
                     continue
-                plugin = pm.get_plugin(plugin_name)
-                state = pm.get_plugin_state(plugin_name)
+                plugin = await pm.get_plugin(plugin_name)
+                state = await pm.get_plugin_state(plugin_name)
                 if plugin is None or state != PluginState.STARTED:
                     flow["state"] = "unavailable"
                     flow["message"] = "Временно недоступно (плагин выгружен или не запущен)"
@@ -635,8 +635,8 @@ async def list_integrations(runtime: Any) -> List[Dict[str, Any]]:
                 plugin_name = _plugin_name_for_integration_item(item, flow_id_to_plugin)
                 if not plugin_name:
                     continue
-                plugin = pm.get_plugin(plugin_name)
-                state = pm.get_plugin_state(plugin_name)
+                plugin = await pm.get_plugin(plugin_name)
+                state = await pm.get_plugin_state(plugin_name)
                 if plugin is None or state != PluginState.STARTED:
                     item["state"] = "unavailable"
                     item["message"] = "Временно недоступно (плагин выгружен или не запущен)"

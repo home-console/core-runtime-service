@@ -38,16 +38,16 @@ async def test_load_start_stop_unload():
     pm = PluginManager()
     dp = DummyPlugin(None, name='p1')
     await pm.load_plugin(dp)
-    assert pm.get_plugin_state('p1') == PluginState.LOADED
+    assert await pm.get_plugin_state('p1') == PluginState.LOADED
 
     await pm.start_plugin('p1')
-    assert pm.get_plugin_state('p1') == PluginState.STARTED
+    assert await pm.get_plugin_state('p1') == PluginState.STARTED
 
     await pm.stop_plugin('p1')
-    assert pm.get_plugin_state('p1') == PluginState.STOPPED
+    assert await pm.get_plugin_state('p1') == PluginState.STOPPED
 
     await pm.unload_plugin('p1')
-    assert pm.get_plugin_state('p1') == PluginState.UNLOADED
+    assert await pm.get_plugin_state('p1') == PluginState.UNLOADED
 
 
 @pytest.mark.asyncio
@@ -62,7 +62,7 @@ async def test_dependency_check():
 
     await pm.load_plugin(p_a)
     await pm.load_plugin(p_b)
-    assert set(pm.list_plugins()) == {'a', 'b'}
+    assert set(await pm.list_plugins()) == {'a', 'b'}
 
 
 @pytest.mark.asyncio
@@ -71,4 +71,4 @@ async def test_load_error_sets_state():
     bad = BadLoadPlugin(None, name='bad')
     with pytest.raises(RuntimeError):
         await pm.load_plugin(bad)
-    assert pm.get_plugin_state('bad') == PluginState.ERROR
+    assert await pm.get_plugin_state('bad') == PluginState.ERROR

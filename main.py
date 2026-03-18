@@ -57,6 +57,32 @@ APP_MODULES: list[ModuleSpec] = [
 ]
 
 
+def _parse_module_specs(config: Config) -> list[ModuleSpec]:
+    """
+    Получить список модулей из config/modules env.
+
+    Формат `RUNTIME_MODULES`:
+    - `api,admin,agent`
+    - `api:true,admin:true,agent:false`
+    """
+    raw = getattr(config, "modules_config", None)
+    if not raw:
+        return APP_MODULES
+
+    specs: list[ModuleSpec] = []
+    for item in raw.split(","):
+        token = item.strip()
+        if not token:
+            continue
+        if ":" in token:
+            name, _, required_raw = token.partition(":")
+            required = required_raw.strip().lower() not in ("false", "0", "no", "optional")
+            specs.append(ModuleSpec(name.strip(), required=required))
+        else:
+            specs.append(ModuleSpec(token, required=True))
+    return specs or APP_MODULES
+
+
 async def main() -> None:
     config = Config.from_env()
     if config.storage_type == "sqlite":
@@ -102,7 +128,8 @@ async def main() -> None:
     if config.storage_mode == "dual":
         print(f"[Runtime] Vault storage: {config.vault_storage_type}")
     print("[Runtime] Регистрация модулей...")
-    await runtime.module_manager.register_module_specs(runtime, APP_MODULES)
+    module_specs = _parse_module_specs(config)
+    await runtime.module_manager.register_module_specs(runtime, module_specs)
     try:
         modules = runtime.module_manager.list_modules()
         if modules:

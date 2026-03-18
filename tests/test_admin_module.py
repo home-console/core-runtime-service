@@ -19,8 +19,9 @@ APP_MODULES = [
 
 
 @pytest.mark.asyncio
-async def test_admin_module_registered(memory_adapter):
+async def test_admin_module_registered(memory_adapter, monkeypatch):
     """Тест: AdminModule регистрируется через bootstrap приложения."""
+    monkeypatch.setenv("TEST_MODE", "1")
     runtime = CoreRuntime(memory_adapter)
     await runtime.module_manager.register_module_specs(runtime, APP_MODULES)
     await runtime.start()
@@ -34,8 +35,9 @@ async def test_admin_module_registered(memory_adapter):
 
 
 @pytest.mark.asyncio
-async def test_admin_endpoints_registered(memory_adapter):
+async def test_admin_endpoints_registered(memory_adapter, monkeypatch):
     """Тест: Admin endpoints регистрируются в HttpRegistry."""
+    monkeypatch.setenv("TEST_MODE", "1")
     runtime = CoreRuntime(memory_adapter)
     await runtime.module_manager.register_module_specs(runtime, APP_MODULES)
     await runtime.start()
@@ -61,8 +63,9 @@ async def test_admin_endpoints_registered(memory_adapter):
 
 
 @pytest.mark.asyncio
-async def test_admin_runtime_endpoint(memory_adapter):
+async def test_admin_runtime_endpoint(memory_adapter, monkeypatch):
     """Тест: GET /admin/v1/inspector/runtime возвращает информацию о runtime."""
+    monkeypatch.setenv("TEST_MODE", "1")
     runtime = CoreRuntime(memory_adapter)
     await runtime.module_manager.register_module_specs(runtime, APP_MODULES)
     await runtime.start()

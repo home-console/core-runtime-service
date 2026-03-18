@@ -2,11 +2,15 @@
 Конфигурация Core Runtime.
 
 Минимальные настройки.
+Extensibility: modules_config, plugins_dir, orchestration_backend.
 """
 
 import os
 from dataclasses import dataclass
-from typing import Optional, List
+from typing import Optional, List, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from core.module_manager import ModuleSpec
 
 
 @dataclass
@@ -85,6 +89,17 @@ class Config:
     # Logging
     # "text" | "json"
     log_format: str = "text"
+
+    # Extensibility: модули и плагины из конфига (override hardcoded lists)
+    # RUNTIME_MODULES: comma-separated "name" or "name:required" (e.g. "api:true,admin:true,agent:false")
+    # Если пусто — используется дефолтный APP_MODULES из main.py
+    modules_config: Optional[str] = None
+    # RUNTIME_PLUGINS_DIR: путь к папке плагинов (относительно cwd или абсолютный)
+    plugins_dir: Optional[str] = None
+    # RUNTIME_ORCHESTRATION_BACKEND: "docker" (default) | "none" (no-op для headless)
+    orchestration_backend: str = "docker"
+    # RUNTIME_MODULE_PATH_PREFIX: префикс для discovery модулей (default "modules")
+    module_path_prefix: str = "modules"
 
     def validate(self) -> None:
         """
@@ -197,6 +212,16 @@ class Config:
         if self.log_format not in ("text", "json"):
             raise ValueError("log_format must be 'text' or 'json'")
 
+        # orchestration_backend
+        if self.orchestration_backend not in ("docker", "none"):
+            raise ValueError("orchestration_backend must be 'docker' or 'none'")
+        if self.modules_config is not None and not isinstance(self.modules_config, str):
+            raise ValueError("modules_config must be string or None")
+        if self.plugins_dir is not None and not isinstance(self.plugins_dir, str):
+            raise ValueError("plugins_dir must be string or None")
+        if not isinstance(self.module_path_prefix, str) or not self.module_path_prefix:
+            raise ValueError("module_path_prefix must be non-empty string")
+
     @classmethod
     def from_env(cls) -> "Config":
         """
@@ -246,6 +271,11 @@ class Config:
             vault_storage_type=os.getenv("RUNTIME_VAULT_STORAGE_TYPE"),
             vault_db_path=os.getenv("RUNTIME_VAULT_DB_PATH"),
             vault_pg_dsn=os.getenv("RUNTIME_VAULT_PG_DSN"),
+            # Extensibility
+            modules_config=os.getenv("RUNTIME_MODULES"),
+            plugins_dir=os.getenv("RUNTIME_PLUGINS_DIR"),
+            orchestration_backend=os.getenv("RUNTIME_ORCHESTRATION_BACKEND", "docker").lower(),
+            module_path_prefix=os.getenv("RUNTIME_MODULE_PATH_PREFIX", "modules"),
         )
         config.validate()
         return config

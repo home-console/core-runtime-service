@@ -174,7 +174,7 @@ async def test_plugin_with_capabilities(memory_adapter):
     
     # Start provider
     await runtime.plugin_manager.start_plugin("cap_provider")
-    state = runtime.plugin_manager.get_plugin_state("cap_provider")
+    state = await runtime.plugin_manager.get_plugin_state("cap_provider")
     assert state == PluginState.STARTED
     
     await runtime.stop()
@@ -196,7 +196,7 @@ async def test_consumer_with_available_capability(memory_adapter):
     
     # Start consumer - должен стартовать т.к. capability доступна
     await runtime.plugin_manager.start_plugin("cap_consumer")
-    state = runtime.plugin_manager.get_plugin_state("cap_consumer")
+    state = await runtime.plugin_manager.get_plugin_state("cap_consumer")
     assert state == PluginState.STARTED
     
     await runtime.stop()
@@ -213,11 +213,11 @@ async def test_consumer_blocked_missing_capability(memory_adapter):
     
     # Try to start - должен остаться в LOADED, не ERROR
     await runtime.plugin_manager.start_plugin("missing_cap_consumer")
-    state = runtime.plugin_manager.get_plugin_state("missing_cap_consumer")
+    state = await runtime.plugin_manager.get_plugin_state("missing_cap_consumer")
     assert state == PluginState.LOADED  # Не стартовал, но не error
     
     # Check block reason
-    reason = runtime.plugin_manager.get_plugin_block_reason("missing_cap_consumer")
+    reason = await runtime.plugin_manager.get_plugin_block_reason("missing_cap_consumer")
     assert reason is not None
     assert "test.nonexistent_capability" in reason.get("missing_capabilities", [])
     
@@ -246,7 +246,7 @@ async def test_runtime_continues_with_blocked_plugin(memory_adapter):
     assert runtime.is_running
     
     # Provider должен быть started
-    provider_state = runtime.plugin_manager.get_plugin_state("cap_provider")
+    provider_state = await runtime.plugin_manager.get_plugin_state("cap_provider")
     assert provider_state == PluginState.STARTED
     
     await runtime.stop()

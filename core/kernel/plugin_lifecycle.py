@@ -76,7 +76,7 @@ class PluginLifecycleManager:
         plugin_name = metadata.name
         
         # Проверка на дубликат
-        if self._registry.has_plugin(plugin_name):
+        if await self._registry.has_plugin(plugin_name):
             raise ValueError(f"Плагин '{plugin_name}' уже загружен")
         
         # Установим ссылку на runtime у плагина перед вызовом on_load
@@ -97,14 +97,14 @@ class PluginLifecycleManager:
                 deps = getattr(metadata, "dependencies", []) or []
             if deps:
                 for dep_name in deps:
-                    if not self._registry.has_plugin(dep_name):
+                    if not await self._registry.has_plugin(dep_name):
                         raise ValueError(
                             f"Плагин '{plugin_name}' требует плагин '{dep_name}', "
                             f"но он не загружен"
                         )
             
             # Регистрируем в реестре
-            self._registry.register(plugin_name, plugin, PluginState.LOADED)
+            await self._registry.register(plugin_name, plugin, PluginState.LOADED)
             
             # Сохраняем метаданные плагина в persistent storage
             # Это позволяет восстановить информацию о плагине после выгрузки
@@ -114,7 +114,7 @@ class PluginLifecycleManager:
             await self._infra.on_plugin_loaded(plugin)
         except Exception as e:
             # Устанавливаем состояние ERROR
-            self._registry.set_plugin_state(plugin_name, PluginState.ERROR)
+            await self._registry.set_plugin_state(plugin_name, PluginState.ERROR)
             # Пробросываем оригинальное исключение
             raise
     
@@ -131,16 +131,16 @@ class PluginLifecycleManager:
         Raises:
             ValueError: если плагин не найден или не загружен
         """
-        plugin = self._registry.get_plugin(plugin_name)
+        plugin = await self._registry.get_plugin(plugin_name)
         if plugin is None:
             raise ValueError(f"Плагин '{plugin_name}' не найден")
         
-        state = self._registry.get_plugin_state(plugin_name)
+        state = await self._registry.get_plugin_state(plugin_name)
         if state == PluginState.STARTED:
             return  # Уже запущен
         
         # Проверка required capabilities: все должны иметь хотя бы одного provider
-        self._registry.clear_plugin_block_reason(plugin_name)
+        await self._registry.clear_plugin_block_reason(plugin_name)
         if self._runtime and hasattr(self._runtime, "capability_registry"):
             reg = self._runtime.capability_registry
             if self._runtime:
@@ -149,14 +149,14 @@ class PluginLifecycleManager:
             if self._runtime:
                 await info(self._runtime, f"RUNTIME: capabilities validated for {plugin_name} ok={ok}", component="runtime")
             if not ok:
-                self._registry.set_plugin_block_reason(plugin_name, {"missing_capabilities": missing})
+                await self._registry.set_plugin_block_reason(plugin_name, {"missing_capabilities": missing})
                 return  # Плагин не стартуем — управляемое состояние (blocked), не исключение
         
         try:
             await plugin.on_start()
-            self._registry.set_plugin_state(plugin_name, PluginState.STARTED)
+            await self._registry.set_plugin_state(plugin_name, PluginState.STARTED)
         except Exception as e:
-            self._registry.set_plugin_state(plugin_name, PluginState.ERROR)
+            await self._registry.set_plugin_state(plugin_name, PluginState.ERROR)
             raise RuntimeError(f"Ошибка запуска плагина '{plugin_name}': {e}")
     
     async def stop_plugin(self, plugin_name: str) -> None:
@@ -171,11 +171,11 @@ class PluginLifecycleManager:
         Raises:
             ValueError: если плагин не найден
         """
-        plugin = self._registry.get_plugin(plugin_name)
+        plugin = await self._registry.get_plugin(plugin_name)
         if plugin is None:
             raise ValueError(f"Плагин '{plugin_name}' не найден")
         
-        state = self._registry.get_plugin_state(plugin_name)
+        state = await self._registry.get_plugin_state(plugin_name)
         if state != PluginState.STARTED:
             return  # Не запущен
         
@@ -187,9 +187,9 @@ class PluginLifecycleManager:
                 await self._stop_plugin_container(plugin_name, metadata.container_config)
             
             await plugin.on_stop()
-            self._registry.set_plugin_state(plugin_name, PluginState.STOPPED)
+            await self._registry.set_plugin_state(plugin_name, PluginState.STOPPED)
         except Exception as e:
-            self._registry.set_plugin_state(plugin_name, PluginState.ERROR)
+            await self._registry.set_plugin_state(plugin_name, PluginState.ERROR)
             raise RuntimeError(f"Ошибка остановки плагина '{plugin_name}': {e}")
     
     async def _stop_plugin_container(self, plugin_name: str, container_config: dict) -> None:
@@ -263,18 +263,18 @@ class PluginLifecycleManager:
         Raises:
             ValueError: если плагин не найден
         """
-        plugin = self._registry.get_plugin(plugin_name)
+        plugin = await self._registry.get_plugin(plugin_name)
         if plugin is None:
             raise ValueError(f"Плагин '{plugin_name}' не найден")
         
         # Сначала остановить, если запущен
-        state = self._registry.get_plugin_state(plugin_name)
+        state = await self._registry.get_plugin_state(plugin_name)
         if state == PluginState.STARTED:
             await self.stop_plugin(plugin_name)
         
         try:
             await plugin.on_unload()
-            self._registry.clear_plugin_block_reason(plugin_name)
+            await self._registry.clear_plugin_block_reason(plugin_name)
             
             # Удаляем контейнер при unload
             # Для плагинов с execution_mode="container" удаляем Docker контейнер
@@ -290,9 +290,9 @@ class PluginLifecycleManager:
             await self._mark_plugin_unloaded(plugin_name)
 
             # Удаляем из реестра плагинов (in-memory)
-            self._registry.unregister(plugin_name)
+            await self._registry.unregister(plugin_name)
         except Exception as e:
-            self._registry.set_plugin_state(plugin_name, PluginState.ERROR)
+            await self._registry.set_plugin_state(plugin_name, PluginState.ERROR)
             raise RuntimeError(f"Ошибка выгрузки плагина '{plugin_name}': {e}")
     
     async def _remove_plugin_container(self, plugin_name: str, container_config: dict) -> None:
@@ -439,14 +439,18 @@ class PluginLifecycleManager:
             ValueError: если плагин не найден или не может быть перезагружен
             RuntimeError: если перезагрузка не удалась
         """
-        if not self._registry.has_plugin(plugin_name):
+        if not await self._registry.has_plugin(plugin_name):
             raise ValueError(f"Плагин '{plugin_name}' не найден для перезагрузки")
         
         # Сохраняем информацию о состоянии перед перезагрузкой
-        was_started = self._registry.get_plugin_state(plugin_name) == PluginState.STARTED
+        was_started = await self._registry.get_plugin_state(plugin_name) == PluginState.STARTED
         
-        # Получаем путь к плагину из манифеста (нужно для перезагрузки)
-        plugins_dir = Path(__file__).parent.parent.parent / "plugins"
+        # Получаем путь к плагину из runtime config / project default.
+        plugins_dir_config = None
+        if self._runtime is not None:
+            config = getattr(self._runtime, "_config", None)
+            plugins_dir_config = getattr(config, "plugins_dir", None) if config is not None else None
+        plugins_dir = Path(plugins_dir_config).expanduser() if plugins_dir_config else Path(__file__).parent.parent.parent / "plugins"
         plugin_dir = plugins_dir / plugin_name
         
         if not plugin_dir.exists() or not plugin_dir.is_dir():
@@ -492,7 +496,7 @@ class PluginLifecycleManager:
     
     async def start_all(self) -> None:
         """Запустить все загруженные плагины."""
-        states = self._registry.get_all_states()
+        states = await self._registry.get_all_states()
         if self._runtime:
             await info(self._runtime, "RUNTIME: plugin_manager.start_all() entered", component="runtime")
         for plugin_name, state in states.items():
@@ -505,7 +509,7 @@ class PluginLifecycleManager:
     
     async def stop_all(self) -> None:
         """Остановить все запущенные плагины."""
-        states = self._registry.get_all_states()
+        states = await self._registry.get_all_states()
         for plugin_name, state in states.items():
             if state == PluginState.STARTED:
                 await self.stop_plugin(plugin_name)

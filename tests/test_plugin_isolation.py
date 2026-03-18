@@ -59,10 +59,11 @@ class TestExecutionRouter:
         assert hasattr(router, 'execute')
         assert hasattr(router, 'register_handler')
     
-    def test_register_handler(self, router):
+    @pytest.mark.asyncio
+    async def test_register_handler(self, router):
         """Test handler registration."""
         handler = Mock()
-        router.register_handler("test.op", handler)
+        await router.register_handler("test.op", handler)
         # Handlers stored internally for in_process execution
         assert router is not None
     
@@ -70,7 +71,7 @@ class TestExecutionRouter:
     async def test_in_process_execution(self, router, operation):
         """Test in_process execution mode (direct handler call)."""
         handler = AsyncMock(return_value={"status": "success"})
-        router.register_handler("test.operation", handler)
+        await router.register_handler("test.operation", handler)
         
         metadata = ProviderMetadata(
             plugin_name="test_plugin",
@@ -88,7 +89,7 @@ class TestExecutionRouter:
     async def test_in_process_with_none_metadata(self, router, operation):
         """Test in_process execution when metadata is None (backward compat)."""
         handler = AsyncMock(return_value={"status": "ok"})
-        router.register_handler("test.operation", handler)
+        await router.register_handler("test.operation", handler)
         
         # No metadata provided (should default to in_process)
         result = await router.execute(operation, None)
@@ -162,7 +163,7 @@ class TestExecutionRouter:
     async def test_unknown_execution_mode(self, router, operation):
         """Test unknown execution mode raises error."""
         handler = AsyncMock(return_value={"status": "fallback"})
-        router.register_handler("test.operation", handler)
+        await router.register_handler("test.operation", handler)
         
         metadata = ProviderMetadata(
             plugin_name="test_plugin",
@@ -278,12 +279,13 @@ class TestBackwardCompatibility:
         assert metadata.process_config is None
         assert metadata.container_config is None
     
-    def test_handlers_registered_for_in_process(self):
+    @pytest.mark.asyncio
+    async def test_handlers_registered_for_in_process(self):
         """Test handlers are still registered for in_process execution."""
         router = ExecutionRouter(Mock())
         handler = Mock()
         
-        router.register_handler("test.op", handler)
+        await router.register_handler("test.op", handler)
         # If no exception thrown, registration succeeded
         assert True
 
@@ -314,7 +316,7 @@ class TestExecutionErrors:
     async def test_handler_exception_caught(self, executor, operation):
         """Test exceptions from handler are propagated."""
         handler = AsyncMock(side_effect=ValueError("Handler error"))
-        executor.register_handler("test.error", handler)
+        await executor.register_handler("test.error", handler)
         
         metadata = ProviderMetadata(
             plugin_name="test",

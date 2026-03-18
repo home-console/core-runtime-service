@@ -17,7 +17,10 @@ import asyncio
 from unittest.mock import Mock, AsyncMock
 
 from core.capability_registry import CapabilityRegistry
-from core.kernel.base_plugin import BasePlugin, PluginMetadata
+from core.capability_protocol import PROTOCOL_VERSION
+from core.kernel.plugin_registry import PluginRegistry
+from core.plugins import PluginManager
+from core.base_plugin import BasePlugin, PluginMetadata
 from core.plugin_isolation import StorageProxy
 from core.errors import ForbiddenError
 
@@ -100,6 +103,22 @@ async def test_registry_methods_are_async():
     assert asyncio.iscoroutinefunction(registry.register_consumer)
     assert asyncio.iscoroutinefunction(registry.unregister_plugin)
     assert asyncio.iscoroutinefunction(registry.validate_plugin_requirements)
+
+
+@pytest.mark.asyncio
+async def test_plugin_registry_uses_asyncio_lock_not_threading():
+    """Test that PluginRegistry uses asyncio.Lock, not threading.Lock."""
+    registry = PluginRegistry()
+    
+    assert isinstance(registry._plugin_lock, asyncio.Lock)
+    assert not hasattr(registry._plugin_lock, '_is_owned')  # threading.Lock attribute
+
+
+@pytest.mark.asyncio
+async def test_execution_router_uses_asyncio_lock():
+    """Test that ExecutionRouter uses asyncio.Lock."""
+    router = ExecutionRouter(Mock())
+    assert isinstance(router._handler_lock, asyncio.Lock)
 
 
 # ============================================================================

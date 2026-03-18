@@ -229,6 +229,43 @@ class OrchestrationService:
         return await self._backend.start_container(container_name)
 
 
+class NullOrchestrationBackend(OrchestrationBackend):
+    """
+    No-op backend для headless/dev сценариев.
+
+    Позволяет отключить orchestration на уровне конфигурации, не раздувая условную
+    логику по всему runtime. Все операции возвращают контролируемый отказ.
+    """
+
+    async def container_exists(self, container_name: str) -> bool:
+        return False
+
+    async def stop_container(
+        self, container_name: str, timeout: Optional[float] = None
+    ) -> Dict[str, Any]:
+        return {"ok": False, "error": "Orchestration backend is disabled"}
+
+    async def remove_container(
+        self, container_name: str, force: bool = False
+    ) -> Dict[str, Any]:
+        return {"ok": False, "error": "Orchestration backend is disabled"}
+
+    async def ensure_container(
+        self,
+        container_name: str,
+        container_config: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        return {"ok": False, "error": "Orchestration backend is disabled"}
+
+    async def start_container(self, container_name: str) -> Dict[str, Any]:
+        return {"ok": False, "error": "Orchestration backend is disabled"}
+
+    async def restart_container(
+        self, container_name: str, timeout: Optional[float] = None
+    ) -> Dict[str, Any]:
+        return {"ok": False, "error": "Orchestration backend is disabled"}
+
+
 # Глобальный экземпляр OrchestrationService (singleton)
 _global_orchestration_service: Optional[OrchestrationService] = None
 

@@ -77,7 +77,7 @@ async def test_remote_provider_metadata_validation(memory_adapter):
     
     # Should not raise on load
     await runtime.plugin_manager.load_plugin(provider)
-    assert "mock_remote_provider" in runtime.plugin_manager.list_plugins()
+    assert "mock_remote_provider" in await runtime.plugin_manager.list_plugins()
     
     await runtime.stop()
 

@@ -261,105 +261,85 @@ def test_circular_dependency_detection():
 # ========== TEST 4: Concurrent Handler Safety ==========
 
 
-def test_concurrent_handler_safety():
-    """P0: Verify ExecutionRouter lock protects handler dictionary."""
-    import threading
-    from unittest.mock import Mock
-
+@pytest.mark.asyncio
+async def test_concurrent_handler_safety():
+    """P0: Verify ExecutionRouter asyncio.Lock protects handler dictionary under async concurrency."""
     from core.execution_router import ExecutionRouter
-
-    # Create a mock runtime
+    from unittest.mock import Mock
+    import asyncio
+    
     mock_runtime = Mock()
     router = ExecutionRouter(mock_runtime)
     results = {"errors": []}
-
-    # Register initial handler
+    
     async def async_handler(context, op):
         return {"success": True}
-
-    router.register_handler("test.op", async_handler)
-
-    def register_task():
+    
+    await router.register_handler("test.op", async_handler)
+    
+    async def register_task():
         try:
             for i in range(10):
-                router.register_handler(f"test.op.{i}", async_handler)
+                await router.register_handler(f"test.op.{i}", async_handler)
         except Exception as e:
             results["errors"].append(str(e))
-
-    def unregister_task():
+    
+    async def unregister_task():
         try:
             for i in range(10):
-                if f"test.op.{i}" in router._local_handlers:
-                    router.unregister_handler(f"test.op.{i}")
+                await router.unregister_handler(f"test.op.{i}")
         except Exception as e:
             results["errors"].append(str(e))
-
-    # Simulate concurrent access with threads
-    threads = [
-        threading.Thread(target=register_task),
-        threading.Thread(target=unregister_task),
-        threading.Thread(target=register_task),
-    ]
-
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
-
-    # Should not have any thread safety errors
-    assert len(results["errors"]) == 0, (
-        f"Concurrent access caused errors: {results['errors']}"
+    
+    # Concurrent async tasks (no event loop blocking)
+    await asyncio.gather(
+        register_task(),
+        unregister_task(),
+        register_task(),
     )
+    
+    assert len(results["errors"]) == 0, f"Concurrent access caused errors: {results['errors']}"
 
 
 # ========== TEST 5: Plugin Manager Lock Safety ==========
 
 
-def test_plugin_manager_lock_safety():
-    """P0: Verify PluginManager lock protects internal state."""
-    import threading
-
-    pm = PluginManager(runtime=None)  # Create without runtime for testing
+@pytest.mark.asyncio
+async def test_plugin_manager_lock_safety():
+    """P0: Verify PluginManager asyncio.Lock protects internal state under async concurrency."""
+    pm = PluginManager(runtime=None)
     results = {"errors": []}
-
     plugin = DemoPluginA()
 
-    def load_task():
+    # First register plugins
+    for i in range(5):
+        await pm._registry.register(f"test_plugin_{i}", plugin, PluginState.LOADED)
+
+    async def state_task():
         try:
             for _ in range(5):
-                with pm._plugin_lock:
-                    pm._plugins["test_plugin"] = plugin
-                    pm._states["test_plugin"] = PluginState.LOADED
+                for i in range(5):
+                    state = await pm._registry.get_plugin_state(f"test_plugin_{i}")
+                    val = state.value if state else "unloaded"
+                    assert val in ["unloaded", "loaded", "started", "stopped", "error"]
         except Exception as e:
             results["errors"].append(str(e))
 
-    def state_task():
+    async def update_task():
         try:
-            for _ in range(5):
-                with pm._plugin_lock:
-                    state = pm._states.get("test_plugin", PluginState.UNLOADED)
-                    assert state in [
-                        PluginState.UNLOADED,
-                        PluginState.LOADED,
-                        PluginState.STARTED,
-                        PluginState.ERROR,
-                    ]
+            for _ in range(3):
+                for i in range(5):
+                    await pm._registry.set_plugin_state(f"test_plugin_{i}", PluginState.STARTED)
+                    await pm._registry.set_plugin_state(f"test_plugin_{i}", PluginState.LOADED)
         except Exception as e:
             results["errors"].append(str(e))
 
-    # Simulate concurrent state access
-    threads = [
-        threading.Thread(target=load_task),
-        threading.Thread(target=state_task),
-        threading.Thread(target=load_task),
-    ]
+    await asyncio.gather(
+        state_task(),
+        update_task(),
+        state_task(),
+    )
 
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
-
-    # Should not have corruption or errors
     assert len(results["errors"]) == 0, f"Lock safety errors: {results['errors']}"
 
 

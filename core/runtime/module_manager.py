@@ -54,7 +54,7 @@ class ModuleManager:
     обеспечивает идемпотентность регистрации.
     """
 
-    def __init__(self, runtime: Optional[Any] = None):
+    def __init__(self, runtime: Optional[Any] = None, *, module_path_prefix: str = "modules"):
         """
         Инициализация менеджера модулей.
         
@@ -63,6 +63,7 @@ class ModuleManager:
         """
         self._modules: Dict[str, RuntimeModule] = {}
         self._runtime = runtime
+        self._module_path_prefix = module_path_prefix or "modules"
         # Имена модулей, помеченных как required при последнем register_module_specs (задаётся приложением)
         self._required_names: set = set()
 
@@ -314,7 +315,7 @@ class ModuleManager:
         Raises:
             RuntimeError: если модуль найден, но класс не является RuntimeModule
         """
-        module_path = f"modules.{module_name}"
+        module_path = f"{self._module_path_prefix}.{module_name}"
         spec = importlib.util.find_spec(module_path)
         if spec is None:
             return None
@@ -386,7 +387,8 @@ class ModuleManager:
             if required:
                 raise RuntimeError(
                     f"Required module '{module_name}' not found. "
-                    f"Expected module at 'modules.{module_name}' with class '{module_name.capitalize()}Module'"
+                    f"Expected module at '{self._module_path_prefix}.{module_name}' "
+                    f"with class '{module_name.capitalize()}Module'"
                 )
             # Для optional модулей просто возвращаемся
             return

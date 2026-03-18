@@ -52,11 +52,20 @@ class CoreRuntime:
     """
 
     def __init__(
+        
         self,
+       
         storage_port: Any,
+       
         config: Optional[Any] = None,
+       
         vault_port: Optional[Any] = None,
+       
         state_engine: Optional[Any] = None,
+    ,
+        *,
+        policy_engine: Optional[PolicyEngine] = None,
+        orchestration_service: Optional[OrchestrationService] = None,
     ):
         """
         Инициализация Core Runtime.
@@ -67,11 +76,14 @@ class CoreRuntime:
             vault_port: опциональный VaultStoragePort для доступа к vault (если dual-mode)
             state_engine: опциональный StateEngine (если None, создаётся новый)
         """
+        # Сохраняем config заранее, чтобы остальные компоненты могли читать extensibility-настройки.
+        self._config = config
+        self.config = config
+
         # Инициализация компонентов
         self.event_bus = EventBus()
-        # PolicyEngine (per-runtime instance; also exported for backward compatibility)
-        self.policy_engine = PolicyEngine()
-        set_policy_engine(self.policy_engine)
+        # PolicyEngine — per-runtime dependency, без обязательного глобального singleton.
+        self.policy_engine = policy_engine or PolicyEngine()
 
         # ServiceRegistry с timeout из конфига (защита от зависших вызовов)
         default_timeout = config.service_call_timeout if config else None
@@ -94,7 +106,8 @@ class CoreRuntime:
         # Operations manager (инфраструктура для всех модулей)
         self.operations = OperationManager(self)
         self.plugin_manager = PluginManager(self)
-        self.module_manager = ModuleManager(self)
+        module_path_prefix = getattr(config, "module_path_prefix", "modules") if config is not None else "modules"
+        self.module_manager = ModuleManager(self, module_path_prefix=module_path_prefix)
         # Dependency resolver для проверки integrity (не знает про HTTP/marketplace)
         self.dependency_resolver = DependencyResolver(
             self.capability_registry, self.plugin_manager, self.storage
@@ -125,10 +138,15 @@ class CoreRuntime:
         # Execution controller (опционально; выставляется модулем execution)
         self.execution_controller: Optional[Any] = None
 
-        # OrchestrationService: Docker backend по умолчанию (можно заменить на k8s)
-        self.orchestration_service = OrchestrationService(DockerOrchestrationBackend())
-        # Устанавливаем глобальный singleton для доступа из других компонентов
-        set_orchestration_service(self.orchestration_service)
+        # OrchestrationService — DI зависимость, configurable backend.
+        self.orchestration_service = orchestration_service or self._build_default_orchestration_service()
+
+    def _build_default_orchestration_service(self) -> OrchestrationService:
+        """Собрать orchestration service из runtime config без глобального singleton."""
+        backend_name = getattr(self._config, "orchestration_backend", "docker") if self._config is not None else "docker"
+        if backend_name == "none":
+            return OrchestrationService(NullOrchestrationBackend())
+        return OrchestrationService(DockerOrchestrationBackend())
 
     async def run(self) -> None:
         """
@@ -347,7 +365,7 @@ class CoreRuntime:
                     )
 
             # Запустить все плагины
-            plugins = self.plugin_manager.list_plugins()
+            plugins = await self.plugin_manager.list_plugins()
             if debug_mode:
                 await info(
                     self,
@@ -376,7 +394,7 @@ class CoreRuntime:
                 blocked = []
                 error = []
                 for name in plugins:
-                    state = self.plugin_manager.get_plugin_state(name)
+                    state = await self.plugin_manager.get_plugin_state(name)
                     if state == PluginState.STARTED:
                         started.append(name)
                     elif state == PluginState.ERROR:
@@ -384,7 +402,7 @@ class CoreRuntime:
                     else:
                         # LOADED, STOPPED и т.п. считаем "не стартовали до конца"
                         # В отдельную категорию "заблокировано" относим те, у кого есть block_reason
-                        if self.plugin_manager.get_plugin_block_reason(name):
+                        if await self.plugin_manager.get_plugin_block_reason(name):
                             blocked.append(name)
                 await info(
                     self,
@@ -408,8 +426,8 @@ class CoreRuntime:
                 if plugins:
                     print("[Runtime] Плагины:")
                     for name in plugins:
-                        state = self.plugin_manager.get_plugin_state(name)
-                        block = self.plugin_manager.get_plugin_block_reason(name)
+                        state = await self.plugin_manager.get_plugin_state(name)
+                        block = await self.plugin_manager.get_plugin_block_reason(name)
                         state_str = state.value if state is not None else "unknown"
                         if block:
                             print(f"  - {name}: {state_str} (blocked: {block})")
@@ -660,10 +678,10 @@ class CoreRuntime:
 
         # Метрики плагинов
         try:
-            plugins = self.plugin_manager.list_plugins()
+            plugins = await self.plugin_manager.list_plugins()
             plugin_states = {}
             for plugin_name in plugins:
-                state = self.plugin_manager.get_plugin_state(plugin_name)
+                state = await self.plugin_manager.get_plugin_state(plugin_name)
                 if state:
                     plugin_states[plugin_name] = state.value
 

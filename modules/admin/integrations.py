@@ -12,7 +12,7 @@ async def admin_v1_integrations(runtime: Any) -> List[Dict[str, Any]]:
     integrations = runtime.integrations.list()
     result = []
     for integration in integrations:
-        plugin_state = runtime.plugin_manager.get_plugin_state(integration.plugin_name)
+        plugin_state = await runtime.plugin_manager.get_plugin_state(integration.plugin_name)
         state_val = None
         try:
             state_val = getattr(plugin_state, "value", str(plugin_state)) if plugin_state else None

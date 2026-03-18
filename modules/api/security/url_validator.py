@@ -6,15 +6,20 @@ URL validator для защиты от SSRF атак.
 - Запрещает опасные схемы (file://, ftp://, gopher://, telnet://, etc.)
 - Разрешает только http:// и https://
 - Проверяет на open redirects
+- DNS cache с TTL 30 сек для защиты от DNS rebinding
 """
 
 import ipaddress
 import socket
-from functools import lru_cache
+import time
+import threading
 from typing import Optional
 from urllib.parse import urlparse
 
 from core.errors import BadRequestError
+
+# TTL для DNS кэша: 30 сек — баланс между производительностью и защитой от DNS rebinding
+_DNS_CACHE_TTL_SEC = 30.0
 
 
 def is_private_ip(host: str) -> bool:
@@ -49,13 +54,33 @@ def is_private_ip(host: str) -> bool:
         return False
 
 
-@lru_cache(maxsize=1024)
+# DNS cache: host -> (ips_tuple, expiry_timestamp)
+_dns_cache: dict[str, tuple[tuple[str, ...], float]] = {}
+_dns_cache_lock = threading.Lock()
+_DNS_CACHE_MAXSIZE = 1024
+
+
 def _resolve_host_ips(host: str) -> tuple[str, ...]:
     """
     Resolve hostname to IP addresses (A/AAAA).
 
-    Cached to avoid repeated DNS lookups.
+    Cached with TTL 30 sec to limit exposure to DNS rebinding attacks.
     """
+    now = time.time()
+    with _dns_cache_lock:
+        entry = _dns_cache.get(host)
+        if entry is not None:
+            ips, expiry = entry
+            if now < expiry:
+                return ips
+        # Evict stale or shrink if over limit
+        to_remove = [k for k, (_, exp) in _dns_cache.items() if exp <= now]
+        for k in to_remove:
+            del _dns_cache[k]
+        while len(_dns_cache) >= _DNS_CACHE_MAXSIZE and _dns_cache:
+            oldest = min(_dns_cache, key=lambda k: _dns_cache[k][1])
+            del _dns_cache[oldest]
+
     try:
         infos = socket.getaddrinfo(host, None)
     except Exception:
@@ -69,8 +94,10 @@ def _resolve_host_ips(host: str) -> tuple[str, ...]:
                 ips.append(sockaddr[0])
         except Exception:
             continue
-    # De-duplicate while preserving determinism
-    return tuple(sorted(set(ips)))
+    result = tuple(sorted(set(ips)))
+    with _dns_cache_lock:
+        _dns_cache[host] = (result, now + _DNS_CACHE_TTL_SEC)
+    return result
 
 
 def is_allowed_scheme(url: str) -> bool:

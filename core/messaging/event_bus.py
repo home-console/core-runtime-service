@@ -8,8 +8,11 @@ EventBus - простой механизм pub/sub для событий.
 """
 
 import asyncio
+import logging
 from collections import defaultdict
 from typing import Any, Callable, Awaitable
+
+logger = logging.getLogger(__name__)
 
 
 # Тип для обработчика событий
@@ -90,21 +93,14 @@ class EventBus:
             results = await asyncio.gather(*tasks, return_exceptions=True)
             
             # Логируем ошибки в обработчиках
-            for i, result in enumerate(results):
+            for result in results:
                 if isinstance(result, Exception):
-                    # Пытаемся залогировать через service_registry, если доступен
-                    # Это best-effort, не должно ломать публикацию событий
-                    try:
-                        # EventBus не имеет прямого доступа к runtime,
-                        # поэтому логируем только в stderr для отладки
-                        import sys
-                        print(
-                            f"[EventBus] Ошибка в обработчике события '{event_type}': {result}",
-                            file=sys.stderr
-                        )
-                    except Exception:
-                        # Игнорируем ошибки логирования
-                        pass
+                    logger.warning(
+                        "EventBus: ошибка в обработчике события '%s': %s",
+                        event_type,
+                        result,
+                        exc_info=isinstance(result, BaseException),
+                    )
 
     def list_subscriptions(self) -> dict[str, list[dict[str, str]]]:
         """

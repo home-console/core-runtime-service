@@ -9,11 +9,17 @@ Orchestration Service отвечает за:
 - Абстракцию над Docker/k8s/другими backend'ами
 """
 
-from .service import OrchestrationService, get_orchestration_service, set_orchestration_service
+from .service import (
+    OrchestrationService,
+    NullOrchestrationBackend,
+    get_orchestration_service,
+    set_orchestration_service,
+)
 from .docker_backend import DockerOrchestrationBackend
 
 __all__ = [
     "OrchestrationService",
+    "NullOrchestrationBackend",
     "get_orchestration_service",
     "set_orchestration_service",
     "DockerOrchestrationBackend",
