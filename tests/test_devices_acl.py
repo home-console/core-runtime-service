@@ -1,6 +1,6 @@
 import pytest
 
-from core.runtime import CoreRuntime
+from core.runtime.runtime import CoreRuntime
 from core.errors import NotFoundError
 from modules.api.auth.context import RequestContext
 from modules.api.auth.contextvars import set_current_request_context

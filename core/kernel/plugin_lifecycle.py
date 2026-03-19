@@ -15,7 +15,7 @@ import sys
 import importlib
 import time
 
-from core.base_plugin import BasePlugin
+from core.kernel.base_plugin import BasePlugin
 from core.kernel.plugin_registry import PluginRegistry, PluginState
 from core.kernel.plugin_sandbox import PluginSandbox
 from core.kernel.plugin_infrastructure import PluginInfrastructureCoordinator

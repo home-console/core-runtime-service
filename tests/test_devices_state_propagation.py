@@ -11,7 +11,7 @@ Scenario:
 
 import asyncio
 import pytest
-from core.runtime import CoreRuntime
+from core.runtime.runtime import CoreRuntime
 from main import APP_MODULES
 
 

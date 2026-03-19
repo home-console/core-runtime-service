@@ -8,20 +8,15 @@ Tests for:
 4. Cleanup on load failure
 """
 
-import asyncio
 import json
-import tempfile
 import zipfile
-from pathlib import Path
-from typing import Any, Dict, Optional
-from unittest.mock import Mock, patch, AsyncMock
+from unittest.mock import Mock
 import pytest
 
-from core.runtime import CoreRuntime
+from core.runtime.runtime import CoreRuntime
 from core.plugins import PluginManager, PluginState
-from core.base_plugin import BasePlugin, PluginMetadata
-from core.storage import Storage
-from core.dependency_resolver import DependencyResolver, DependencyError
+from core.kernel.base_plugin import BasePlugin, PluginMetadata
+from core.dependency_resolver import DependencyResolver
 from modules.marketplace.installer import MarketplaceInstaller
 from tests.conftest import InMemoryStorageAdapter
 from core.storage_port import CoreStoragePort
@@ -311,7 +306,6 @@ def test_concurrent_handler_safety():
 
 def test_plugin_manager_lock_safety():
     """P0: Verify PluginManager lock protects internal state."""
-    from unittest.mock import Mock
     import threading
     
     pm = PluginManager(runtime=None)  # Create without runtime for testing
@@ -359,8 +353,7 @@ def test_concurrent_provider_unregister_during_execution():
     """P0: Provider unregister while operation is executing should not crash."""
     from core.capability_registry import CapabilityRegistry
     import threading
-    import asyncio
-    
+
     reg = CapabilityRegistry()
     # Use sync_lock for direct dict manipulation in tests
     with reg._sync_lock:

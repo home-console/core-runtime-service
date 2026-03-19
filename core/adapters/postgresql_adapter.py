@@ -13,18 +13,19 @@ CRASH SAFETY (Part A):
 """
 
 import json
-from typing import Any, Optional, AsyncIterator
-import asyncio
 from contextlib import asynccontextmanager
+from typing import Any, AsyncIterator, Optional
 
 try:
     import asyncpg
+
     ASYNCPG_AVAILABLE = True
 except ImportError:
     ASYNCPG_AVAILABLE = False
 
-from .storage_adapter import StorageAdapter
 from core.storage_exceptions import StorageCorruptionError
+
+from .storage_adapter import StorageAdapter
 
 
 class PostgreSQLAdapter(StorageAdapter):
@@ -33,20 +34,20 @@ class PostgreSQLAdapter(StorageAdapter):
     Использует asyncpg для асинхронной работы с PostgreSQL.
     Инициализация схемы не выполняется автоматически — отдельный метод
     `initialize_schema()` должен быть вызван явно.
-    
+
     CRASH SAFETY CONFIGURATION:
-    
+
     Для production, убедитесь что PostgreSQL настроена с:
     - shared_buffers=256MB (или больше)
     - wal_level=replica  (for streaming replication)
     - fsync=on  (default, но проверьте)
     - synchronous_commit=on  (для гарантии на диск)
     - max_wal_senders=10  (для backup/replication)
-    
+
     Connection string должна включать:
     - ?sslmode=require (для шифрования)
     - &connect_timeout=10
-    
+
     Пример production строки:
         postgresql://user:pass@localhost:5432/homeconsole?sslmode=require&connect_timeout=10
     """
@@ -82,9 +83,10 @@ class PostgreSQLAdapter(StorageAdapter):
             self._dsn = dsn
         else:
             from urllib.parse import quote_plus
+
             safe_password = quote_plus(password) if password else ""
             self._dsn = f"postgresql://{user}:{safe_password}@{host}:{port}/{database}"
-        
+
         self._pool: Optional[asyncpg.Pool] = None
 
     async def _get_pool(self) -> asyncpg.Pool:
@@ -112,7 +114,7 @@ class PostgreSQLAdapter(StorageAdapter):
 
     async def get(self, namespace: str, key: str) -> Optional[dict[str, Any]]:
         """Получить значение из storage.
-        
+
         CORRUPTION DETECTION (Part A):
         - JSONB автоматически валидируется PostgreSQL
         - Если get вернул не-dict → StorageCorruptionError
@@ -122,7 +124,8 @@ class PostgreSQLAdapter(StorageAdapter):
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
                 "SELECT value FROM storage WHERE namespace = $1 AND key = $2",
-                namespace, key
+                namespace,
+                key,
             )
             if row is None:
                 return None
@@ -153,7 +156,7 @@ class PostgreSQLAdapter(StorageAdapter):
 
     async def set(self, namespace: str, key: str, value: dict[str, Any]) -> None:
         """Сохранить значение в storage.
-        
+
         JSONB автоматически валидирует JSON, поэтому можно передавать dict напрямую.
         asyncpg автоматически сериализует dict в JSONB.
         """
@@ -161,19 +164,23 @@ class PostgreSQLAdapter(StorageAdapter):
         async with pool.acquire() as conn:
             # asyncpg автоматически сериализует dict в JSONB
             # Не нужно делать json.dumps() - asyncpg сделает это сам
-            await conn.execute("""
+            await conn.execute(
+                """
                 INSERT INTO storage (namespace, key, value)
                 VALUES ($1, $2, $3::jsonb)
                 ON CONFLICT (namespace, key) DO UPDATE SET value = $3::jsonb
-            """, namespace, key, value)
+            """,
+                namespace,
+                key,
+                value,
+            )
 
     async def delete(self, namespace: str, key: str) -> bool:
         """Удалить значение из storage."""
         pool = await self._get_pool()
         async with pool.acquire() as conn:
             result = await conn.execute(
-                "DELETE FROM storage WHERE namespace = $1 AND key = $2",
-                namespace, key
+                "DELETE FROM storage WHERE namespace = $1 AND key = $2", namespace, key
             )
             # result содержит строку вида "DELETE N", где N - количество удаленных строк
             return result != "DELETE 0"
@@ -183,8 +190,7 @@ class PostgreSQLAdapter(StorageAdapter):
         pool = await self._get_pool()
         async with pool.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT key FROM storage WHERE namespace = $1",
-                namespace
+                "SELECT key FROM storage WHERE namespace = $1", namespace
             )
             return [row["key"] for row in rows]
 
@@ -192,31 +198,26 @@ class PostgreSQLAdapter(StorageAdapter):
         """Получить список всех namespace."""
         pool = await self._get_pool()
         async with pool.acquire() as conn:
-            rows = await conn.fetch(
-                "SELECT DISTINCT namespace FROM storage"
-            )
+            rows = await conn.fetch("SELECT DISTINCT namespace FROM storage")
             return sorted(row["namespace"] for row in rows)
 
     async def clear_namespace(self, namespace: str) -> None:
         """Очистить все записи в namespace."""
         pool = await self._get_pool()
         async with pool.acquire() as conn:
-            await conn.execute(
-                "DELETE FROM storage WHERE namespace = $1",
-                namespace
-            )
+            await conn.execute("DELETE FROM storage WHERE namespace = $1", namespace)
 
     async def close(self) -> None:
         """Закрыть пул соединений."""
         if self._pool:
             await self._pool.close()
             self._pool = None
-    
+
     @asynccontextmanager
     async def transaction(self):
         """
         Контекстный менеджер для транзакций PostgreSQL.
-        
+
         Использование:
             async with adapter.transaction():
                 await adapter.set("ns", "key1", {"value": 1})
@@ -227,7 +228,7 @@ class PostgreSQLAdapter(StorageAdapter):
         async with pool.acquire() as conn:
             async with conn.transaction():
                 yield
-    
+
     async def batch_set(self, namespace: str, items: dict[str, dict[str, Any]]) -> None:
         """Массовая запись значений в namespace."""
         pool = await self._get_pool()
@@ -235,23 +236,28 @@ class PostgreSQLAdapter(StorageAdapter):
             # Используем executemany для оптимизации множественных вставок
             # asyncpg автоматически сериализует dict в JSONB
             values = [(namespace, key, value) for key, value in items.items()]
-            await conn.executemany("""
+            await conn.executemany(
+                """
                 INSERT INTO storage (namespace, key, value)
                 VALUES ($1, $2, $3::jsonb)
                 ON CONFLICT (namespace, key) DO UPDATE SET value = $3::jsonb
-            """, values)
-    
-    async def iter_namespace(self, namespace: str, batch_size: int = 100) -> "AsyncIterator[tuple[str, dict[str, Any]]]":
+            """,
+                values,
+            )
+
+    async def iter_namespace(
+        self, namespace: str, batch_size: int = 100
+    ) -> "AsyncIterator[tuple[str, dict[str, Any]]]":
         """
         Итерировать по всем ключам в namespace батчами (для efficient streaming больших namespace).
-        
+
         Args:
             namespace: пространство имён
             batch_size: размер батча для fetch (default 100)
-            
+
         Yields:
             (key, value) кортежи
-            
+
         Пример:
             async for key, value in adapter.iter_namespace("devices"):
                 print(f"Device {key}: {value}")
@@ -259,9 +265,12 @@ class PostgreSQLAdapter(StorageAdapter):
         pool = await self._get_pool()
         async with pool.acquire() as conn:
             # Используем cursor для efficient streaming больших наборов
-            async with conn.cursor("""
+            async with conn.cursor(
+                """
                 SELECT key, value FROM storage WHERE namespace = $1
-            """, namespace) as cursor:
+            """,
+                namespace,
+            ) as cursor:
                 while True:
                     rows = await cursor.fetch(batch_size)
                     if not rows:

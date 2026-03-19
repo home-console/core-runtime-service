@@ -9,11 +9,10 @@ import json
 import pytest
 import tempfile
 from pathlib import Path
-from unittest.mock import patch
 
-from core.base_plugin import BasePlugin, PluginMetadata
+from core.kernel.base_plugin import BasePlugin, PluginMetadata
 from core.plugins import PluginManager
-from core.runtime import CoreRuntime
+from core.runtime.runtime import CoreRuntime
 
 
 class DummyPlugin(BasePlugin):

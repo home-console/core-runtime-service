@@ -167,4 +167,5 @@ class StorageAdapter(ABC):
         
         This is efficient for large namespaces and avoids loading everything into memory.
         """
-        yield None  # pragma: no cover
+        return
+        yield  # pragma: no cover

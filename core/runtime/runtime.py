@@ -13,27 +13,23 @@ CoreRuntime - главный класс Core Runtime.
 
 from typing import Any, Dict, Optional
 import asyncio
-import os
 import time
 
-from core.event_bus import EventBus
+from core.messaging.event_bus import EventBus
 from core.service_registry import ServiceRegistry
 from core.state_engine import StateEngine
-from core.storage import Storage
-from core.storage_mirror import StorageWithStateMirror
 from core.plugins import PluginManager, PluginState
-from core.module_manager import ModuleManager
+from core.runtime.module_manager import ModuleManager
 from core.http_registry import HttpRegistry
 from core.integration_registry import IntegrationRegistry
 from core.capability_registry import CapabilityRegistry
 from core.logger_helper import info, warning
-from core.base_plugin import BasePlugin
 from core.operations.manager import OperationManager
 from core.dependency_resolver import DependencyResolver, RuntimeIntegrityError  # Step 10
 from core.agent.enrollment import AgentEnrollmentManager
 from core.agent.registry import AgentRegistry
 from core.agent.tls import MTLSCertificateAuthority
-from core.runtime_context import RuntimeContext
+from core.runtime.runtime_context import RuntimeContext
 from core.orchestration import OrchestrationService, DockerOrchestrationBackend, set_orchestration_service
 
 

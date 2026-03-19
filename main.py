@@ -35,7 +35,7 @@ _load_dotenv()
 from core.config import Config
 from core.runtime import CoreRuntime
 from core.adapters.storage_factory import build_storage_stack
-from core.module_manager import ModuleSpec
+from core.runtime.module_manager import ModuleSpec
 from core.state_engine import StateEngine
 
 

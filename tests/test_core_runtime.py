@@ -1,7 +1,6 @@
 import pytest
 
-from core.runtime import CoreRuntime
-from core.state_engine import StateEngine
+from core.runtime.runtime import CoreRuntime
 
 
 class DummyAdapter:

@@ -10,9 +10,9 @@ Tests system integrity validation:
 """
 
 import pytest
-from unittest.mock import Mock, MagicMock
-from core.dependency_resolver import DependencyResolver, RuntimeIntegrityError, DependencyError
-from core.base_plugin import PluginMetadata
+from unittest.mock import Mock
+from core.dependency_resolver import DependencyResolver, RuntimeIntegrityError
+from core.kernel.base_plugin import PluginMetadata
 
 
 class TestDependencyResolverBasics:

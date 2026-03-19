@@ -14,18 +14,11 @@ core.process_executor module.
 
 import pytest
 import asyncio
-import tempfile
-import json
-from pathlib import Path
-from unittest.mock import Mock, AsyncMock, patch, MagicMock
+from unittest.mock import Mock, AsyncMock
 
 from core.capability_registry import CapabilityRegistry
-from core.capability_protocol import PROTOCOL_VERSION
-from core.plugins import PluginManager
-from core.base_plugin import BasePlugin, PluginMetadata
+from core.kernel.base_plugin import BasePlugin, PluginMetadata
 from core.plugin_isolation import StorageProxy
-from core.operations import Operation, OperationInitiator, OperationInitiatorKind, OperationManager
-from core.execution_router import ExecutionRouter
 from core.errors import ForbiddenError
 
 

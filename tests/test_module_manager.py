@@ -5,7 +5,7 @@
 import pytest
 from unittest.mock import MagicMock
 
-from core.module_manager import ModuleManager
+from core.runtime.module_manager import ModuleManager
 from core.runtime_module import RuntimeModule
 
 
@@ -211,7 +211,7 @@ async def test_clear_modules():
 @pytest.mark.asyncio
 async def test_register_app_modules_via_bootstrap(memory_adapter):
     """Тест регистрации модулей приложения через bootstrap."""
-    from core.runtime import CoreRuntime
+    from core.runtime.runtime import CoreRuntime
     from main import APP_MODULES
 
     runtime = CoreRuntime(memory_adapter)

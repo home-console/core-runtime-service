@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from core.base_plugin import BasePlugin, PluginMetadata
+from core.kernel.base_plugin import BasePlugin, PluginMetadata
 
 
 class YandexSmartHomeStubPlugin(BasePlugin):

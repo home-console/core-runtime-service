@@ -45,6 +45,7 @@ modules/monitoring/
 ```
 
 #### module.py
+
 ```python
 """
 Monitoring Module — мониторинг и observability.
@@ -59,7 +60,7 @@ from typing import TYPE_CHECKING
 from core.runtime_module import RuntimeModule
 
 if TYPE_CHECKING:
-    from core.runtime import CoreRuntime
+    from core.runtime.runtime import CoreRuntime
 
 
 class MonitoringModule(RuntimeModule):
@@ -71,28 +72,28 @@ class MonitoringModule(RuntimeModule):
     - monitoring.health_check - проверка здоровья компонента
     - monitoring.start_span - начало trace span
     """
-    
+
     @property
     def name(self) -> str:
         return "monitoring"
-    
+
     def __init__(self, runtime: "CoreRuntime"):
         super().__init__(runtime)
         self.metrics = None
         self.health_checker = None
         self.tracer = None
-    
+
     async def register(self) -> None:
         """Регистрация сервисов."""
         from .metrics import MetricsCollector
         from .health_checks import HealthChecker
         from .tracing import TracingSystem
-        
+
         # Инициализация компонентов
         self.metrics = MetricsCollector()
         self.health_checker = HealthChecker(self.runtime)
         self.tracer = TracingSystem()
-        
+
         # Регистрация сервисов
         await self.runtime.service_registry.register(
             "monitoring.record_metric",
@@ -106,7 +107,7 @@ class MonitoringModule(RuntimeModule):
             "monitoring.start_span",
             self._start_span
         )
-    
+
     async def start(self) -> None:
         """Запуск мониторинга."""
         # Подписка на системные события для метрик
@@ -114,27 +115,27 @@ class MonitoringModule(RuntimeModule):
             "internal.*",
             self._track_event
         )
-        
+
         # Запуск health checker
         await self.health_checker.start()
-    
+
     async def _record_metric(
-        self,
-        name: str,
-        value: float,
-        labels: dict = None
+            self,
+            name: str,
+            value: float,
+            labels: dict = None
     ):
         """Запись метрики."""
         self.metrics.record(name, value, labels or {})
-    
+
     async def _health_check(self, component: str) -> dict:
         """Проверка здоровья компонента."""
         return await self.health_checker.check(component)
-    
+
     async def _start_span(self, operation: str) -> str:
         """Начать trace span."""
         return self.tracer.start_span(operation)
-    
+
     async def _track_event(self, event_type: str, data: dict):
         """Трекинг событий для метрик."""
         # Считаем количество событий по типам

@@ -26,11 +26,11 @@ import asyncio
 import os
 from typing import TYPE_CHECKING, Optional
 
-from core.base_plugin import BasePlugin, PluginMetadata
+from core.kernel.base_plugin import BasePlugin, PluginMetadata
 from .scanner import NetworkScanner
 
 if TYPE_CHECKING:
-    from core.runtime import CoreRuntime
+    pass
 
 
 class NetworkScannerPlugin(BasePlugin):

@@ -9,7 +9,6 @@
 """
 
 import pytest
-import asyncio
 import sys
 from pathlib import Path
 
@@ -18,7 +17,7 @@ CLIENT_MANAGER_PATH = Path(__file__).parent.parent / "plugins" / "client-manager
 if str(CLIENT_MANAGER_PATH) not in sys.path:
     sys.path.insert(0, str(CLIENT_MANAGER_PATH))
 
-from core.runtime import CoreRuntime
+from core.runtime.runtime import CoreRuntime
 from tests.conftest import InMemoryStorageAdapter
 from core.storage_port import CoreStoragePort
 from core.state_engine import StateEngine

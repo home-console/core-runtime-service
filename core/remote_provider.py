@@ -32,10 +32,10 @@ Remote Service должен реализовать API:
 
 from typing import TYPE_CHECKING, Optional
 
-from core.base_plugin import BasePlugin, PluginMetadata
+from core.kernel.base_plugin import BasePlugin, PluginMetadata
 
 if TYPE_CHECKING:
-    from core.runtime import CoreRuntime
+    from core.runtime.runtime import CoreRuntime
 
 
 class RemoteCapabilityProvider(BasePlugin):

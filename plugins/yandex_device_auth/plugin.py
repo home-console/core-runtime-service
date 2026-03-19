@@ -26,7 +26,7 @@ Storage:
 """
 from typing import Any, Dict, List, Optional
 
-from core.base_plugin import BasePlugin, PluginMetadata
+from core.kernel.base_plugin import BasePlugin, PluginMetadata
 from .device_auth_service import YandexDeviceAuthService
 
 AUTH_INSPECTOR_FLOWS_KEY = "auth_inspector.flows"

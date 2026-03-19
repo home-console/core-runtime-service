@@ -6,10 +6,8 @@
 """
 
 import pytest
-from unittest.mock import patch, MagicMock
 
-from core.runtime import CoreRuntime
-from core.module_manager import ModuleManager, ModuleSpec
+from core.runtime.runtime import CoreRuntime
 from core.runtime_module import RuntimeModule
 from main import APP_MODULES
 

@@ -13,12 +13,7 @@ LoggerModule регистрируется автоматически при со
 
 from __future__ import annotations
 
-import sys
-import json
-import logging
-from typing import Any
-
-from core.base_plugin import BasePlugin, PluginMetadata
+from core.kernel.base_plugin import BasePlugin, PluginMetadata
 
 
 class SystemLoggerPlugin(BasePlugin):

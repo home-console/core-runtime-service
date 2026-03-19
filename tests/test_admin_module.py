@@ -8,8 +8,8 @@
 """
 
 import pytest
-from core.runtime import CoreRuntime
-from core.module_manager import ModuleSpec
+from core.runtime.runtime import CoreRuntime
+from core.runtime.module_manager import ModuleSpec
 
 # Минимальный набор модулей для тестов admin
 APP_MODULES = [

@@ -3,7 +3,6 @@
 import asyncio
 import logging
 import os
-from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 from core.runtime_module import RuntimeModule
@@ -130,7 +129,7 @@ class AgentControlPlaneModule(RuntimeModule):
         self.runtime.deployment_tracker = deployment_tracker
 
         # Initialize AgentLogStore (TASK 3.1)
-        from core.agents.log_store import AgentLogStore
+        from core.agent.log_store import AgentLogStore
         self.runtime.agent_log_store = AgentLogStore()
 
         # Обёртка для admin-хендлеров, которым нужен runtime первым аргументом

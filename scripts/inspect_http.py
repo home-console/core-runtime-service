@@ -6,9 +6,9 @@ import inspect
 from pathlib import Path
 
 from core.config import Config
-from core.runtime import CoreRuntime
+from core.runtime.runtime import CoreRuntime
 from adapters.sqlite_adapter import SQLiteAdapter
-from core.base_plugin import BasePlugin
+from core.kernel.base_plugin import BasePlugin
 
 async def main():
     config = Config.from_env()

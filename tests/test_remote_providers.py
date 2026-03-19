@@ -12,15 +12,14 @@ Verifies that:
 import pytest
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 os.environ['TEST_MODE'] = '1'
 
-from core.runtime import CoreRuntime
-from core.base_plugin import BasePlugin, PluginMetadata
+from core.runtime.runtime import CoreRuntime
+from core.kernel.base_plugin import BasePlugin, PluginMetadata
 from core.remote_provider import RemoteCapabilityProvider
 from core.operations import OperationInitiator, OperationInitiatorKind, OperationStatus
-from core.remote_executor import RemoteOperationExecutor
 
 
 class MockRemoteProvider(RemoteCapabilityProvider):

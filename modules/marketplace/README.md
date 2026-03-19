@@ -123,7 +123,8 @@ my-plugin/
 ### plugin.py Example
 
 ```python
-from core.base_plugin import BasePlugin
+from core.kernel.base_plugin import BasePlugin
+
 
 class MyPlugin(BasePlugin):
     def metadata(self):
@@ -131,19 +132,19 @@ class MyPlugin(BasePlugin):
             "name": "my_plugin",
             "version": "1.0.0"
         }
-    
+
     async def on_load(self):
         """Initialize plugin on load."""
         print("Plugin loaded!")
-    
+
     async def on_start(self):
         """Execute on runtime start."""
         print("Plugin started!")
-    
+
     async def on_stop(self):
         """Cleanup on runtime stop."""
         print("Plugin stopped!")
-    
+
     def list_capabilities(self):
         """List capabilities provided by this plugin."""
         return ["custom.feature"]

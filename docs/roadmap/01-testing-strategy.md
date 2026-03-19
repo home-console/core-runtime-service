@@ -169,13 +169,15 @@ tests/integration/
 ```
 
 **Пример интеграционного теста:**
+
 ```python
 """
 Интеграционные тесты для API endpoints.
 """
 import pytest
 from fastapi.testclient import TestClient
-from core.runtime import CoreRuntime
+from core.runtime.runtime import CoreRuntime
+
 
 @pytest.fixture
 async def test_runtime(memory_adapter):
@@ -185,11 +187,13 @@ async def test_runtime(memory_adapter):
     yield runtime
     await runtime.shutdown()
 
+
 @pytest.fixture
 def test_client(test_runtime):
     """FastAPI TestClient для интеграционных тестов."""
     api_module = test_runtime.module_manager.get_module("api")
     return TestClient(api_module.app)
+
 
 def test_create_api_key_endpoint(test_client):
     """Тест: POST /api/v1/auth/api-keys создаёт ключ."""
@@ -199,23 +203,25 @@ def test_create_api_key_endpoint(test_client):
         "scopes": ["devices.read"],
         "expires_in": 3600
     }
-    
+
     # Act
     response = test_client.post("/api/v1/auth/api-keys", json=request_data)
-    
+
     # Assert
     assert response.status_code == 201
     data = response.json()
     assert "api_key" in data
     assert data["subject"] == "user:test"
 
+
 def test_get_devices_requires_auth(test_client):
     """Тест: GET /api/v1/devices требует аутентификацию."""
     # Act
     response = test_client.get("/api/v1/devices")
-    
+
     # Assert
     assert response.status_code == 401  # Unauthorized
+
 
 def test_get_devices_with_valid_key(test_client):
     """Тест: GET /api/v1/devices с валидным ключом."""
@@ -225,13 +231,13 @@ def test_get_devices_with_valid_key(test_client):
         "scopes": ["devices.read"]
     })
     api_key = create_response.json()["api_key"]
-    
+
     # Act
     response = test_client.get(
         "/api/v1/devices",
         headers={"Authorization": f"Bearer {api_key}"}
     )
-    
+
     # Assert
     assert response.status_code == 200
 ```

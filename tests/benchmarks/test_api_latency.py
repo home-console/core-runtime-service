@@ -15,7 +15,7 @@ from typing import List
 # Импортируем то что можем
 # (если не получится, закомментируем)
 try:
-    from core.runtime import CoreRuntime
+    from core.runtime.runtime import CoreRuntime
     from core.config import Config
     from main import APP_MODULES
     HAS_RUNTIME = True

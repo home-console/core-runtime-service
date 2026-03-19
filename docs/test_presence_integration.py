@@ -13,7 +13,7 @@ import pytest
 from pathlib import Path
 
 from core.config import Config
-from core.runtime import CoreRuntime
+from core.runtime.runtime import CoreRuntime
 from adapters.sqlite_adapter import SQLiteAdapter
 from plugins.test import SystemLoggerPlugin, AutomationStubPlugin
 

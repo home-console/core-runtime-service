@@ -10,12 +10,11 @@ Verifies that:
 """
 
 import pytest
-import asyncio
 import os
-from typing import Any, Dict, Optional
-from core.runtime import CoreRuntime
-from core.module_manager import ModuleSpec
-from core.base_plugin import BasePlugin, PluginMetadata
+from typing import Any, Dict
+from core.runtime.runtime import CoreRuntime
+from core.runtime.module_manager import ModuleSpec
+from core.kernel.base_plugin import BasePlugin, PluginMetadata
 from core.operations import OperationInitiator, OperationInitiatorKind, OperationStatus
 
 # Disable auto-loading of plugins during tests

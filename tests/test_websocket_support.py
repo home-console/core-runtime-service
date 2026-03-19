@@ -9,8 +9,7 @@
 """
 
 import pytest
-import asyncio
-from core.runtime import CoreRuntime
+from core.runtime.runtime import CoreRuntime
 from core.http_registry import HttpEndpoint
 
 

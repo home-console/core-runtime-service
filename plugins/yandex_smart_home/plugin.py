@@ -42,7 +42,7 @@ from __future__ import annotations
 
 import asyncio
 
-from core.base_plugin import BasePlugin, PluginMetadata
+from core.kernel.base_plugin import BasePlugin, PluginMetadata
 from .sync import DeviceSync, DeviceStatusChecker
 from .command_handler import CommandHandler
 from .yandex_quasar_ws import YandexQuasarWS

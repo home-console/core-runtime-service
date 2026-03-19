@@ -15,10 +15,10 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Optional, Awaitable, Callable, Any, Literal, Union
 
 from sdk.plugin import BasePlugin as SDKBasePlugin
-from core.runtime_context import RuntimeContext
+from core.runtime.runtime_context import RuntimeContext
 
 if TYPE_CHECKING:
-    from core.runtime import CoreRuntime
+    from core.runtime.runtime import CoreRuntime
 
 
 @dataclass

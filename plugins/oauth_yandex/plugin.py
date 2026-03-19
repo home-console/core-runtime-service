@@ -43,7 +43,7 @@ from urllib.parse import urlencode
 
 import aiohttp
 
-from core.base_plugin import BasePlugin, PluginMetadata
+from core.kernel.base_plugin import BasePlugin, PluginMetadata
 
 # Логический идентификатор capability, который реализует этот плагин.
 # Сервисы ServiceRegistry остаются в пространстве имён `oauth_yandex.*` для

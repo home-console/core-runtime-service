@@ -11,13 +11,13 @@ import asyncio
 import logging
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional, Dict, Any
+from typing import TYPE_CHECKING, Optional
 
-from core.base_plugin import BasePlugin, PluginMetadata
+from core.kernel.base_plugin import BasePlugin, PluginMetadata
 from core.http_registry import HttpEndpoint
 
 if TYPE_CHECKING:
-    from core.runtime import CoreRuntime
+    from core.runtime.runtime import CoreRuntime
 
 logger = logging.getLogger(__name__)
 

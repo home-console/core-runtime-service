@@ -12,7 +12,7 @@ import threading
 from typing import Optional, Dict, Any
 
 from enum import Enum
-from core.base_plugin import BasePlugin
+from core.kernel.base_plugin import BasePlugin
 
 
 class PluginState(Enum):

@@ -9,11 +9,11 @@ Test Capability System - проверка зависимостей между п
 """
 
 import pytest
-from typing import Optional, List
+from typing import Optional
 
-from core.base_plugin import BasePlugin, PluginMetadata
-from core.plugins import PluginManager, PluginState
-from core.runtime import CoreRuntime
+from core.kernel.base_plugin import BasePlugin, PluginMetadata
+from core.plugins import PluginState
+from core.runtime.runtime import CoreRuntime
 from core.capability_registry import CapabilityRegistry
 
 

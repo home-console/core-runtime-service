@@ -18,7 +18,7 @@ PluginManager - управление lifecycle плагинов (Facade).
 from pathlib import Path
 from typing import Optional, TYPE_CHECKING, Callable, Awaitable, Dict, Any
 
-from core.base_plugin import BasePlugin
+from core.kernel.base_plugin import BasePlugin
 from core.logger_helper import warning
 from core.kernel.plugin_registry import PluginRegistry, PluginState
 from core.kernel.plugin_lifecycle import PluginLifecycleManager
@@ -26,7 +26,7 @@ from core.kernel.plugin_loader import PluginManifestLoader
 from core.integration_registry import IntegrationFlag
 
 if TYPE_CHECKING:
-    from core.runtime import CoreRuntime
+    from core.runtime.runtime import CoreRuntime
 
 
 class PluginManager:

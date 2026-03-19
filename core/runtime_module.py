@@ -28,7 +28,7 @@ RuntimeModule — это обязательные домены системы, �
 from abc import ABC, abstractmethod
 from typing import Any, Awaitable, Callable, Optional, Union
 
-from core.runtime_context import RuntimeContext
+from core.runtime.runtime_context import RuntimeContext
 
 # Тип для сервисной функции: async (*args, **kwargs) -> Any
 ServiceFunc = Callable[..., Awaitable[Any]]

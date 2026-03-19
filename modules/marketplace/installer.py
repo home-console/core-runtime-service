@@ -20,7 +20,7 @@ import shutil
 import os
 import asyncio
 from pathlib import Path
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional
 from datetime import datetime
 
 from core.plugin_schema import validate_plugin_json, ValidationError as SchemaValidationError
@@ -160,7 +160,7 @@ class MarketplaceInstaller:
             
             # Validate that plugin can be installed (dependencies satisfied)
             if runtime and hasattr(runtime, 'dependency_resolver'):
-                from core.base_plugin import PluginMetadata
+                from core.kernel.base_plugin import PluginMetadata
                 
                 # Create metadata for validation
                 try:
@@ -214,7 +214,7 @@ class MarketplaceInstaller:
             # Load via PluginManager if provided
             if runtime:
                 try:
-                    from core.base_plugin import BasePlugin
+                    from core.kernel.base_plugin import BasePlugin
                     
                     # P0: Wrap load in try-finally for proper cleanup
                     try:
@@ -465,7 +465,7 @@ class MarketplaceInstaller:
     
     def _find_plugin_class(self, module):
         """Find BasePlugin subclass in module."""
-        from core.base_plugin import BasePlugin
+        from core.kernel.base_plugin import BasePlugin
         
         for item_name in dir(module):
             item = getattr(module, item_name)
