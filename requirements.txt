@@ -41,3 +41,5 @@ wsproto
 
 
 pydantic_settings>=2.0.0
+
+ruff

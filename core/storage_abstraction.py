@@ -7,7 +7,7 @@ Core зависит только от этого Protocol, а не от конк
 
 from __future__ import annotations
 
-from typing import Any, Optional, AsyncIterator, Protocol
+from typing import Any, Optional, AsyncIterator, Protocol, Coroutine
 
 
 class IStorageBackend(Protocol):
@@ -18,31 +18,31 @@ class IStorageBackend(Protocol):
     Реализации (SQLiteAdapter, PostgreSQLAdapter) предоставляются слоем adapters.
     """
 
-    async def get(self, namespace: str, key: str) -> Optional[dict[str, Any]]:
+    def get(self, namespace: str, key: str) -> Coroutine[Any, Any, Optional[dict[str, Any]]]:
         """Получить значение по ключу из namespace."""
         ...
 
-    async def set(self, namespace: str, key: str, value: dict[str, Any]) -> None:
+    def set(self, namespace: str, key: str, value: dict[str, Any]) -> Coroutine[Any, Any, None]:
         """Сохранить значение по ключу в namespace."""
         ...
 
-    async def delete(self, namespace: str, key: str) -> bool:
+    def delete(self, namespace: str, key: str) -> Coroutine[Any, Any, bool]:
         """Удалить значение по ключу из namespace."""
         ...
 
-    async def list_keys(self, namespace: str) -> list[str]:
+    def list_keys(self, namespace: str) -> Coroutine[Any, Any, list[str]]:
         """Получить список всех ключей в namespace."""
         ...
 
-    async def list_namespaces(self) -> list[str]:
+    def list_namespaces(self) -> Coroutine[Any, Any, list[str]]:
         """Получить список всех namespace в хранилище."""
         ...
 
-    async def clear_namespace(self, namespace: str) -> None:
+    def clear_namespace(self, namespace: str) -> Coroutine[Any, Any, None]:
         """Очистить все записи в namespace."""
         ...
 
-    async def close(self) -> None:
+    def close(self) -> Coroutine[Any, Any, None]:
         """Закрыть соединение с хранилищем."""
         ...
 
@@ -50,14 +50,22 @@ class IStorageBackend(Protocol):
         """Контекстный менеджер для транзакций (async with)."""
         ...
 
-    async def batch_set(
+    def batch_set(
         self, namespace: str, items: dict[str, dict[str, Any]]
-    ) -> None:
+    ) -> Coroutine[Any, Any, None]:
         """Массовая запись значений в namespace."""
         ...
 
     def iter_namespace(
         self, namespace: str, batch_size: int = 100
-    ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
+    ) -> Coroutine[Any, Any, AsyncIterator[tuple[str, dict[str, Any]]]]:
         """Итерировать по ключам в namespace батчами."""
+        ...
+
+    def iter_namespaces(self) -> Coroutine[Any, Any, AsyncIterator[str]]:
+        """Итерировать по всем namespace в хранилище."""
+        ...
+
+    def initialize_schema(self) -> Coroutine[Any, Any, None]:
+        """Инициализировать схему хранилища (создать таблицы и т.п.)."""
         ...

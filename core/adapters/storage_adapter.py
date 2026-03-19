@@ -79,6 +79,25 @@ class StorageAdapter(ABC):
         """
         pass
 
+    async def iter_namespaces(self) -> AsyncIterator[str]:
+        """
+        Итерировать по всем namespace в хранилище (async iterator).
+
+        Default implementation delegates to `list_namespaces()` and yields
+        each namespace. Individual adapters may override for streaming.
+        """
+        namespaces = await self.list_namespaces()
+        for ns in namespaces:
+            yield ns
+
+    @abstractmethod
+    async def initialize_schema(self) -> None:
+        """
+        Инициализация схемы хранилища (создать таблицы и т.п.).
+        Вызывается при startup (await adapter.initialize_schema()).
+        """
+        pass
+
     @abstractmethod
     async def clear_namespace(self, namespace: str) -> None:
         """

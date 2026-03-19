@@ -6,6 +6,7 @@ Core не зависит от этого модуля — только от аб
 """
 
 from core.config import Config
+from core.adapters.storage_adapter import StorageAdapter
 from core.storage_manager import StorageManager
 from core.storage_errors import StorageConfigurationError
 from core.storage_port import CoreStoragePort, VaultStoragePort, StorageStack
@@ -13,7 +14,6 @@ from core.state_engine import StateEngine
 from core.secure_storage import SecureStorageWrapper
 from core.storage_startup import StorageStartupChecker
 
-from adapters.storage_adapter import StorageAdapter
 
 
 async def create_storage_adapter(config: Config) -> StorageAdapter:
@@ -33,13 +33,13 @@ async def create_storage_adapter(config: Config) -> StorageAdapter:
     config.validate()
 
     if config.storage_type == "sqlite":
-        from adapters.sqlite_adapter import SQLiteAdapter
+        from core.adapters.sqlite_adapter import SQLiteAdapter
         adapter = SQLiteAdapter(config.db_path)
         await adapter.initialize_schema()
         return adapter
 
     if config.storage_type == "postgresql":
-        from adapters.postgresql_adapter import PostgreSQLAdapter
+        from core.adapters.postgresql_adapter import PostgreSQLAdapter
         adapter = PostgreSQLAdapter(
             host=config.pg_host,
             port=config.pg_port,
@@ -73,7 +73,7 @@ async def _create_vault_storage_adapter(config: Config) -> StorageAdapter:
             raise StorageConfigurationError(
                 "vault_db_path must be set for SQLite vault storage"
             )
-        from adapters.sqlite_adapter import SQLiteAdapter
+        from core.adapters.sqlite_adapter import SQLiteAdapter
         adapter = SQLiteAdapter(config.vault_db_path)
         await adapter.initialize_schema()
         return adapter
@@ -83,7 +83,7 @@ async def _create_vault_storage_adapter(config: Config) -> StorageAdapter:
             raise StorageConfigurationError(
                 "vault_pg_dsn must be set for PostgreSQL vault storage"
             )
-        from adapters.postgresql_adapter import PostgreSQLAdapter
+        from core.adapters.postgresql_adapter import PostgreSQLAdapter
         adapter = PostgreSQLAdapter(dsn=config.vault_pg_dsn)
         await adapter.initialize_schema()
         return adapter

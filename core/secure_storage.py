@@ -545,3 +545,25 @@ class SecureStorageWrapper:
         """Итерировать по namespace."""
         async for item in self._adapter.iter_namespace(namespace, batch_size):
             yield item
+
+    async def batch_set(self, namespace: str, items: dict[str, dict[str, Any]]) -> None:
+        """
+        Массовая запись значений в namespace.
+
+        Для критичных namespace требует использования `secure_set` и поэтому запрещена.
+        Для обычных namespace делегируется адаптеру.
+        """
+        if namespace in PROTECTED_NAMESPACES:
+            raise ValueError(
+                f"batch_set() on protected namespace '{namespace}' is not allowed. Use secure_set()/append() instead."
+            )
+        await self._adapter.batch_set(namespace, items)
+
+    async def iter_namespaces(self) -> AsyncIterator[str]:
+        """Итерировать по всем namespace (делегирует адаптеру)."""
+        async for ns in self._adapter.iter_namespaces():
+            yield ns
+
+    async def initialize_schema(self) -> None:
+        """Инициализация схемы — делегируется базовому адаптеру."""
+        await self._adapter.initialize_schema()
