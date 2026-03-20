@@ -9,16 +9,25 @@ from typing import Any, Dict, Optional, Callable, Awaitable
 
 from core.operations.models import Operation, OperationStatus, OperationError
 from core.operations.registry import OperationHandlerRegistry
+from core.operations.interface import IOperationExecutor
 from core.health_monitor import ProviderHealthMonitor
 from core.observability.metrics import get_metrics_registry
 from core import capability_protocol
 
 
-class OperationExecutor:
+class OperationExecutor(IOperationExecutor):
     """
     Исполнитель операций.
     
-    Отвечает за выполнение операций через различные execution backends.
+    Реализует интерфейс IOperationExecutor и отвечает за выполнение операций
+    через различные execution backends (in_process, process, container, remote).
+    
+    Supports:
+        - Local operation execution via registered handlers
+        - Remote operation execution via HTTP (Capability Protocol v1)
+        - Health monitoring and automatic failover
+        - Per-capability timeout configuration
+        - Automatic retry on transient failures
     """
     
     def __init__(

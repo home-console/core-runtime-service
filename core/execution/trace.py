@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import Any, Dict, Literal, Optional
 
 
@@ -91,18 +91,18 @@ def _parse_datetime(value: Any) -> datetime:
         return value
     if isinstance(value, (int, float)):
         # epoch seconds
-        return datetime.utcfromtimestamp(value)
+        return datetime.fromtimestamp(value, tz=UTC)
     if isinstance(value, str):
         try:
             return datetime.fromisoformat(value)
         except ValueError:
             # fallback: try parse as epoch string
             try:
-                return datetime.utcfromtimestamp(float(value))
+                return datetime.fromtimestamp(float(value), tz=UTC)
             except Exception:
                 pass
     # В крайнем случае — "сейчас", чтобы не падать из-за старых/битых данных
-    return datetime.utcnow()
+    return datetime.now(UTC)
 
 
 def _parse_datetime_optional(value: Any) -> Optional[datetime]:

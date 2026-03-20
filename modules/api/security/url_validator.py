@@ -16,7 +16,7 @@ import threading
 from typing import Optional
 from urllib.parse import urlparse
 
-from core.errors import BadRequestError
+from core.exceptions.errors import BadRequestError
 
 # TTL для DNS кэша: 30 сек — баланс между производительностью и защитой от DNS rebinding
 _DNS_CACHE_TTL_SEC = 30.0

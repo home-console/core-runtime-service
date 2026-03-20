@@ -14,7 +14,7 @@ from core.config import Config
 from core.runtime.runtime import CoreRuntime
 from core.adapters.storage_factory import build_storage_stack
 from core.state_engine import StateEngine
-from core.http_registry import HttpEndpoint
+from core.http import HttpEndpoint
 
 
 async def _auto_load_plugins(runtime: CoreRuntime) -> None:

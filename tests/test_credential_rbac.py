@@ -5,7 +5,7 @@ Comprehensive test suite for credential access control.
 """
 
 import pytest
-from datetime import datetime
+from datetime import datetime, UTC
 
 from core.security.rbac_models import (
     Role,
@@ -54,8 +54,8 @@ class TestPolicyEngine:
             secret_read_roles=[Role.ADMIN],
             allowed_users=["user-owner"],
             version=1,
-            created_at=datetime.utcnow().isoformat(),
-            updated_at=datetime.utcnow().isoformat(),
+            created_at=datetime.now(UTC).isoformat(),
+            updated_at=datetime.now(UTC).isoformat(),
         )
     
     @pytest.mark.asyncio
@@ -156,8 +156,8 @@ class TestPolicyEngine:
             secret_read_roles=[Role.ADMIN],
             allowed_users=[],
             version=1,
-            created_at=datetime.utcnow().isoformat(),
-            updated_at=datetime.utcnow().isoformat(),
+            created_at=datetime.now(UTC).isoformat(),
+            updated_at=datetime.now(UTC).isoformat(),
         )
         store.add_policy(policy)
         
@@ -195,8 +195,8 @@ class TestPolicyEngine:
             secret_read_roles=[Role.ADMIN],
             allowed_users=["explicit-user"],
             version=1,
-            created_at=datetime.utcnow().isoformat(),
-            updated_at=datetime.utcnow().isoformat(),
+            created_at=datetime.now(UTC).isoformat(),
+            updated_at=datetime.now(UTC).isoformat(),
         )
         store.add_policy(policy)
         
@@ -220,8 +220,8 @@ class TestPolicyEngine:
             secret_read_roles=[Role.ADMIN],
             allowed_users=[],
             version=1,
-            created_at=datetime.utcnow().isoformat(),
-            updated_at=datetime.utcnow().isoformat(),
+            created_at=datetime.now(UTC).isoformat(),
+            updated_at=datetime.now(UTC).isoformat(),
         )
         store.add_policy(policy)
         
@@ -281,8 +281,8 @@ class TestRBACEnforcer:
             secret_read_roles=[Role.ADMIN],
             allowed_users=["user-owner"],
             version=1,
-            created_at=datetime.utcnow().isoformat(),
-            updated_at=datetime.utcnow().isoformat(),
+            created_at=datetime.now(UTC).isoformat(),
+            updated_at=datetime.now(UTC).isoformat(),
         )
     
     @pytest.mark.asyncio

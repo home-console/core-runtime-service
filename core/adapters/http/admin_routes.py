@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from starlette.requests import Request
 
-from core.http_registry import HttpEndpoint
+from core.http import HttpEndpoint
 
 
 def create_admin_router(runtime: Any) -> APIRouter:

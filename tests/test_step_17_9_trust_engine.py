@@ -18,7 +18,7 @@ Test coverage:
 import pytest
 import time
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 
 from core.security.trust.trust_state import (
     TrustLevel,
@@ -117,7 +117,7 @@ class TestTrustPolicy:
             risk_score=10.0,
         )
         
-        action, level = policy.evaluate(state, 10.0, datetime.utcnow())
+        action, level = policy.evaluate(state, 10.0, datetime.now(UTC))
         assert action == TrustAction.ALLOW
         assert level == TrustLevel.NORMAL
 
@@ -132,7 +132,7 @@ class TestTrustPolicy:
             risk_score=5.0,
         )
         
-        action, level = policy.evaluate(state, 50.0, datetime.utcnow())
+        action, level = policy.evaluate(state, 50.0, datetime.now(UTC))
         assert action == TrustAction.REQUIRE_MFA
         assert level == TrustLevel.ELEVATED_RISK
 
@@ -147,7 +147,7 @@ class TestTrustPolicy:
             risk_score=5.0,
         )
         
-        action, level = policy.evaluate(state, 75.0, datetime.utcnow())
+        action, level = policy.evaluate(state, 75.0, datetime.now(UTC))
         assert action == TrustAction.TEMP_BLOCK
         assert level == TrustLevel.TEMP_BLOCKED
 
@@ -162,7 +162,7 @@ class TestTrustPolicy:
             risk_score=5.0,
         )
         
-        action, level = policy.evaluate(state, 90.0, datetime.utcnow())
+        action, level = policy.evaluate(state, 90.0, datetime.now(UTC))
         assert action == TrustAction.FREEZE
         assert level == TrustLevel.FROZEN
 
@@ -171,7 +171,7 @@ class TestTrustPolicy:
         config = TrustConfigs.BALANCED
         policy = TrustPolicy(config)
         
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         state = TrustState(
             user_id="jack",
             level=TrustLevel.FROZEN,
@@ -195,7 +195,7 @@ class TestTrustPolicy:
         )
         
         # Risk drops below recovery threshold (25 by default)
-        action, level = policy.evaluate(state, 10.0, datetime.utcnow())
+        action, level = policy.evaluate(state, 10.0, datetime.now(UTC))
         assert action == TrustAction.RESTORE
         assert level == TrustLevel.NORMAL
 

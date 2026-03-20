@@ -15,9 +15,10 @@ RemoteOperationExecutor - выполняет операции через HTTP к
 from typing import Any, Dict, Optional
 import asyncio
 from core import capability_protocol
+from core.remote_executor_interface import IRemoteExecutor
 
 
-class RemoteOperationExecutor:
+class RemoteOperationExecutor(IRemoteExecutor):
     """
     Executor для remote capability operations.
     

@@ -19,7 +19,7 @@ import asyncio
 import json
 import sys
 from typing import Any, Dict, Optional
-from datetime import datetime
+from datetime import datetime, UTC
 
 try:
     from fastapi import FastAPI, HTTPException, Request
@@ -60,7 +60,7 @@ async def get_health():
         "status": "ok",
         "loaded": _state["loaded"],
         "started": _state["started"],
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }
 
 
@@ -73,7 +73,7 @@ async def plugin_load():
         
         # Регистрируем сервис logger.log (виртуально, как контракт)
         _state["loaded"] = True
-        _state["logs"].append({"event": "load", "time": datetime.utcnow().isoformat()})
+        _state["logs"].append({"event": "load", "time": datetime.now(UTC).isoformat()})
         
         return {"status": "ok", "message": "plugin loaded"}
     except Exception as exc:
@@ -91,7 +91,7 @@ async def plugin_start():
             return {"status": "already started"}
         
         _state["started"] = True
-        _state["logs"].append({"event": "start", "time": datetime.utcnow().isoformat()})
+        _state["logs"].append({"event": "start", "time": datetime.now(UTC).isoformat()})
         
         return {"status": "ok", "message": "plugin started"}
     except Exception as exc:
@@ -107,7 +107,7 @@ async def plugin_stop():
             return {"status": "already stopped"}
         
         _state["started"] = False
-        _state["logs"].append({"event": "stop", "time": datetime.utcnow().isoformat()})
+        _state["logs"].append({"event": "stop", "time": datetime.now(UTC).isoformat()})
         
         return {"status": "ok", "message": "plugin stopped"}
     except Exception as exc:
@@ -121,7 +121,7 @@ async def plugin_unload():
     try:
         _state["loaded"] = False
         _state["started"] = False
-        _state["logs"].append({"event": "unload", "time": datetime.utcnow().isoformat()})
+        _state["logs"].append({"event": "unload", "time": datetime.now(UTC).isoformat()})
         
         return {"status": "ok", "message": "plugin unloaded"}
     except Exception as exc:
@@ -154,7 +154,7 @@ async def log_message(request: Request):
             "level": level.lower(),
             "message": message,
             "context": context,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
         
         # Выводим в stdout
@@ -168,7 +168,7 @@ async def log_message(request: Request):
         print(json.dumps({
             "level": "error",
             "message": f"Ошибка в remote_logger: {str(exc)}",
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }, ensure_ascii=False))
         raise HTTPException(status_code=500, detail=str(exc))
 

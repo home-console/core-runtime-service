@@ -12,7 +12,7 @@ Design: Immutable, audit-friendly, no secrets stored.
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
-from datetime import datetime
+from datetime import datetime, UTC
 
 
 class RiskAction(str, Enum):
@@ -116,7 +116,7 @@ class RiskAssessment:
     action: RiskAction
     reasons: list[str] = field(default_factory=list)
     events_considered: int = 0
-    timestamp: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     
     def __post_init__(self):
         """Validate score range."""

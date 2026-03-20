@@ -323,24 +323,61 @@ async def admin_agent_deploy(
             storage_manager = getattr(runtime, "storage_manager", None)
             if storage_manager is None:
                 return {"ok": False, "error": "storage_manager not initialized"}
-            credential = None
+
+            def _extract_host(value: Any) -> Optional[str]:
+                if value is None:
+                    return None
+                # Domain object path
+                attr_host = getattr(value, "host", None)
+                if isinstance(attr_host, str) and attr_host.strip():
+                    return attr_host.strip()
+                # Legacy dict path
+                if isinstance(value, dict):
+                    h = value.get("host")
+                    if isinstance(h, str) and h.strip():
+                        return h.strip()
+                    md = value.get("metadata")
+                    if isinstance(md, dict):
+                        mh = md.get("host")
+                        if isinstance(mh, str) and mh.strip():
+                            return mh.strip()
+                return None
+
+            async def _read_legacy_raw_credential() -> Any:
+                # Try the most permissive/legacy signatures first.
+                for args, kwargs in [
+                    ((credential_id,), {}),
+                    (("credentials.meta", credential_id), {}),
+                    (("credentials.meta", credential_id), {"target": "core"}),
+                    (("credentials", credential_id), {}),
+                ]:
+                    try:
+                        value = await storage_manager.get(*args, **kwargs)
+                        if value is not None:
+                            return value
+                    except TypeError:
+                        continue
+                    except Exception:
+                        continue
+                return None
+
+            repo_error: Optional[Exception] = None
             try:
-                credential = await storage_manager.get(credential_id)
-            except TypeError:
-                try:
-                    credential = await storage_manager.get("credentials", credential_id)
-                except Exception:
-                    credential = None
-            except Exception:
-                credential = None
-
-            if credential is None:
-                return {"ok": False, "error": f"Credential {credential_id} not found"}
-
-            if isinstance(credential, dict):
-                host = credential.get("host")
-            else:
-                host = getattr(credential, "host", None)
+                from core.credentials.repository import CredentialRepository
+                repo = CredentialRepository(storage_manager=storage_manager, secret_store=secret_store)
+                cred = await repo.get(credential_id)
+                host = _extract_host(cred)
+                if cred is None or not host:
+                    raw_cred = await _read_legacy_raw_credential()
+                    host = _extract_host(raw_cred)
+                    if cred is None and raw_cred is None:
+                        return {"ok": False, "error": f"Credential {credential_id} not found"}
+            except Exception as e:
+                repo_error = e
+                raw_cred = await _read_legacy_raw_credential()
+                host = _extract_host(raw_cred)
+                if raw_cred is None:
+                    return {"ok": False, "error": f"Failed to read credential: {e}"}
 
         if not host:
             return {

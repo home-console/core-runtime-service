@@ -15,14 +15,22 @@ core.process_executor module.
 import pytest
 import asyncio
 from unittest.mock import Mock, AsyncMock
+import inspect
+import tempfile
+import json
+from pathlib import Path
+from unittest.mock import Mock, AsyncMock, patch, MagicMock
 
-from core.capability_registry import CapabilityRegistry
+from core.capability import CapabilityRegistry
 from core.capability_protocol import PROTOCOL_VERSION
 from core.kernel.plugin_registry import PluginRegistry
 from core.plugins import PluginManager
 from core.base_plugin import BasePlugin, PluginMetadata
 from core.plugin_isolation import StorageProxy
 from core.errors import ForbiddenError
+from core.operations import Operation, OperationInitiator, OperationInitiatorKind, OperationManager
+from core.execution_router import ExecutionRouter
+from core.exceptions.errors import ForbiddenError
 
 
 # ============================================================================
@@ -97,12 +105,12 @@ async def test_registry_methods_are_async():
     registry = CapabilityRegistry()
     
     # All write methods should be coroutines
-    assert asyncio.iscoroutinefunction(registry.register_provider)
-    assert asyncio.iscoroutinefunction(registry.update_provider_metadata)
-    assert asyncio.iscoroutinefunction(registry.set_provider_health)
-    assert asyncio.iscoroutinefunction(registry.register_consumer)
-    assert asyncio.iscoroutinefunction(registry.unregister_plugin)
-    assert asyncio.iscoroutinefunction(registry.validate_plugin_requirements)
+    assert inspect.iscoroutinefunction(registry.register_provider)
+    assert inspect.iscoroutinefunction(registry.update_provider_metadata)
+    assert inspect.iscoroutinefunction(registry.set_provider_health)
+    assert inspect.iscoroutinefunction(registry.register_consumer)
+    assert inspect.iscoroutinefunction(registry.unregister_plugin)
+    assert inspect.iscoroutinefunction(registry.validate_plugin_requirements)
 
 
 @pytest.mark.asyncio
@@ -117,7 +125,8 @@ async def test_plugin_registry_uses_asyncio_lock_not_threading():
 @pytest.mark.asyncio
 async def test_execution_router_uses_asyncio_lock():
     """Test that ExecutionRouter uses asyncio.Lock."""
-    router = ExecutionRouter(Mock())
+    with pytest.warns(DeprecationWarning):
+        router = ExecutionRouter(Mock())
     assert isinstance(router._handler_lock, asyncio.Lock)
 
 
@@ -257,7 +266,7 @@ async def test_plugin_receives_isolated_storage_proxy():
     - Plugin should NOT have access to runtime.storage directly
     """
     # Mock runtime and storage
-    mock_runtime = AsyncMock()
+    mock_runtime = Mock()
     mock_storage = Mock()
     mock_runtime.storage = mock_storage
     mock_runtime.plugin_manager = Mock()

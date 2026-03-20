@@ -242,7 +242,7 @@ class YandexDeviceAuthPlugin(BasePlugin):
         await reg.register_with_acl("yandex_device_auth.get_session", get_account_session, admin_only=True)
 
         # Register HTTP endpoints
-        from core.http_registry import HttpEndpoint
+        from core.http import HttpEndpoint
 
         try:
             self.runtime.http.register(

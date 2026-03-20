@@ -15,6 +15,7 @@ from typing import Any
 
 from core.http_registry import EndpointAuthConfig, HttpEndpoint
 from core.runtime_module import RuntimeModule
+from core.http import HttpEndpoint, EndpointAuthConfig
 
 
 def _user_cred_params(kw: dict) -> dict:

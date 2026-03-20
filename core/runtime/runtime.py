@@ -1,5 +1,5 @@
 """
-CoreRuntime - главный класс Core Runtime.
+CoreRuntime - главный класс Core Runtime (D1).
 
 Объединяет все компоненты:
 - EventBus
@@ -9,11 +9,17 @@ CoreRuntime - главный класс Core Runtime.
 - PluginManager
 
 Это kernel/runtime, а не backend-приложение.
+
+Методы:
+- Инициализация (init, _build_default_orchestration_service)
+- Жизненный цикл (start, stop, shutdown, run) -> delegated to runtime.lifecycle
+- Мониторинг (health_check, get_metrics) -> delegated to runtime.monitoring
+- Транспорт (run_transports, iter_transport_runners)
 """
 
 import asyncio
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Awaitable, Callable, cast
 
 from core.capability_registry import CapabilityRegistry
 from core.dependency_resolver import (  # Step 10
@@ -25,6 +31,7 @@ from core.integration_registry import IntegrationRegistry
 from core.logger_helper import info, warning
 from core.messaging.event_bus import EventBus
 from core.operations.manager import OperationManager
+from core.policy import PolicyEngine
 from core.orchestration import (
     DockerOrchestrationBackend,
     OrchestrationService,
@@ -41,6 +48,10 @@ from modules.agent import (
     AgentRegistry,
     MTLSCertificateAuthority,
 )
+
+# Import extracted lifecycle and monitoring functions
+from core.runtime.lifecycle import start_runtime, stop_runtime, shutdown_runtime, hydrate_critical_state
+from core.runtime.monitoring import health_check as _health_check, get_metrics as _get_metrics
 
 
 class CoreRuntime:
@@ -62,7 +73,6 @@ class CoreRuntime:
         vault_port: Optional[Any] = None,
        
         state_engine: Optional[Any] = None,
-    ,
         *,
         policy_engine: Optional[PolicyEngine] = None,
         orchestration_service: Optional[OrchestrationService] = None,
@@ -148,10 +158,50 @@ class CoreRuntime:
             return OrchestrationService(NullOrchestrationBackend())
         return OrchestrationService(DockerOrchestrationBackend())
 
+    def _iter_transport_runners(self) -> list[tuple[str, Callable[[Any], Awaitable[Any]]]]:
+        """
+        Найти transport runner'ы среди зарегистрированных модулей.
+
+        Новый контракт: модуль может экспортировать `run_transport(runtime)`.
+        Backward-compat: если его нет, используем legacy `run_http(runtime)`.
+        """
+        runners: list[tuple[str, Callable[[Any], Awaitable[Any]]]] = []
+        for module_name in self.module_manager.list_modules():
+            module = self.module_manager.get_module(module_name)
+            if module is None:
+                continue
+
+            run_transport = getattr(module, "run_transport", None)
+            if callable(run_transport):
+                runners.append((module_name, cast(Callable[[Any], Awaitable[Any]], run_transport)))
+                continue
+
+            run_http = getattr(module, "run_http", None)
+            if callable(run_http):
+                runners.append((module_name, cast(Callable[[Any], Awaitable[Any]], run_http)))
+        return runners
+
+    async def _run_transports(self) -> None:
+        """Запустить transport runner'ы модулей."""
+        runners = self._iter_transport_runners()
+        if not runners:
+            await info(self, "RUNTIME: no transport runners registered", component="runtime")
+            return
+
+        for module_name, runner in runners:
+            try:
+                await info(self, f"RUNTIME: running transport for module '{module_name}'", component="runtime")
+                await runner(self)
+                await info(self, f"RUNTIME: transport runner for '{module_name}' returned", component="runtime")
+            except Exception as e:
+                await warning(self, f"Ошибка transport runner '{module_name}': {e}", component="runtime")
+                import traceback
+                traceback.print_exc()
+
     async def run(self) -> None:
         """
-        Верный запуск: start (модули + плагины), затем HTTP через модуль api.
-        Runtime не знает про FastAPI/uvicorn — вызывает api.run_http(runtime).
+        Верный запуск: start (модули + плагины), затем transport runner'ы модулей.
+        Backward-compat: legacy `run_http(runtime)` тоже поддерживается.
         """
         await info(self, "RUNTIME: start() about to run", component="runtime")
         await self.start()

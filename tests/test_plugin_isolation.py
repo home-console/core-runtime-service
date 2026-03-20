@@ -20,7 +20,12 @@ from core.operations import (
 )
 from core.execution_router import ExecutionRouter
 from core.capability_protocol import ProviderMetadata
-from core.capability_registry import CapabilityRegistry
+from core.capability import CapabilityRegistry
+
+
+def _make_execution_router(runtime):
+    with pytest.warns(DeprecationWarning):
+        return ExecutionRouter(runtime)
 
 
 class TestExecutionRouter:
@@ -37,7 +42,7 @@ class TestExecutionRouter:
     @pytest.fixture
     def router(self, runtime):
         """Create ExecutionRouter."""
-        return ExecutionRouter(runtime)
+        return _make_execution_router(runtime)
     
     @pytest.fixture
     def operation(self):
@@ -197,7 +202,7 @@ class TestExecutionModes:
         
         # We'll test routing behavior through mock
         manager = Mock()
-        manager._execution_router = ExecutionRouter(runtime)
+        manager._execution_router = _make_execution_router(runtime)
         manager._handlers = {}
         return manager
     
@@ -282,7 +287,7 @@ class TestBackwardCompatibility:
     @pytest.mark.asyncio
     async def test_handlers_registered_for_in_process(self):
         """Test handlers are still registered for in_process execution."""
-        router = ExecutionRouter(Mock())
+        router = _make_execution_router(Mock())
         handler = Mock()
         
         await router.register_handler("test.op", handler)
@@ -296,7 +301,7 @@ class TestExecutionErrors:
     @pytest.fixture
     def executor(self):
         """Create ExecutionRouter."""
-        return ExecutionRouter(Mock())
+        return _make_execution_router(Mock())
     
     @pytest.fixture
     def operation(self):

@@ -11,14 +11,11 @@ AdminModule — Control Plane Host + Inspector Host.
 
 from pathlib import Path
 from typing import Any, Optional
-import asyncio
 import json
 import logging
-import shutil
 import time
 
 from core.runtime_module import RuntimeModule
-from core.http_registry import HttpEndpoint
 # OrchestrationService (Docker/k8s абстракция)
 from core.orchestration import OrchestrationService
 
@@ -36,6 +33,13 @@ from .credentials_handlers import (
     admin_credentials_terminal_sessions,
     admin_credentials_terminal_session_close,
 )
+from .http_endpoints import register_admin_core_http_endpoints
+from .plugin_control_bindings import register_plugin_control_bindings
+from .device_admin_bindings import register_device_admin_bindings
+from .ssh_bindings import register_ssh_bindings
+from .plugin_control_bindings import register_plugin_control_bindings
+from .device_admin_bindings import register_device_admin_bindings
+from .ssh_bindings import register_ssh_bindings
 from .introspection import (
     get_runtime_info,
     list_plugins,
@@ -49,13 +53,12 @@ from .introspection import (
     list_state_keys,
     get_state_value,
     list_operations_available,
-    list_auth_flows,
     list_integrations,
     integrations_inspector_response,
     auth_inspector_response,
     inventory_inspector_response,
-    inspector_auth_summary,
     dashboard_inspector_response,
+    get_system_health,
     list_execution_traces,
     get_execution_trace,
     list_operation_executions,
@@ -102,170 +105,7 @@ class AdminModule(RuntimeModule):
     async def register(self) -> None:
         self._admin_started_at = time.time()
         self._registered_services = []
-
-        # --- HTTP: Inspector (read-only snapshot) ---
-        inspector_endpoints = [
-            ("/admin/v1/inspector/dashboard", "admin.v1.inspector.dashboard", "Inspector: dashboard summary"),
-            ("/admin/v1/inspector/runtime", "admin.v1.runtime", "Inspector: runtime info"),
-            ("/admin/v1/inspector/plugins", "admin.v1.plugins", "Inspector: list plugins"),
-            ("/admin/v1/inspector/services", "admin.v1.services", "Inspector: list services"),
-            ("/admin/v1/inspector/http", "admin.v1.http", "Inspector: list HTTP endpoints"),
-            ("/admin/v1/inspector/ws", "admin.v1.ws", "Inspector: list WebSocket endpoints"),
-            ("/admin/v1/inspector/events", "admin.v1.events", "Inspector: list event subscriptions"),
-            ("/admin/v1/inspector/storage", "admin.v1.storage", "Inspector: list storage namespaces"),
-            ("/admin/v1/inspector/state", "admin.v1.state", "Inspector: get all state"),
-            ("/admin/v1/inspector/state/keys", "admin.v1.state.keys", "Inspector: list state keys"),
-            ("/admin/v1/inspector/operations", "admin.v1.inspector.operations", "Inspector: available operation types"),
-            ("/admin/v1/inspector/executions", "admin.v1.inspector.executions", "Inspector: list execution traces"),
-            ("/admin/v1/inspector/auth", "admin.v1.inspector.auth", "Inspector: auth flows (OAuth/device auth, etc.)"),
-            ("/admin/v1/inspector/integrations", "admin.v1.inspector.integrations", "Inspector: integrations (connect/disconnect state, actions)"),
-            ("/admin/v1/inspector/inventory", "admin.v1.inspector.inventory", "Inspector: devices inventory (items, mappings, external by provider)"),
-            ("/admin/v1/inspector/system_health", "admin.v1.inspector.system_health", "Inspector: system health (metrics, resource usage)"),
-        ]
-        for path, service, description in inspector_endpoints:
-            self.context.http.register(HttpEndpoint(
-                method="GET",
-                path=path,
-                service=service,
-                description=description
-            ))
-        # Плагины: discovery и детали одного (из ядра) — регистрируем до /plugins/{name}
-        self.context.http.register(HttpEndpoint(
-            method="GET",
-            path="/admin/v1/inspector/plugins/discover",
-            service="admin.v1.inspector.plugins.discover",
-            description="Inspector: discover plugins on disk (manifests, load_order)"
-        ))
-        self.context.http.register(HttpEndpoint(
-            method="GET",
-            path="/admin/v1/inspector/plugins/{name}",
-            service="admin.v1.inspector.plugins.get",
-            description="Inspector: get single plugin details (loaded + manifest)"
-        ))
-        self.context.http.register(HttpEndpoint(
-            method="GET",
-            path="/admin/v1/marketplace/catalog",
-            service="admin.v1.marketplace.catalog",
-            description="Marketplace: список плагинов (один файл catalog.json, ссылки на репо)"
-        ))
-        self.context.http.register(HttpEndpoint(
-            method="GET",
-            path="/admin/v1/inspector/state/{key}",
-            service="admin.v1.state.get",
-            description="Inspector: get state value by key"
-        ))
-        self.context.http.register(HttpEndpoint(
-            method="GET",
-            path="/admin/v1/inspector/storage/{namespace}",
-            service="admin.v1.storage.get",
-            description="Inspector: get storage namespace contents (keys + values)"
-        ))
-        # Credentials (SSH hosts, etc.) — admin API
-        self.context.http.register(HttpEndpoint(
-            method="GET",
-            path="/admin/v1/credentials",
-            service="admin.v1.credentials.list",
-            description="Admin: list credentials"
-        ))
-        self.context.http.register(HttpEndpoint(
-            method="POST",
-            path="/admin/v1/credentials",
-            service="admin.v1.credentials.create",
-            description="Admin: create credential"
-        ))
-        self.context.http.register(HttpEndpoint(
-            method="GET",
-            path="/admin/v1/credentials/{credential_id}",
-            service="admin.v1.credentials.get",
-            description="Admin: get credential by id"
-        ))
-        self.context.http.register(HttpEndpoint(
-            method="GET",
-            path="/admin/v1/credentials/{credential_id}/secret",
-            service="admin.v1.credentials.get_secret",
-            description="Admin: get credential secret (for export)"
-        ))
-        self.context.http.register(HttpEndpoint(
-            method="PUT",
-            path="/admin/v1/credentials/{credential_id}",
-            service="admin.v1.credentials.update",
-            description="Admin: update credential"
-        ))
-        self.context.http.register(HttpEndpoint(
-            method="DELETE",
-            path="/admin/v1/credentials/{credential_id}",
-            service="admin.v1.credentials.delete",
-            description="Admin: delete credential"
-        ))
-        self.context.http.register(HttpEndpoint(
-            method="POST",
-            path="/admin/v1/credentials/{credential_id}/connect",
-            service="admin.v1.credentials.connect",
-            description="Admin: подключиться к хосту по креду из БД (SSH)"
-        ))
-        # Active SSH terminal sessions are exposed under a separate sub-path
-        # to avoid collision with /admin/v1/credentials/{credential_id}.
-        self.context.http.register(HttpEndpoint(
-            method="GET",
-            path="/admin/v1/credentials/terminal/sessions",
-            service="admin.v1.credentials.terminal_sessions",
-            description="Admin: список активных SSH терминальных сессий"
-        ))
-        self.context.http.register(HttpEndpoint(
-            method="DELETE",
-            path="/admin/v1/credentials/terminal/sessions/{session_id}",
-            service="admin.v1.credentials.terminal_session_close",
-            description="Admin: закрыть SSH терминальную сессию по id"
-        ))
-        self.context.http.register(HttpEndpoint(
-            path="/admin/v1/credentials/terminal",
-            service="admin.v1.credentials.terminal_ws",
-            websocket=True,
-            description="Admin: WebSocket терминал по креду (?credential_id=...)"
-        ))
-        self.context.http.register(HttpEndpoint(
-            method="GET",
-            path="/admin/v1/inspector/executions/{execution_id}",
-            service="admin.v1.inspector.executions.get",
-            description="Inspector: get execution trace by id",
-        ))
-        self.context.http.register(HttpEndpoint(
-            method="GET",
-            path="/admin/v1/inspector/operations/{operation_id}/executions",
-            service="admin.v1.inspector.operations.executions",
-            description="Inspector: list executions for operation",
-        ))
-        self.context.http.register(HttpEndpoint(
-            method="GET",
-            path="/admin/v1/inspector/executions/{execution_id}/retries",
-            service="admin.v1.inspector.executions.retries",
-            description="Inspector: list retries for execution",
-        ))
-        self.context.http.register(HttpEndpoint(
-            method="GET",
-            path="/admin/v1/inspector/executions/{execution_id}/tree",
-            service="admin.v1.inspector.executions.tree",
-            description="Inspector: execution retry tree",
-        ))
-        # Schedules inspector
-        self.context.http.register(HttpEndpoint(
-            method="GET",
-            path="/admin/v1/inspector/schedules",
-            service="admin.v1.inspector.schedules",
-            description="Inspector: list execution schedules",
-        ))
-        self.context.http.register(HttpEndpoint(
-            method="GET",
-            path="/admin/v1/inspector/schedules/{schedule_id}",
-            service="admin.v1.inspector.schedules.get",
-            description="Inspector: get execution schedule by id",
-        ))
-        self.context.http.register(HttpEndpoint(
-            method="GET",
-            path="/admin/v1/inspector/operations/{operation_id}/schedules",
-            service="admin.v1.inspector.operations.schedules",
-            description="Inspector: list schedules for operation",
-        ))
+        register_admin_core_http_endpoints(self.context.http)
 
         # --- Webhook demo (C4) ---
         async def webhook_test_service(payload, **kwargs):
@@ -455,9 +295,9 @@ class AdminModule(RuntimeModule):
             ("admin.v1.state.keys", wrap_introspection(list_state_keys)),
             ("admin.v1.state.get", wrap_state_get()),
             ("admin.v1.inspector.operations", wrap_introspection(list_operations_available)),
-            ("admin.v1.inspector.auth", wrap_introspection(list_auth_flows)),
+            ("admin.v1.inspector.auth", wrap_introspection(auth_inspector_response)),
             ("admin.v1.inspector.integrations", wrap_introspection(integrations_inspector_response)),
-            ("admin.v1.inspector.inventory", wrap_introspection(lambda runtime: [])),
+            ("admin.v1.inspector.inventory", wrap_introspection(inventory_inspector_response)),
             ("admin.v1.inspector.capabilities", wrap_introspection(list_capabilities)),
             ("admin.v1.inspector.executions", wrap_introspection(list_execution_traces)),
             ("admin.v1.inspector.executions.get", wrap_execution_get()),
@@ -467,7 +307,7 @@ class AdminModule(RuntimeModule):
             ("admin.v1.inspector.schedules", wrap_schedules()),
             ("admin.v1.inspector.schedules.get", wrap_schedule_get()),
             ("admin.v1.inspector.operations.schedules", wrap_operation_schedules()),
-            ("admin.v1.inspector.auth", wrap_introspection(inspector_auth_summary)),
+            ("admin.v1.inspector.system_health", wrap_introspection(get_system_health)),
             ("admin.v1.inspector.dashboard", wrap_introspection(dashboard_inspector_response)),
             ("admin.v1.marketplace.catalog", _marketplace_catalog),
             # Admin devices read-only proxy services (kept for Admin UI compatibility)
@@ -503,450 +343,15 @@ class AdminModule(RuntimeModule):
             except ValueError:
                 continue
 
-        # --- Plugin control: unload / reload / restart container (admin-only) ---
-        async def _admin_unload_plugin(name: str = None, **kw):
-            """
-            Выгрузить плагин.
-            
-            Args:
-                name: имя плагина (из URL path параметра {name})
-            """
-            plugin_name = name or kw.get("name")
-            if not plugin_name:
-                return {"ok": False, "error": "Имя плагина не указано"}
-            try:
-                await self.runtime.plugin_manager.unload_plugin(plugin_name)
-                return {"ok": True}
-            except Exception as e:
-                return {"ok": False, "error": str(e)}
-
-        async def _admin_reload_plugin(name: str = None, **kw):
-            """
-            Перезагрузить плагин (hot-reload).
-            
-            Args:
-                name: имя плагина (из URL path параметра {name})
-            """
-            plugin_name = name or kw.get("name")
-            if not plugin_name:
-                return {"ok": False, "error": "Имя плагина не указано"}
-            try:
-                await self.runtime.plugin_manager.reload_plugin(plugin_name)
-                return {"ok": True}
-            except Exception as e:
-                return {"ok": False, "error": str(e)}
-
-        async def _admin_restart_plugin_container(name: str = None, body: Any = None, **kw):
-            """
-            Перезапустить плагин через перезапуск Docker контейнера.
-            
-            Если контейнер не существует, автоматически вызывает ensure_container для создания.
-            Архитектурное разделение: restart использует ContainerOrchestrator для DevOps операций.
-            
-            Args:
-                name: имя плагина (из URL path параметра {name})
-                body: тело запроса (может содержать container_name)
-            
-            Returns:
-                {"ok": True} при успехе, {"ok": False, "error": "..."} при ошибке
-            """
-            plugin_name = name or kw.get("name")
-            if not plugin_name:
-                return {"ok": False, "error": "Имя плагина не указано"}
-            
-            # Получаем плагин
-            plugin = await self.runtime.plugin_manager.get_plugin(plugin_name)
-            if not plugin:
-                return {"ok": False, "error": f"Плагин '{plugin_name}' не найден"}
-            
-            # Проверяем, что плагин настроен на container mode
-            metadata = plugin.metadata
-            if metadata.execution_mode != "container":
-                return {
-                    "ok": False,
-                    "error": f"Плагин '{plugin_name}' не является container плагином (execution_mode: {metadata.execution_mode}). "
-                            f"Используйте reload для перезапуска."
-                }
-            
-            if not metadata.container_config:
-                return {
-                    "ok": False,
-                    "error": f"У плагина '{plugin_name}' не указан container_config в metadata"
-                }
-            
-            # Определяем имя контейнера из metadata или body
-            container_name = None
-            if isinstance(body, dict):
-                container_name = body.get("container_name")
-            
-            if not container_name:
-                container_name = metadata.container_config.get("name")
-            
-            if not container_name:
-                container_name = f"plugin-{plugin_name}"
-            
-            # Проверяем наличие docker
-            docker_cmd = shutil.which("docker")
-            if not docker_cmd:
-                return {"ok": False, "error": "Docker не найден в системе"}
-            
-            # OrchestrationService
-            # Проверяем существование контейнера
-            container_exists = await self._orchestration_service.container_exists(container_name)
-            
-            # Если контейнер не существует, пытаемся создать его
-            if not container_exists:
-                logger.info(f"Container {container_name} not found, attempting to ensure it exists")
-                ensure_result = await self._orchestration_service.ensure_container(
-                    container_name,
-                    metadata.container_config
-                )
-                if not ensure_result["ok"]:
-                    return ensure_result
-                # После создания контейнера продолжаем с restart
-            
-            # OrchestrationService для restart
-            logger.info(f"Restarting container {container_name} for plugin {plugin_name}")
-            restart_result = await self._orchestration_service.restart_container(container_name, timeout=30.0)
-            
-            if restart_result["ok"]:
-                logger.info(f"Container {container_name} restarted successfully")
-                return restart_result
-            else:
-                error_msg = restart_result.get("error", "Неизвестная ошибка")
-                logger.warning(f"Failed to restart container {container_name}: {error_msg}")
-                
-                # Если ошибка связана с сетью, удаляем контейнер и пересоздаём
-                if "network" in error_msg.lower() and "not found" in error_msg.lower():
-                    logger.info(f"Network error detected, removing container {container_name} to recreate it")
-                    remove_result = await self._orchestration_service.remove_container(container_name, force=True)
-                    if remove_result["ok"]:
-                        # Пересоздаём контейнер с правильной сетью
-                        logger.info(f"Recreating container {container_name} with correct network configuration")
-                        ensure_result = await self._orchestration_service.ensure_container(
-                            container_name,
-                            metadata.container_config
-                        )
-                        if ensure_result["ok"]:
-                            return {"ok": True, "message": f"Контейнер '{container_name}' пересоздан и запущен (была проблема с сетью)"}
-                        else:
-                            return ensure_result
-                    else:
-                        return {
-                            "ok": False,
-                            "error": f"Не удалось перезапустить контейнер '{container_name}': {error_msg}. "
-                                    f"Также не удалось удалить контейнер для пересоздания: {remove_result.get('error', 'неизвестная ошибка')}"
-                        }
-                
-                return restart_result
-
-        async def _admin_ensure_plugin_container(name: str = None, body: Any = None, **kw):
-            """
-            Убедиться, что контейнер плагина существует и запущен.
-            
-            Если контейнер не существует:
-            - Проверяет наличие образа
-            - Если образа нет и указан build в container_config — собирает образ
-            - Создаёт и запускает контейнер
-            
-            Использует ContainerOrchestrator для DevOps-операций (сборка, создание).
-            Runtime остаётся чистым — только управление существующими контейнерами.
-            
-            Args:
-                name: имя плагина (из URL path параметра {name})
-                body: тело запроса (может содержать container_name)
-            
-            Returns:
-                {"ok": True} при успехе, {"ok": False, "error": "..."} при ошибке
-            """
-            plugin_name = name or kw.get("name")
-            if not plugin_name:
-                return {"ok": False, "error": "Имя плагина не указано"}
-            
-            # Получаем плагин
-            plugin = await self.runtime.plugin_manager.get_plugin(plugin_name)
-            if not plugin:
-                return {"ok": False, "error": f"Плагин '{plugin_name}' не найден"}
-            
-            # Проверяем, что плагин настроен на container mode
-            metadata = plugin.metadata
-            if metadata.execution_mode != "container":
-                return {
-                    "ok": False,
-                    "error": f"Плагин '{plugin_name}' не является container плагином (execution_mode: {metadata.execution_mode}). "
-                            f"Используйте reload для перезапуска."
-                }
-            
-            if not metadata.container_config:
-                return {
-                    "ok": False,
-                    "error": f"У плагина '{plugin_name}' не указан container_config в metadata"
-                }
-            
-            # Определяем имя контейнера из metadata или body
-            container_name = None
-            if isinstance(body, dict):
-                container_name = body.get("container_name")
-            
-            if not container_name:
-                container_name = metadata.container_config.get("name")
-            
-            if not container_name:
-                container_name = f"plugin-{plugin_name}"
-            
-            # OrchestrationService
-            # Используем OrchestrationService для обеспечения существования контейнера
-            return await self._orchestration_service.ensure_container(
-                container_name,
-                metadata.container_config
+        self._registered_services.extend(
+            await register_plugin_control_bindings(
+                self.runtime,
+                self.context,
+                self._orchestration_service,
             )
-
-        async def _admin_start_plugin(name: str = None, **kw):
-            """Запустить плагин (ядро: plugin_manager.start_plugin)."""
-            plugin_name = name or kw.get("name")
-            if not plugin_name:
-                return {"ok": False, "error": "Имя плагина не указано"}
-            try:
-                await self.runtime.plugin_manager.start_plugin(plugin_name)
-                return {"ok": True}
-            except Exception as e:
-                return {"ok": False, "error": str(e)}
-
-        async def _admin_stop_plugin(name: str = None, **kw):
-            """Остановить плагин (ядро: plugin_manager.stop_plugin)."""
-            plugin_name = name or kw.get("name")
-            if not plugin_name:
-                return {"ok": False, "error": "Имя плагина не указано"}
-            try:
-                await self.runtime.plugin_manager.stop_plugin(plugin_name)
-                return {"ok": True}
-            except Exception as e:
-                return {"ok": False, "error": str(e)}
-
-        async def _admin_load_plugin_by_name(name: str = None, body: Any = None, **kw):
-            """Загрузить один плагин по имени из каталога (ядро: plugin_manager.load_plugin_by_name)."""
-            plugin_name = name or (isinstance(body, dict) and body.get("name")) or kw.get("name")
-            if not plugin_name:
-                return {"ok": False, "error": "Имя плагина не указано"}
-            try:
-                plugins_dir = None
-                if isinstance(body, dict) and body.get("plugins_dir"):
-                    plugins_dir = Path(body["plugins_dir"])
-                ok = await self.runtime.plugin_manager.load_plugin_by_name(plugin_name, plugins_dir=plugins_dir)
-                if ok:
-                    return {"ok": True}
-                return {"ok": False, "error": f"Не удалось загрузить плагин '{plugin_name}' (нет манифеста или зависимости)"}
-            except Exception as e:
-                return {"ok": False, "error": str(e)}
-
-        async def _admin_auto_load_plugins(body: Any = None, **kw):
-            """Пересканировать каталог и загрузить плагины по манифестам (ядро: plugin_manager.auto_load_plugins)."""
-            plugins_dir = None
-            if isinstance(body, dict) and body.get("plugins_dir"):
-                plugins_dir = Path(body["plugins_dir"])
-            try:
-                await self.runtime.plugin_manager.auto_load_plugins(plugins_dir=plugins_dir)
-                return {"ok": True, "loaded": await self.runtime.plugin_manager.list_plugins()}
-            except Exception as e:
-                return {"ok": False, "error": str(e)}
-
-        try:
-            # Register services (admin-only)
-            services = self.context.services
-            if hasattr(services, "register_with_acl"):
-                await services.register_with_acl("admin.v1.plugins.unload", _admin_unload_plugin, admin_only=True)
-                await services.register_with_acl("admin.v1.plugins.reload", _admin_reload_plugin, admin_only=True)
-                await services.register_with_acl("admin.v1.plugins.restart_container", _admin_restart_plugin_container, admin_only=True)
-                await services.register_with_acl("admin.v1.plugins.ensure_container", _admin_ensure_plugin_container, admin_only=True)
-                await services.register_with_acl("admin.v1.plugins.start", _admin_start_plugin, admin_only=True)
-                await services.register_with_acl("admin.v1.plugins.stop", _admin_stop_plugin, admin_only=True)
-                await services.register_with_acl("admin.v1.plugins.load_by_name", _admin_load_plugin_by_name, admin_only=True)
-                await services.register_with_acl("admin.v1.plugins.auto_load", _admin_auto_load_plugins, admin_only=True)
-            else:
-                await services.register("admin.v1.plugins.unload", _admin_unload_plugin)
-                await services.register("admin.v1.plugins.reload", _admin_reload_plugin)
-                await services.register("admin.v1.plugins.restart_container", _admin_restart_plugin_container)
-                await services.register("admin.v1.plugins.ensure_container", _admin_ensure_plugin_container)
-                await services.register("admin.v1.plugins.start", _admin_start_plugin)
-                await services.register("admin.v1.plugins.stop", _admin_stop_plugin)
-                await services.register("admin.v1.plugins.load_by_name", _admin_load_plugin_by_name)
-                await services.register("admin.v1.plugins.auto_load", _admin_auto_load_plugins)
-            self._registered_services.extend([
-                "admin.v1.plugins.unload", "admin.v1.plugins.reload", "admin.v1.plugins.restart_container",
-                "admin.v1.plugins.ensure_container", "admin.v1.plugins.start", "admin.v1.plugins.stop",
-                "admin.v1.plugins.load_by_name", "admin.v1.plugins.auto_load",
-            ])
-        except Exception:
-            # Best-effort: do not break admin registration
-            pass
-
-        # Expose HTTP endpoints for plugin control
-        try:
-            self.context.http.register(HttpEndpoint(
-                method="POST",
-                path="/admin/v1/plugins/{name}/unload",
-                service="admin.v1.plugins.unload",
-                description="Unload plugin by name (admin only)"
-            ))
-            self.context.http.register(HttpEndpoint(
-                method="POST",
-                path="/admin/v1/plugins/{name}/reload",
-                service="admin.v1.plugins.reload",
-                description="Reload plugin by name (admin only)"
-            ))
-            self.context.http.register(HttpEndpoint(
-                method="POST",
-                path="/admin/v1/plugins/{name}/restart-container",
-                service="admin.v1.plugins.restart_container",
-                description="Restart plugin container by name (admin only)"
-            ))
-            self.context.http.register(HttpEndpoint(
-                method="POST",
-                path="/admin/v1/plugins/{name}/ensure-container",
-                service="admin.v1.plugins.ensure_container",
-                description="Ensure plugin container exists (build and create if needed, admin only)"
-            ))
-            self.context.http.register(HttpEndpoint(
-                method="POST",
-                path="/admin/v1/plugins/{name}/start",
-                service="admin.v1.plugins.start",
-                description="Start plugin by name (kernel: plugin_manager.start_plugin)"
-            ))
-            self.context.http.register(HttpEndpoint(
-                method="POST",
-                path="/admin/v1/plugins/{name}/stop",
-                service="admin.v1.plugins.stop",
-                description="Stop plugin by name (kernel: plugin_manager.stop_plugin)"
-            ))
-            self.context.http.register(HttpEndpoint(
-                method="POST",
-                path="/admin/v1/plugins/load",
-                service="admin.v1.plugins.load_by_name",
-                description="Load one plugin by name from plugins dir (kernel: load_plugin_by_name). Body: { name?, plugins_dir? }"
-            ))
-            self.context.http.register(HttpEndpoint(
-                method="POST",
-                path="/admin/v1/plugins/{name}/load",
-                service="admin.v1.plugins.load_by_name",
-                description="Load one plugin by name from path (kernel: load_plugin_by_name)"
-            ))
-            self.context.http.register(HttpEndpoint(
-                method="POST",
-                path="/admin/v1/plugins/auto-load",
-                service="admin.v1.plugins.auto_load",
-                description="Rescan plugins dir and load from manifests (kernel: auto_load_plugins). Body: { plugins_dir? }"
-            ))
-        except Exception:
-            pass
-
-        # HTTP endpoints for admin devices (read-only + set_state proxy)
-        try:
-            self.context.http.register(HttpEndpoint(
-                method="GET",
-                path="/admin/v1/devices",
-                service="admin.v1.devices.list",
-                description="List internal devices"
-            ))
-            self.context.http.register(HttpEndpoint(
-                method="GET",
-                path="/admin/v1/devices/{id}",
-                service="admin.v1.devices.get",
-                description="Get device by id"
-            ))
-            self.context.http.register(HttpEndpoint(
-                method="GET",
-                path="/admin/v1/devices/external/{provider}",
-                service="admin.v1.devices.list_external",
-                description="List external devices by provider"
-            ))
-            self.context.http.register(HttpEndpoint(
-                method="GET",
-                path="/admin/v1/devices/external",
-                service="admin.v1.devices.list_external",
-                description="List all external devices (optional ?provider=yandex to filter)"
-            ))
-            self.context.http.register(HttpEndpoint(
-                method="GET",
-                path="/admin/v1/devices/mappings",
-                service="admin.v1.devices.list_mappings",
-                description="List device mappings"
-            ))
-            self.context.http.register(HttpEndpoint(
-                method="GET",
-                path="/admin/v1/devices/{id}/external",
-                service="admin.v1.devices.get_external_for_device",
-                description="Get external device payload (Yandex etc.) for an internal device"
-            ))
-            # POST to set device state — proxy to devices.set_state (domain service)
-            async def _admin_set_state(device_id: str, body: dict = None, **kw):
-                from core.system_context import create_system_context
-                from core.auth_contextvars import set_current_auth_context, get_current_auth_context
-                ctx = create_system_context("admin", "devices.set_state")
-                prev = get_current_auth_context()
-                try:
-                    # Normalize common admin payloads (e.g., {"power":"on"} -> desired.on = True)
-                    payload = body
-                    if isinstance(body, dict) and "power" in body:
-                        payload = {"state": {"on": True if body.get("power") == "on" else False}}
-                    set_current_auth_context(ctx)
-                    return await self.context.services.call("devices.set_state", device_id, payload)
-                finally:
-                    set_current_auth_context(prev)
-
-            await self.context.services.register("admin.v1.devices.set_state", _admin_set_state)
-            self.context.http.register(HttpEndpoint(
-                method="POST",
-                path="/admin/v1/devices/{id}/state",
-                service="admin.v1.devices.set_state",
-                description="Set device desired state (proxy to devices.set_state)"
-            ))
-        except Exception:
-            # Best-effort: do not break admin registration if HTTP registry unavailable
-            pass
-
-        # HTTP endpoint для SSH‑деплоя агентов теперь регистрируется в AgentControlPlaneModule
-
-        # SSH Terminal Session Manager
-        # POST   /admin/v1/ssh/sessions          — создать PTY-сессию (возвращает session_id)
-        # GET    /admin/v1/ssh/sessions          — список сессий
-        # DELETE /admin/v1/ssh/sessions/{id}    — закрыть сессию
-        # WS     /admin/v1/ssh/ws/{session_id}  — attach/detach к PTY
-        try:
-            from .services import ssh_terminal as _ssh_mod
-
-            async def _ssh_create(body: dict = None, **kw):
-                return await _ssh_mod.http_create_session(self.runtime, body)
-
-            async def _ssh_list(**kw):
-                return await _ssh_mod.http_list_sessions(self.runtime)
-
-            async def _ssh_close(session_id: str, **kw):
-                return await _ssh_mod.http_close_session(self.runtime, session_id)
-
-            async def _ssh_ws(websocket: Any, session_id: str = None, **kw):
-                if not session_id:
-                    await websocket.close(code=1008, reason="session_id required")
-                    return
-                await _ssh_mod.attach_websocket(websocket, session_id)
-
-            for svc, handler in [
-                ("admin.v1.ssh.sessions.create", _ssh_create),
-                ("admin.v1.ssh.sessions.list",   _ssh_list),
-                ("admin.v1.ssh.sessions.close",  _ssh_close),
-                ("admin.v1.ssh.ws",              _ssh_ws),
-            ]:
-                await self.context.services.register(svc, handler)
-
-            for ep in [
-                HttpEndpoint(method="POST",   path="/admin/v1/ssh/sessions",             service="admin.v1.ssh.sessions.create", description="Create SSH PTY session"),
-                HttpEndpoint(method="GET",    path="/admin/v1/ssh/sessions",             service="admin.v1.ssh.sessions.list",   description="List SSH PTY sessions"),
-                HttpEndpoint(method="DELETE", path="/admin/v1/ssh/sessions/{session_id}", service="admin.v1.ssh.sessions.close",  description="Close SSH PTY session"),
-                HttpEndpoint(path="/admin/v1/ssh/ws/{session_id}", service="admin.v1.ssh.ws", websocket=True, description="Attach WebSocket to SSH PTY session"),
-            ]:
-                self.context.http.register(ep)
-
-        except Exception as e:
-            logger.warning(f"Failed to register SSH terminal endpoints: {e}", exc_info=True)
+        )
+        self._registered_services.extend(await register_device_admin_bindings(self.context))
+        self._registered_services.extend(await register_ssh_bindings(self.runtime, self.context))
 
     async def start(self) -> None:
         pass

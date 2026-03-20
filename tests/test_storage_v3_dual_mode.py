@@ -25,6 +25,8 @@ from core.config import Config
 from modules.storage.errors import (
     NamespaceViolationError,
     StorageConfigurationError,
+    migrate_to_dual_mode,
+    check_migration_status,
 )
 from modules.storage.manager import StorageManager
 from modules.storage.migrate import migrate_to_dual_mode

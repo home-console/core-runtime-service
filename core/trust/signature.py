@@ -1,135 +1,27 @@
-"""
-Cryptographic signature verification using Ed25519.
+"""Legacy compatibility wrapper for trust signature helpers."""
 
-Provides:
-- Ed25519 signature verification and generation
-- Base64 encoding/decoding for keys and signatures
-- Payload hashing
-"""
+import warnings
 
-import base64
-import hashlib
-from cryptography.hazmat.primitives.asymmetric import ed25519
-from cryptography.hazmat.primitives import serialization
-from cryptography.exceptions import InvalidSignature
+warnings.warn(
+    "core.trust.signature is deprecated; use core.security.trust.signature instead",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
+from core.security.trust.signature import (
+    SignatureError,
+    compute_archive_sha256,
+    compute_payload_hash,
+    generate_keypair,
+    sign_message,
+    verify_signature,
+)
 
-class SignatureError(Exception):
-    """Signature verification or generation failed."""
-    pass
-
-
-def generate_keypair() -> tuple[str, str]:
-    """
-    Generate a new Ed25519 keypair for plugin signing.
-    
-    Returns:
-        (private_key_b64, public_key_b64)
-        
-    Note: Private keys should only be used for signing during development.
-    Only public keys should be distributed with plugins.
-    """
-    private_key = ed25519.Ed25519PrivateKey.generate()
-    private_bytes = private_key.private_bytes(
-        encoding=serialization.Encoding.Raw,
-        format=serialization.PrivateFormat.Raw,
-        encryption_algorithm=serialization.NoEncryption()
-    )
-    
-    public_key = private_key.public_key()
-    public_bytes = public_key.public_bytes(
-        encoding=serialization.Encoding.Raw,
-        format=serialization.PublicFormat.Raw
-    )
-    
-    return (
-        base64.b64encode(private_bytes).decode('ascii'),
-        base64.b64encode(public_bytes).decode('ascii')
-    )
-
-
-def sign_message(message: bytes, private_key_b64: str) -> str:
-    """
-    Sign a message using Ed25519 private key.
-    
-    Args:
-        message: Message bytes to sign
-        private_key_b64: Base64-encoded Ed25519 private key
-        
-    Returns:
-        Base64-encoded signature
-        
-    Raises:
-        SignatureError: if signing fails
-    """
-    try:
-        private_bytes = base64.b64decode(private_key_b64)
-        private_key = ed25519.Ed25519PrivateKey.from_private_bytes(private_bytes)
-        signature = private_key.sign(message)
-        return base64.b64encode(signature).decode('ascii')
-    except Exception as e:
-        raise SignatureError(f"Failed to sign message: {e}")
-
-
-def verify_signature(message: bytes, public_key_b64: str, signature_b64: str) -> bool:
-    """
-    Verify a message signature using Ed25519 public key.
-    
-    Args:
-        message: Message bytes that were signed
-        public_key_b64: Base64-encoded Ed25519 public key
-        signature_b64: Base64-encoded signature
-        
-    Returns:
-        True if signature is valid
-        
-    Raises:
-        SignatureError: if verification fails or signature is invalid
-    """
-    try:
-        public_bytes = base64.b64decode(public_key_b64)
-        public_key = ed25519.Ed25519PublicKey.from_public_bytes(public_bytes)
-        signature = base64.b64decode(signature_b64)
-        
-        # verify() raises InvalidSignature if verification fails
-        public_key.verify(signature, message)
-        return True
-    except InvalidSignature:
-        raise SignatureError("Signature verification failed: invalid signature")
-    except Exception as e:
-        raise SignatureError(f"Signature verification error: {e}")
-
-
-def compute_payload_hash(
-    manifest_json: str,
-    archive_hash: str
-) -> bytes:
-    """
-    Compute the payload to be signed: (manifest + archive_hash).
-    
-    Args:
-        manifest_json: JSON string of plugin.json (sorted keys for consistency)
-        archive_hash: SHA256 hash of the plugin archive
-        
-    Returns:
-        Bytes to be signed
-    """
-    payload = (manifest_json + archive_hash).encode('utf-8')
-    return payload
-
-
-def compute_archive_sha256(file_path) -> str:
-    """
-    Compute SHA256 hash of a file.
-    
-    Args:
-        file_path: Path to file
-        
-    Returns:
-        Hex string of SHA256 hash
-    """
-    sha256_hash = hashlib.sha256()
-    with open(file_path, 'rb') as f:
-        for chunk in iter(lambda: f.read(8192), b''):
-            sha256_hash.update(chunk)
-    return sha256_hash.hexdigest()
+__all__ = [
+    "SignatureError",
+    "generate_keypair",
+    "sign_message",
+    "verify_signature",
+    "compute_payload_hash",
+    "compute_archive_sha256",
+]

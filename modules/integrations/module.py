@@ -6,7 +6,7 @@ AdminModule не знает про integrations; список интеграци
 """
 
 from core.runtime_module import RuntimeModule
-from core.http_registry import HttpEndpoint
+from core.http import HttpEndpoint
 
 
 class IntegrationsModule(RuntimeModule):

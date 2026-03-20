@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Optional, List, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from core.module_manager import ModuleSpec
+    from core.module import ModuleSpec
 
 
 @dataclass

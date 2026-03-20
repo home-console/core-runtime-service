@@ -25,7 +25,7 @@ def register_core_http(runtime):
     # NOTE: Webhook service регистрация откложена - сервис будет зарегистрирован
     # во время первого вызова через lazy registration pattern
     try:
-        from core.http_registry import HttpEndpoint
+        from core.http import HttpEndpoint
         
         # Register webhook test endpoint
         runtime.http.register(HttpEndpoint(

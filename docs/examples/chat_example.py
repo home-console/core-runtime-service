@@ -10,7 +10,7 @@ from core.http_registry import HttpEndpoint
 from fastapi import WebSocket
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, UTC
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +96,7 @@ class ChatPluginExample(BasePlugin):
                     response = {
                         "type": "message",
                         "echo": message,
-                        "timestamp": datetime.utcnow().isoformat(),
+                        "timestamp": datetime.now(UTC).isoformat(),
                         "server": "Chat Example",
                     }
                     await websocket.send_json(response)
@@ -104,7 +104,7 @@ class ChatPluginExample(BasePlugin):
                 elif action == "ping":
                     await websocket.send_json({
                         "type": "pong",
-                        "timestamp": datetime.utcnow().isoformat(),
+                        "timestamp": datetime.now(UTC).isoformat(),
                     })
                 
                 elif action == "set_id":

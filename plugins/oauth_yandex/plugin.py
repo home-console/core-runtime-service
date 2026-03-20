@@ -908,7 +908,7 @@ class OAuthYandexPlugin(BasePlugin):
         #   напрямую через HTTP.
         # - UI НЕ должен передавать OAuth параметры после configure —
         #   они берутся из storage автоматически.
-        from core.http_registry import HttpEndpoint
+        from core.http import HttpEndpoint
         try:
             # POST /oauth/yandex/configure — сохранить конфигурацию OAuth
             self.runtime.http.register(HttpEndpoint(

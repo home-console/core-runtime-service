@@ -17,7 +17,7 @@ Remote metrics — внешний сборщик метрик как system plug
 """
 
 import sys
-from datetime import datetime
+from datetime import datetime, UTC
 
 try:
     from fastapi import FastAPI, HTTPException, Request
@@ -53,7 +53,7 @@ async def get_metadata():
 
 @app.get("/plugin/health")
 async def get_health():
-    return {"status": "ok", "loaded": _state["loaded"], "started": _state["started"], "timestamp": datetime.utcnow().isoformat()}
+    return {"status": "ok", "loaded": _state["loaded"], "started": _state["started"], "timestamp": datetime.now(UTC).isoformat()}
 
 
 @app.post("/plugin/load")
@@ -62,7 +62,7 @@ async def plugin_load():
         if _state["loaded"]:
             return {"status": "already loaded"}
         _state["loaded"] = True
-        _state["metrics"].append({"event": "load", "time": datetime.utcnow().isoformat()})
+        _state["metrics"].append({"event": "load", "time": datetime.now(UTC).isoformat()})
         return {"status": "ok", "message": "plugin loaded"}
     except Exception as exc:
         _state["metrics"].append({"event": "load_error", "error": str(exc)})
@@ -77,7 +77,7 @@ async def plugin_start():
         if _state["started"]:
             return {"status": "already started"}
         _state["started"] = True
-        _state["metrics"].append({"event": "start", "time": datetime.utcnow().isoformat()})
+        _state["metrics"].append({"event": "start", "time": datetime.now(UTC).isoformat()})
         return {"status": "ok", "message": "plugin started"}
     except Exception as exc:
         _state["metrics"].append({"event": "start_error", "error": str(exc)})
@@ -90,7 +90,7 @@ async def plugin_stop():
         if not _state["started"]:
             return {"status": "already stopped"}
         _state["started"] = False
-        _state["metrics"].append({"event": "stop", "time": datetime.utcnow().isoformat()})
+        _state["metrics"].append({"event": "stop", "time": datetime.now(UTC).isoformat()})
         return {"status": "ok", "message": "plugin stopped"}
     except Exception as exc:
         _state["metrics"].append({"event": "stop_error", "error": str(exc)})
@@ -102,7 +102,7 @@ async def plugin_unload():
     try:
         _state["loaded"] = False
         _state["started"] = False
-        _state["metrics"].append({"event": "unload", "time": datetime.utcnow().isoformat()})
+        _state["metrics"].append({"event": "unload", "time": datetime.now(UTC).isoformat()})
         return {"status": "ok", "message": "plugin unloaded"}
     except Exception as exc:
         _state["metrics"].append({"event": "unload_error", "error": str(exc)})
@@ -118,7 +118,7 @@ async def report_metrics(request: Request):
         name = body.get("name")
         value = body.get("value")
         tags = body.get("tags", {})
-        record = {"name": name, "value": value, "tags": tags, "timestamp": datetime.utcnow().isoformat()}
+        record = {"name": name, "value": value, "tags": tags, "timestamp": datetime.now(UTC).isoformat()}
         # Для простоты — выводим и сохраняем
         print(record)
         _state["metrics"].append(record)

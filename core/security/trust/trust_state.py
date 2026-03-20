@@ -12,7 +12,7 @@ Design: Immutable, audit-friendly, deterministic
 
 from dataclasses import dataclass, field
 from enum import Enum
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import Any, Optional
 
 
@@ -114,7 +114,7 @@ class TrustDecision:
     new_state: TrustState
     reason: str
     events: list[str] = field(default_factory=list)
-    timestamp: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     
     def __post_init__(self):
         """Validate decision consistency."""

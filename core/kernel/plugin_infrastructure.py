@@ -15,7 +15,6 @@ PluginInfrastructureCoordinator — координация инфраструк�
 from __future__ import annotations
 
 from typing import Optional
-
 from core.kernel.base_plugin import BasePlugin, PluginMetadata
 from core.capability_registry import CapabilityRegistry
 from core.operations.manager import OperationManager

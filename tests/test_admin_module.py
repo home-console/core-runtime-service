@@ -9,7 +9,8 @@
 
 import pytest
 from core.runtime.runtime import CoreRuntime
-from core.runtime.module_manager import ModuleSpec
+from core.module import ModuleSpec
+from modules.admin.services.introspection import _is_debug
 
 # Минимальный набор модулей для тестов admin
 APP_MODULES = [
@@ -80,3 +81,10 @@ async def test_admin_runtime_endpoint(memory_adapter, monkeypatch):
         pass
     
     await runtime.stop()
+
+
+def test_inspector_debug_disabled_by_default(monkeypatch):
+    """Inspector не должен раскрывать debug-only данные без явного DEBUG флага."""
+    monkeypatch.delenv("DEBUG", raising=False)
+    monkeypatch.delenv("DEBUG_MODE", raising=False)
+    assert _is_debug() is False

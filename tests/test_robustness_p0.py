@@ -269,7 +269,8 @@ async def test_concurrent_handler_safety():
     import asyncio
     
     mock_runtime = Mock()
-    router = ExecutionRouter(mock_runtime)
+    with pytest.warns(DeprecationWarning):
+        router = ExecutionRouter(mock_runtime)
     results = {"errors": []}
     
     async def async_handler(context, op):

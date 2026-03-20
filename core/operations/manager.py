@@ -11,6 +11,7 @@ from typing import Any, Optional
 
 from core.operations.models import Operation, OperationInitiator, OperationStatus
 from core.operations.registry import OperationHandlerRegistry
+from core.operations.interface import IOperationExecutor
 from core.operations.executor import OperationExecutor
 from core.operations.storage import OperationStorage
 
@@ -44,7 +45,7 @@ class OperationManager:
         # Создаём компоненты
         self._registry = OperationHandlerRegistry(execution_router=None)
         self._storage = OperationStorage(runtime)
-        self._executor = OperationExecutor(self._registry, runtime, self._storage)
+        self._executor: IOperationExecutor = OperationExecutor(self._registry, runtime, self._storage)
         
         # Error codes that allow retry
         self._retryable_errors = {

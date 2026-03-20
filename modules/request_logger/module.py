@@ -9,7 +9,7 @@ import uuid
 import time
 from typing import Any, Dict, List, Optional
 from collections import deque
-from datetime import datetime
+from datetime import datetime, UTC
 
 from core.runtime_module import RuntimeModule
 
@@ -149,7 +149,7 @@ class RequestLoggerModule(RuntimeModule):
         # Создаём запись лога
         log_entry = {
             "timestamp": time.time(),
-            "datetime": datetime.utcnow().isoformat() + "Z",
+            "datetime": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
             "level": (level or "info").lower(),
             "message": message,
             "context": context or {},

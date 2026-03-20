@@ -7,8 +7,8 @@ Step 17.5: Tamper-evident audit logging via AuditBinder
 Step 17.6: Zero-trust secret access with MFA elevation
 """
 
-from datetime import datetime
-from typing import TYPE_CHECKING, Any, List, Optional
+from typing import Any, Dict, Optional, List, TYPE_CHECKING
+from datetime import datetime, UTC
 
 from core.security import CredentialAccessLevel, CredentialPolicy, RiskAction, Role
 from modules.credentials import (
@@ -163,8 +163,8 @@ class CredentialService:
                 secret_read_roles=[Role.ADMIN],  # Only admin can read secret
                 allowed_users=[user_id],  # Owner can access
                 version=1,
-                created_at=datetime.utcnow().isoformat(),
-                updated_at=datetime.utcnow().isoformat(),
+                created_at=datetime.now(UTC).isoformat(),
+                updated_at=datetime.now(UTC).isoformat(),
             )
             await self.repo.create_policy(policy)
 
@@ -673,7 +673,7 @@ class CredentialService:
                     "user_id": user_id or "system",
                     "credential_id": credential_id,
                     "fingerprint": fingerprint,
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                     "metadata": {"operation": operation},
                 }
                 from core.audit.events import SecurityEvent
@@ -718,7 +718,7 @@ class CredentialService:
                 "user_id": user_id or "system",
                 "credential_id": "",
                 "fingerprint": "",
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
                 "metadata": {
                     "operation": operation,
                     "status": "failure",

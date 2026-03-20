@@ -6,6 +6,7 @@ Service Registry Integration - регистрация сервисов Client Ma
 
 import logging
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from datetime import datetime, UTC
 
 if TYPE_CHECKING:
     from .plugin import ClientManagerPlugin
@@ -188,7 +189,7 @@ async def register_services(plugin: "ClientManagerPlugin") -> None:
         return {
             "status": "ok" if plugin.handler else "initializing",
             "handler": "ready" if plugin.handler else "not ready",
-            "timestamp": __import__('datetime').datetime.utcnow().isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
     
     await registry.register("client_manager.health_check", health_check)

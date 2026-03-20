@@ -9,7 +9,7 @@ from modules.api.security.url_validator import (
     is_private_ip,
     is_allowed_scheme,
 )
-from core.errors import BadRequestError
+from core.exceptions.errors import BadRequestError
 
 
 class TestIsPrivateIp:

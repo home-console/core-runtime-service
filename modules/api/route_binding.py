@@ -287,7 +287,7 @@ def _make_api_handler(runtime: Any, endpoint: Any):
             result = await runtime.service_registry.call(endpoint.service, **params)
         except Exception as e:
             try:
-                from core.errors import (
+                from core.exceptions.errors import (
                     BadRequestError,
                     UnauthorizedError,
                     ForbiddenError,

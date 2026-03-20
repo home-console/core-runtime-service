@@ -7,9 +7,11 @@ PluginSandbox - создание изолированного контекста
 - Установку RuntimeContext для плагина
 """
 
-from typing import Any, Optional
+from typing import Optional, Any
 
-from core.kernel.base_plugin import BasePlugin
+from core.base_plugin import BasePlugin
+from core.plugin_isolation import StorageProxy, ServiceProxy, DEFAULT_ALLOWED_SERVICES
+from core.kernel.plugin_runtime_facade import PluginRuntimeFacade
 
 
 class PluginSandbox:
@@ -67,11 +69,20 @@ class PluginSandbox:
             # Устанавливаем RuntimeContext для плагина (если runtime поддерживает create_context)
             if hasattr(runtime, "create_context"):
                 plugin.context = runtime.create_context()
-
-            # Backward compat: set plugin.runtime so plugins can use self.runtime.operations etc.
-            # Plugins should prefer storage/services proxies, but runtime is available for direct handlers
-            plugin.runtime = runtime  # type: ignore[assignment]
-
+            
+            # Backward compat (SECURITY): provide facade instead of raw CoreRuntime.
+            plugin.runtime = PluginRuntimeFacade(
+                storage=getattr(plugin, "storage", None) or getattr(runtime, "storage", None),
+                service_registry=getattr(runtime, "service_registry", None),
+                http=getattr(runtime, "http", None),
+                operations=getattr(runtime, "operations", None),
+                state=getattr(runtime, "state", None),
+                event_bus=getattr(runtime, "event_bus", None),
+                capabilities=getattr(runtime, "capability_registry", None) or getattr(runtime, "capabilities", None),
+                vault=getattr(runtime, "vault", None),
+                config=getattr(runtime, "config", None),
+            )  # type: ignore[assignment]
+            
         except Exception as e:
             # Isolation setup failed - still continue but log
             from core.logger_helper import warning

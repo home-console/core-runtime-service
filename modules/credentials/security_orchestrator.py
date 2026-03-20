@@ -19,8 +19,8 @@ Design:
 
 from dataclasses import dataclass
 from enum import Enum
-from datetime import datetime
 from typing import Optional, List, TYPE_CHECKING
+from datetime import datetime, UTC
 
 if TYPE_CHECKING:
     from core.audit.binder import AuditBinder
@@ -87,7 +87,7 @@ class SecurityDecision:
         if self.audit_events is None:
             object.__setattr__(self, 'audit_events', [])
         if self.timestamp is None:
-            object.__setattr__(self, 'timestamp', datetime.utcnow().isoformat())
+            object.__setattr__(self, 'timestamp', datetime.now(UTC).isoformat())
 
 
 class CredentialSecurityOrchestrator:

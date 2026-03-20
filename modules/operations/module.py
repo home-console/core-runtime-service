@@ -7,7 +7,7 @@ Services (admin.operations.*) остаются в AdminModule.
 """
 
 from core.runtime_module import RuntimeModule
-from core.http_registry import HttpEndpoint
+from core.http import HttpEndpoint
 
 
 class OperationsModule(RuntimeModule):

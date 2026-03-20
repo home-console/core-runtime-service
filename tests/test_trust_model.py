@@ -18,16 +18,20 @@ import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch, AsyncMock, call
 
-from core.trust.signature import (
+from core.security.trust.legacy_crypto import (
     generate_keypair,
     sign_message,
     verify_signature,
     compute_archive_sha256,
-    compute_payload_hash
+    compute_payload_hash,
+    SignatureError,
+    TrustStore,
+    TrustLevel,
+    TrustError,
+    PluginTrustVerifier,
+    PluginTrustError,
 )
-from core.trust.trust_store import TrustStore, TrustLevel, TrustError
-from core.trust.verifier import PluginTrustVerifier, PluginTrustError
-from core.capability_registry import (
+from core.capability import (
     CapabilityRegistry,
     CapabilitySecurityError,
     _check_capability_namespace_permission
@@ -69,7 +73,6 @@ class TestSignatureGeneration:
         signature = sign_message(message, private_key1)
         
         # Verification with wrong key should fail
-        from core.trust.signature import SignatureError
         with pytest.raises(SignatureError):
             verify_signature(message, public_key2, signature)
     

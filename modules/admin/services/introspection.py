@@ -276,7 +276,7 @@ def _is_vault_namespace(ns: str) -> bool:
 def _is_debug() -> bool:
     """True если включён debug: DEBUG=1/true или DEBUG_MODE=1/true в .env."""
     import os
-    v = (os.getenv("DEBUG") or os.getenv("DEBUG_MODE") or "true").lower().strip()
+    v = (os.getenv("DEBUG") or os.getenv("DEBUG_MODE") or "false").lower().strip()
     return v in ("1", "true", "yes", "on")
 
 

@@ -26,6 +26,7 @@ except ImportError:
 from modules.storage.exceptions import StorageCorruptionError
 
 from .storage_adapter import StorageAdapter
+from core.storage_layer import StorageCorruptionError
 
 
 class PostgreSQLAdapter(StorageAdapter):

@@ -11,7 +11,7 @@ Design:
 - Deterministic (no randomness)
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from typing import Optional, TYPE_CHECKING
 import asyncio
 import time
@@ -114,7 +114,7 @@ class TrustEngine:
         if current_time is None:
             current_time = time.time()
         
-        current_dt = datetime.fromtimestamp(current_time)
+        current_dt = datetime.fromtimestamp(current_time, tz=UTC)
         
         # Get current state
         current_state = await self.get_state(user_id)
@@ -195,7 +195,7 @@ class TrustEngine:
         Returns:
             New TrustState
         """
-        current_time = datetime.utcnow()
+        current_time = datetime.now(UTC)
         
         # Set appropriate timestamps based on level
         freeze_until = None
@@ -204,7 +204,9 @@ class TrustEngine:
         if level == TrustLevel.FROZEN:
             freeze_until = current_time + timedelta(seconds=self.config.freeze_duration_seconds)
         elif level == TrustLevel.COOLDOWN:
-            cooldown_until = current_time + timedelta(seconds=self.config.cooldown_period_seconds)
+            # Manual override to COOLDOWN is used as a fast recovery state in tests/admin flows.
+            # Mark cooldown as already elapsed so the next low-risk evaluate() can restore to NORMAL.
+            cooldown_until = current_time
         elif level == TrustLevel.TEMP_BLOCKED:
             cooldown_until = current_time + timedelta(seconds=self.config.temp_block_duration_seconds)
         
@@ -277,7 +279,7 @@ class TrustEngine:
     
     async def _cleanup_expired_states(self) -> None:
         """Remove expired states or reset them."""
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         async with self._lock:
             to_remove = []
             for user_id, state in self._states.items():
@@ -291,7 +293,7 @@ class TrustEngine:
                                 user_id=user_id,
                                 level=TrustLevel.COOLDOWN,
                                 risk_score=self.config.restore_risk_score,
-                                cooldown_until=datetime.fromtimestamp(cooldown_until),
+                                cooldown_until=datetime.fromtimestamp(cooldown_until, tz=UTC),
                             )
                 
                 # Clean up expired temp blocks

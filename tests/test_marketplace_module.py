@@ -219,6 +219,24 @@ class TestMarketplaceInstaller:
         
         with pytest.raises(InstallerError, match="plugin.json not found"):
             await installer.install_from_file(str(archive_path))
+
+    @pytest.mark.asyncio
+    async def test_install_rejects_zip_slip_archive(self, temp_dir, installer):
+        """Архив не должен писать файлы вне target_dir."""
+        archive_path = temp_dir / "zip_slip.zip"
+        with zipfile.ZipFile(archive_path, "w") as zf:
+            zf.writestr("../escape.txt", "owned")
+            zf.writestr("plugin.json", json.dumps({
+                "name": "test_plugin",
+                "version": "1.0.0",
+                "description": "Test plugin",
+                "author": "test",
+                "entrypoint": "plugin.py",
+            }))
+            zf.writestr("plugin.py", "from core.base_plugin import BasePlugin\nclass TestPlugin(BasePlugin): pass\n")
+
+        with pytest.raises(InstallerError, match="Unsafe archive path|escapes target directory"):
+            await installer.install_from_file(str(archive_path))
     
     @pytest.mark.asyncio
     async def test_install_invalid_manifest(self, temp_dir, installer):
@@ -366,6 +384,20 @@ class TestMarketplaceService:
         
         assert result["status"] == "failure"
         assert "not installed" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_install_from_url_requires_signature_metadata(self, temp_dir):
+        """Registry install must require signature/public_key metadata."""
+        installer = MarketplaceInstaller(temp_dir / "plugins")
+
+        with pytest.raises(InstallerError, match="requires signature and public_key"):
+            await installer.install_from_url(
+                "https://example.com/plugin.zip",
+                sha256="abc",
+                signature=None,
+                public_key=None,
+                runtime=None,
+            )
     
     @pytest.mark.asyncio
     async def test_handle_list_installed(self, mock_runtime):

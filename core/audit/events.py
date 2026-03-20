@@ -25,7 +25,7 @@ Events never contain:
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 from typing import Any, Optional
-from datetime import datetime
+from datetime import datetime, UTC
 from uuid import uuid4
 
 
@@ -129,7 +129,7 @@ class SecurityEvent:
     Empty string if access was denied (before read).
     """
     
-    timestamp: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     """UTC timestamp when event occurred"""
     
     metadata: dict[str, Any] = field(default_factory=dict)

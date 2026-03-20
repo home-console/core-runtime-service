@@ -18,7 +18,9 @@ Secure Storage Wrapper — P0 hardening for cold storage.
 import asyncio
 import os
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import UTC, datetime
+import json
+import time
 from typing import Any, AsyncIterator, Optional
 
 from modules.storage.abstraction import IStorageBackend
@@ -109,7 +111,12 @@ class SecureStorageWrapper:
                     "updated_at": datetime.utcnow().isoformat(),
                 },
             )
-
+            await self._adapter.set("_system.meta", "global_epoch", {
+                "epoch": 0,
+                "updated_at": datetime.now(UTC).isoformat(),
+            })
+        
+ 
         # Проверяем и рассчитываем root hash при старте
         await self._verify_storage_integrity()
 
@@ -204,7 +211,7 @@ class SecureStorageWrapper:
             "root_hash": current_root,
             "epoch": self._current_epoch,
             "signed_by": "core_key",  # Placeholder; real Ed25519/ECDSA signing in Step 17+
-            "calculated_at": datetime.utcnow().isoformat(),
+            "calculated_at": datetime.now(UTC).isoformat(),
         }
 
         # Сохраняем через adapter (без epoch bump, это системная операция)
@@ -274,7 +281,7 @@ class SecureStorageWrapper:
             "key": key,
             "operation": operation,
             "hash": value_hash,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "prev_hash": prev_hash,
         }
 
@@ -293,7 +300,7 @@ class SecureStorageWrapper:
 
         meta = {
             "epoch": self._current_epoch,
-            "updated_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.now(UTC).isoformat(),
         }
 
         # Сохраняем через adapter
@@ -310,7 +317,7 @@ class SecureStorageWrapper:
     ) -> int:
         """Синхронное тело secure_set в одном потоке (bump + audit + set). Возвращает new_epoch."""
         new_epoch = current_epoch + 1
-        meta = {"epoch": new_epoch, "updated_at": datetime.utcnow().isoformat()}
+        meta = {"epoch": new_epoch, "updated_at": datetime.now(UTC).isoformat()}
         if not hasattr(adapter, "_set_with_conn"):
             raise RuntimeError("Adapter does not support run_atomic (_set_with_conn)")
         adapter._set_with_conn(conn, "_system.meta", "global_epoch", meta)
@@ -336,7 +343,7 @@ class SecureStorageWrapper:
             "key": key,
             "operation": "SET",
             "hash": value_hash,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "prev_hash": prev_hash,
         }
         entry_canonical = canonical_json(entry)
@@ -357,7 +364,7 @@ class SecureStorageWrapper:
     ) -> tuple[int, bool]:
         """Синхронное тело secure_delete в одном потоке. Возвращает (new_epoch, deleted)."""
         new_epoch = current_epoch + 1
-        meta = {"epoch": new_epoch, "updated_at": datetime.utcnow().isoformat()}
+        meta = {"epoch": new_epoch, "updated_at": datetime.now(UTC).isoformat()}
         adapter._set_with_conn(conn, "_system.meta", "global_epoch", meta)
         audit_keys = adapter._list_keys_with_conn(conn, "_system.audit_log")
         prev_hash = None
@@ -381,7 +388,7 @@ class SecureStorageWrapper:
             "key": key,
             "operation": "DELETE",
             "hash": value_hash,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "prev_hash": prev_hash,
         }
         entry_canonical = canonical_json(entry)

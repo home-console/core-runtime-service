@@ -22,10 +22,18 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
+import shutil
+import os
+import asyncio
+from pathlib import Path, PurePosixPath
+from typing import Dict, Any, Optional, Tuple
+from datetime import UTC, datetime
 
 from core.trust import PluginTrustError, PluginTrustVerifier, TrustStore
 from modules.plugins.schema import ValidationError as SchemaValidationError
 from modules.plugins.schema import validate_plugin_json
+from core.plugin_schema import validate_plugin_json, ValidationError as SchemaValidationError
+from core.security.trust.legacy_crypto import PluginTrustVerifier, PluginTrustError, TrustStore
 
 
 class InstallerError(Exception):
@@ -278,6 +286,7 @@ class MarketplaceInstaller:
                 "version": plugin_version,
                 "path": str(target_dir),
                 "installed_at": datetime.now(timezone.utc).isoformat(),
+                "installed_at": datetime.now(UTC).isoformat(),
                 "hash": calculated_hash,
                 "entrypoint": entrypoint,
                 "capabilities_provided": plugin_data.get("capabilities_provided", []),
@@ -339,6 +348,7 @@ class MarketplaceInstaller:
         return {
             "name": plugin_name,
             "uninstalled_at": datetime.now(timezone.utc).isoformat(),
+            "uninstalled_at": datetime.now(UTC).isoformat(),
         }
 
     def _is_supported_archive(self, path: Path) -> bool:
@@ -354,14 +364,46 @@ class MarketplaceInstaller:
         return sha256_hash.hexdigest()
 
     def _extract_archive(self, archive_path: Path, target_dir: str) -> None:
-        """Extract ZIP or TAR archive."""
+        """Extract ZIP or TAR archive safely."""
+        target_root = Path(target_dir).resolve()
+
+        def _safe_destination(member_name: str) -> Path:
+            parts = PurePosixPath(member_name).parts
+            if not parts:
+                raise InstallerError("Archive contains empty member name")
+            if any(part in ("", ".", "..") for part in parts):
+                raise InstallerError(f"Unsafe archive path: {member_name}")
+            destination = (target_root / Path(*parts)).resolve()
+            if destination != target_root and target_root not in destination.parents:
+                raise InstallerError(f"Archive path escapes target directory: {member_name}")
+            return destination
+
         try:
             if archive_path.suffix == ".zip":
                 with zipfile.ZipFile(archive_path, "r") as zf:
-                    zf.extractall(target_dir)
+                    for info in zf.infolist():
+                        destination = _safe_destination(info.filename)
+                        if info.is_dir():
+                            destination.mkdir(parents=True, exist_ok=True)
+                            continue
+                        destination.parent.mkdir(parents=True, exist_ok=True)
+                        with zf.open(info, "r") as src, open(destination, "wb") as dst:
+                            shutil.copyfileobj(src, dst)
             elif str(archive_path).endswith((".tar.gz", ".tgz")):
                 with tarfile.open(archive_path, "r:gz") as tf:
-                    tf.extractall(target_dir)
+                    for member in tf.getmembers():
+                        if member.issym() or member.islnk() or member.isdev():
+                            raise InstallerError(f"Unsafe archive member type: {member.name}")
+                        destination = _safe_destination(member.name)
+                        if member.isdir():
+                            destination.mkdir(parents=True, exist_ok=True)
+                            continue
+                        extracted = tf.extractfile(member)
+                        if extracted is None:
+                            raise InstallerError(f"Failed to extract archive member: {member.name}")
+                        destination.parent.mkdir(parents=True, exist_ok=True)
+                        with extracted, open(destination, "wb") as dst:
+                            shutil.copyfileobj(extracted, dst)
             else:
                 raise InstallerError(f"Unknown archive format: {archive_path}")
         except (zipfile.BadZipFile, tarfile.TarError) as e:
@@ -374,8 +416,11 @@ class MarketplaceInstaller:
 
         # Add plugin directory to path
         plugin_dir_str = str(plugin_dir)
+        path_inserted = False
         if plugin_dir_str not in sys.path:
             sys.path.insert(0, plugin_dir_str)
+            path_inserted = True
+        
 
         # Load module
         entrypoint_path = plugin_dir / entrypoint
@@ -386,6 +431,14 @@ class MarketplaceInstaller:
             raise InstallerError(f"Cannot load module: {entrypoint}")
 
         module = importlib.util.module_from_spec(spec)
+        try:
+            spec.loader.exec_module(module)
+            return module
+        finally:
+            if path_inserted and sys.path and sys.path[0] == plugin_dir_str:
+                sys.path.pop(0)
+    
+    
         spec.loader.exec_module(module)
         return module
 
@@ -415,6 +468,11 @@ class MarketplaceInstaller:
         Raises:
             InstallerError: if download or installation fails
         """
+        if not signature or not public_key:
+            raise InstallerError(
+                "Marketplace install requires signature and public_key from registry metadata"
+            )
+
         try:
             import aiohttp
         except ImportError:
@@ -465,6 +523,7 @@ class MarketplaceInstaller:
                     raise InstallerError(f"Download timeout ({TIMEOUT}s)")
                 except aiohttp.ClientError as e:
                     raise InstallerError(f"Download failed: {e}")
+            
 
             # If signature provided, it will be verified during install_from_file
             # (signature validation is Step 11 responsibility)

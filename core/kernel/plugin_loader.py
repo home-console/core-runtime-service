@@ -316,6 +316,9 @@ class PluginManifestLoader:
                     component="plugin_loader"
                 )
                 return False
+            finally:
+                if path_inserted and sys.path and sys.path[0] == str(plugin_dir):
+                    sys.path.pop(0)
                 
         except Exception as e:
             import traceback

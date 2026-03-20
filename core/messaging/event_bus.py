@@ -19,6 +19,34 @@ logger = logging.getLogger(__name__)
 EventHandler = Callable[[str, dict[str, Any]], Awaitable[None]]
 
 
+class EventBusMiddleware:
+    """
+    Extension point вокруг publish().
+
+    Реализации можно использовать для метрик, трассировки, фильтрации и
+    диагностики, не вмешиваясь в бизнес-обработчики событий.
+    """
+
+    async def before_publish(self, event_type: str, data: dict[str, Any]) -> None:
+        pass
+
+    async def after_publish(
+        self,
+        event_type: str,
+        data: dict[str, Any],
+        subscriber_count: int,
+    ) -> None:
+        pass
+
+    async def on_handler_error(
+        self,
+        event_type: str,
+        data: dict[str, Any],
+        error: Exception,
+    ) -> None:
+        pass
+
+
 class EventBus:
     """
     Простая шина событий для обмена сообщениями между плагинами.
@@ -32,8 +60,30 @@ class EventBus:
     def __init__(self):
         # Словарь: event_type -> list[handler]
         self._handlers: dict[str, list[EventHandler]] = defaultdict(list)
+        self._middleware: list[EventBusMiddleware] = []
         # Lock для thread-safety операций с _handlers
         self._lock = asyncio.Lock()
+
+    async def add_middleware(self, middleware: EventBusMiddleware) -> None:
+        """Добавить middleware для publish lifecycle."""
+        async with self._lock:
+            self._middleware.append(middleware)
+
+    async def remove_middleware(self, middleware: EventBusMiddleware) -> None:
+        """Удалить middleware, если он зарегистрирован."""
+        async with self._lock:
+            try:
+                self._middleware.remove(middleware)
+            except ValueError:
+                pass
+
+    async def list_middleware(self) -> list[str]:
+        """Список middleware для diagnostics."""
+        async with self._lock:
+            return [
+                getattr(m, "__class__", type(m)).__name__
+                for m in self._middleware
+            ]
 
     async def subscribe(self, event_type: str, handler: EventHandler) -> None:
         """
@@ -85,6 +135,10 @@ class EventBus:
         # Получаем копию списка обработчиков под lock для thread-safety
         async with self._lock:
             handlers = list(self._handlers.get(event_type, []))
+            middleware = list(self._middleware)
+
+        for m in middleware:
+            await m.before_publish(event_type, data)
         
         # Запускаем все обработчики параллельно
         if handlers:
@@ -95,12 +149,17 @@ class EventBus:
             # Логируем ошибки в обработчиках
             for result in results:
                 if isinstance(result, Exception):
+                    for m in middleware:
+                        await m.on_handler_error(event_type, data, result)
                     logger.warning(
                         "EventBus: ошибка в обработчике события '%s': %s",
                         event_type,
                         result,
                         exc_info=isinstance(result, BaseException),
                     )
+
+        for m in middleware:
+            await m.after_publish(event_type, data, len(handlers))
 
     def list_subscriptions(self) -> dict[str, list[dict[str, str]]]:
         """
@@ -135,3 +194,4 @@ class EventBus:
         """Очистить все подписки."""
         async with self._lock:
             self._handlers.clear()
+            self._middleware.clear()

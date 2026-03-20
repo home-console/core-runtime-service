@@ -4,7 +4,7 @@ Credential Repository errors.
 Custom exceptions for repository operations.
 """
 
-from modules.storage.errors import StorageSecurityError
+from core.storage_layer import StorageSecurityError
 
 
 class CredentialRepositoryError(StorageSecurityError):

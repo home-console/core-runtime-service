@@ -68,3 +68,49 @@ async def test_subscribers_count_and_clear():
     assert await bus.get_subscribers_count('x') == 2
     await bus.clear()
     assert await bus.get_subscribers_count('x') == 0
+
+
+class _TrackingEventMiddleware(EventBusMiddleware):
+    def __init__(self):
+        self.events = []
+
+    async def before_publish(self, event_type, data):
+        self.events.append(("before", event_type, data))
+
+    async def after_publish(self, event_type, data, subscriber_count):
+        self.events.append(("after", event_type, subscriber_count))
+
+    async def on_handler_error(self, event_type, data, error):
+        self.events.append(("error", event_type, type(error).__name__))
+
+
+@pytest.mark.asyncio
+async def test_event_bus_middleware_receives_publish_lifecycle():
+    bus = EventBus()
+    mw = _TrackingEventMiddleware()
+
+    async def handler(event_type, data):
+        return None
+
+    await bus.add_middleware(mw)
+    await bus.subscribe("evt", handler)
+    await bus.publish("evt", {"v": 1})
+
+    assert ("before", "evt", {"v": 1}) in mw.events
+    assert ("after", "evt", 1) in mw.events
+    assert " _TrackingEventMiddleware".strip() in await bus.list_middleware()
+
+
+@pytest.mark.asyncio
+async def test_event_bus_middleware_receives_handler_errors():
+    bus = EventBus()
+    mw = _TrackingEventMiddleware()
+
+    async def bad_handler(event_type, data):
+        raise ValueError("boom")
+
+    await bus.add_middleware(mw)
+    await bus.subscribe("evt", bad_handler)
+    await bus.publish("evt", {"v": 1})
+
+    assert ("error", "evt", "ValueError") in mw.events

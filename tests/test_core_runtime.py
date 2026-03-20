@@ -1,10 +1,12 @@
 import pytest
+from unittest.mock import AsyncMock
 
 from core.runtime.runtime import CoreRuntime
 from core.config import Config
 from core.orchestration import NullOrchestrationBackend
-from core.policy_engine import PolicyEngine
+from core.policy import PolicyEngine
 from core.runtime import CoreRuntime
+from core.runtime_module import RuntimeModule
 from core.state_engine import StateEngine
 
 
@@ -128,3 +130,36 @@ async def test_runtime_accepts_injected_policy_engine(memory_adapter, monkeypatc
     runtime = CoreRuntime(memory_adapter, policy_engine=engine)
 
     assert runtime.policy_engine is engine
+
+
+@pytest.mark.asyncio
+async def test_runtime_runs_transport_runner(memory_adapter, monkeypatch):
+    monkeypatch.setenv("TEST_MODE", "1")
+    runtime = CoreRuntime(memory_adapter)
+
+    class DummyTransportModule(RuntimeModule):
+        @property
+        def name(self) -> str:
+            return "dummy_transport"
+
+        async def register(self) -> None:
+            pass
+
+        async def start(self) -> None:
+            pass
+
+        async def stop(self) -> None:
+            pass
+
+        async def run_transport(self, runtime_obj) -> None:
+            runtime_obj._transport_called = True
+
+    await runtime.module_manager.register(DummyTransportModule(runtime))
+    runtime.start = AsyncMock()
+    runtime.shutdown = AsyncMock()
+
+    await runtime.run()
+
+    assert getattr(runtime, "_transport_called", False) is True
+    runtime.start.assert_awaited_once()
+    runtime.shutdown.assert_awaited_once()

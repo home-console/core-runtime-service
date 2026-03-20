@@ -11,7 +11,7 @@ Session-Based Vault Model with TTL.
 
 import asyncio
 from typing import Optional, Awaitable
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from contextlib import asynccontextmanager
 import hashlib
 
@@ -133,7 +133,7 @@ class VaultSession:
             wipe_memory(bytearray(master_key_bytes))
             
             # Set unlock time and clear expiration flags
-            self._unlock_time = datetime.utcnow()
+            self._unlock_time = datetime.now(UTC)
             self._locked = False
             self._expired = False
             
@@ -208,7 +208,7 @@ class VaultSession:
         if not self._unlock_time or self._locked or self._expired:
             return None
         
-        elapsed = (datetime.utcnow() - self._unlock_time).total_seconds()
+        elapsed = (datetime.now(UTC) - self._unlock_time).total_seconds()
         remaining = max(0, self._ttl_seconds - elapsed)
         return int(remaining)
     
