@@ -16,16 +16,6 @@ _request_id_var: ContextVar[Optional[str]] = ContextVar("request_id", default=No
 _operation_id_var: ContextVar[Optional[str]] = ContextVar("operation_id", default=None)
 
 
-def _get_services(runtime: Any):
-    # TODO: remove fallback after full KernelContext migration
-    context = getattr(runtime, "context", None)
-    if context is not None and hasattr(context, "get_service"):
-        services = context.get_service("service_registry")
-    else:
-        services = getattr(runtime, "service_registry", None)
-    return services
-
-
 def get_request_id() -> Optional[str]:
     """Получить request_id из текущего контекста выполнения."""
     return _request_id_var.get()
@@ -79,7 +69,7 @@ async def _log_request_to_console(
     message = f"{method} {path} {status_code} {duration_ms}ms{client_str}{err_str}"
 
     try:
-        services = _get_services(runtime)
+        services = runtime.kernel_context.get_service("service_registry")
         if runtime and await services.has_service("logger.log"):
             await services.call(
                 "logger.log",
@@ -199,7 +189,7 @@ async def request_logger_middleware(request: Request, call_next: Callable) -> Re
     
     try:
         # Проверяем, доступен ли RequestLoggerModule
-        services = _get_services(runtime)
+        services = runtime.kernel_context.get_service("service_registry")
         has_request_logger = await services.has_service("request_logger.log")
         
         if has_request_logger:
@@ -318,7 +308,7 @@ async def request_logger_middleware(request: Request, call_next: Callable) -> Re
         }
         
         try:
-            services = _get_services(runtime)
+            services = runtime.kernel_context.get_service("service_registry")
             has_request_logger = await services.has_service("request_logger.log")
             if has_request_logger:
                 # Получаем operation_id для этого запроса

@@ -10,22 +10,12 @@ from core.system_context import create_system_context
 from core.auth_contextvars import set_current_auth_context, get_current_auth_context
 
 
-def _get_services(runtime: Any):
-    # TODO: remove fallback after full KernelContext migration
-    context = getattr(runtime, "context", None)
-    if context is not None and hasattr(context, "get_service"):
-        services = context.get_service("service_registry")
-    else:
-        services = getattr(runtime, "service_registry", None)
-    return services
-
-
 async def admin_devices_list(runtime: Any):
     ctx = create_system_context("admin", "devices.list")
     prev = get_current_auth_context()
     try:
         set_current_auth_context(ctx)
-        services = _get_services(runtime)
+        services = runtime.kernel_context.get_service("service_registry")
         return await services.call("devices.list")
     finally:
         set_current_auth_context(prev)
@@ -39,7 +29,7 @@ async def admin_devices_get(runtime: Any, id: Optional[str] = None, **kwargs):
     prev = get_current_auth_context()
     try:
         set_current_auth_context(ctx)
-        services = _get_services(runtime)
+        services = runtime.kernel_context.get_service("service_registry")
         return await services.call("devices.get", device_id)
     finally:
         set_current_auth_context(prev)
@@ -52,7 +42,7 @@ async def admin_devices_list_external(runtime: Any, provider: Optional[str] = No
     prev = get_current_auth_context()
     try:
         set_current_auth_context(ctx)
-        services = _get_services(runtime)
+        services = runtime.kernel_context.get_service("service_registry")
         return await services.call("devices.list_external", provider)
     finally:
         set_current_auth_context(prev)
@@ -64,7 +54,7 @@ async def admin_devices_list_mappings(runtime: Any) -> Any:
         prev = get_current_auth_context()
         try:
             set_current_auth_context(ctx)
-            services = _get_services(runtime)
+            services = runtime.kernel_context.get_service("service_registry")
             return await services.call("devices.list_mappings")
         finally:
             set_current_auth_context(prev)
@@ -81,7 +71,7 @@ async def admin_devices_get_external_for_device(runtime: Any, id: Optional[str] 
     prev = get_current_auth_context()
     try:
         set_current_auth_context(ctx)
-        services = _get_services(runtime)
+        services = runtime.kernel_context.get_service("service_registry")
         return await services.call("devices.get_external_for_device", device_id)
     finally:
         set_current_auth_context(prev)

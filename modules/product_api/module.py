@@ -40,11 +40,11 @@ class ProductApiModule(RuntimeModule):
     async def register(self) -> None:
         async def _devices_list(**kwargs: Any) -> Any:
             """BFF: GET /api/v1/devices → devices.list()."""
-            return await self.context.services.call("devices.list")
+            return await services.call("devices.list")
 
         async def _devices_get(id: str, **kwargs: Any) -> Any:
             """BFF: GET /api/v1/devices/{id} → devices.get(id)."""
-            return await self.context.services.call("devices.get", id)
+            return await services.call("devices.get", id)
 
         async def _devices_set_state(id: str, body: Any = None, **kwargs: Any) -> Any:
             """BFF: POST /api/v1/devices/{id}/state → devices.set_state(id, state)."""
@@ -55,25 +55,22 @@ class ProductApiModule(RuntimeModule):
                 and isinstance(body["state"], dict)
             ):
                 state = body["state"]
-            return await self.context.services.call("devices.set_state", id, state)
+            return await services.call("devices.set_state", id, state)
 
         async def _devices_get_external(id: str, **kwargs: Any) -> Any:
             """BFF: GET /api/v1/devices/{id}/external → devices.get(id) затем devices.get_external_for_device(id)."""
-            await self.context.services.call(
-                "devices.get", id
-            )  # проверка доступа (ACL)
-            return await self.context.services.call(
-                "devices.get_external_for_device", id
-            )
+            await services.call("devices.get", id)  # проверка доступа (ACL)
+            return await services.call("devices.get_external_for_device", id)
 
-        await self.context.services.register(
+        reg_services = self.runtime.kernel_context.get_service("service_registry")
+        await reg_services.register(
             "product_api.v1.devices.list", _devices_list
         )
-        await self.context.services.register("product_api.v1.devices.get", _devices_get)
-        await self.context.services.register(
+        await reg_services.register("product_api.v1.devices.get", _devices_get)
+        await reg_services.register(
             "product_api.v1.devices.set_state", _devices_set_state
         )
-        await self.context.services.register(
+        await reg_services.register(
             "product_api.v1.devices.get_external", _devices_get_external
         )
 
@@ -111,8 +108,8 @@ class ProductApiModule(RuntimeModule):
         )
 
         # User credentials (свои креды у каждого пользователя)
-        runtime = self.runtime
-        services = self.context.services
+        ctx = self.runtime.kernel_context
+        services = ctx.get_service("service_registry")
 
         async def user_credentials_list(**kw: Any) -> Any:
             """
@@ -124,7 +121,7 @@ class ProductApiModule(RuntimeModule):
             from modules.admin.credentials_handlers import _service_not_loaded
 
             try:
-                return await runtime.service_registry.call(
+                return await services.call(
                     "credential.list",
                     **_user_cred_params(kw),
                 )
@@ -162,7 +159,7 @@ class ProductApiModule(RuntimeModule):
             )
 
             try:
-                return await runtime.service_registry.call(
+                return await services.call(
                     "credential.create",
                     credential=cred,
                     secret=secret_bytes,
@@ -178,14 +175,14 @@ class ProductApiModule(RuntimeModule):
                 ) from e
 
         async def user_credentials_get(**kw: Any) -> Any:
-            return await runtime.service_registry.call(
+            return await services.call(
                 "credential.get",
                 credential_id=kw.get("credential_id"),
                 **_user_cred_params(kw),
             )
 
         async def user_credentials_get_secret(**kw: Any) -> Any:
-            out = await runtime.service_registry.call(
+            out = await services.call(
                 "credential.get_with_secret",
                 credential_id=kw.get("credential_id"),
                 **_user_cred_params(kw),
@@ -210,7 +207,7 @@ class ProductApiModule(RuntimeModule):
                 if secret_str and isinstance(secret_str, str)
                 else None
             )
-            return await runtime.service_registry.call(
+            return await services.call(
                 "credential.update",
                 credential=cred,
                 secret=secret_bytes,
@@ -218,7 +215,7 @@ class ProductApiModule(RuntimeModule):
             )
 
         async def user_credentials_delete(**kw: Any) -> Any:
-            await runtime.service_registry.call(
+            await services.call(
                 "credential.delete",
                 credential_id=kw.get("credential_id"),
                 **_user_cred_params(kw),
@@ -229,7 +226,7 @@ class ProductApiModule(RuntimeModule):
             from modules.admin.credentials_handlers import _ssh_connect_with_credential
             from modules.credentials import CredentialType
 
-            out = await runtime.service_registry.call(
+            out = await services.call(
                 "credential.get_with_secret",
                 credential_id=kw.get("credential_id"),
                 **_user_cred_params(kw),
@@ -337,6 +334,6 @@ class ProductApiModule(RuntimeModule):
             "user.v1.credentials.connect",
         ):
             try:
-                await self.context.services.unregister(name)
+                await self.runtime.kernel_context.get_service("service_registry").unregister(name)
             except Exception:
                 pass

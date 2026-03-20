@@ -151,11 +151,7 @@ class AgentControlPlaneModule(RuntimeModule):
             return lambda *args, **kw: fn(self.runtime, *args, **kw)
 
         # Register services with service registry
-        services = (
-            self.context.services
-            if hasattr(self, "context") and self.context
-            else self.runtime.service_registry
-        )
+        services = self.runtime.kernel_context.get_service("service_registry")
         await services.register(
             "admin.agent.create_enrollment_token",
             wrap_agent(admin_agent_create_enrollment_token),

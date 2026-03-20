@@ -61,7 +61,7 @@ async def list_plugins(runtime: Any) -> List[Dict[str, Any]]:
         event_subscriptions = []
         
         try:
-            all_services = await runtime.service_registry.list_services()
+            all_services = await runtime.kernel_context.get_service("service_registry").list_services()
             services = [s for s in all_services if s.startswith(f"{name}.")]
         except Exception:
             pass
@@ -210,7 +210,7 @@ async def get_plugin_details(runtime: Any, plugin_name: str) -> Optional[Dict[st
 
 async def list_services(runtime: Any) -> List[Dict[str, str]]:
     """List all registered services."""
-    services = await runtime.service_registry.list_services()
+    services = await runtime.kernel_context.get_service("service_registry").list_services()
     result = []
     for service in services:
         plugin_name = service.split(".")[0] if "." in service else "core"

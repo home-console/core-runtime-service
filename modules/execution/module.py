@@ -195,18 +195,16 @@ class ExecutionModule(RuntimeModule):
             await scheduler.save_schedule(sched)
 
             # Событие creation (best-effort)
-            event_bus = getattr(self.runtime, "event_bus", None)
-            if event_bus is not None and hasattr(event_bus, "publish"):
-                try:
-                    await event_bus.publish(
-                        "execution.scheduled",
-                        {
-                            "schedule_id": schedule_id,
-                            "operation_type": operation_type,
-                        },
-                    )
-                except Exception:
-                    pass
+            try:
+                await self.runtime.kernel_context.emit(
+                    "execution.scheduled",
+                    {
+                        "schedule_id": schedule_id,
+                        "operation_type": operation_type,
+                    },
+                )
+            except Exception:
+                pass
 
             return {"status": "ok", "schedule_id": schedule_id}
 
@@ -242,19 +240,17 @@ class ExecutionModule(RuntimeModule):
             sched.enabled = False
             await _persist_schedule(sched)
 
-            event_bus = getattr(self.runtime, "event_bus", None)
-            if event_bus is not None and hasattr(event_bus, "publish"):
-                try:
-                    await event_bus.publish(
-                        "execution.schedule.disabled",
-                        {
-                            "schedule_id": sched.schedule_id,
-                            "operation_type": sched.operation_type,
-                            "reason": "manual_pause",
-                        },
-                    )
-                except Exception:
-                    pass
+            try:
+                await self.runtime.kernel_context.emit(
+                    "execution.schedule.disabled",
+                    {
+                        "schedule_id": sched.schedule_id,
+                        "operation_type": sched.operation_type,
+                        "reason": "manual_pause",
+                    },
+                )
+            except Exception:
+                pass
 
             return {"status": "ok", "schedule_id": sched.schedule_id}
 

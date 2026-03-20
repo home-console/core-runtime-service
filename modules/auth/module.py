@@ -103,11 +103,10 @@ class AuthModule(RuntimeModule):
         
         for service_name, handler, admin_only in services_config:
             try:
-                services = self.context.services
-                if hasattr(services, "register_with_acl"):
-                    await services.register_with_acl(service_name, handler, admin_only=admin_only)
-                else:
-                    await services.register(service_name, handler)
+                services = self.runtime.kernel_context.get_service("service_registry")
+                await services.register_with_acl(
+                    service_name, handler, admin_only=admin_only
+                )
             except ValueError:
                 # Service already registered (best-effort)
                 pass

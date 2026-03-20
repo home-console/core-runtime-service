@@ -96,7 +96,7 @@ async def get_or_create_jwt_secret(runtime: Any) -> str:
                 return secret
     except Exception as e:
         try:
-            await runtime.service_registry.call(
+            await runtime.kernel_context.get_service("service_registry").call(
                 "logger.log",
                 level="warning",
                 message="Failed to load JWT secret from storage",
@@ -109,7 +109,7 @@ async def get_or_create_jwt_secret(runtime: Any) -> str:
     # Генерируем новый secret
     secret = secrets.token_urlsafe(JWT_SECRET_KEY_LENGTH)
     try:
-        await runtime.service_registry.call(
+        await runtime.kernel_context.get_service("service_registry").call(
             "logger.log",
             level="info",
             message="Generated new JWT secret",
@@ -122,7 +122,7 @@ async def get_or_create_jwt_secret(runtime: Any) -> str:
         # Оборачиваем в dict, так как storage.set требует dict
         await runtime.storage.set("auth_config", JWT_SECRET_KEY_STORAGE_KEY, {"value": secret})
         try:
-            await runtime.service_registry.call(
+            await runtime.kernel_context.get_service("service_registry").call(
                 "logger.log",
                 level="debug",
                 message="Saved new JWT secret to storage",
@@ -132,7 +132,7 @@ async def get_or_create_jwt_secret(runtime: Any) -> str:
             pass
     except Exception as e:
         try:
-            await runtime.service_registry.call(
+            await runtime.kernel_context.get_service("service_registry").call(
                 "logger.log",
                 level="error",
                 message="Failed to save JWT secret to storage",
@@ -202,7 +202,7 @@ async def validate_access_token(token: str, secret: str, runtime: Optional[Any] 
         if payload.get("type") != "access":
             if runtime:
                 try:
-                    await runtime.service_registry.call(
+                    await runtime.kernel_context.get_service("service_registry").call(
                         "logger.log",
                         level="warning",
                         message="JWT token type mismatch",
@@ -225,7 +225,7 @@ async def validate_access_token(token: str, secret: str, runtime: Optional[Any] 
     except Exception as e:
         if runtime:
             try:
-                await runtime.service_registry.call(
+                await runtime.kernel_context.get_service("service_registry").call(
                     "logger.log",
                     level="warning",
                     message="JWT token validation error",

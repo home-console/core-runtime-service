@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 
 async def register_ssh_bindings(runtime: Any, context: Any) -> list[str]:
     registered_services: list[str] = []
+    services = runtime.kernel_context.get_service("service_registry")
 
     try:
         from .services import ssh_terminal as ssh_mod
@@ -35,10 +36,7 @@ async def register_ssh_bindings(runtime: Any, context: Any) -> list[str]:
             ("admin.v1.ssh.sessions.close", _ssh_close),
             ("admin.v1.ssh.ws", _ssh_ws),
         ]:
-            if hasattr(context.services, "register_with_acl"):
-                await context.services.register_with_acl(service_name, handler, admin_only=True)
-            else:
-                await context.services.register(service_name, handler)
+            await services.register_with_acl(service_name, handler, admin_only=True)
             registered_services.append(service_name)
 
         for endpoint in [

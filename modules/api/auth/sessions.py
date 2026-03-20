@@ -64,7 +64,7 @@ async def validate_session(runtime: Any, session_id: str) -> Optional[RequestCon
         # Проверяем структуру данных
         if not isinstance(session_data, dict):
             try:
-                await runtime.service_registry.call(
+                await runtime.kernel_context.get_service("service_registry").call(
                     "logger.log",
                     level="warning",
                     message=f"Invalid session data structure for session: {session_id[:8]}...",
@@ -135,7 +135,7 @@ async def validate_session(runtime: Any, session_id: str) -> Optional[RequestCon
     except Exception as e:
         # Ошибка при чтении storage - логируем и возвращаем None
         try:
-            await runtime.service_registry.call(
+            await runtime.kernel_context.get_service("service_registry").call(
                 "logger.log",
                 level="error",
                 message=f"Error validating session: {e}",
@@ -347,7 +347,7 @@ async def revoke_all_sessions(runtime: Any, user_id: str) -> int:
     except Exception as e:
         # Логируем ошибку, но не падаем
         try:
-            await runtime.service_registry.call(
+            await runtime.kernel_context.get_service("service_registry").call(
                 "logger.log",
                 level="error",
                 message=f"Error revoking all sessions for user {user_id}: {e}",

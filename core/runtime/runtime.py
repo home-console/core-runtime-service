@@ -34,11 +34,12 @@ from core.operations.manager import OperationManager
 from core.policy import PolicyEngine
 from core.orchestration import (
     DockerOrchestrationBackend,
+    NullOrchestrationBackend,
     OrchestrationService,
-    set_orchestration_service,
 )
 from core.kernel.context import KernelContext
-from core.plugins import PluginManager, PluginState
+from core.plugins import PluginState
+from core.kernel.plugin_manager import PluginManager
 from core.runtime.module_manager import ModuleManager
 from core.runtime.runtime_context import RuntimeContext
 from core.service_registry import ServiceRegistry
@@ -48,6 +49,7 @@ from modules.agent import (
     AgentRegistry,
     MTLSCertificateAuthority,
 )
+from modules.events.validation import EventValidationMiddleware
 
 # Import extracted lifecycle and monitoring functions
 from core.runtime.lifecycle import start_runtime, stop_runtime, shutdown_runtime, hydrate_critical_state
@@ -115,6 +117,7 @@ class CoreRuntime:
         self.capability_registry = CapabilityRegistry()
         # Operations manager (инфраструктура для всех модулей)
         self.operations = OperationManager(self)
+        # TODO: remove modules.plugins.manager shim (backward compat)
         self.plugin_manager = PluginManager(self)
         module_path_prefix = getattr(config, "module_path_prefix", "modules") if config is not None else "modules"
         self.module_manager = ModuleManager(self, module_path_prefix=module_path_prefix)
@@ -138,8 +141,9 @@ class CoreRuntime:
         self._config = config
 
         self.kernel_context: Optional[KernelContext] = KernelContext(
-            self.service_registry,
+            {"service_registry": self.service_registry},
             self.state_engine,
+            event_bus=self.event_bus,
         )
 
         self._running = False
@@ -243,7 +247,11 @@ class CoreRuntime:
             RuntimeContext с storage, services, http, capabilities, operations
         """
         # TODO: migrate to KernelContext
-        self.kernel_context = KernelContext(self.service_registry, self.state_engine)
+        self.kernel_context = KernelContext(
+            {"service_registry": self.service_registry},
+            self.state_engine,
+            event_bus=self.event_bus,
+        )
         return RuntimeContext(
             storage=self.storage,
             vault=self.vault,
@@ -352,6 +360,10 @@ class CoreRuntime:
                     component="runtime",
                 )
 
+            middleware_names = await self.event_bus.list_middleware()
+            if EventValidationMiddleware.__name__ not in middleware_names:
+                await self.event_bus.add_middleware(EventValidationMiddleware())
+
             # Модули регистрируются приложением (bootstrap) через register_module_specs() до вызова start().
             # Проверка, что все REQUIRED модули зарегистрированы (список required задаётся приложением)
             self.module_manager.check_required_modules_registered()
@@ -400,7 +412,8 @@ class CoreRuntime:
 
             # P0: Автозагрузка плагинов из папки plugins/ (один раз после модулей)
             # Сканируем папку, в каждой подпапке ищем manifest/plugin.json — если валидный, грузим плагин
-            if not self.plugin_manager.list_plugins() and not os.getenv("TEST_MODE"):
+            plugins = await self.plugin_manager.list_plugins()
+            if not plugins and not os.getenv("TEST_MODE"):
                 try:
                     if debug_mode:
                         await info(

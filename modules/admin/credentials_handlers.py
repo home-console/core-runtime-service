@@ -22,16 +22,6 @@ _ADMIN_USER_ID = "admin"
 _ADMIN_ROLES = ["admin"]
 
 
-def _get_services(runtime: Any):
-    # TODO: remove fallback after full KernelContext migration
-    context = getattr(runtime, "context", None)
-    if context is not None and hasattr(context, "get_service"):
-        services = context.get_service("service_registry")
-    else:
-        services = getattr(runtime, "service_registry", None)
-    return services
-
-
 def _service_not_loaded(e: Exception) -> bool:
     """Проверка, что ошибка из-за отсутствия сервиса (модуль не загружен)."""
     s = str(e).lower()
@@ -59,7 +49,7 @@ async def admin_credentials_list(runtime: Any) -> Dict[str, Any]:
         prev = get_current_auth_context()
         try:
             set_current_auth_context(ctx)
-            services = _get_services(runtime)
+            services = runtime.kernel_context.get_service("service_registry")
             out = await services.call(
                 "credential.list",
                 _user_id=_ADMIN_USER_ID,
@@ -112,7 +102,7 @@ async def admin_credentials_create(
         prev = get_current_auth_context()
         try:
             set_current_auth_context(ctx)
-            services = _get_services(runtime)
+            services = runtime.kernel_context.get_service("service_registry")
             return await services.call(
                 "credential.create",
                 credential=credential,
@@ -165,7 +155,7 @@ async def admin_credentials_get_secret(
         prev = get_current_auth_context()
         try:
             set_current_auth_context(ctx)
-            services = _get_services(runtime)
+            services = runtime.kernel_context.get_service("service_registry")
             out = await services.call(
                 "credential.get_with_secret",
                 credential_id=cid,
@@ -205,7 +195,7 @@ async def admin_credentials_get(
         prev = get_current_auth_context()
         try:
             set_current_auth_context(ctx)
-            services = _get_services(runtime)
+            services = runtime.kernel_context.get_service("service_registry")
             return await services.call(
                 "credential.get",
                 credential_id=cid,
@@ -240,7 +230,7 @@ async def admin_credentials_delete(
         prev = get_current_auth_context()
         try:
             set_current_auth_context(ctx)
-            services = _get_services(runtime)
+            services = runtime.kernel_context.get_service("service_registry")
             await services.call(
                 "credential.delete",
                 credential_id=cid,
@@ -284,7 +274,7 @@ async def admin_credentials_update(
         prev = get_current_auth_context()
         try:
             set_current_auth_context(ctx)
-            services = _get_services(runtime)
+            services = runtime.kernel_context.get_service("service_registry")
             return await services.call(
                 "credential.update",
                 credential=credential,

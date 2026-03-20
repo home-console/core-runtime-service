@@ -239,14 +239,14 @@ async def set_state(runtime, device_id: str, state: Dict[str, Any]) -> Dict[str,
             external_id = k
             break
 
-    await runtime.event_bus.publish(
+    await runtime.kernel_context.emit(
         "internal.device_command_requested",
         {
             "internal_id": device_id,
             "external_id": external_id,
             "command": "set_state",
             "params": actual_state,  # Передаём извлечённое состояние
-        }
+        },
     )
 
     return {"ok": True, "queued": True, "external_id": external_id, "state": current_state}
@@ -303,6 +303,35 @@ async def create_mapping(runtime, external_id: str, internal_id: str) -> Dict[st
 
     # Сохраняем dict согласно контракту Storage API
     await runtime.storage.set("devices_mappings", external_id, {"internal_id": internal_id})
+
+    # replay pending state after mapping creation to avoid lost automation triggers
+    pending = None
+    try:
+        pending = await runtime.storage.get(
+            "devices_external_pending_state", external_id
+        )
+    except Exception:
+        pending = None
+
+    if pending is not None:
+        try:
+            await runtime.kernel_context.emit(
+                "external.device_state_reported",
+                {
+                    "external_id": external_id,
+                    "state": pending,
+                    "source": "replay",
+                },
+            )
+        except Exception:
+            # best-effort replay; mapping creation should still succeed
+            pass
+        try:
+            await runtime.storage.delete(
+                "devices_external_pending_state", external_id
+            )
+        except Exception:
+            pass
 
     return {"ok": True, "external_id": external_id, "internal_id": internal_id}
 
@@ -451,7 +480,7 @@ async def auto_map_external(runtime, provider: Optional[str] = None) -> Dict[str
 
                 # Вызываем update_device_fields через service_registry
                 try:
-                    await runtime.service_registry.call(
+                    await runtime.kernel_context.get_service("service_registry").call(
                         "devices.update_device_fields",
                         internal_id,
                         {
@@ -488,7 +517,7 @@ async def auto_map_external(runtime, provider: Optional[str] = None) -> Dict[str
                 )
 
                 # Применяем через update_device_fields
-                await runtime.service_registry.call(
+                await runtime.kernel_context.get_service("service_registry").call(
                     "devices.update_device_fields",
                     internal_id,
                     {"state": device_state},
@@ -623,7 +652,7 @@ async def update_device_fields(runtime, device_id: str, updates: Dict[str, Any])
                     state_diff[key] = {"old": old_val, "new": new_val}
         
         if state_diff or old_online != new_online:
-            await runtime.service_registry.call(
+            await runtime.kernel_context.get_service("service_registry").call(
                 "logger.log",
                 level="debug",
                 message=f"[DEVICE_WRITE] Fields updated",
@@ -655,7 +684,7 @@ async def update_device_fields(runtime, device_id: str, updates: Dict[str, Any])
     
     # DEBUG: log final state after save
     try:
-        await runtime.service_registry.call(
+        await runtime.kernel_context.get_service("service_registry").call(
             "logger.log",
             level="debug",
             message=f"[update_device_fields] Device state updated and saved",

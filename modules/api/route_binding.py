@@ -70,7 +70,7 @@ def bind_routes(runtime: Any, app: Any) -> None:
                             param_values[param_name] = parts[i]
                 try:
                     # WebSocket handlers are long-lived — bypass default_timeout
-                    await runtime.service_registry.call_without_timeout(ep.service, websocket=websocket, **param_values)
+                    await runtime.kernel_context.get_service("service_registry").call_without_timeout(ep.service, websocket=websocket, **param_values)
                 except WebSocketDisconnect:
                     pass
                 except Exception as e:
@@ -115,7 +115,7 @@ def _make_api_handler(runtime: Any, endpoint: Any):
             debug_runtime = getattr(request.app.state, "runtime", None) or runtime
             if debug_runtime and hasattr(debug_runtime, "logger"):
                 try:
-                    await debug_runtime.service_registry.call(
+                    await debug_runtime.kernel_context.get_service("service_registry").call(
                         "logger.log",
                         level="info",
                         message=f"[ROUTE_BINDING] {endpoint.service} auth_config={auth_config} is_public={is_public}",
@@ -279,12 +279,12 @@ def _make_api_handler(runtime: Any, endpoint: Any):
                 params["code"] = body.get("code", "")
         
         # Проверяем существование сервиса
-        if not await runtime.service_registry.has_service(endpoint.service):
+        if not await runtime.kernel_context.get_service("service_registry").has_service(endpoint.service):
             raise HTTPException(status_code=404, detail="service not found")
         
         # Вызываем сервис
         try:
-            result = await runtime.service_registry.call(endpoint.service, **params)
+            result = await runtime.kernel_context.get_service("service_registry").call(endpoint.service, **params)
         except Exception as e:
             try:
                 from core.exceptions.errors import (
@@ -367,14 +367,14 @@ def _make_webhook_handler(runtime: Any, endpoint: Any):
             except Exception:
                 payload = await request.body()
             try:
-                result = await runtime.service_registry.call(
+                result = await runtime.kernel_context.get_service("service_registry").call(
                     endpoint.service,
                     payload=payload,
                     headers=dict(request.headers),
                     raw_request=request
                 )
             except TypeError:
-                result = runtime.service_registry.call(
+                result = runtime.kernel_context.get_service("service_registry").call(
                     endpoint.service,
                     payload=payload,
                     headers=dict(request.headers),
@@ -395,10 +395,10 @@ def _make_ws_handler(runtime: Any, endpoint: Any):
         try:
             # WebSocket‑хендлеры по определению долгоживущие, поэтому вызываем
             # сервис без default_timeout, иначе соединение будет рваться по таймауту.
-            if hasattr(runtime.service_registry, "call_without_timeout"):
-                await runtime.service_registry.call_without_timeout(endpoint.service, websocket=websocket)
+            if hasattr(runtime.kernel_context.get_service("service_registry"), "call_without_timeout"):
+                await runtime.kernel_context.get_service("service_registry").call_without_timeout(endpoint.service, websocket=websocket)
             else:
-                await runtime.service_registry.call(endpoint.service, websocket=websocket)
+                await runtime.kernel_context.get_service("service_registry").call(endpoint.service, websocket=websocket)
         except WebSocketDisconnect:
             pass
         except Exception as e:

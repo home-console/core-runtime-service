@@ -68,7 +68,7 @@ async def start_pending_cleaner(runtime: Any) -> None:
                                     
                                     # Логируем очистку
                                     try:
-                                        await runtime.service_registry.call(
+                                        await runtime.kernel_context.get_service("service_registry").call(
                                             "logger.log",
                                             level="warning",
                                             message=f"Cleared hung pending command for device {device_id} (elapsed {elapsed:.1f}s > {PENDING_TIMEOUT_SEC}s)",
@@ -91,7 +91,7 @@ async def start_pending_cleaner(runtime: Any) -> None:
                 # Логируем итоги если что-то было очищено
                 if cleared_count > 0:
                     try:
-                        await runtime.service_registry.call(
+                        await runtime.kernel_context.get_service("service_registry").call(
                             "logger.log",
                             level="info",
                             message=f"Cleaned {cleared_count} hung pending commands",
@@ -104,7 +104,7 @@ async def start_pending_cleaner(runtime: Any) -> None:
             except Exception as e:
                 # Ловим все ошибки чтобы loop не умер
                 try:
-                    await runtime.service_registry.call(
+                    await runtime.kernel_context.get_service("service_registry").call(
                         "logger.log",
                         level="error",
                         message=f"Error in pending cleaner loop: {e}",
@@ -193,7 +193,7 @@ async def clear_pending_manually(runtime: Any, device_id: str) -> Dict[str, Any]
         
         # Логируем
         try:
-            await runtime.service_registry.call(
+            await runtime.kernel_context.get_service("service_registry").call(
                 "logger.log",
                 level="info",
                 message=f"Manually cleared pending for device {device_id}",

@@ -6,7 +6,8 @@ DevicesModule — встроенный модуль управления уст�
 """
 
 from core.runtime_module import RuntimeModule
-from . import services, handlers
+
+from . import handlers, services
 
 
 class DevicesModule(RuntimeModule):
@@ -54,13 +55,19 @@ class DevicesModule(RuntimeModule):
             # для set_state делаем preload устройства до выполнения (важно: write)
             "devices.set_state": {"resource": "device", "preload": "device_by_id"},
             # для update_device_fields делаем preload (для ACL проверки)
-            "devices.update_device_fields": {"resource": "device", "preload": "device_by_id"},
+            "devices.update_device_fields": {
+                "resource": "device",
+                "preload": "device_by_id",
+            },
             # инвентарь/маппинги — admin-only при наличии ctx
             "devices.list_external": {"admin_only": True},
             "devices.create_mapping": {"admin_only": True},
             "devices.list_mappings": {"admin_only": True},
             # get_external_for_device — доступен при devices.read (Product API проверяет доступ через devices.get)
-            "devices.get_external_for_device": {"resource": "device", "preload": "device_by_id"},
+            "devices.get_external_for_device": {
+                "resource": "device",
+                "preload": "device_by_id",
+            },
             "devices.delete_mapping": {"admin_only": True},
             "devices.auto_map_external": {"admin_only": True},
             # Diagnostics — admin-only
@@ -73,10 +80,8 @@ class DevicesModule(RuntimeModule):
         for name, func in service_names:
             # Skip services that are already registered (idempotent)
             try:
-                service_registry = (
-                    self.context.services
-                    if hasattr(self, "context") and self.context
-                    else self.runtime.service_registry
+                service_registry = self.runtime.kernel_context.get_service(
+                    "service_registry"
                 )
                 if await service_registry.has_service(name):
                     continue
@@ -112,10 +117,8 @@ class DevicesModule(RuntimeModule):
 
                     preload_resource = _preload
 
-                service_registry = (
-                    self.context.services
-                    if hasattr(self, "context") and self.context
-                    else self.runtime.service_registry
+                service_registry = self.runtime.kernel_context.get_service(
+                    "service_registry"
                 )
                 if hasattr(service_registry, "register_with_acl"):
                     await service_registry.register_with_acl(
@@ -138,12 +141,10 @@ class DevicesModule(RuntimeModule):
 
         # Подписка на события
         await self.runtime.event_bus.subscribe(
-            "external.device_state_reported",
-            self._handle_external_state
+            "external.device_state_reported", self._handle_external_state
         )
         await self.runtime.event_bus.subscribe(
-            "external.device_discovered",
-            self._handle_external_device_discovered
+            "external.device_discovered", self._handle_external_device_discovered
         )
 
     async def start(self) -> None:
@@ -154,25 +155,25 @@ class DevicesModule(RuntimeModule):
         и запускает background cleaner для зависших pending команд.
         """
         from .operations import register_device_operations
+
         register_device_operations(self.runtime)
 
         # Запускаем background cleaner для зависших pending команд
         try:
             from .pending_cleaner import start_pending_cleaner
+
             await start_pending_cleaner(self.runtime)
         except Exception as e:
             # Логируем но не ломаем старт модуля
             try:
-                service_registry = (
-                    self.context.services
-                    if hasattr(self, "context") and self.context
-                    else self.runtime.service_registry
+                service_registry = self.runtime.kernel_context.get_service(
+                    "service_registry"
                 )
                 await service_registry.call(
                     "logger.log",
                     level="warning",
                     message=f"Failed to start pending cleaner: {e}",
-                    module="devices"
+                    module="devices",
                 )
             except Exception:
                 pass
@@ -186,26 +187,20 @@ class DevicesModule(RuntimeModule):
         # Отписка от событий
         try:
             await self.runtime.event_bus.unsubscribe(
-                "external.device_state_reported",
-                self._handle_external_state
+                "external.device_state_reported", self._handle_external_state
             )
         except Exception:
             pass
 
         try:
             await self.runtime.event_bus.unsubscribe(
-                "external.device_discovered",
-                self._handle_external_device_discovered
+                "external.device_discovered", self._handle_external_device_discovered
             )
         except Exception:
             pass
 
         # Отмена регистрации сервисов
-        service_registry = (
-            self.context.services
-            if hasattr(self, "context") and self.context
-            else self.runtime.service_registry
-        )
+        service_registry = self.runtime.kernel_context.get_service("service_registry")
         for service_name in getattr(self, "_registered_services", []):
             try:
                 await service_registry.unregister(service_name)
@@ -216,6 +211,8 @@ class DevicesModule(RuntimeModule):
         """Обработчик события external.device_state_reported."""
         await handlers.handle_external_state(self.runtime, data)
 
-    async def _handle_external_device_discovered(self, event_type: str, data: dict) -> None:
+    async def _handle_external_device_discovered(
+        self, event_type: str, data: dict
+    ) -> None:
         """Обработчик события external.device_discovered."""
         await handlers.handle_external_device_discovered(self.runtime, data)

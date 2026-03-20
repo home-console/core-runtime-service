@@ -10,6 +10,8 @@ logger = logging.getLogger(__name__)
 
 async def register_device_admin_bindings(context: Any) -> list[str]:
     registered_services: list[str] = []
+    runtime = context.runtime
+    services = runtime.kernel_context.get_service("service_registry")
 
     try:
         for endpoint in [
@@ -33,20 +35,17 @@ async def register_device_admin_bindings(context: Any) -> list[str]:
                 if isinstance(body, dict) and "power" in body:
                     payload = {"state": {"on": body.get("power") == "on"}}
                 set_current_auth_context(ctx)
-                return await context.services.call("devices.set_state", device_id, payload)
+                return await services.call("devices.set_state", device_id, payload)
             finally:
                 set_current_auth_context(prev)
 
-        if hasattr(context.services, "register_with_acl"):
-            # Admin auth is enforced at HTTP boundary; this handler sets a
-            # trusted system context before delegating to devices.set_state.
-            await context.services.register_with_acl(
-                "admin.v1.devices.set_state",
-                _admin_set_state,
-                admin_only=False,
-            )
-        else:
-            await context.services.register("admin.v1.devices.set_state", _admin_set_state)
+        # Admin auth is enforced at HTTP boundary; this handler sets a
+        # trusted system context before delegating to devices.set_state.
+        await services.register_with_acl(
+            "admin.v1.devices.set_state",
+            _admin_set_state,
+            admin_only=False,
+        )
         registered_services.append("admin.v1.devices.set_state")
 
         context.http.register(HttpEndpoint(

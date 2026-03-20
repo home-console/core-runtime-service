@@ -14,16 +14,6 @@ from typing import Any, Dict, Optional
 from fastapi import Request
 
 
-def _get_services(runtime: Any):
-    # TODO: remove fallback after full KernelContext migration
-    context = getattr(runtime, "context", None)
-    if context is not None and hasattr(context, "get_service"):
-        services = context.get_service("service_registry")
-    else:
-        services = getattr(runtime, "service_registry", None)
-    return services
-
-
 class DomainAdapter:
     """Базовый класс для доменных адаптеров."""
 
@@ -109,7 +99,7 @@ class DevicesAdapter(DomainAdapter):
             return None
 
         try:
-            services = _get_services(runtime)
+            services = runtime.kernel_context.get_service("service_registry")
             device = await services.call("devices.get", device_id)
             if isinstance(device, dict):
                 resource: Dict[str, Any] = {}

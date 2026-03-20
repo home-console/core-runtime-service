@@ -6,16 +6,6 @@ from typing import Any, Dict
 from fastapi import APIRouter, HTTPException, Query, Request, Body
 
 
-def _get_services(runtime: Any):
-    # TODO: remove fallback after full KernelContext migration
-    context = getattr(runtime, "context", None)
-    if context is not None and hasattr(context, "get_service"):
-        services = context.get_service("service_registry")
-    else:
-        services = getattr(runtime, "service_registry", None)
-    return services
-
-
 def create_request_logger_router(runtime: Any) -> APIRouter:
     """
     Создаёт FastAPI роутер для RequestLoggerModule.
@@ -40,7 +30,7 @@ def create_request_logger_router(runtime: Any) -> APIRouter:
             Словарь с информацией о запросе и списком логов
         """
         try:
-            services = _get_services(runtime)
+            services = runtime.kernel_context.get_service("service_registry")
             if not await services.has_service("request_logger.get_request_logs"):
                 raise HTTPException(
                     status_code=503,
@@ -73,7 +63,7 @@ def create_request_logger_router(runtime: Any) -> APIRouter:
             Словарь со списком запросов и метаданными
         """
         try:
-            services = _get_services(runtime)
+            services = runtime.kernel_context.get_service("service_registry")
             if not await services.has_service("request_logger.list_requests"):
                 raise HTTPException(
                     status_code=503,
@@ -100,7 +90,7 @@ def create_request_logger_router(runtime: Any) -> APIRouter:
             Подтверждение очистки
         """
         try:
-            services = _get_services(runtime)
+            services = runtime.kernel_context.get_service("service_registry")
             if not await services.has_service("request_logger.clear_logs"):
                 raise HTTPException(
                     status_code=503,
@@ -133,7 +123,7 @@ def create_request_logger_router(runtime: Any) -> APIRouter:
         }
         """
         try:
-            services = _get_services(runtime)
+            services = runtime.kernel_context.get_service("service_registry")
             if not await services.has_service("request_logger.log"):
                 raise HTTPException(
                     status_code=503,

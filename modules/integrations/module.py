@@ -32,22 +32,13 @@ class IntegrationsModule(RuntimeModule):
             return await user_v1_integrations(self.runtime)
 
         try:
-            # TODO: remove fallback after full KernelContext migration
-            services = (
-                self.context.get_service("service_registry")
-                if hasattr(self.context, "get_service")
-                else self.context.services
+            services = self.runtime.kernel_context.get_service("service_registry")
+            await services.register_with_acl(
+                "admin.v1.integrations", _admin_wrap, admin_only=True
             )
-            if hasattr(services, "register_with_acl"):
-                await services.register_with_acl(
-                    "admin.v1.integrations", _admin_wrap, admin_only=True
-                )
-                await services.register_with_acl(
-                    "user.v1.integrations", _user_wrap, admin_only=False
-                )
-            else:
-                await services.register("admin.v1.integrations", _admin_wrap)
-                await services.register("user.v1.integrations", _user_wrap)
+            await services.register_with_acl(
+                "user.v1.integrations", _user_wrap, admin_only=False
+            )
         except ValueError:
             pass
         

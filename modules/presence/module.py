@@ -31,12 +31,7 @@ class PresenceModule(RuntimeModule):
         Регистрирует сервис presence.set и HTTP endpoints.
         """
         # Регистрация сервиса
-        # TODO: remove fallback after full KernelContext migration
-        services = (
-            self.context.get_service("service_registry")
-            if hasattr(self.context, "get_service")
-            else self.context.services
-        )
+        services = self.runtime.kernel_context.get_service("service_registry")
         await services.register("presence.set", self._set_service)
 
         # Регистрация HTTP контрактов
@@ -82,11 +77,7 @@ class PresenceModule(RuntimeModule):
         """
         # Отмена регистрации сервиса
         try:
-            services = (
-                self.context.get_service("service_registry")
-                if hasattr(self.context, "get_service")
-                else self.context.services
-            )
+            services = self.runtime.kernel_context.get_service("service_registry")
             await services.unregister("presence.set")
         except Exception:
             pass
@@ -132,20 +123,16 @@ class PresenceModule(RuntimeModule):
             # Публикуем событие в зависимости от направления изменения
             payload = {"old_state": old_val, "new_state": home}
             if old_val is False and home is True:
-                await self.runtime.event_bus.publish("presence.entered", payload)
+                await self.runtime.kernel_context.emit("presence.entered", payload)
             elif old_val is True and home is False:
-                await self.runtime.event_bus.publish("presence.left", payload)
+                await self.runtime.kernel_context.emit("presence.left", payload)
 
             return home
 
         except Exception as exc:
             # Логируем ошибки, но не ломаем Core
             try:
-                services = (
-                    self.context.get_service("service_registry")
-                    if hasattr(self.context, "get_service")
-                    else self.context.services
-                )
+                services = self.runtime.kernel_context.get_service("service_registry")
                 await services.call(
                     "logger.log",
                     level="error",

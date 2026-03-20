@@ -49,7 +49,7 @@ async def revoke_api_key(runtime: Any, api_key: str) -> None:
     
     except Exception as e:
         try:
-            await runtime.service_registry.call(
+            await runtime.kernel_context.get_service("service_registry").call(
                 "logger.log",
                 level="error",
                 message=f"Error revoking API key: {e}",
@@ -93,7 +93,7 @@ async def revoke_session(runtime: Any, session_id: str) -> None:
     
     except Exception as e:
         try:
-            await runtime.service_registry.call(
+            await runtime.kernel_context.get_service("service_registry").call(
                 "logger.log",
                 level="error",
                 message=f"Error revoking session: {e}",
@@ -137,7 +137,7 @@ async def revoke_refresh_token(runtime: Any, refresh_token: str) -> None:
     
     except Exception as e:
         try:
-            await runtime.service_registry.call(
+            await runtime.kernel_context.get_service("service_registry").call(
                 "logger.log",
                 level="error",
                 message=f"Error revoking refresh token: {e}",

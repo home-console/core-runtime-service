@@ -46,7 +46,7 @@ async def validate_api_key(runtime: Any, api_key: str) -> Optional[RequestContex
         # Проверяем структуру данных
         if not isinstance(key_data, dict):
             try:
-                await runtime.service_registry.call(
+                await runtime.kernel_context.get_service("service_registry").call(
                     "logger.log",
                     level="warning",
                     message=f"Invalid API key data structure for key: {api_key[:8]}...",
@@ -99,7 +99,7 @@ async def validate_api_key(runtime: Any, api_key: str) -> Optional[RequestContex
     
     except Exception as e:
         try:
-            await runtime.service_registry.call(
+            await runtime.kernel_context.get_service("service_registry").call(
                 "logger.log",
                 level="error",
                 message=f"Error validating API key: {e}",

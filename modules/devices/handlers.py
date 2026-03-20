@@ -14,7 +14,7 @@ async def handle_external_device_discovered(runtime, data: dict) -> None:
 async def handle_external_state(runtime, data: dict) -> None:
     # Логируем получение события
     try:
-        await runtime.service_registry.call(
+        await runtime.kernel_context.get_service("service_registry").call(
             "logger.log",
             level="debug",
             message=f"handle_external_state: received event",
@@ -29,7 +29,7 @@ async def handle_external_state(runtime, data: dict) -> None:
 
     if not external_id or reported_state is None:
         try:
-            await runtime.service_registry.call(
+            await runtime.kernel_context.get_service("service_registry").call(
                 "logger.log",
                 level="debug",
                 message=f"handle_external_state: missing external_id or state",
@@ -50,7 +50,7 @@ async def handle_external_state(runtime, data: dict) -> None:
         # (например, WebSocket обновление пришло ДО auto_map_external)
         try:
             await runtime.storage.set("devices_external_pending_state", external_id, reported_state)
-            await runtime.service_registry.call(
+            await runtime.kernel_context.get_service("service_registry").call(
                 "logger.log",
                 level="debug",
                 message=f"[STATE_FLOW] Mapping NOT found, storing pending state",
@@ -81,7 +81,7 @@ async def handle_external_state(runtime, data: dict) -> None:
 
     # DEBUG 4B: Mapping found
     try:
-        await runtime.service_registry.call(
+        await runtime.kernel_context.get_service("service_registry").call(
             "logger.log",
             level="debug",
             message=f"[STATE_FLOW] Mapping FOUND, applying state",
@@ -98,7 +98,7 @@ async def handle_external_state(runtime, data: dict) -> None:
     internal_id = mapping.get("internal_id")
     if not internal_id:
         try:
-            await runtime.service_registry.call(
+            await runtime.kernel_context.get_service("service_registry").call(
                 "logger.log",
                 level="debug",
                 message=f"handle_external_state: mapping has no internal_id",
@@ -113,7 +113,7 @@ async def handle_external_state(runtime, data: dict) -> None:
 
     if device is None:
         try:
-            await runtime.service_registry.call(
+            await runtime.kernel_context.get_service("service_registry").call(
                 "logger.log",
                 level="debug",
                 message=f"handle_external_state: device not found for internal_id={internal_id}",
@@ -197,9 +197,10 @@ async def handle_external_state(runtime, data: dict) -> None:
     else:
         states_match = False
     
-    # ВАЖНО: При обновлении из WebSocket всегда сбрасываем pending
-    # Это реальное состояние устройства, независимо от того, кто его изменил
-    old_state["pending"] = False
+    # pending should only be cleared on authoritative updates (ws)
+    source = data.get("source")
+    if source == "ws":
+        old_state["pending"] = False
 
     # Применяем входящее состояние к reported (иначе GET /devices вернёт старые данные)
     if isinstance(reported_state, dict) and reported_state:
@@ -225,7 +226,7 @@ async def handle_external_state(runtime, data: dict) -> None:
     
     # Логируем обновление для отладки
     try:
-        await runtime.service_registry.call(
+        await runtime.kernel_context.get_service("service_registry").call(
             "logger.log",
             level="debug",
             message=f"handle_external_state: processing update",
@@ -253,7 +254,7 @@ async def handle_external_state(runtime, data: dict) -> None:
     
     # Логируем успешное обновление
     try:
-        await runtime.service_registry.call(
+        await runtime.kernel_context.get_service("service_registry").call(
             "logger.log",
             level="debug",
             message=f"handle_external_state: state updated successfully",
@@ -269,7 +270,7 @@ async def handle_external_state(runtime, data: dict) -> None:
 
     # Логируем успешное обновление
     try:
-        await runtime.service_registry.call(
+        await runtime.kernel_context.get_service("service_registry").call(
             "logger.log",
             level="debug",
             message=f"handle_external_state: updated device {internal_id}, pending=False",
@@ -283,7 +284,7 @@ async def handle_external_state(runtime, data: dict) -> None:
     except Exception:
         pass
 
-    await runtime.event_bus.publish(
+    await runtime.kernel_context.emit(
         "internal.device_state_updated",
         {
             "internal_id": internal_id,

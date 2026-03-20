@@ -160,7 +160,7 @@ async def require_auth_middleware(request: Request, call_next):
             # Логируем только для не-auth endpoints, чтобы не засорять логи
             if not is_auth_endpoint and runtime:
                 try:
-                    await runtime.service_registry.call(
+                    await runtime.kernel_context.get_service("service_registry").call(
                         "logger.log",
                         level="warning",
                         message="JWT validation failed, will try API key",

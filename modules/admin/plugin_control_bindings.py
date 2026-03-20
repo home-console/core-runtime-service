@@ -210,12 +210,9 @@ async def register_plugin_control_bindings(
         ("admin.v1.plugins.auto_load", _admin_auto_load_plugins),
     ]
     try:
-        services = context.services
+        services = runtime.kernel_context.get_service("service_registry")
         for name, handler in handlers:
-            if hasattr(services, "register_with_acl"):
-                await services.register_with_acl(name, handler, admin_only=True)
-            else:
-                await services.register(name, handler)
+            await services.register_with_acl(name, handler, admin_only=True)
             registered_services.append(name)
     except Exception as e:
         logger.warning("Failed to register plugin control services: %s", e, exc_info=True)

@@ -51,6 +51,8 @@ async def audit_log_auth_event(
             "details": safe_details
         }
 
+        services = runtime.kernel_context.get_service("service_registry")
+
         # Сохраняем в audit log (key: timestamp + hash of subject)
         try:
             subject_bytes = safe_subject.encode() if isinstance(safe_subject, str) else str(safe_subject).encode()
@@ -59,7 +61,7 @@ async def audit_log_auth_event(
         except Exception:
             # Best-effort: if storage is not available, fallback to logger
             try:
-                await runtime.service_registry.call(
+                await services.call(
                     "logger.log",
                     level="warning",
                     message="Failed to write audit entry to storage",
@@ -72,7 +74,7 @@ async def audit_log_auth_event(
     except Exception as e:
         # Не падаем при ошибке audit logging
         try:
-            await runtime.service_registry.call(
+            await services.call(
                 "logger.log",
                 level="error",
                 message=f"Audit logging error: {e}",

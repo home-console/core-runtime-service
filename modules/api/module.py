@@ -116,7 +116,14 @@ class ApiModule(RuntimeModule):
 
     async def _log(self, runtime: Any, level: str, message: str, **ctx: Any) -> None:
         try:
-            await runtime.service_registry.call("logger.log", level=level, message=message, component="api", **ctx)
+            services = runtime.kernel_context.get_service("service_registry")
+            await services.call(
+                "logger.log",
+                level=level,
+                message=message,
+                component="api",
+                **ctx,
+            )
         except Exception:
             pass
 

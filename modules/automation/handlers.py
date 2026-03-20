@@ -44,6 +44,15 @@ async def handle_external_state_reported(runtime, data: Dict[str, Any]) -> None:
             if not ops_mgr:
                 return
 
+            device = await runtime.storage.get("devices", internal_id)
+            current_reported = {}
+            if isinstance(device, dict):
+                current_reported = device.get("state", {}).get("reported", {})
+
+            # skip duplicate reported_state to prevent automation spam
+            if current_reported == data.get("state"):
+                return
+
             from core.operations import OperationInitiator, OperationInitiatorKind
 
             # Automation не исполняет действия сама — только описывает intent через operations.

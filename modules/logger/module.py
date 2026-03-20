@@ -55,7 +55,7 @@ class LoggerModule(RuntimeModule):
         # Регистрируем сервис logger.log (ACL обвязка в ядре — без ограничений)
         # Поддерживаем старые FakeRegistry объекты в тестах, поэтому используем
         # register_with_acl если доступен, иначе падаем back на register().
-        services = self.context.services if hasattr(self, "context") and self.context else self.runtime.service_registry
+        services = self.runtime.kernel_context.get_service("service_registry")
         if hasattr(services, "register_with_acl"):
             await services.register_with_acl("logger.log", self._log_service)
         else:
@@ -100,7 +100,7 @@ class LoggerModule(RuntimeModule):
 
         # Отменяем регистрацию сервиса
         try:
-            services = self.context.services if hasattr(self, "context") and self.context else self.runtime.service_registry
+            services = self.runtime.kernel_context.get_service("service_registry")
             await services.unregister("logger.log")
         except Exception:
             pass
@@ -192,7 +192,7 @@ class LoggerModule(RuntimeModule):
         
         # Если доступен RequestLoggerModule, записываем лог туда тоже
         try:
-            services = self.context.services if hasattr(self, "context") and self.context else self.runtime.service_registry
+            services = self.runtime.kernel_context.get_service("service_registry")
             if services:
                 has_request_logger = await services.has_service("request_logger.log")
                 if has_request_logger:

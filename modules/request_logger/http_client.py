@@ -41,21 +41,11 @@ class LoggedClientSession:
             **session_kwargs: параметры для aiohttp.ClientSession
         """
         self.runtime = runtime
-        # RuntimeContext для cross-request tracing
-        self.context = getattr(runtime, "context", None) if hasattr(runtime, "context") else None
         self.source = source
         self._has_request_logger = None
         
         # Создаём trace_config для перехвата запросов
         trace_config = self._create_trace_config()
-    
-    def _get_service_registry(self):
-        """Получить ServiceRegistry из context или runtime."""
-        if self.context and hasattr(self.context, "services"):
-            return self.context.services
-        elif self.runtime and hasattr(self.runtime, "service_registry"):
-            return self.runtime.service_registry
-        return None
         
         # Создаём ClientSession с trace_config
         if "trace_configs" not in session_kwargs:
@@ -154,7 +144,7 @@ class LoggedClientSession:
             
             # Логируем запрос в обычный logger (чтобы видеть в консоли)
             try:
-                services = self._get_service_registry()
+                services = self.runtime.kernel_context.get_service("service_registry")
                 if services:
                     await services.call(
                         "logger.log",
@@ -170,7 +160,7 @@ class LoggedClientSession:
                 pass
             
             # Логируем запрос в request_logger используя operation_id
-            services = self._get_service_registry()
+            services = self.runtime.kernel_context.get_service("service_registry")
             if services:
                 await services.call(
                     "request_logger.log",
@@ -261,7 +251,7 @@ class LoggedClientSession:
             duration_ms = (time.time() - trace_config_ctx.start_time) * 1000
             
             # Логируем ошибку в обычный logger
-            services = self._get_service_registry()
+            services = self.runtime.kernel_context.get_service("service_registry")
             try:
                 if services:
                     await services.call(
@@ -344,7 +334,7 @@ class LoggedClientSession:
         """Проверяет, доступен ли RequestLoggerModule."""
         if self._has_request_logger is None:
             try:
-                services = self._get_service_registry()
+                services = self.runtime.kernel_context.get_service("service_registry")
                 if services:
                     self._has_request_logger = await services.has_service("request_logger.log")
                 else:
@@ -387,7 +377,7 @@ class LoggedClientSession:
                         sanitized_headers[k] = v
             
             # Логируем запрос
-            services = self._get_service_registry()
+            services = self.runtime.kernel_context.get_service("service_registry")
             if services:
                 await services.call(
                     "request_logger.log",

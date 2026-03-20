@@ -118,7 +118,8 @@ class AdminModule(RuntimeModule):
                 "payload_type": str(type(payload).__name__),
                 "payload_sample": str(payload)[:100] if payload else None
             }
-        await self.context.services.register("system.webhook_test", webhook_test_service)
+        services = self.runtime.kernel_context.get_service("service_registry")
+        await services.register("system.webhook_test", webhook_test_service)
 
         # --- Register admin services (glue: pass runtime via lambda) ---
         def wrap_introspection(fn, with_started_at: bool = False):
@@ -334,11 +335,8 @@ class AdminModule(RuntimeModule):
                 else:
                     # Non-inspector admin services require admin auth (auth services in AuthModule)
                     admin_only = True
-                services = self.context.services
-                if hasattr(services, "register_with_acl"):
-                    await services.register_with_acl(name, handler, admin_only=admin_only)
-                else:
-                    await services.register(name, handler)
+                services = self.runtime.kernel_context.get_service("service_registry")
+                await services.register_with_acl(name, handler, admin_only=admin_only)
                 self._registered_services.append(name)
             except ValueError:
                 continue
@@ -350,6 +348,8 @@ class AdminModule(RuntimeModule):
                 self._orchestration_service,
             )
         )
+        # Прокидываем runtime в RuntimeContext, чтобы device_admin_bindings мог использовать runtime.kernel_context.
+        setattr(self.context, "runtime", self.runtime)
         self._registered_services.extend(await register_device_admin_bindings(self.context))
         self._registered_services.extend(await register_ssh_bindings(self.runtime, self.context))
 
@@ -359,7 +359,7 @@ class AdminModule(RuntimeModule):
     async def stop(self) -> None:
         for service_name in self._registered_services:
             try:
-                await self.context.services.unregister(service_name)
+                await self.runtime.kernel_context.get_service("service_registry").unregister(service_name)
             except Exception:
                 pass
         self._registered_services.clear()
