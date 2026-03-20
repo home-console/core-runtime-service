@@ -4,46 +4,44 @@ import asyncio
 import logging
 import os
 
-logger = logging.getLogger(__name__)
+from core.http_registry import EndpointAuthConfig, HttpEndpoint
 from core.runtime_module import RuntimeModule
-from core.http_registry import HttpEndpoint, EndpointAuthConfig
-from core.agents.deployment_tracker import DeploymentTracker
-
-try:
-    from core.security import SecretStore
-except ImportError:
-    SecretStore = None  # type: ignore[misc, assignment]
-
-from core.agent.enrollment import AgentEnrollmentManager
-from core.agent.registry import AgentRegistry
-from core.agent.tls import MTLSCertificateAuthority
+from core.security import SecretStore, SecretStoreStorageAdapter
 from modules.agent.services import (
+    admin_agent_check_agents_health,
     admin_agent_create_enrollment_token,
+    admin_agent_deploy,
+    admin_agent_deregister_agent,
+    admin_agent_download_binary,
+    admin_agent_download_checksum,
     admin_agent_enroll_agent,
     admin_agent_generate_bootstrap_token,
-    admin_agent_list_agents,
     admin_agent_get_agent,
-    admin_agent_deregister_agent,
-    admin_agent_list_agents_providing_capability,
-    admin_agent_deploy,
-    admin_agent_get_deployment_status,
     admin_agent_get_deployment_metrics,
-    admin_agent_heartbeat,
+    admin_agent_get_deployment_status,
     admin_agent_get_heartbeat_status,
-    admin_agent_check_agents_health,
-    admin_agent_list_online_agents,
-    admin_agent_download_checksum,
-    admin_agent_download_binary,
-    admin_agent_submit_logs,
     admin_agent_get_logs,
     admin_agent_get_status,
+    admin_agent_heartbeat,
+    admin_agent_list_agents,
+    admin_agent_list_agents_providing_capability,
+    admin_agent_list_online_agents,
+    admin_agent_submit_logs,
 )
+from modules.agent.domain import (
+    AgentEnrollmentManager,
+    AgentRegistry,
+    DeploymentTracker,
+    MTLSCertificateAuthority,
+)
+
+logger = logging.getLogger(__name__)
 
 
 class AgentControlPlaneModule(RuntimeModule):
     """
     Step 15: Agent Control Plane Module.
-    
+
     Manages:
     - Agent enrollment with tokens
     - Agent identity & mTLS certificates
@@ -59,34 +57,38 @@ class AgentControlPlaneModule(RuntimeModule):
     async def register(self) -> None:
         """
         Register Agent Control Plane with CoreRuntime.
-        
+
         - Initialize SecretStore
         - Initialize AgentEnrollmentManager
         - Initialize AgentRegistry
         - Initialize MTLSCertificateAuthority
         - Register HTTP endpoints
         """
-        if SecretStore is None:
-            raise RuntimeError(
-                "Agent module requires SecretStore from core.security; "
-                "ensure core.security.secret_store is available (e.g. cryptography package)."
-            )
         # Use SecretStore from runtime if already set (main/bootstrap), otherwise create
         secret_store = getattr(self.runtime, "secret_store", None)
         if secret_store is None:
-            from core.security.secret_store_adapter import SecretStoreStorageAdapter
             # В dual mode обязательно vault через SecureStorage (get_vault), иначе root hash не обновляется
             manager = getattr(self.runtime, "storage_manager", None)
             if manager is not None and getattr(manager, "is_dual_mode", False):
                 backend = manager.get_vault()
             else:
-                storage = self.context.storage if hasattr(self, "context") and self.context else self.runtime.storage
-                backend = getattr(getattr(storage, "_storage", storage), "_adapter", None)
+                storage = (
+                    self.context.storage
+                    if hasattr(self, "context") and self.context
+                    else self.runtime.storage
+                )
+                backend = getattr(
+                    getattr(storage, "_storage", storage), "_adapter", None
+                )
             if backend is None:
-                raise RuntimeError("Agent module: cannot get storage backend for SecretStore")
+                raise RuntimeError(
+                    "Agent module: cannot get storage backend for SecretStore"
+                )
             wrapper = SecretStoreStorageAdapter(backend)
             secret_store = SecretStore(wrapper)
-            passphrase = os.getenv("AGENT_SECRET_STORE_PASSPHRASE", "default-dev-passphrase")
+            passphrase = os.getenv(
+                "AGENT_SECRET_STORE_PASSPHRASE", "default-dev-passphrase"
+            )
             try:
                 await secret_store.initialize(passphrase)
             except RuntimeError:
@@ -96,31 +98,37 @@ class AgentControlPlaneModule(RuntimeModule):
         # Initialize mTLS Certificate Authority
         # Check if CA certificate already exists in storage
         ca_exists = await secret_store.exists("agent:ca:private_key")
-        
+
         if ca_exists:
             # Load existing CA from storage
             ca_private_pem = await secret_store.get("agent:ca:private_key")
             ca_cert_pem = await secret_store.get("agent:ca:certificate")
+            if ca_private_pem is None or ca_cert_pem is None:
+                raise RuntimeError("Agent CA materials are missing from SecretStore")
             mtls_ca = MTLSCertificateAuthority(ca_private_pem, ca_cert_pem)
         else:
             # Generate new CA
-            ca_private_pem, ca_cert_pem = MTLSCertificateAuthority.generate_ca_certificate()
-            
+            ca_private_pem, ca_cert_pem = (
+                MTLSCertificateAuthority.generate_ca_certificate()
+            )
+
             # Store CA in SecretStore
             await secret_store.put("agent:ca:private_key", ca_private_pem)
             await secret_store.put("agent:ca:certificate", ca_cert_pem)
-            
+
             mtls_ca = MTLSCertificateAuthority(ca_private_pem, ca_cert_pem)
-        
+
         # Initialize AgentEnrollmentManager
         agent_manager = AgentEnrollmentManager(secret_store)
-        
+
         # Initialize AgentRegistry
         agent_registry = AgentRegistry()
-        
+
         # Initialize DeploymentTracker (in-memory with optional DB persistence)
-        deployment_tracker = DeploymentTracker(db_service=getattr(self.runtime, "db", None))
-        
+        deployment_tracker = DeploymentTracker(
+            db_service=getattr(self.runtime, "db", None)
+        )
+
         # Store in CoreRuntime (secret_store — для credentials и inspector в debug)
         self.runtime.secret_store = secret_store
         self.runtime.agent_manager = agent_manager
@@ -129,15 +137,20 @@ class AgentControlPlaneModule(RuntimeModule):
         self.runtime.deployment_tracker = deployment_tracker
 
         # Initialize AgentLogStore (TASK 3.1)
-        from core.agent.log_store import AgentLogStore
+        from modules.agent.domain import AgentLogStore
+
         self.runtime.agent_log_store = AgentLogStore()
 
         # Обёртка для admin-хендлеров, которым нужен runtime первым аргументом
         def wrap_agent(fn):
             return lambda *args, **kw: fn(self.runtime, *args, **kw)
-        
+
         # Register services with service registry
-        services = self.context.services if hasattr(self, "context") and self.context else self.runtime.service_registry
+        services = (
+            self.context.services
+            if hasattr(self, "context") and self.context
+            else self.runtime.service_registry
+        )
         await services.register(
             "admin.agent.create_enrollment_token",
             wrap_agent(admin_agent_create_enrollment_token),
@@ -166,7 +179,7 @@ class AgentControlPlaneModule(RuntimeModule):
             "admin.agent.list_agents_providing_capability",
             wrap_agent(admin_agent_list_agents_providing_capability),
         )
-        
+
         # ==== Deployment Services (TASK 1.1) ====
         await services.register(
             "admin.agent.deploy",
@@ -184,7 +197,7 @@ class AgentControlPlaneModule(RuntimeModule):
             "admin.agent.heartbeat",
             wrap_agent(admin_agent_heartbeat),
         )
-        
+
         # ==== Heartbeat Monitoring Services (TASK 1.3) ====
         await services.register(
             "admin.agent.get_heartbeat_status",
@@ -198,7 +211,7 @@ class AgentControlPlaneModule(RuntimeModule):
             "admin.agent.list_online_agents",
             wrap_agent(admin_agent_list_online_agents),
         )
-        
+
         # ==== Download Services (TASK 2.2) ====
         await services.register(
             "admin.agent.download_checksum",
@@ -222,160 +235,198 @@ class AgentControlPlaneModule(RuntimeModule):
             "admin.agent.get_status",
             wrap_agent(admin_agent_get_status),
         )
-        
+
         # Register HTTP endpoints for Agent Control Plane
         # Enrollment endpoints
-        self.context.http.register(HttpEndpoint(
-            method="POST",
-            path="/admin/v1/agents/enrollment-token",
-            service="admin.agent.create_enrollment_token",
-            description="Create enrollment token for new agent"
-        ))
+        self.context.http.register(
+            HttpEndpoint(
+                method="POST",
+                path="/admin/v1/agents/enrollment-token",
+                service="admin.agent.create_enrollment_token",
+                description="Create enrollment token for new agent",
+            )
+        )
 
         # Bootstrap token for installer / manual agent installation (HMAC-signed, TTL 10m)
-        self.context.http.register(HttpEndpoint(
-            method="POST",
-            path="/admin/v1/agents/bootstrap-token",
-            service="admin.agent.generate_bootstrap_token",
-            description="Generate one-time bootstrap enrollment token for installer"
-        ))
-        
-        self.context.http.register(HttpEndpoint(
-            method="POST",
-            path="/admin/v1/agents/enroll",
-            service="admin.agent.enroll_agent",
-            description="Enroll agent with enrollment token"
-        ))
-        
+        self.context.http.register(
+            HttpEndpoint(
+                method="POST",
+                path="/admin/v1/agents/bootstrap-token",
+                service="admin.agent.generate_bootstrap_token",
+                description="Generate one-time bootstrap enrollment token for installer",
+            )
+        )
+
+        self.context.http.register(
+            HttpEndpoint(
+                method="POST",
+                path="/admin/v1/agents/enroll",
+                service="admin.agent.enroll_agent",
+                description="Enroll agent with enrollment token",
+            )
+        )
+
         # Agent registry endpoints
-        self.context.http.register(HttpEndpoint(
-            method="GET",
-            path="/admin/v1/agents",
-            service="admin.agent.list_agents",
-            description="List all registered agents"
-        ))
-        
-        self.context.http.register(HttpEndpoint(
-            method="GET",
-            path="/admin/v1/agents/{agent_id}",
-            service="admin.agent.get_agent",
-            description="Get agent details"
-        ))
-        
-        self.context.http.register(HttpEndpoint(
-            method="POST",
-            path="/admin/v1/agents/{agent_id}/deregister",
-            service="admin.agent.deregister_agent",
-            description="Deregister agent"
-        ))
-        
+        self.context.http.register(
+            HttpEndpoint(
+                method="GET",
+                path="/admin/v1/agents",
+                service="admin.agent.list_agents",
+                description="List all registered agents",
+            )
+        )
+
+        self.context.http.register(
+            HttpEndpoint(
+                method="GET",
+                path="/admin/v1/agents/{agent_id}",
+                service="admin.agent.get_agent",
+                description="Get agent details",
+            )
+        )
+
+        self.context.http.register(
+            HttpEndpoint(
+                method="POST",
+                path="/admin/v1/agents/{agent_id}/deregister",
+                service="admin.agent.deregister_agent",
+                description="Deregister agent",
+            )
+        )
+
         # ==== Deployment Endpoints (TASK 1.1) ====
-        self.context.http.register(HttpEndpoint(
-            method="POST",
-            path="/admin/v1/agents/deploy",
-            service="admin.agent.deploy",
-            description="Deploy agent to remote host via SSH"
-        ))
-        
-        self.context.http.register(HttpEndpoint(
-            method="GET",
-            path="/admin/v1/deployments/{deployment_id}",
-            service="admin.agent.get_deployment_status",
-            description="Get agent deployment status"
-        ))
-        
-        self.context.http.register(HttpEndpoint(
-            method="GET",
-            path="/admin/v1/deployments",
-            service="admin.agent.get_deployment_metrics",
-            description="Get deployment metrics and statistics"
-        ))
-        
-        self.context.http.register(HttpEndpoint(
-            method="POST",
-            path="/admin/v1/agents/{agent_id}/heartbeat",
-            service="admin.agent.heartbeat",
-            description="Receive heartbeat from agent"
-        ))
-        
-        self.context.http.register(HttpEndpoint(
-            method="GET",
-            path="/admin/v1/agents/{agent_id}/heartbeat",
-            service="admin.agent.get_heartbeat_status",
-            description="Get heartbeat status for specific agent"
-        ))
-        
-        self.context.http.register(HttpEndpoint(
-            method="GET",
-            path="/admin/v1/agents/health/check",
-            service="admin.agent.check_agents_health",
-            description="Check health of all agents",
-            auth_config=EndpointAuthConfig(public=True),
-        ))
-        
-        self.context.http.register(HttpEndpoint(
-            method="GET",
-            path="/admin/v1/agents/online",
-            service="admin.agent.list_online_agents",
-            description="List all currently online agents"
-        ))
-        
+        self.context.http.register(
+            HttpEndpoint(
+                method="POST",
+                path="/admin/v1/agents/deploy",
+                service="admin.agent.deploy",
+                description="Deploy agent to remote host via SSH",
+            )
+        )
+
+        self.context.http.register(
+            HttpEndpoint(
+                method="GET",
+                path="/admin/v1/deployments/{deployment_id}",
+                service="admin.agent.get_deployment_status",
+                description="Get agent deployment status",
+            )
+        )
+
+        self.context.http.register(
+            HttpEndpoint(
+                method="GET",
+                path="/admin/v1/deployments",
+                service="admin.agent.get_deployment_metrics",
+                description="Get deployment metrics and statistics",
+            )
+        )
+
+        self.context.http.register(
+            HttpEndpoint(
+                method="POST",
+                path="/admin/v1/agents/{agent_id}/heartbeat",
+                service="admin.agent.heartbeat",
+                description="Receive heartbeat from agent",
+            )
+        )
+
+        self.context.http.register(
+            HttpEndpoint(
+                method="GET",
+                path="/admin/v1/agents/{agent_id}/heartbeat",
+                service="admin.agent.get_heartbeat_status",
+                description="Get heartbeat status for specific agent",
+            )
+        )
+
+        self.context.http.register(
+            HttpEndpoint(
+                method="GET",
+                path="/admin/v1/agents/health/check",
+                service="admin.agent.check_agents_health",
+                description="Check health of all agents",
+                auth_config=EndpointAuthConfig(public=True),
+            )
+        )
+
+        self.context.http.register(
+            HttpEndpoint(
+                method="GET",
+                path="/admin/v1/agents/online",
+                service="admin.agent.list_online_agents",
+                description="List all currently online agents",
+            )
+        )
+
         # Download endpoints (TASK 2.2)
         # Public: installer runs unauthenticated; admin_access_middleware already
         # restricts these paths to private-network clients only.
         _public = EndpointAuthConfig(public=True)
-        self.context.http.register(HttpEndpoint(
-            method="GET",
-            path="/media/checksum",
-            service="admin.agent.download_checksum",
-            description="Get SHA256 checksum of agent binary",
-            auth_config=_public,
-        ))
-        
-        self.context.http.register(HttpEndpoint(
-            method="GET",
-            path="/media/download/binary",
-            service="admin.agent.download_binary",
-            description="Stream agent binary to installer",
-            auth_config=_public,
-        ))
-        
+        self.context.http.register(
+            HttpEndpoint(
+                method="GET",
+                path="/media/checksum",
+                service="admin.agent.download_checksum",
+                description="Get SHA256 checksum of agent binary",
+                auth_config=_public,
+            )
+        )
+
+        self.context.http.register(
+            HttpEndpoint(
+                method="GET",
+                path="/media/download/binary",
+                service="admin.agent.download_binary",
+                description="Stream agent binary to installer",
+                auth_config=_public,
+            )
+        )
+
         # Capability routing endpoints
-        self.context.http.register(HttpEndpoint(
-            method="GET",
-            path="/admin/v1/agents/capabilities/{capability_id}",
-            service="admin.agent.list_agents_providing_capability",
-            description="List agents providing capability"
-        ))
+        self.context.http.register(
+            HttpEndpoint(
+                method="GET",
+                path="/admin/v1/agents/capabilities/{capability_id}",
+                service="admin.agent.list_agents_providing_capability",
+                description="List agents providing capability",
+            )
+        )
 
         # TASK 3.1: Agent Logs API
-        self.context.http.register(HttpEndpoint(
-            method="POST",
-            path="/admin/v1/agents/{agent_id}/logs",
-            service="admin.agent.submit_logs",
-            description="Agent pushes log entries to Core"
-        ))
+        self.context.http.register(
+            HttpEndpoint(
+                method="POST",
+                path="/admin/v1/agents/{agent_id}/logs",
+                service="admin.agent.submit_logs",
+                description="Agent pushes log entries to Core",
+            )
+        )
 
-        self.context.http.register(HttpEndpoint(
-            method="GET",
-            path="/admin/v1/agents/{agent_id}/logs",
-            service="admin.agent.get_logs",
-            description="Get stored logs for agent"
-        ))
+        self.context.http.register(
+            HttpEndpoint(
+                method="GET",
+                path="/admin/v1/agents/{agent_id}/logs",
+                service="admin.agent.get_logs",
+                description="Get stored logs for agent",
+            )
+        )
 
         # TASK 3.2: Agent Status endpoint
-        self.context.http.register(HttpEndpoint(
-            method="GET",
-            path="/admin/v1/agents/{agent_id}/status",
-            service="admin.agent.get_status",
-            description="Get real-time status of agent"
-        ))
+        self.context.http.register(
+            HttpEndpoint(
+                method="GET",
+                path="/admin/v1/agents/{agent_id}/status",
+                service="admin.agent.get_status",
+                description="Get real-time status of agent",
+            )
+        )
 
     async def start(self) -> None:
         """Start Agent Control Plane module."""
         # TASK 1.3: Start background health monitoring task
         from modules.agent.services import _monitor_agent_health_background
-        
+
         if self.runtime:
             asyncio.create_task(_monitor_agent_health_background(self.runtime))
             logger.info("✅ Agent health monitoring background task started")

@@ -10,19 +10,16 @@ Step 12: Manages:
 - SSRF protection
 """
 
-import json
 import asyncio
-import time
-from pathlib import Path
-from typing import Dict, List, Optional, Any
-from dataclasses import dataclass
-from datetime import datetime, timedelta
-import hashlib
-import re
+import json
 import logging
-import base64
+import re
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Dict, Optional
 
-from core.marketplace.semver import Version, VersionResolver, VersionConstraintError
+from modules.marketplace.semver import VersionResolver, VersionConstraintError
 
 logger = logging.getLogger(__name__)
 
@@ -242,7 +239,7 @@ class RegistryClient:
                     
                     # Check actual size
                     if len(body) > self.MAX_DOWNLOAD_SIZE:
-                        raise RegistryError(f"Registry index exceeds size limit")
+                        raise RegistryError("Registry index exceeds size limit")
                     
                     # Parse JSON
                     try:
@@ -258,23 +255,23 @@ class RegistryClient:
     def _parse_and_validate_index(self, data: Dict[str, Any]) -> RegistryIndex:
         """
         Parse and validate registry index.
-        
+
         Checks:
         - registry_version exists and is supported
         - plugins is dict
         - Each plugin has required metadata
-        
+
         Raises:
             RegistryError: if validation fails
         """
         # Check registry_version
         if "registry_version" not in data:
             raise RegistryError("Missing registry_version")
-        
+
         registry_version = data.get("registry_version")
         if registry_version != 1:
             raise RegistryError(f"Unsupported registry version: {registry_version}")
-        
+
         # Step 12.5: Prevent registry downgrade attacks
         if self._cached_registry_version is not None:
             if registry_version < self._cached_registry_version:
@@ -282,55 +279,55 @@ class RegistryClient:
                     f"Registry downgrade detected: cached={self._cached_registry_version}, "
                     f"new={registry_version}"
                 )
-        
+
         # Check plugins structure
         if "plugins" not in data:
             raise RegistryError("Missing 'plugins' section")
-        
+
         plugins = data.get("plugins", {})
         if not isinstance(plugins, dict):
             raise RegistryError("'plugins' must be a dict")
-        
+
         # Validate each plugin entry
         for plugin_name, plugin_data in plugins.items():
             self._validate_plugin_entry(plugin_name, plugin_data)
-        
+
         return RegistryIndex(
             registry_version=registry_version,
             updated_at=data.get("updated_at", ""),
             plugins=plugins
         )
-    
+
     def _validate_plugin_entry(self, plugin_name: str, plugin_data: Dict[str, Any]):
         """
         Validate single plugin entry.
-        
+
         Each plugin release requires:
         - url (must be HTTPS)
         - sha256
         - signature (Step 11)
         - public_key
-        
+
         Raises:
             RegistryError: if validation fails
         """
         if not isinstance(plugin_data, dict):
             raise RegistryError(f"Plugin '{plugin_name}' must be dict")
-        
+
         # Check channels
         channels = plugin_data.get("channels", {})
         if not isinstance(channels, dict):
             raise RegistryError(f"Plugin '{plugin_name}' channels must be dict")
-        
+
         # Validate each channel
         for channel_name, channel_data in channels.items():
             self._validate_release(plugin_name, channel_name, channel_data)
-        
+
         # Check versions
         versions = plugin_data.get("versions", {})
         if not isinstance(versions, dict):
             raise RegistryError(f"Plugin '{plugin_name}' versions must be dict")
-        
+
         for version_str, version_data in versions.items():
             self._validate_release(plugin_name, version_str, version_data)
     
@@ -519,44 +516,3 @@ class RegistryClient:
             description=release_data.get("description"),
             channel=channel
         )
-    
-    async def list_available(self) -> Dict[str, List[str]]:
-        """
-        List all available plugins and their versions.
-        
-        Returns:
-            Dict mapping plugin names to list of versions
-        """
-        index = await self.fetch_index()
-        
-        result = {}
-        for plugin_name, plugin_data in index.plugins.items():
-            versions = list(plugin_data.get("versions", {}).keys())
-            result[plugin_name] = sorted(versions, reverse=True)
-        
-        return result
-    
-    async def search(self, query: str) -> Dict[str, Any]:
-        """
-        Search registry for plugins by name or description.
-        
-        Returns:
-            Dict of matching plugins with metadata
-        """
-        index = await self.fetch_index()
-        
-        query = query.lower()
-        results = {}
-        
-        for plugin_name, plugin_data in index.plugins.items():
-            # Match name
-            if query in plugin_name.lower():
-                results[plugin_name] = plugin_data
-                continue
-            
-            # Match description
-            desc = plugin_data.get("description", "").lower()
-            if query in desc:
-                results[plugin_name] = plugin_data
-        
-        return results

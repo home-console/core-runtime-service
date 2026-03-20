@@ -5,7 +5,7 @@ Simplified tests that focus on main workflows without all the async/mock complex
 """
 
 import pytest
-from core.marketplace.semver import Version, VersionConstraint, VersionResolver
+from modules.marketplace.semver import Version, VersionConstraint, VersionResolver
 
 
 class TestSemverIntegration:

@@ -384,3 +384,17 @@ plugins/
 Если хочешь, дальше могу:
 	•	сделать чеклист с git-командами (mv + sed для импортов)
 	•	или дать скрипт, который полуавтоматически всё разнесёт
+
+⸻
+
+ТЕКУЩИЙ СТАТУС МИГРАЦИИ
+
+Marketplace:
+	•	канонический код уже в modules/marketplace
+	•	core.marketplace удалён
+	•	потребители переведены на modules.marketplace
+
+Plugins:
+	•	канонический код уже в modules/plugins
+	•	core.plugin_schema, core.plugin_isolation и core.plugins оставлены как compatibility shims
+	•	новые импорты должны идти через modules.plugins

@@ -10,13 +10,13 @@ Covers:
 
 import pytest
 from unittest.mock import MagicMock, patch
-from core.marketplace.semver import (
+from modules.marketplace.semver import (
     Version, VersionConstraint, VersionResolver, VersionConstraintError
 )
-from core.marketplace.registry_client import (
+from modules.marketplace.registry_client import (
     RegistryClient, PluginRelease, RegistryError, RegistrySecurityError
 )
-from core.marketplace.update_validator import (
+from modules.marketplace.update_validator import (
     PluginUpdateValidator, UpdateCheck
 )
 

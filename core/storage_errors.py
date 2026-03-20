@@ -1,20 +1,16 @@
+"""Compatibility exports for storage errors.
+
+Canonical implementations live in modules.storage.errors.
 """
-Storage-specific security and configuration errors.
 
-P0: Prevent namespace injection and storage mode violations.
-"""
+from modules.storage.errors import (
+    NamespaceViolationError,
+    StorageConfigurationError,
+    StorageSecurityError,
+)
 
-
-class StorageSecurityError(Exception):
-    """Storage security violation."""
-    pass
-
-
-class StorageConfigurationError(Exception):
-    """Invalid storage configuration."""
-    pass
-
-
-class NamespaceViolationError(StorageSecurityError):
-    """Attempt to write critical vault namespace through wrong storage."""
-    pass
+__all__ = [
+    "StorageSecurityError",
+    "StorageConfigurationError",
+    "NamespaceViolationError",
+]

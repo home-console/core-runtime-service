@@ -14,12 +14,12 @@ Supports:
 """
 
 from dataclasses import dataclass
-from enum import Enum
-from typing import Optional, Any
 from datetime import datetime, timezone
-import uuid
-import json
+from enum import Enum
 from hashlib import sha256
+from typing import Any, Optional
+import json
+import uuid
 
 
 class CredentialValidationError(ValueError):
@@ -46,21 +46,6 @@ class Credential:
 
     Represents a single credential with metadata, versioning, and auditable stamps.
     All operations return new instances (immutable pattern).
-
-    Fields:
-        id: UUID4 string identifier
-        type: Credential type (SSH, API, DB, etc.)
-        name: Human-readable name
-        secret_ref: Reference key in vault (where actual secret is stored)
-        username: Username (required for SSH/DB)
-        host: Hostname (required for SSH/DB)
-        port: Port number (required for DATABASE)
-        metadata: Arbitrary metadata dict
-        tags: List of string tags
-        version: Optimistic version counter (starts at 1)
-        created_at: ISO8601 UTC timestamp
-        updated_at: ISO8601 UTC timestamp
-        rotation_policy: Optional rotation policy for lifecycle management
     """
 
     id: str
@@ -73,24 +58,11 @@ class Credential:
     metadata: dict[str, Any]
     tags: list[str]
     version: int
-    created_at: str  # ISO8601 UTC
-    updated_at: str  # ISO8601 UTC
-    rotation_policy: Optional[dict[str, Any]] = None  # RotationPolicy as dict
+    created_at: str
+    updated_at: str
+    rotation_policy: Optional[dict[str, Any]] = None
 
     def validate(self) -> None:
-        """
-        Validate credential fields.
-
-        Checks:
-        - All required fields are non-empty
-        - Timestamps are valid ISO8601 and ordered
-        - Type-specific constraints are met
-        - Version is positive
-
-        Raises:
-            CredentialValidationError: if validation fails
-        """
-        # Common validations
         if not self.id or not isinstance(self.id, str):
             raise CredentialValidationError("id must be non-empty string")
 
@@ -103,59 +75,34 @@ class Credential:
         if not self.secret_ref or not isinstance(self.secret_ref, str):
             raise CredentialValidationError("secret_ref must be non-empty string")
 
-        # Validate type
         if not isinstance(self.type, CredentialType):
             raise CredentialValidationError("type must be CredentialType")
 
-        # Validate timestamps (ISO8601 format)
         try:
-            created = datetime.fromisoformat(
-                self.created_at.replace("Z", "+00:00")
-            )
-            updated = datetime.fromisoformat(
-                self.updated_at.replace("Z", "+00:00")
-            )
+            created = datetime.fromisoformat(self.created_at.replace("Z", "+00:00"))
+            updated = datetime.fromisoformat(self.updated_at.replace("Z", "+00:00"))
 
             if updated < created:
-                raise CredentialValidationError(
-                    "updated_at cannot be before created_at"
-                )
+                raise CredentialValidationError("updated_at cannot be before created_at")
         except ValueError as e:
-            raise CredentialValidationError(
-                f"Invalid ISO8601 timestamp: {e}"
-            )
+            raise CredentialValidationError(f"Invalid ISO8601 timestamp: {e}")
 
-        # Type-specific validations
-        if self.type in (
-            CredentialType.SSH_PASSWORD,
-            CredentialType.SSH_KEY,
-        ):
+        if self.type in (CredentialType.SSH_PASSWORD, CredentialType.SSH_KEY):
             if not self.host:
-                raise CredentialValidationError(
-                    f"{self.type.value} requires host"
-                )
+                raise CredentialValidationError(f"{self.type.value} requires host")
             if not self.username:
-                raise CredentialValidationError(
-                    f"{self.type.value} requires username"
-                )
+                raise CredentialValidationError(f"{self.type.value} requires username")
 
         if self.type == CredentialType.DATABASE_PASSWORD:
             if not self.host:
-                raise CredentialValidationError(
-                    "DATABASE_PASSWORD requires host"
-                )
+                raise CredentialValidationError("DATABASE_PASSWORD requires host")
             if not self.port or self.port <= 0:
-                raise CredentialValidationError(
-                    "DATABASE_PASSWORD requires port > 0"
-                )
+                raise CredentialValidationError("DATABASE_PASSWORD requires port > 0")
 
-        # Validate metadata and tags
         if not isinstance(self.metadata, dict):
             raise CredentialValidationError("metadata must be a dict")
 
-        if not isinstance(self.tags, list) or not all(
-            isinstance(t, str) for t in self.tags
-        ):
+        if not isinstance(self.tags, list) or not all(isinstance(t, str) for t in self.tags):
             raise CredentialValidationError("tags must be list of strings")
 
     @classmethod
@@ -171,29 +118,6 @@ class Credential:
         tags: Optional[list[str]] = None,
         rotation_policy: Optional[dict[str, Any]] = None,
     ) -> "Credential":
-        """
-        Create a new credential with defaults.
-
-        Generates UUID, sets version to 1, and timestamps to current UTC time.
-        Runs validation before returning.
-
-        Args:
-            type: credential type
-            name: human-readable name
-            secret_ref: reference key in vault
-            username: username (required for SSH/DB)
-            host: hostname (required for SSH/DB)
-            port: port number (required for DATABASE)
-            metadata: arbitrary metadata (default: {})
-            tags: list of tags (default: [])
-            rotation_policy: rotation policy dict (optional)
-
-        Returns:
-            New Credential instance
-
-        Raises:
-            CredentialValidationError: if validation fails
-        """
         now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
         credential = cls(
@@ -216,15 +140,6 @@ class Credential:
         return credential
 
     def to_dict(self) -> dict[str, Any]:
-        """
-        Serialize to dictionary.
-
-        Converts type enum to string value. No secrets are included
-        (only secret_ref pointer).
-
-        Returns:
-            Dictionary with all fields, type as string value
-        """
         return {
             "id": self.id,
             "type": self.type.value,
@@ -243,29 +158,12 @@ class Credential:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Credential":
-        """
-        Deserialize from dictionary.
-
-        Parses type enum from string. Validates on construction.
-
-        Args:
-            data: dictionary with credential fields
-
-        Returns:
-            Credential instance
-
-        Raises:
-            CredentialValidationError: if validation fails
-        """
-        # Parse type enum
         type_value = data.get("type")
         if isinstance(type_value, str):
             try:
                 cred_type = CredentialType(type_value)
             except ValueError:
-                raise CredentialValidationError(
-                    f"Invalid credential type: {type_value}"
-                )
+                raise CredentialValidationError(f"Invalid credential type: {type_value}")
         else:
             cred_type = type_value
 
@@ -289,19 +187,6 @@ class Credential:
         return credential
 
     def fingerprint(self) -> str:
-        """
-        Compute SHA256 fingerprint for integrity checking.
-
-        Excludes updated_at so the fingerprint remains stable
-        across updates. Useful for audit chains and change detection.
-
-        Uses canonical JSON (sorted keys, no whitespace) for
-        deterministic results.
-
-        Returns:
-            Hex-encoded SHA256 hash
-        """
-        # Create dict without updated_at for determinism
         fp_data = {
             "id": self.id,
             "type": self.type.value,
@@ -316,53 +201,20 @@ class Credential:
             "created_at": self.created_at,
         }
 
-        # Canonical JSON: sorted keys, no whitespace
-        json_str = json.dumps(
-            fp_data, sort_keys=True, separators=(",", ":")
-        )
+        json_str = json.dumps(fp_data, sort_keys=True, separators=(",", ":"))
         hash_obj = sha256(json_str.encode("utf-8"))
         return hash_obj.hexdigest()
 
     def mutate(self, **changes) -> "Credential":
-        """
-        Create a new credential with updates (immutable pattern).
-
-        Returns new instance with:
-        - Applied changes
-        - Version incremented
-        - updated_at set to now
-        - created_at preserved
-
-        Original credential is unchanged.
-
-        Args:
-            **changes: fields to update
-
-        Returns:
-            New Credential instance with version incremented
-
-        Raises:
-            CredentialValidationError: if validation fails
-        """
-        # Get current values
         data = self.to_dict()
-
-        # Apply changes
         data.update(changes)
 
-        # Increment version if not explicitly set
         if "version" not in changes:
             data["version"] = self.version + 1
 
-        # Update timestamp if not explicitly set
         if "updated_at" not in changes:
-            now = datetime.now(timezone.utc).isoformat().replace(
-                "+00:00", "Z"
-            )
+            now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
             data["updated_at"] = now
 
-        # Preserve creation time
         data["created_at"] = self.created_at
-
-        # Create new credential
         return Credential.from_dict(data)

@@ -1,21 +1,57 @@
-"""Step 15: Agent Control Plane Module — manages agent enrollment and lifecycle.
+"""Step 15: Agent Control Plane Module.
 
-Этот пакет экспортирует:
-- AgentControlPlaneModule — основная реализация
-- AgentModule — alias для ModuleManager (module name "agent")
+This package is the canonical modules-layer entry point for agent runtime
+control plane and agent domain primitives.
 """
 
 from modules.agent.module import AgentControlPlaneModule
 
+from .deploy_service import AgentDeployConfig, AgentDeployService
+from .domain import (
+    AgentEnrollmentManager,
+    AgentIdentity,
+    AgentIdentityFactory,
+    AgentKeyManager,
+    AgentLogStore,
+    AgentMetadata,
+    AgentPublicKey,
+    AgentRegistry,
+    AgentStatus,
+    DeploymentInfo,
+    DeploymentStatus,
+    DeploymentTracker,
+    EnrollmentToken,
+    EnrollmentTokenFactory,
+    EnrollmentTokenStatus,
+    LogEntry,
+    MTLSCertificateAuthority,
+)
+
 
 class AgentModule(AgentControlPlaneModule):
-  """
-  Backward-compatible alias for AgentControlPlaneModule.
-
-  ModuleManager ищет класс `AgentModule` в пакете `modules.agent`
-  для ModuleSpec(name="agent"), поэтому этот alias позволяет загрузить
-  агентский control plane без изменения bootstrap.
-  """
+    """Backward-compatible alias for AgentControlPlaneModule."""
 
 
-__all__ = ["AgentControlPlaneModule", "AgentModule"]
+__all__ = [
+    "AgentControlPlaneModule",
+    "AgentModule",
+    "AgentDeployConfig",
+    "AgentDeployService",
+    "AgentIdentity",
+    "AgentPublicKey",
+    "AgentKeyManager",
+    "AgentIdentityFactory",
+    "EnrollmentToken",
+    "EnrollmentTokenStatus",
+    "EnrollmentTokenFactory",
+    "AgentEnrollmentManager",
+    "MTLSCertificateAuthority",
+    "AgentMetadata",
+    "AgentStatus",
+    "AgentRegistry",
+    "DeploymentTracker",
+    "DeploymentStatus",
+    "DeploymentInfo",
+    "AgentLogStore",
+    "LogEntry",
+]

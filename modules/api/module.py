@@ -39,7 +39,7 @@ class ApiModule(RuntimeModule):
     async def register(self) -> None:
         """Только bootstrap HTTP-контрактов в runtime.http."""
         try:
-            from adapters.http.bootstrap import register_core_http
+            from core.adapters.http.bootstrap import register_core_http
             register_core_http(self.runtime)
         except ImportError:
             pass

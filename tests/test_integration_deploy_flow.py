@@ -21,8 +21,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from core.agents.deployment_tracker import DeploymentTracker, DeploymentStatus
-from core.agent.registry import AgentRegistry, AgentMetadata
+from modules.agent import DeploymentTracker, DeploymentStatus, AgentRegistry, AgentMetadata
 from modules.agent.services import (
     admin_agent_deploy,
     admin_agent_enroll_agent,
@@ -66,7 +65,7 @@ class _FakeSecretStore:
 
 def _build_enrollment_manager(secret_store):
     """Real AgentEnrollmentManager backed by fake secret store."""
-    from core.agent.enrollment import AgentEnrollmentManager
+    from modules.agent import AgentEnrollmentManager
     return AgentEnrollmentManager(secret_store)
 
 
@@ -126,7 +125,7 @@ class TestFullDeployHappyPath:
 
         # ── Step 4: Enroll agent (simulates remote-client calling /enroll) ─
         # First create a real enrollment token
-        from core.agent.identity import AgentKeyManager
+        from modules.agent import AgentKeyManager
         import json
 
         hostname = "integration-agent"

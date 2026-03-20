@@ -1,17 +1,18 @@
-import sys
 import os
 import pathlib
-import pytest
+import sys
 
-# Ensure repository root is on sys.path so packages (adapters, core, plugins) import correctly
+# Ensure repository root is on sys.path before importing project packages
+# This makes `import core` and `import modules.*` work when running pytest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from adapters.storage_adapter import StorageAdapter
-from core.storage_port import CoreStoragePort
-from core.state_engine import StateEngine
+import pytest
 
+from core.adapters.storage_adapter import StorageAdapter
+from core.state_engine import StateEngine
+from modules.storage.port import CoreStoragePort
 
 class InMemoryStorageAdapter(StorageAdapter):
     def __init__(self):
@@ -37,6 +38,9 @@ class InMemoryStorageAdapter(StorageAdapter):
     async def list_namespaces(self) -> list[str]:
         # Return sorted list of namespaces present in memory
         return sorted(list(self._data.keys()))
+
+    async def initialize_schema(self) -> None:
+        return None
 
     async def clear_namespace(self, namespace: str) -> None:
         self._data.pop(namespace, None)
@@ -84,6 +88,7 @@ _POLLUTABLE_VARS = (
     "RUNTIME_VAULT_DB_PATH",
     "RUNTIME_INSTALL_PLUGIN_DEPS",
 )
+
 
 @pytest.fixture(scope="session", autouse=True)
 def _clean_env_session():

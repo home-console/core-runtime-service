@@ -5,14 +5,16 @@ Strict data transfer objects that isolate API from domain model.
 No raw secrets in metadata DTOs.
 """
 
-from typing import Optional, Dict, Any
 from dataclasses import dataclass, field
-from core.credentials.domain import CredentialType
+from typing import Any, Dict, Optional
+
+from modules.credentials import CredentialType
 
 
 @dataclass
 class CreateCredentialRequest:
     """Request to create a new credential."""
+
     type: str  # CredentialType enum value
     name: str
     secret_ref: str
@@ -30,7 +32,7 @@ class CreateCredentialRequest:
             raise ValueError("name is required and non-empty")
         if not self.secret_ref or not self.secret_ref.strip():
             raise ValueError("secret_ref is required and non-empty")
-        
+
         # Validate type
         try:
             CredentialType(self.type)
@@ -41,6 +43,7 @@ class CreateCredentialRequest:
 @dataclass
 class UpdateCredentialRequest:
     """Request to update an existing credential."""
+
     id: str
     version: int
     name: Optional[str] = None
@@ -58,6 +61,7 @@ class UpdateCredentialRequest:
 @dataclass
 class CredentialMetadata:
     """Credential metadata (no secret)."""
+
     id: str
     type: str
     name: str
@@ -113,6 +117,7 @@ class CredentialMetadata:
 @dataclass
 class CredentialWithSecretResponse:
     """Credential with secret (elevated privilege)."""
+
     metadata: CredentialMetadata
     secret: bytes
 
@@ -127,6 +132,7 @@ class CredentialWithSecretResponse:
 @dataclass
 class CredentialOperationResult:
     """Result of credential operation."""
+
     success: bool
     message: str
     credential_id: Optional[str] = None

@@ -13,9 +13,7 @@ import pytest
 from datetime import datetime, timezone, timedelta
 from types import SimpleNamespace
 
-from core.agent.log_store import AgentLogStore, LogEntry
-from core.agent.registry import AgentRegistry, AgentMetadata
-from core.agents.deployment_tracker import DeploymentTracker
+from modules.agent import AgentLogStore, LogEntry, AgentRegistry, AgentMetadata, DeploymentTracker
 
 from modules.agent.services import (
     admin_agent_submit_logs,

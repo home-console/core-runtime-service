@@ -10,45 +10,47 @@ Tests cover:
 - Isolation (no secret leakage)
 """
 
-import pytest
-import tempfile
-import os
 import json
-from typing import Optional, Any, AsyncIterator, Dict
 from contextlib import asynccontextmanager
-from core.credentials import (
-    Credential,
-    CredentialType,
-    CredentialRepository,
-    CredentialNotFound,
-    CredentialAlreadyExists,
-    CredentialVersionConflict,
-    CredentialSecretLeakage,
-)
-from core.storage_manager import StorageManager
+from typing import Any, AsyncIterator, Dict, Optional
+
+import pytest
+
+from core.adapters.storage_adapter import StorageAdapter
 from core.security.secret_store import SecretStore
-from adapters.storage_adapter import StorageAdapter
-from adapters.sqlite_adapter import SQLiteAdapter
+from modules.credentials import (
+    Credential,
+    CredentialAlreadyExists,
+    CredentialRepository,
+    CredentialSecretLeakage,
+    CredentialType,
+    CredentialVersionConflict,
+)
+from modules.storage.manager import StorageManager
 
 
 class InMemoryStorageAdapter(StorageAdapter):
     """Simple in-memory storage adapter for testing."""
-    
+
     def __init__(self):
         self._data: Dict[str, Dict[str, Any]] = {}
-    
+
+    async def initialize_schema(self) -> None:
+        """Initialize schema (no-op for in-memory adapter)."""
+        return None
+
     async def get(self, namespace: str, key: str) -> Optional[dict[str, Any]]:
         """Get value from storage."""
         if namespace not in self._data:
             return None
         return self._data[namespace].get(key)
-    
+
     async def set(self, namespace: str, key: str, value: dict[str, Any]) -> None:
         """Set value in storage."""
         if namespace not in self._data:
             self._data[namespace] = {}
         self._data[namespace][key] = value
-    
+
     async def delete(self, namespace: str, key: str) -> bool:
         """Delete value from storage."""
         if namespace not in self._data:
@@ -57,44 +59,46 @@ class InMemoryStorageAdapter(StorageAdapter):
             return False
         del self._data[namespace][key]
         return True
-    
+
     async def list_keys(self, namespace: str) -> list[str]:
         """List all keys in namespace."""
         if namespace not in self._data:
             return []
         return list(self._data[namespace].keys())
-    
+
     async def list_namespaces(self) -> list[str]:
         """List all namespaces."""
         return list(self._data.keys())
-    
+
     async def clear_namespace(self, namespace: str) -> None:
         """Clear all items in namespace."""
         if namespace in self._data:
             self._data[namespace] = {}
-    
+
     async def close(self) -> None:
         """Close storage."""
         pass
-    
+
     @asynccontextmanager
     async def transaction(self) -> AsyncIterator[None]:
         """Transaction context manager."""
         yield
-    
+
     async def batch_set(self, namespace: str, items: dict[str, dict[str, Any]]) -> None:
         """Batch set values."""
         if namespace not in self._data:
             self._data[namespace] = {}
         self._data[namespace].update(items)
-    
-    async def iter_namespace(self, namespace: str, batch_size: int = 100) -> AsyncIterator[tuple[str, dict[str, Any]]]:
+
+    async def iter_namespace(
+        self, namespace: str, batch_size: int = 100
+    ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
         """Iterate over namespace."""
         if namespace not in self._data:
             return
         for key, value in self._data[namespace].items():
             yield key, value
-    
+
     # Legacy methods for SecretStore compatibility
     async def get_async(self, key: str) -> Optional[str]:
         """Legacy method for SecretStore."""
@@ -109,7 +113,7 @@ class InMemoryStorageAdapter(StorageAdapter):
         if isinstance(data, dict) and "value" in data:
             return data["value"]
         return json.dumps(data) if isinstance(data, dict) else None
-    
+
     async def set_async(self, key: str, value: str) -> None:
         """Legacy method for SecretStore."""
         parts = key.split(".")
@@ -122,7 +126,7 @@ class InMemoryStorageAdapter(StorageAdapter):
         except:
             data = {"value": value}
         await self.set(namespace, subkey, data)
-    
+
     async def delete_async(self, key: str) -> bool:
         """Legacy method for SecretStore."""
         parts = key.split(".")
@@ -131,7 +135,7 @@ class InMemoryStorageAdapter(StorageAdapter):
         namespace = parts[0]
         subkey = ".".join(parts[1:])
         return await self.delete(namespace, subkey)
-    
+
     async def list_keys_async(self, pattern: str) -> list[str]:
         """Legacy method for SecretStore."""
         # Simple pattern matching
@@ -199,9 +203,7 @@ class TestCredentialRepositoryCreate:
         assert created.version == 1
 
     @pytest.mark.asyncio
-    async def test_create_duplicate_fails(
-        self, repository, storage_setup
-    ):
+    async def test_create_duplicate_fails(self, repository, storage_setup):
         """Test that creating duplicate ID fails."""
         cred = Credential.create(
             type=CredentialType.API_TOKEN,
@@ -219,13 +221,9 @@ class TestCredentialRepositoryCreate:
             await repository.create(cred, secret)
 
     @pytest.mark.asyncio
-    async def test_secret_stored_in_vault_only(
-        self, repository, storage_setup
-    ):
+    async def test_secret_stored_in_vault_only(self, repository, storage_setup):
         """Test that secret is stored in vault, not core."""
-        storage_manager, secret_store, core_adapter, vault_adapter = (
-            storage_setup
-        )
+        storage_manager, secret_store, core_adapter, vault_adapter = storage_setup
 
         cred = Credential.create(
             type=CredentialType.API_TOKEN,
@@ -247,13 +245,9 @@ class TestCredentialRepositoryCreate:
         assert "secret" not in core_data  # But secret data not in metadata
 
     @pytest.mark.asyncio
-    async def test_metadata_stored_in_core_only(
-        self, repository, storage_setup
-    ):
+    async def test_metadata_stored_in_core_only(self, repository, storage_setup):
         """Test that metadata is stored in core, not vault."""
-        storage_manager, secret_store, core_adapter, vault_adapter = (
-            storage_setup
-        )
+        storage_manager, secret_store, core_adapter, vault_adapter = storage_setup
 
         cred = Credential.create(
             type=CredentialType.API_TOKEN,
@@ -275,9 +269,7 @@ class TestCredentialRepositoryCreate:
         assert cred.id not in vault_keys
 
     @pytest.mark.asyncio
-    async def test_create_rejects_metadata_with_secret(
-        self, repository
-    ):
+    async def test_create_rejects_metadata_with_secret(self, repository):
         """Test that metadata containing secret-like fields is rejected."""
         cred = Credential.create(
             type=CredentialType.API_TOKEN,
@@ -296,9 +288,7 @@ class TestCredentialRepositoryGet:
     """Tests for credential retrieval."""
 
     @pytest.mark.asyncio
-    async def test_get_returns_metadata_only(
-        self, repository
-    ):
+    async def test_get_returns_metadata_only(self, repository):
         """Test that get returns metadata without secret."""
         cred = Credential.create(
             type=CredentialType.SSH_PASSWORD,
@@ -322,18 +312,14 @@ class TestCredentialRepositoryGet:
         assert retrieved.host == "prod.example.com"
 
     @pytest.mark.asyncio
-    async def test_get_not_found_returns_none(
-        self, repository
-    ):
+    async def test_get_not_found_returns_none(self, repository):
         """Test that getting non-existent credential returns None."""
         result = await repository.get("non-existent-id")
 
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_get_with_secret_returns_both(
-        self, repository
-    ):
+    async def test_get_with_secret_returns_both(self, repository):
         """Test that get_with_secret returns metadata and secret."""
         cred = Credential.create(
             type=CredentialType.API_TOKEN,
@@ -354,9 +340,7 @@ class TestCredentialRepositoryGet:
         assert retrieved_secret == secret
 
     @pytest.mark.asyncio
-    async def test_get_with_secret_not_found_returns_none(
-        self, repository
-    ):
+    async def test_get_with_secret_not_found_returns_none(self, repository):
         """Test that get_with_secret returns None for missing credential."""
         result = await repository.get_with_secret("non-existent-id")
 
@@ -367,9 +351,7 @@ class TestCredentialRepositoryUpdate:
     """Tests for credential updates."""
 
     @pytest.mark.asyncio
-    async def test_update_metadata_only(
-        self, repository
-    ):
+    async def test_update_metadata_only(self, repository):
         """Test updating metadata without changing secret."""
         cred = Credential.create(
             type=CredentialType.API_TOKEN,
@@ -399,9 +381,7 @@ class TestCredentialRepositoryUpdate:
         assert retrieved_secret == secret
 
     @pytest.mark.asyncio
-    async def test_update_secret_only(
-        self, repository
-    ):
+    async def test_update_secret_only(self, repository):
         """Test updating secret without changing metadata."""
         cred = Credential.create(
             type=CredentialType.API_TOKEN,
@@ -426,9 +406,7 @@ class TestCredentialRepositoryUpdate:
         assert retrieved_secret == secret2
 
     @pytest.mark.asyncio
-    async def test_update_both_metadata_and_secret(
-        self, repository
-    ):
+    async def test_update_both_metadata_and_secret(self, repository):
         """Test updating both metadata and secret together."""
         cred = Credential.create(
             type=CredentialType.DATABASE_PASSWORD,
@@ -457,16 +435,12 @@ class TestCredentialRepositoryUpdate:
         assert result.host == "db-backup.example.com"
 
         # Verify both changed
-        retrieved_cred, retrieved_secret = await repository.get_with_secret(
-            cred.id
-        )
+        retrieved_cred, retrieved_secret = await repository.get_with_secret(cred.id)
         assert retrieved_cred.name == "postgres-backup"
         assert retrieved_secret == secret2
 
     @pytest.mark.asyncio
-    async def test_update_version_conflict(
-        self, repository
-    ):
+    async def test_update_version_conflict(self, repository):
         """Test that version mismatch is detected."""
         cred = Credential.create(
             type=CredentialType.API_TOKEN,
@@ -505,9 +479,7 @@ class TestCredentialRepositoryUpdate:
             await repository.update(v2, secret=None)
 
     @pytest.mark.asyncio
-    async def test_update_rejected_with_secret_in_metadata(
-        self, repository
-    ):
+    async def test_update_rejected_with_secret_in_metadata(self, repository):
         """Test that update rejects metadata with secrets."""
         cred = Credential.create(
             type=CredentialType.API_TOKEN,
@@ -532,9 +504,7 @@ class TestCredentialRepositoryDelete:
     """Tests for credential deletion."""
 
     @pytest.mark.asyncio
-    async def test_delete_removes_metadata_and_secret(
-        self, repository
-    ):
+    async def test_delete_removes_metadata_and_secret(self, repository):
         """Test that delete removes both metadata and secret."""
         cred = Credential.create(
             type=CredentialType.API_TOKEN,
@@ -558,17 +528,13 @@ class TestCredentialRepositoryDelete:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_delete_non_existent_is_idempotent(
-        self, repository
-    ):
+    async def test_delete_non_existent_is_idempotent(self, repository):
         """Test that deleting non-existent credential is safe."""
         # Should not raise
         await repository.delete("non-existent-id")
 
     @pytest.mark.asyncio
-    async def test_delete_twice_is_idempotent(
-        self, repository
-    ):
+    async def test_delete_twice_is_idempotent(self, repository):
         """Test that deleting same credential twice is safe."""
         cred = Credential.create(
             type=CredentialType.API_TOKEN,
@@ -616,9 +582,7 @@ class TestCredentialRepositoryList:
         assert listed_ids == cred_ids
 
     @pytest.mark.asyncio
-    async def test_list_returns_metadata_only(
-        self, repository
-    ):
+    async def test_list_returns_metadata_only(self, repository):
         """Test that list returns metadata without secrets."""
         cred = Credential.create(
             type=CredentialType.API_TOKEN,
@@ -665,9 +629,7 @@ class TestCredentialRepositoryAtomicity:
         assert await repository.exists(cred.id) is False
 
     @pytest.mark.asyncio
-    async def test_count_reflects_population(
-        self, repository
-    ):
+    async def test_count_reflects_population(self, repository):
         """Test count method."""
         # Start empty
         assert await repository.count() == 0
@@ -692,13 +654,9 @@ class TestCredentialRepositoryIsolation:
     """Tests for namespace isolation."""
 
     @pytest.mark.asyncio
-    async def test_secret_namespace_not_in_meta(
-        self, repository, storage_setup
-    ):
+    async def test_secret_namespace_not_in_meta(self, repository, storage_setup):
         """Test that secrets are not stored in meta namespace."""
-        storage_manager, secret_store, core_adapter, vault_adapter = (
-            storage_setup
-        )
+        storage_manager, secret_store, core_adapter, vault_adapter = storage_setup
 
         cred = Credential.create(
             type=CredentialType.API_TOKEN,
@@ -719,13 +677,9 @@ class TestCredentialRepositoryIsolation:
         assert b"secret_data".decode() not in meta_str
 
     @pytest.mark.asyncio
-    async def test_meta_namespace_not_in_vault(
-        self, repository, storage_setup
-    ):
+    async def test_meta_namespace_not_in_vault(self, repository, storage_setup):
         """Test that metadata is not stored in vault namespace."""
-        storage_manager, secret_store, core_adapter, vault_adapter = (
-            storage_setup
-        )
+        storage_manager, secret_store, core_adapter, vault_adapter = storage_setup
 
         cred = Credential.create(
             type=CredentialType.API_TOKEN,
@@ -739,9 +693,7 @@ class TestCredentialRepositoryIsolation:
         await repository.create(cred, secret)
 
         # Check vault namespace doesn't have credential metadata
-        vault_meta = await vault_adapter.get(
-            "credentials.meta", cred.id
-        )
+        vault_meta = await vault_adapter.get("credentials.meta", cred.id)
         assert vault_meta is None
 
 
@@ -773,9 +725,7 @@ class TestCredentialRepositoryWorkflow:
         assert retrieved.name == "prod-deploy"
 
         # Get with secret
-        cred_with_secret, secret = await repository.get_with_secret(
-            created.id
-        )
+        cred_with_secret, secret = await repository.get_with_secret(created.id)
         assert secret == password
 
         # Update metadata

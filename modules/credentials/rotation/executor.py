@@ -7,6 +7,7 @@ import asyncio
 from .policy import RotationPolicy, RotationStatus, RotationStrategy, RotationState
 from .exceptions import RotationFailedError, RotationNotAllowedError
 from .secret_gen import generate_strong_secret
+from core.security import TrustLevel
 
 
 class RotationExecutor:
@@ -79,8 +80,7 @@ class RotationExecutor:
             trust_state = await self.trust_engine.get_state(credential_id)
             
             # Must convert TrustLevel enum to compare
-            from core.security.trust.trust_state import TrustLevel as TL
-            if trust_state and trust_state.level == TL.FROZEN:
+            if trust_state and trust_state.level == TrustLevel.FROZEN:
                 await self.audit_binder.append_event(
                     event_type="credential_rotation_denied",
                     metadata={

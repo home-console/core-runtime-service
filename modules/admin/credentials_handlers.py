@@ -9,18 +9,27 @@ import asyncio
 import io
 import json
 import threading
-from typing import Any, Dict, Optional
 import time
+from typing import Any, Dict
 
+from core.auth_contextvars import get_current_auth_context, set_current_auth_context
 from core.system_context import create_system_context
-from core.auth_contextvars import set_current_auth_context, get_current_auth_context
-from core.credentials.domain import CredentialType
-
+from modules.credentials import CredentialType
 
 # SystemContext не имеет user_id; для credential.* передаём явно admin
 _ADMIN_USER_ID = "admin"
 # RBAC Role values are lowercase (see core.security.rbac_models.Role)
 _ADMIN_ROLES = ["admin"]
+
+
+def _get_services(runtime: Any):
+    # TODO: remove fallback after full KernelContext migration
+    context = getattr(runtime, "context", None)
+    if context is not None and hasattr(context, "get_service"):
+        services = context.get_service("service_registry")
+    else:
+        services = getattr(runtime, "service_registry", None)
+    return services
 
 
 def _service_not_loaded(e: Exception) -> bool:
@@ -36,7 +45,8 @@ def _get_repo(runtime: Any):
     if sm is None or ss is None:
         return None
     try:
-        from core.credentials.repository import CredentialRepository
+        from modules.credentials import CredentialRepository
+
         return CredentialRepository(storage_manager=sm, secret_store=ss)
     except Exception:
         return None
@@ -49,7 +59,8 @@ async def admin_credentials_list(runtime: Any) -> Dict[str, Any]:
         prev = get_current_auth_context()
         try:
             set_current_auth_context(ctx)
-            out = await runtime.service_registry.call(
+            services = _get_services(runtime)
+            out = await services.call(
                 "credential.list",
                 _user_id=_ADMIN_USER_ID,
                 _user_roles=_ADMIN_ROLES,
@@ -62,19 +73,28 @@ async def admin_credentials_list(runtime: Any) -> Dict[str, Any]:
             raise
         repo = _get_repo(runtime)
         if repo is None:
-            return {"credentials": [], "count": 0, "_message": "Credentials module not loaded; storage_manager or secret_store missing."}
+            return {
+                "credentials": [],
+                "count": 0,
+                "_message": "Credentials module not loaded; storage_manager or secret_store missing.",
+            }
         try:
             from modules.credentials.schemas import CredentialMetadata
+
             creds = await repo.list()
             return {
-                "credentials": [CredentialMetadata.from_domain(c).to_dict() for c in creds],
+                "credentials": [
+                    CredentialMetadata.from_domain(c).to_dict() for c in creds
+                ],
                 "count": len(creds),
             }
         except Exception:
             return {"credentials": [], "count": 0}
 
 
-async def admin_credentials_create(runtime: Any, body: Dict[str, Any] = None) -> Dict[str, Any]:
+async def admin_credentials_create(
+    runtime: Any, body: Dict[str, Any] = None
+) -> Dict[str, Any]:
     """POST /admin/v1/credentials — create credential."""
     if not body:
         raise ValueError("body required")
@@ -83,14 +103,17 @@ async def admin_credentials_create(runtime: Any, body: Dict[str, Any] = None) ->
     if not secret_str:
         raise ValueError("secret required")
     credential.pop("secret", None)
-    secret_bytes = secret_str.encode("utf-8") if isinstance(secret_str, str) else secret_str
+    secret_bytes = (
+        secret_str.encode("utf-8") if isinstance(secret_str, str) else secret_str
+    )
 
     try:
         ctx = create_system_context("admin", "credential.create")
         prev = get_current_auth_context()
         try:
             set_current_auth_context(ctx)
-            return await runtime.service_registry.call(
+            services = _get_services(runtime)
+            return await services.call(
                 "credential.create",
                 credential=credential,
                 secret=secret_bytes,
@@ -104,10 +127,13 @@ async def admin_credentials_create(runtime: Any, body: Dict[str, Any] = None) ->
             raise
         repo = _get_repo(runtime)
         if repo is None:
-            raise ValueError("Credentials module not loaded and storage/secret_store unavailable. Enable credentials module or check SecretStore init.") from e
+            raise ValueError(
+                "Credentials module not loaded and storage/secret_store unavailable. Enable credentials module or check SecretStore init."
+            ) from e
         try:
-            from core.credentials.domain import Credential, CredentialType
+            from modules.credentials import Credential, CredentialType
             from modules.credentials.schemas import CredentialMetadata
+
             secret_ref = (credential.get("secret_ref") or "").strip()
             if not secret_ref:
                 secret_ref = f"cred:{credential.get('name', '').replace(' ', '_')}"
@@ -127,7 +153,9 @@ async def admin_credentials_create(runtime: Any, body: Dict[str, Any] = None) ->
             raise ValueError(f"Create failed: {e2}") from e2
 
 
-async def admin_credentials_get_secret(runtime: Any, credential_id: str = None, **kw: Any) -> Dict[str, Any]:
+async def admin_credentials_get_secret(
+    runtime: Any, credential_id: str = None, **kw: Any
+) -> Dict[str, Any]:
     """GET /admin/v1/credentials/{credential_id}/secret — получить секрет (для экспорта в .ssh/config и т.д.)."""
     cid = credential_id or kw.get("credential_id")
     if not cid:
@@ -137,7 +165,8 @@ async def admin_credentials_get_secret(runtime: Any, credential_id: str = None, 
         prev = get_current_auth_context()
         try:
             set_current_auth_context(ctx)
-            out = await runtime.service_registry.call(
+            services = _get_services(runtime)
+            out = await services.call(
                 "credential.get_with_secret",
                 credential_id=cid,
                 _user_id=_ADMIN_USER_ID,
@@ -164,7 +193,9 @@ async def admin_credentials_get_secret(runtime: Any, credential_id: str = None, 
         return {"secret": secret_str}
 
 
-async def admin_credentials_get(runtime: Any, credential_id: str = None, **kw: Any) -> Dict[str, Any]:
+async def admin_credentials_get(
+    runtime: Any, credential_id: str = None, **kw: Any
+) -> Dict[str, Any]:
     """GET /admin/v1/credentials/{credential_id} — get one credential (metadata)."""
     cid = credential_id or kw.get("credential_id")
     if not cid:
@@ -174,7 +205,8 @@ async def admin_credentials_get(runtime: Any, credential_id: str = None, **kw: A
         prev = get_current_auth_context()
         try:
             set_current_auth_context(ctx)
-            return await runtime.service_registry.call(
+            services = _get_services(runtime)
+            return await services.call(
                 "credential.get",
                 credential_id=cid,
                 _user_id=_ADMIN_USER_ID,
@@ -192,10 +224,13 @@ async def admin_credentials_get(runtime: Any, credential_id: str = None, **kw: A
         if cred is None:
             raise ValueError(f"Credential {cid} not found")
         from modules.credentials.schemas import CredentialMetadata
+
         return CredentialMetadata.from_domain(cred).to_dict()
 
 
-async def admin_credentials_delete(runtime: Any, credential_id: str = None, **kw: Any) -> Dict[str, Any]:
+async def admin_credentials_delete(
+    runtime: Any, credential_id: str = None, **kw: Any
+) -> Dict[str, Any]:
     """DELETE /admin/v1/credentials/{credential_id}."""
     cid = credential_id or kw.get("credential_id")
     if not cid:
@@ -205,7 +240,8 @@ async def admin_credentials_delete(runtime: Any, credential_id: str = None, **kw
         prev = get_current_auth_context()
         try:
             set_current_auth_context(ctx)
-            await runtime.service_registry.call(
+            services = _get_services(runtime)
+            await services.call(
                 "credential.delete",
                 credential_id=cid,
                 _user_id=_ADMIN_USER_ID,
@@ -224,7 +260,9 @@ async def admin_credentials_delete(runtime: Any, credential_id: str = None, **kw
         return {"deleted": True}
 
 
-async def admin_credentials_update(runtime: Any, credential_id: str, body: Dict[str, Any] = None, **kw: Any) -> Dict[str, Any]:
+async def admin_credentials_update(
+    runtime: Any, credential_id: str, body: Dict[str, Any] = None, **kw: Any
+) -> Dict[str, Any]:
     """PUT /admin/v1/credentials/{credential_id} — update credential (metadata и/или секрет)."""
     cid = credential_id or kw.get("credential_id")
     if not cid:
@@ -235,14 +273,19 @@ async def admin_credentials_update(runtime: Any, credential_id: str, body: Dict[
     credential["id"] = cid
     secret_str = body.get("secret") or credential.get("secret")
     credential.pop("secret", None)
-    secret_bytes = secret_str.encode("utf-8") if isinstance(secret_str, str) and secret_str else (secret_str if isinstance(secret_str, bytes) else None)
+    secret_bytes = (
+        secret_str.encode("utf-8")
+        if isinstance(secret_str, str) and secret_str
+        else (secret_str if isinstance(secret_str, bytes) else None)
+    )
 
     try:
         ctx = create_system_context("admin", "credential.update")
         prev = get_current_auth_context()
         try:
             set_current_auth_context(ctx)
-            return await runtime.service_registry.call(
+            services = _get_services(runtime)
+            return await services.call(
                 "credential.update",
                 credential=credential,
                 secret=secret_bytes,
@@ -260,8 +303,9 @@ async def admin_credentials_update(runtime: Any, credential_id: str, body: Dict[
         current = await repo.get(cid)
         if current is None:
             raise ValueError(f"Credential {cid} not found")
-        from core.credentials.domain import CredentialType
+        from modules.credentials import CredentialType
         from modules.credentials.schemas import CredentialMetadata
+
         changes = {}
         if credential.get("name") is not None:
             changes["name"] = str(credential["name"]).strip()
@@ -297,7 +341,10 @@ def _ssh_connect_with_credential(cred, secret_bytes: bytes) -> Dict[str, Any]:
         return {"ok": False, "error": "paramiko не установлен (pip install paramiko)"}
 
     if cred.type not in (CredentialType.SSH_PASSWORD, CredentialType.SSH_KEY):
-        return {"ok": False, "error": f"Тип креда {cred.type} не поддерживает подключение к хосту (нужен ssh_password или ssh_key)"}
+        return {
+            "ok": False,
+            "error": f"Тип креда {cred.type} не поддерживает подключение к хосту (нужен ssh_password или ssh_key)",
+        }
     if not cred.host or not cred.username:
         return {"ok": False, "error": "У креда должны быть указаны host и username"}
 
@@ -330,7 +377,10 @@ def _ssh_connect_with_credential(cred, secret_bytes: bytes) -> Dict[str, Any]:
                 except Exception:
                     continue
             if pkey is None:
-                return {"ok": False, "error": "Не удалось прочитать приватный ключ (RSA/Ed25519/ECDSA)"}
+                return {
+                    "ok": False,
+                    "error": "Не удалось прочитать приватный ключ (RSA/Ed25519/ECDSA)",
+                }
             client.connect(
                 hostname=host,
                 port=port,
@@ -351,7 +401,9 @@ def _ssh_connect_with_credential(cred, secret_bytes: bytes) -> Dict[str, Any]:
                 pass
 
 
-async def admin_credentials_connect(runtime: Any, credential_id: str = None, **kw: Any) -> Dict[str, Any]:
+async def admin_credentials_connect(
+    runtime: Any, credential_id: str = None, **kw: Any
+) -> Dict[str, Any]:
     """
     POST /admin/v1/credentials/{credential_id}/connect — подключиться к хосту по креду из БД.
     Для SSH-кредов (ssh_password, ssh_key) устанавливает соединение и возвращает ok/error.
@@ -362,7 +414,9 @@ async def admin_credentials_connect(runtime: Any, credential_id: str = None, **k
 
     repo = _get_repo(runtime)
     if repo is None:
-        raise ValueError("Credentials module not loaded (storage_manager or secret_store missing)")
+        raise ValueError(
+            "Credentials module not loaded (storage_manager or secret_store missing)"
+        )
 
     pair = await repo.get_with_secret(cid)
     if pair is None:
@@ -383,7 +437,9 @@ def _ssh_open_shell(cred, secret_bytes: bytes):
         raise RuntimeError("paramiko не установлен (pip install paramiko)")
 
     if cred.type not in (CredentialType.SSH_PASSWORD, CredentialType.SSH_KEY):
-        raise RuntimeError(f"Тип креда {cred.type} не поддерживает терминал (нужен ssh_password или ssh_key)")
+        raise RuntimeError(
+            f"Тип креда {cred.type} не поддерживает терминал (нужен ssh_password или ssh_key)"
+        )
     if not cred.host or not cred.username:
         raise RuntimeError("У креда должны быть указаны host и username")
 
@@ -413,7 +469,9 @@ def _ssh_open_shell(cred, secret_bytes: bytes):
             except Exception:
                 continue
         if pkey is None:
-            raise RuntimeError("Не удалось прочитать приватный ключ (RSA/Ed25519/ECDSA)")
+            raise RuntimeError(
+                "Не удалось прочитать приватный ключ (RSA/Ed25519/ECDSA)"
+            )
         client.connect(
             hostname=host,
             port=port,
@@ -459,7 +517,11 @@ async def admin_credentials_terminal_ws(runtime: Any, websocket: Any) -> None:
     WebSocket /admin/v1/credentials/terminal?credential_id=xxx — терминал по креду из БД.
     Мост: браузер ↔ SSH PTY. Закрытие WebSocket закрывает SSH.
     """
-    credential_id = websocket.query_params.get("credential_id") if hasattr(websocket, "query_params") else None
+    credential_id = (
+        websocket.query_params.get("credential_id")
+        if hasattr(websocket, "query_params")
+        else None
+    )
     if not credential_id:
         await websocket.close(code=4000, reason="credential_id required")
         return
@@ -544,11 +606,15 @@ async def admin_credentials_terminal_ws(runtime: Any, websocket: Any) -> None:
                     if text.startswith("{"):
                         try:
                             payload = json.loads(text)
-                            if isinstance(payload, dict) and payload.get("type") == "resize":
+                            if (
+                                isinstance(payload, dict)
+                                and payload.get("type") == "resize"
+                            ):
                                 cols = int(payload.get("cols") or 80)
                                 rows = int(payload.get("rows") or 24)
                                 await loop.run_in_executor(
-                                    None, lambda: channel.resize_pty(width=cols, height=rows)
+                                    None,
+                                    lambda: channel.resize_pty(width=cols, height=rows),
                                 )
                                 handled = True
                         except Exception:
@@ -583,7 +649,9 @@ async def admin_credentials_terminal_ws(runtime: Any, websocket: Any) -> None:
             pass
 
 
-async def admin_credentials_terminal_session_close(runtime: Any, session_id: str) -> Dict[str, Any]:
+async def admin_credentials_terminal_session_close(
+    runtime: Any, session_id: str
+) -> Dict[str, Any]:
     """
     DELETE /admin/v1/credentials/terminal/sessions/{session_id} — принудительно закрыть SSH терминальную сессию.
     """

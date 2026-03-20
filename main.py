@@ -80,8 +80,7 @@ async def main() -> None:
 
     # SecretStore для inspector (debug) и credentials: один раз при старте
     try:
-        from core.security.secret_store import SecretStore
-        from core.security.secret_store_adapter import SecretStoreStorageAdapter
+        from core.security import SecretStore, SecretStoreStorageAdapter
         backend = storage_stack.manager.get_vault() if storage_stack.manager.is_dual_mode else storage_stack.manager.get_core()
         wrapper = SecretStoreStorageAdapter(backend)
         secret_store = SecretStore(wrapper)

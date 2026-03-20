@@ -13,25 +13,21 @@ import json
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
-from core.agent.identity import (
+from modules.agent import (
     AgentIdentity,
     AgentPublicKey,
     AgentKeyManager,
     AgentIdentityFactory,
+    AgentEnrollmentManager,
+    MTLSCertificateAuthority,
+    AgentRegistry,
+    AgentStatus,
 )
-from core.agent.enrollment import (
+from modules.agent import (
     EnrollmentToken,
     EnrollmentTokenStatus,
     EnrollmentTokenFactory,
     AgentEnrollmentManager,
-)
-from core.agent.tls import (
-    MTLSCertificateAuthority,
-)
-from core.agent.registry import (
-    AgentMetadata,
-    AgentStatus,
-    AgentRegistry,
 )
 
 

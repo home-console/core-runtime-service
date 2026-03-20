@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from typing import Any, Optional, Dict
 from enum import Enum
 
+from core.security import TrustLevel
+
 
 class RotationStrategyType(Enum):
     """Rotation strategy types."""
@@ -160,7 +162,6 @@ class RotationStrategy(ABC):
         if context.trust_engine:
             trust_state = await context.trust_engine.get_state(context.credential_id)
             if trust_state:
-                from core.security.trust.trust_state import TrustLevel
                 if trust_state.level == TrustLevel.FROZEN:
                     return False, "account_frozen"
         

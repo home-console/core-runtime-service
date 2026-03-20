@@ -107,7 +107,7 @@ async def test_plugin_load_only_via_manifest(memory_adapter):
         # Создаём Python файл плагина
         plugin_file = plugin_dir / "plugin.py"
         plugin_file.write_text("""
-from core.base_plugin import BasePlugin, PluginMetadata
+from core.kernel.base_plugin import BasePlugin, PluginMetadata
 
 class TestPlugin(BasePlugin):
     @property

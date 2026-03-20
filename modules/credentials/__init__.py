@@ -1,25 +1,30 @@
-"""
-Credential Management Module — Step 17.3-17.4
+"""Credential Management Module — Step 17.3-17.4.
 
 Provides capability-driven credential operations through OperationManager.
-Includes full RBAC enforcement (Step 17.4).
-No direct HTTP CRUD — all operations are routed through the operation system.
-
-Этот пакет экспортирует два класса RuntimeModule:
-- CredentialModule — основная реализация
-- CredentialsModule — alias для ModuleManager (module name "credentials")
+This package is now the canonical home for credential domain code.
 """
 
+from .domain import Credential, CredentialType, CredentialValidationError
+from .errors import (
+    CredentialRepositoryError,
+    CredentialNotFound,
+    CredentialAlreadyExists,
+    CredentialVersionConflict,
+    CredentialSecretLeakage,
+    CredentialAccessDenied,
+)
+from .repository import CredentialRepository
+
 from .module import CredentialModule
-from .services import CredentialService
 from .policy_enforcer import CredentialRBACEnforcer
 from .schemas import (
     CreateCredentialRequest,
-    UpdateCredentialRequest,
     CredentialMetadata,
-    CredentialWithSecretResponse,
     CredentialOperationResult,
+    CredentialWithSecretResponse,
+    UpdateCredentialRequest,
 )
+from .services import CredentialService
 
 
 class CredentialsModule(CredentialModule):
@@ -33,6 +38,16 @@ class CredentialsModule(CredentialModule):
 
 
 __all__ = [
+    "Credential",
+    "CredentialType",
+    "CredentialValidationError",
+    "CredentialRepository",
+    "CredentialRepositoryError",
+    "CredentialNotFound",
+    "CredentialAlreadyExists",
+    "CredentialVersionConflict",
+    "CredentialSecretLeakage",
+    "CredentialAccessDenied",
     "CredentialModule",
     "CredentialsModule",
     "CredentialService",

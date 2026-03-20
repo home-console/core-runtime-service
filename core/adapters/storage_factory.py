@@ -5,15 +5,14 @@
 Core не зависит от этого модуля — только от абстракции IStorageBackend и портов.
 """
 
-from core.config import Config
 from core.adapters.storage_adapter import StorageAdapter
-from core.storage_manager import StorageManager
-from core.storage_errors import StorageConfigurationError
-from core.storage_port import CoreStoragePort, VaultStoragePort, StorageStack
+from core.config import Config
 from core.state_engine import StateEngine
-from core.secure_storage import SecureStorageWrapper
-from core.storage_startup import StorageStartupChecker
-
+from modules.storage.errors import StorageConfigurationError
+from modules.storage.manager import StorageManager
+from modules.storage.port import CoreStoragePort, StorageStack, VaultStoragePort
+from modules.storage.secure import SecureStorageWrapper
+from modules.storage.startup import StorageStartupChecker
 
 
 async def create_storage_adapter(config: Config) -> StorageAdapter:
@@ -34,12 +33,14 @@ async def create_storage_adapter(config: Config) -> StorageAdapter:
 
     if config.storage_type == "sqlite":
         from core.adapters.sqlite_adapter import SQLiteAdapter
+
         adapter = SQLiteAdapter(config.db_path)
         await adapter.initialize_schema()
         return adapter
 
     if config.storage_type == "postgresql":
         from core.adapters.postgresql_adapter import PostgreSQLAdapter
+
         adapter = PostgreSQLAdapter(
             host=config.pg_host,
             port=config.pg_port,
@@ -64,9 +65,7 @@ async def _create_vault_storage_adapter(config: Config) -> StorageAdapter:
             f"_create_vault_storage_adapter requires storage_mode='dual', got {config.storage_mode!r}"
         )
     if not config.vault_storage_type:
-        raise StorageConfigurationError(
-            "vault_storage_type must be set in dual mode"
-        )
+        raise StorageConfigurationError("vault_storage_type must be set in dual mode")
 
     if config.vault_storage_type == "sqlite":
         if not config.vault_db_path:
@@ -74,6 +73,7 @@ async def _create_vault_storage_adapter(config: Config) -> StorageAdapter:
                 "vault_db_path must be set for SQLite vault storage"
             )
         from core.adapters.sqlite_adapter import SQLiteAdapter
+
         adapter = SQLiteAdapter(config.vault_db_path)
         await adapter.initialize_schema()
         return adapter
@@ -84,6 +84,7 @@ async def _create_vault_storage_adapter(config: Config) -> StorageAdapter:
                 "vault_pg_dsn must be set for PostgreSQL vault storage"
             )
         from core.adapters.postgresql_adapter import PostgreSQLAdapter
+
         adapter = PostgreSQLAdapter(dsn=config.vault_pg_dsn)
         await adapter.initialize_schema()
         return adapter
@@ -114,7 +115,9 @@ async def create_storage_manager(config: Config) -> StorageManager:
     )
 
 
-async def build_storage_stack(config: Config, state_engine: StateEngine) -> StorageStack:
+async def build_storage_stack(
+    config: Config, state_engine: StateEngine
+) -> StorageStack:
     """
     Собрать полный storage stack для ядра.
 

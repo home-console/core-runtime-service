@@ -1,10 +1,25 @@
 """
-Plugins subsystem - управление lifecycle плагинов.
+Compatibility package for the plugin subsystem.
 
-Re-export для обратной совместимости.
+Canonical implementations live under modules.plugins.
 """
 
-from core.plugins.manager import PluginManager
-from core.kernel.plugin_registry import PluginState
+from modules.plugins import (
+    DEFAULT_ALLOWED_SERVICES,
+    PluginManager,
+    PluginState,
+    ServiceProxy,
+    StorageProxy,
+    ValidationError,
+    validate_plugin_json,
+)
 
-__all__ = ['PluginManager', 'PluginState']
+__all__ = [
+    "DEFAULT_ALLOWED_SERVICES",
+    "PluginManager",
+    "PluginState",
+    "ServiceProxy",
+    "StorageProxy",
+    "ValidationError",
+    "validate_plugin_json",
+]

@@ -15,35 +15,27 @@ Secure Storage Wrapper — P0 hardening for cold storage.
     await storage.secure_set("trust_store", "key1", {...})
 """
 
-from typing import Any, Optional, AsyncIterator
+import asyncio
+import os
 from contextlib import asynccontextmanager
 from datetime import datetime
-import json
-import os
-import time
-import asyncio
+from typing import Any, AsyncIterator, Optional
 
-from core.storage_abstraction import IStorageBackend
-from core.storage_exceptions import (
-    StorageCorruptionError,
-    StorageRollbackDetected, 
-    StorageTamperDetected
-)
-from core.storage_crypto import (
-    sha256_json,
-    sha256_string,
-    sha256_bytes,
-    canonical_json,
+from modules.storage.abstraction import IStorageBackend
+from modules.storage.crypto import (
     calculate_namespace_root,
     calculate_storage_root,
-    merkle_root
+    canonical_json,
+    sha256_bytes,
+    sha256_json,
+    sha256_string,
 )
-
+from modules.storage.exceptions import StorageCorruptionError
 
 # NAMESPACES, которые ДОЛЖНЫ проходить через secure_set
 CRITICAL_NAMESPACES = {
     "trust_store",
-    "agent_registry", 
+    "agent_registry",
     "secrets.store",
     "marketplace.transactions",
     "_audit.security",  # Step 17.5: Credential security audit trail (tamper-evident)
@@ -63,9 +55,9 @@ PROTECTED_NAMESPACES = CRITICAL_NAMESPACES | SYSTEM_NAMESPACES
 class SecureStorageWrapper:
     """
     Wrapper вокруг StorageAdapter, добавляющий криптографическую защиту и аудит.
-    
+
     Архитектура:
-    
+
     ┌─────────────────────────────────────────────────┐
     │ Application Layer (плагины)                     │
     │ await secure_storage.secure_set(ns, key, val)   │
@@ -86,22 +78,22 @@ class SecureStorageWrapper:
     │ - WAL mode (crash safety)                       │
     └─────────────────────────────────────────────────┘
     """
-    
+
     def __init__(self, adapter: IStorageBackend):
         """Инициализация secure wrapper."""
         self._adapter = adapter
         self._lock = asyncio.Lock()  # Глобальная блокировка для секурных операций
         self._current_epoch = 0
         self._cached_root_hash = None
-    
+
     async def initialize(self) -> None:
         """Инициализация schema и проверка целостности при startup."""
         # Инициализируем adapter
         await self._adapter.initialize_schema()
-        
+
         # Добавим таблицы для system namespace если нужны
         # (StorageAdapter использует одну таблицу, но мы их логически разделяем)
-        
+
         # Загружаем текущий epoch
         meta = await self._adapter.get("_system.meta", "global_epoch")
         if meta:
@@ -109,14 +101,18 @@ class SecureStorageWrapper:
         else:
             # Первая инициализация
             self._current_epoch = 0
-            await self._adapter.set("_system.meta", "global_epoch", {
-                "epoch": 0,
-                "updated_at": datetime.utcnow().isoformat(),
-            })
-        
+            await self._adapter.set(
+                "_system.meta",
+                "global_epoch",
+                {
+                    "epoch": 0,
+                    "updated_at": datetime.utcnow().isoformat(),
+                },
+            )
+
         # Проверяем и рассчитываем root hash при старте
         await self._verify_storage_integrity()
-    
+
     def _skip_root_verify(self) -> bool:
         """
         Не проверять root при старте, а пересчитать и сохранить (чтобы не падать в dev).
@@ -124,7 +120,11 @@ class SecureStorageWrapper:
 
         Почему хеш меняется: см. комментарий в коде про mismatch.
         """
-        skip = os.environ.get("STORAGE_SKIP_ROOT_VERIFY", "").lower() in ("1", "true", "yes")
+        skip = os.environ.get("STORAGE_SKIP_ROOT_VERIFY", "").lower() in (
+            "1",
+            "true",
+            "yes",
+        )
         debug = os.environ.get("DEBUG", "").lower() in ("1", "true", "yes")
         return skip or debug
 
@@ -134,8 +134,14 @@ class SecureStorageWrapper:
         При STORAGE_SKIP_ROOT_VERIFY=1 или DEBUG=1 — только пересчёт и сохранение root.
         """
         if self._skip_root_verify():
-            reason = "STORAGE_SKIP_ROOT_VERIFY=1" if os.environ.get("STORAGE_SKIP_ROOT_VERIFY") else "DEBUG=1"
-            print(f"[SecureStorage] {reason}: recalculating root hash on startup (no verify).")
+            reason = (
+                "STORAGE_SKIP_ROOT_VERIFY=1"
+                if os.environ.get("STORAGE_SKIP_ROOT_VERIFY")
+                else "DEBUG=1"
+            )
+            print(
+                f"[SecureStorage] {reason}: recalculating root hash on startup (no verify)."
+            )
             await self._recalculate_root_hash()
             return
 
@@ -158,11 +164,11 @@ class SecureStorageWrapper:
                 f"Storage may be corrupted or tampered."
             )
         print(f"[SecureStorage] Root hash verified: {current_root[:16]}...")
-    
+
     async def _calculate_current_root_hash(self) -> str:
         """
         Пересчитать текущий Merkle root для всего хранилища.
-        
+
         Алгоритм:
         1. Для каждого namespace (кроме _system)
         2. Для каждого key в namespace
@@ -171,11 +177,11 @@ class SecureStorageWrapper:
         5. Построить глобальный Merkle tree
         """
         namespace_roots = {}
-        
+
         # Сортируем namespace для детерминированного хеша (порядок в БД может отличаться)
         all_namespaces = await self._adapter.list_namespaces()
         namespaces = sorted(ns for ns in all_namespaces if not ns.startswith("_system"))
-        
+
         for ns in namespaces:
             key_hashes = {}
             async for key, value in self._adapter.iter_namespace(ns, batch_size=100):
@@ -184,31 +190,31 @@ class SecureStorageWrapper:
             if key_hashes:
                 namespace_root = calculate_namespace_root(key_hashes)
                 namespace_roots[ns] = namespace_root
-        
+
         # Вычисляем глобальный root
         global_root = calculate_storage_root(namespace_roots)
         self._cached_root_hash = global_root
         return global_root
-    
+
     async def _recalculate_root_hash(self) -> None:
         """Пересчитать и сохранить root hash."""
         current_root = await self._calculate_current_root_hash()
-        
+
         root_data = {
             "root_hash": current_root,
             "epoch": self._current_epoch,
             "signed_by": "core_key",  # Placeholder; real Ed25519/ECDSA signing in Step 17+
             "calculated_at": datetime.utcnow().isoformat(),
         }
-        
+
         # Сохраняем через adapter (без epoch bump, это системная операция)
         await self._adapter.set("_system.root_hash", "current", root_data)
-    
+
     @asynccontextmanager
     async def transaction(self):
         """
         Контекстный менеджер для атомарных транзакций.
-        
+
         Гарантирует, что:
         - Epoch update
         - Root hash update
@@ -218,7 +224,7 @@ class SecureStorageWrapper:
         async with self._lock:
             async with self._adapter.transaction():
                 yield
-    
+
     async def _append_audit_log(
         self,
         namespace: str,
@@ -228,7 +234,7 @@ class SecureStorageWrapper:
     ) -> None:
         """
         Добавить запись в audit log (Part 5).
-        
+
         Структура:
         {
             "id": incremental,
@@ -245,20 +251,20 @@ class SecureStorageWrapper:
         # Получаем последнюю запись для prev_hash linkage
         audit_keys = await self._adapter.list_keys("_system.audit_log")
         prev_hash = None
-        
+
         if audit_keys:
             # ID это последовательный номер, берем последний
             last_id = max(int(k) for k in audit_keys if k.isdigit())
             last_entry = await self._adapter.get("_system.audit_log", str(last_id))
             if last_entry:
                 prev_hash = last_entry.get("entry_hash")
-        
+
         if prev_hash is None:
             prev_hash = sha256_string("")  # Empty hash for first entry
-        
+
         # Вычисляем хеш значения
         value_hash = sha256_json(value) if value else sha256_string("")
-        
+
         # Новая запись
         new_id = len(audit_keys) + 1
         entry = {
@@ -271,26 +277,28 @@ class SecureStorageWrapper:
             "timestamp": datetime.utcnow().isoformat(),
             "prev_hash": prev_hash,
         }
-        
+
         # Вычисляем entry_hash
         entry_canonical = canonical_json(entry)
-        entry["entry_hash"] = sha256_bytes((prev_hash + entry_canonical).encode('utf-8'))
-        
+        entry["entry_hash"] = sha256_bytes(
+            (prev_hash + entry_canonical).encode("utf-8")
+        )
+
         # Сохраняем в audit log (через adapter напрямую, чтобы избежать рекурсии)
         await self._adapter.set("_system.audit_log", str(new_id), entry)
-    
+
     async def _bump_epoch(self) -> None:
         """Увеличить epoch и переподписать meta (Part B)."""
         self._current_epoch += 1
-        
+
         meta = {
             "epoch": self._current_epoch,
             "updated_at": datetime.utcnow().isoformat(),
         }
-        
+
         # Сохраняем через adapter
         await self._adapter.set("_system.meta", "global_epoch", meta)
-    
+
     def _secure_set_body_sync(
         self,
         conn: Any,
@@ -312,7 +320,9 @@ class SecureStorageWrapper:
             digit_keys = [k for k in audit_keys if k.isdigit()]
             if digit_keys:
                 last_id = max(int(k) for k in digit_keys)
-                last_entry = adapter._get_with_conn(conn, "_system.audit_log", str(last_id))
+                last_entry = adapter._get_with_conn(
+                    conn, "_system.audit_log", str(last_id)
+                )
                 if last_entry:
                     prev_hash = last_entry.get("entry_hash")
         if prev_hash is None:
@@ -330,7 +340,9 @@ class SecureStorageWrapper:
             "prev_hash": prev_hash,
         }
         entry_canonical = canonical_json(entry)
-        entry["entry_hash"] = sha256_bytes((prev_hash + entry_canonical).encode("utf-8"))
+        entry["entry_hash"] = sha256_bytes(
+            (prev_hash + entry_canonical).encode("utf-8")
+        )
         adapter._set_with_conn(conn, "_system.audit_log", str(new_id), entry)
         adapter._set_with_conn(conn, namespace, key, value)
         return new_epoch
@@ -353,7 +365,9 @@ class SecureStorageWrapper:
             digit_keys = [k for k in audit_keys if k.isdigit()]
             if digit_keys:
                 last_id = max(int(k) for k in digit_keys)
-                last_entry = adapter._get_with_conn(conn, "_system.audit_log", str(last_id))
+                last_entry = adapter._get_with_conn(
+                    conn, "_system.audit_log", str(last_id)
+                )
                 if last_entry:
                     prev_hash = last_entry.get("entry_hash")
         if prev_hash is None:
@@ -371,17 +385,14 @@ class SecureStorageWrapper:
             "prev_hash": prev_hash,
         }
         entry_canonical = canonical_json(entry)
-        entry["entry_hash"] = sha256_bytes((prev_hash + entry_canonical).encode("utf-8"))
+        entry["entry_hash"] = sha256_bytes(
+            (prev_hash + entry_canonical).encode("utf-8")
+        )
         adapter._set_with_conn(conn, "_system.audit_log", str(new_id), entry)
         deleted = adapter._delete_with_conn(conn, namespace, key)
         return (new_epoch, deleted)
 
-    async def secure_set(
-        self,
-        namespace: str,
-        key: str,
-        value: dict[str, Any]
-    ) -> None:
+    async def secure_set(self, namespace: str, key: str, value: dict[str, Any]) -> None:
         """
         Безопасная запись в критичные namespace (Part 6).
         Использует run_atomic если адаптер поддерживает — одна транзакция в одном потоке (устраняет "database is locked").
@@ -391,8 +402,9 @@ class SecureStorageWrapper:
                 f"secure_set() requires critical namespace, got {namespace}. "
                 f"For regular storage, use adapter.set() directly."
             )
-        if hasattr(self._adapter, "run_atomic"):
-            new_epoch = await self._adapter.run_atomic(
+        run_atomic = getattr(self._adapter, "run_atomic", None)
+        if run_atomic is not None:
+            new_epoch = await run_atomic(
                 lambda conn, ad: self._secure_set_body_sync(
                     conn, ad, namespace, key, value, self._current_epoch
                 )
@@ -404,24 +416,23 @@ class SecureStorageWrapper:
                 await self._append_audit_log(namespace, key, "SET", value)
                 await self._adapter.set(namespace, key, value)
         await self._recalculate_root_hash()
-    
-    async def secure_delete(
-        self,
-        namespace: str,
-        key: str
-    ) -> bool:
+
+    async def secure_delete(self, namespace: str, key: str) -> bool:
         """
         Безопасное удаление из критичных namespace.
-        
+
         Аналогично secure_set, но для DELETE операции.
         """
         if namespace not in CRITICAL_NAMESPACES:
             raise ValueError(
                 f"secure_delete() requires critical namespace, got {namespace}."
             )
-        if hasattr(self._adapter, "run_atomic"):
-            new_epoch, deleted = await self._adapter.run_atomic(
-                lambda conn, ad: self._secure_delete_body_sync(conn, ad, namespace, key, self._current_epoch)
+        run_atomic = getattr(self._adapter, "run_atomic", None)
+        if run_atomic is not None:
+            new_epoch, deleted = await run_atomic(
+                lambda conn, ad: self._secure_delete_body_sync(
+                    conn, ad, namespace, key, self._current_epoch
+                )
             )
             self._current_epoch = new_epoch
         else:
@@ -432,20 +443,16 @@ class SecureStorageWrapper:
         if deleted:
             await self._recalculate_root_hash()
         return deleted
-    
-    async def append(
-        self,
-        namespace: str,
-        event: dict[str, Any]
-    ) -> str:
+
+    async def append(self, namespace: str, event: dict[str, Any]) -> str:
         """
         Append-only write for security events (Step 17.5).
-        
+
         Используется для неизменяемых событий аудита, которые:
         - Никогда не переписываются
         - Уникальны по ID
         - Должны быть tamper-evident
-        
+
         Операция (идентична secure_set):
         1. Начинаем транзакцию
         2. Bump epoch (защита от rollback)
@@ -453,14 +460,14 @@ class SecureStorageWrapper:
         4. Writes event (использует event["id"] как key)
         5. Recalculate merkle root
         6. Commit (атомарно)
-        
+
         Args:
             namespace: Must be "_audit.security" for credential events
             event: Dict with 'id' and event data (e.g., SecurityEvent.to_dict())
-            
+
         Returns:
             event["id"] (для confirmation)
-            
+
         Raises:
             ValueError: If namespace not in CRITICAL_NAMESPACES
         """
@@ -469,34 +476,32 @@ class SecureStorageWrapper:
                 f"append() requires critical namespace, got {namespace}. "
                 f"For append-only events, use namespace in {CRITICAL_NAMESPACES}"
             )
-        
+
         if "id" not in event:
-            raise ValueError(
-                f"append() requires event['id'] to be present"
-            )
-        
+            raise ValueError("append() requires event['id'] to be present")
+
         event_id = event["id"]
-        
+
         async with self.transaction():
             # 1. Bump epoch (защита от rollback)
             await self._bump_epoch()
-            
+
             # 2. Append to P0 audit log (internal P0 audit trail)
             await self._append_audit_log(namespace, event_id, "SET", event)
-            
+
             # 3. Write event (key is event_id, unique per event)
             await self._adapter.set(namespace, event_id, event)
-            
+
             # 4. Recalculate and save merkle root
             await self._recalculate_root_hash()
-        
+
         return event_id
-    
+
     # Delegate остальные методы к adapter
     async def get(self, namespace: str, key: str) -> Optional[dict[str, Any]]:
         """Получить значение (без защиты)."""
         return await self._adapter.get(namespace, key)
-    
+
     async def set(self, namespace: str, key: str, value: dict[str, Any]) -> None:
         """Записать значение. Для критичных namespace — запрещено напрямую, используйте secure_set."""
         if namespace in CRITICAL_NAMESPACES:
@@ -505,7 +510,7 @@ class SecureStorageWrapper:
                 f"Use secure_set() instead for audit trail and integrity protection."
             )
         await self._adapter.set(namespace, key, value)
-    
+
     async def delete(self, namespace: str, key: str) -> bool:
         """Удалить значение. Для критичных namespace — запрещено напрямую, используйте secure_delete."""
         if namespace in CRITICAL_NAMESPACES:
@@ -514,34 +519,34 @@ class SecureStorageWrapper:
                 f"Use secure_delete() instead."
             )
         return await self._adapter.delete(namespace, key)
-    
+
     async def list_keys(self, namespace: str) -> list[str]:
         """Получить список ключей."""
         return await self._adapter.list_keys(namespace)
-    
+
     async def list_namespaces(self) -> list[str]:
         """Получить список namespace."""
         return await self._adapter.list_namespaces()
-    
+
     async def clear_namespace(self, namespace: str) -> None:
         """Очистить namespace."""
         if namespace in PROTECTED_NAMESPACES:
-            raise ValueError(
-                f"Cannot clear protected namespace {namespace}."
-            )
+            raise ValueError(f"Cannot clear protected namespace {namespace}.")
         await self._adapter.clear_namespace(namespace)
-    
+
     async def close(self) -> None:
         """Закрыть подключение."""
         await self._adapter.close()
-    
+
     @asynccontextmanager
     async def user_transaction(self):
         """Транзакция для обычного кода (не бамп epoch)."""
         async with self._adapter.transaction():
             yield
-    
-    async def iter_namespace(self, namespace: str, batch_size: int = 100) -> AsyncIterator[tuple[str, dict[str, Any]]]:
+
+    async def iter_namespace(
+        self, namespace: str, batch_size: int = 100
+    ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
         """Итерировать по namespace."""
         async for item in self._adapter.iter_namespace(namespace, batch_size):
             yield item

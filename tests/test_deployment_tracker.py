@@ -16,7 +16,7 @@ import pytest
 from datetime import datetime, timezone, timedelta
 from unittest.mock import AsyncMock
 
-from core.agents.deployment_tracker import DeploymentTracker, DeploymentStatus, DeploymentInfo
+from modules.agent import DeploymentTracker, DeploymentStatus, DeploymentInfo
 
 
 # ---------------------------------------------------------------------------

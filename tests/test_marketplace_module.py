@@ -23,7 +23,7 @@ import hashlib
 from pathlib import Path
 from unittest.mock import Mock, AsyncMock, patch
 
-from core.plugin_schema import validate_plugin_json
+from modules.plugins.schema import validate_plugin_json
 from modules.marketplace.installer import MarketplaceInstaller, InstallerError
 from modules.marketplace.services import MarketplaceService
 from modules.marketplace.module import MarketplaceModule
@@ -94,7 +94,7 @@ def test_plugin_archive(temp_dir):
     
     # Create plugin.py with BasePlugin subclass
     plugin_py = '''
-from core.base_plugin import BasePlugin
+from core.kernel.base_plugin import BasePlugin
 
 class TestPlugin(BasePlugin):
     def metadata(self):

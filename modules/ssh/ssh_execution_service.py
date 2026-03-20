@@ -7,14 +7,13 @@ SSHExecutionService — безопасное выполнение команд �
 
 from __future__ import annotations
 
-from typing import Any, Dict, Tuple
-import io
 import asyncio
+import io
+from typing import Any, Dict, Tuple
 
 import paramiko  # type: ignore[import-not-found]
 
-from core.credentials.domain import Credential, CredentialType
-
+from modules.credentials import Credential, CredentialType
 
 CredentialWithSecret = Tuple[Credential, bytes]
 
@@ -45,7 +44,9 @@ class SSHExecutionService:
             secret_bytes: bytes = bytes(credential[1])
             return cred_obj, secret_bytes
 
-        raise ValueError("SSHExecutionService expects credential as (Credential, secret_bytes) tuple")
+        raise ValueError(
+            "SSHExecutionService expects credential as (Credential, secret_bytes) tuple"
+        )
 
     def _connect(self, cred: Credential, secret_bytes: bytes) -> paramiko.SSHClient:
         """
@@ -56,7 +57,9 @@ class SSHExecutionService:
         if cred.type not in (CredentialType.SSH_PASSWORD, CredentialType.SSH_KEY):
             raise ValueError(f"Unsupported credential type for SSH: {cred.type}")
         if not cred.host or not cred.username:
-            raise ValueError("Credential must contain host and username for SSH connection")
+            raise ValueError(
+                "Credential must contain host and username for SSH connection"
+            )
 
         host = cred.host
         port = cred.port or 22
@@ -80,14 +83,20 @@ class SSHExecutionService:
             else:
                 # SSH_KEY
                 pkey = None
-                for key_cls in (paramiko.RSAKey, paramiko.Ed25519Key, paramiko.ECDSAKey):
+                for key_cls in (
+                    paramiko.RSAKey,
+                    paramiko.Ed25519Key,
+                    paramiko.ECDSAKey,
+                ):
                     try:
                         pkey = key_cls.from_private_key(io.StringIO(secret_str))
                         break
                     except Exception:
                         continue
                 if pkey is None:
-                    raise ValueError("Unsupported private key format (RSA/Ed25519/ECDSA required)")
+                    raise ValueError(
+                        "Unsupported private key format (RSA/Ed25519/ECDSA required)"
+                    )
 
                 client.connect(
                     hostname=host,
@@ -140,14 +149,20 @@ class SSHExecutionService:
         client = self._connect(cred, secret_bytes)
         effective_timeout = timeout if timeout is not None else self._timeout
         try:
-            stdin, stdout, stderr = client.exec_command(command, timeout=effective_timeout)
+            stdin, stdout, stderr = client.exec_command(
+                command, timeout=effective_timeout
+            )
 
             out_bytes = stdout.read()
             err_bytes = stderr.read()
             exit_status = stdout.channel.recv_exit_status()
 
-            stdout_text = out_bytes.decode("utf-8", errors="replace") if out_bytes else ""
-            stderr_text = err_bytes.decode("utf-8", errors="replace") if err_bytes else ""
+            stdout_text = (
+                out_bytes.decode("utf-8", errors="replace") if out_bytes else ""
+            )
+            stderr_text = (
+                err_bytes.decode("utf-8", errors="replace") if err_bytes else ""
+            )
 
             return {
                 "exit_code": int(exit_status),
@@ -160,7 +175,9 @@ class SSHExecutionService:
             except Exception:
                 pass
 
-    async def upload_file(self, credential: Any, local_path: str, remote_path: str) -> None:
+    async def upload_file(
+        self, credential: Any, local_path: str, remote_path: str
+    ) -> None:
         """
         Загрузить локальный файл на удалённый хост по SSH.
 
@@ -168,9 +185,13 @@ class SSHExecutionService:
         """
         cred_pair = self._normalize_credential(credential)
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, self._upload_file_sync, cred_pair, local_path, remote_path)
+        await loop.run_in_executor(
+            None, self._upload_file_sync, cred_pair, local_path, remote_path
+        )
 
-    async def run_command(self, credential: Any, command: str, timeout: int | None = None) -> Dict[str, Any]:
+    async def run_command(
+        self, credential: Any, command: str, timeout: int | None = None
+    ) -> Dict[str, Any]:
         """
         Выполнить команду на удалённом хосте по SSH через exec_command.
 
@@ -189,4 +210,3 @@ class SSHExecutionService:
         return await loop.run_in_executor(
             None, self._run_command_sync, cred_pair, command, timeout
         )
-

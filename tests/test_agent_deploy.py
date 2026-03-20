@@ -15,7 +15,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from core.runtime.runtime import CoreRuntime
-from core.agents.deployment_tracker import DeploymentTracker, DeploymentStatus
+from modules.agent import DeploymentTracker, DeploymentStatus
 from modules.agent.services import (
     admin_agent_deploy,
     admin_agent_get_deployment_status,

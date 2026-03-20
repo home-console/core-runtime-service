@@ -7,9 +7,9 @@ This wrapper maps keys like "secrets.store.xxx" to namespace "secrets.store", ke
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Optional
 
-from core.storage_abstraction import IStorageBackend
+from modules.storage import IStorageBackend
 
 SECRETS_NS = "secrets.store"
 PREFIX = "secrets.store."
@@ -39,6 +39,7 @@ class SecretStoreStorageAdapter:
             return val["_v"]
         if isinstance(val, dict):
             import json
+
             return json.dumps(val)
         return str(val)
 

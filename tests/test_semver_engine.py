@@ -11,7 +11,7 @@ Tests cover:
 """
 
 import pytest
-from core.marketplace.semver import (
+from modules.marketplace.semver import (
     Version, VersionConstraint, VersionResolver, VersionConstraintError
 )
 

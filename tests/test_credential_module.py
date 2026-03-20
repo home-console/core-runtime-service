@@ -16,7 +16,7 @@ import asyncio
 from typing import Optional, Any, Dict
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from core.credentials import (
+from modules.credentials import (
     Credential,
     CredentialType,
     CredentialRepository,
@@ -164,7 +164,7 @@ class TestCredentialServiceCreate:
         """Test create rejects metadata containing secret keywords."""
         service, repo = service_with_repo
         
-        from core.credentials.errors import CredentialSecretLeakage
+        from modules.credentials import CredentialSecretLeakage
         repo.create.side_effect = CredentialSecretLeakage("password in metadata")
         
         request = CreateCredentialRequest(
@@ -282,7 +282,7 @@ class TestCredentialServiceUpdate:
         """Test update detects version conflicts."""
         service, repo = service_with_repo
         
-        from core.credentials.errors import CredentialVersionConflict
+        from modules.credentials import CredentialVersionConflict
         
         # Current credential is v3
         current = Credential.create(

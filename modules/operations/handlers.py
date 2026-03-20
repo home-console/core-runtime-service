@@ -35,7 +35,14 @@ async def handle_oauth_refresh(params: Dict[str, Any], context: Any) -> Dict[str
     
     # Call oauth refresh service
     service_name = f"{service}.refresh_tokens"
-    result = await runtime.service_registry.call(service_name)
+    # TODO: remove fallback after full KernelContext migration
+    services = (
+        context.get_service("service_registry")
+        if hasattr(context, "get_service")
+        else runtime.service_registry
+    )
+
+    result = await services.call(service_name)
     
     return {
         "success": True,

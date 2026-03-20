@@ -30,7 +30,7 @@ from core.audit.binder import AuditBinder
 from modules.credentials.policy_enforcer import CredentialRBACEnforcer
 from core.security.rbac_models import Role, CredentialAccessLevel
 from core.security.policy_engine import CredentialPolicyEngine
-from core.credentials.errors import CredentialAccessDenied
+from modules.credentials import CredentialAccessDenied
 
 
 # ============================================================================

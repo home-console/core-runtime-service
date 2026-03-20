@@ -1,14 +1,14 @@
 import json
 import socket
 import threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import TYPE_CHECKING
 
 import pytest
 
 from core.runtime.runtime import CoreRuntime
-from core.storage_port import CoreStoragePort
 from core.state_engine import StateEngine
+from modules.storage.port import CoreStoragePort
 from plugins.remote_plugin_proxy import RemotePluginProxy
 from tests.conftest import InMemoryStorageAdapter
 
@@ -31,7 +31,13 @@ class MockRemoteHandler(BaseHTTPRequestHandler):
                 "mode": "remote",
                 "version": "0.1.0",
                 "description": "mock remote metrics",
-                "services": [{"name": "metrics.report", "endpoint": "/metrics/report", "method": "POST"}],
+                "services": [
+                    {
+                        "name": "metrics.report",
+                        "endpoint": "/metrics/report",
+                        "method": "POST",
+                    }
+                ],
             }
             self.wfile.write(json.dumps(body).encode())
             return
@@ -85,6 +91,7 @@ class MockRemoteHandler(BaseHTTPRequestHandler):
         self._set_json(404)
         self.wfile.write(json.dumps({"error": "not found"}).encode())
 
+
 class MockHTTPServer(HTTPServer):
     """HTTPServer subclass with explicit attributes used by the tests/handler.
 
@@ -103,6 +110,7 @@ class MockHTTPServer(HTTPServer):
 if TYPE_CHECKING:
     # Для статических анализаторов: у обработчика `self.server` будет наш MockHTTPServer
     MockRemoteHandler.server: "MockHTTPServer"
+
 
 @pytest.fixture
 def mock_remote_server():
@@ -150,7 +158,9 @@ async def test_remote_metrics_proxy_lifecycle_and_service(mock_remote_server):
     await runtime.plugin_manager.start_plugin(proxy.metadata.name)
 
     # Вызов сервиса через proxy
-    await runtime.service_registry.call("metrics.report", name="cpu", value=0.42, tags={"host": "test"})
+    await runtime.service_registry.call(
+        "metrics.report", name="cpu", value=0.42, tags={"host": "test"}
+    )
 
     # Проверяем, что mock server получил вызов
     assert server.metrics, "Remote сервер не получил метрику"
@@ -164,7 +174,9 @@ async def test_remote_metrics_proxy_lifecycle_and_service(mock_remote_server):
 
     # Вызов сервиса теперь должен бросать ошибку, но Core остаётся живым
     with pytest.raises(Exception):
-        await runtime.service_registry.call("metrics.report", name="mem", value=10, tags={})
+        await runtime.service_registry.call(
+            "metrics.report", name="mem", value=10, tags={}
+        )
 
     # Выгрузка плагина через менеджер — должна отрегистировать сервисы
     await runtime.plugin_manager.unload_plugin(proxy.metadata.name)

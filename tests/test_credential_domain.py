@@ -12,7 +12,7 @@ Tests cover:
 
 import pytest
 import time
-from core.credentials.domain import (
+from modules.credentials.domain import (
     Credential,
     CredentialType,
     CredentialValidationError,

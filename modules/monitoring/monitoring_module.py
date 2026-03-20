@@ -57,7 +57,15 @@ class MonitoringModule:
         # Check storage if runtime available
         if self.runtime:
             try:
-                storage = self.context.storage if hasattr(self, "context") and self.context else self.runtime.storage
+                # TODO: remove fallback after full KernelContext migration
+                if hasattr(self, "context") and self.context:
+                    storage = (
+                        self.context.get_service("storage")
+                        if hasattr(self.context, "get_service")
+                        else self.context.storage
+                    )
+                else:
+                    storage = self.runtime.storage
                 await storage.get("health_check", "test")
                 checks["storage"] = "ok"
             except Exception as e:

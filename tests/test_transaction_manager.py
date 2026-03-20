@@ -18,10 +18,10 @@ from pathlib import Path
 from unittest.mock import MagicMock, AsyncMock, patch
 from datetime import datetime, timezone
 
-from core.marketplace.transaction import (
+from modules.marketplace.transaction import (
     UpdateTransactionManager, TransactionState, Transaction, TransactionError, RollbackError
 )
-from core.marketplace.registry_client import RegistryClient, RegistrySecurityError
+from modules.marketplace.registry_client import RegistryClient, RegistrySecurityError
 
 
 @pytest.fixture

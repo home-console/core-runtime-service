@@ -8,11 +8,11 @@ Step 12: Validates:
 - Trust level changes
 """
 
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
 import logging
 
-from core.marketplace.semver import Version
+from modules.marketplace.semver import Version
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +27,8 @@ class UpdateCheck:
     """Result of update check."""
     can_update: bool
     reason: str = ""
-    blocking_issues: List[str] = None
-    warnings: List[str] = None
+    blocking_issues: Optional[List[str]] = None
+    warnings: Optional[List[str]] = None
     
     def __init__(self, can_update: bool, **kwargs):
         self.can_update = can_update
@@ -50,8 +50,8 @@ class PluginUpdateValidator:
         self._runtime = runtime
     
     def validate_plugin_update(self,
-                              old_plugin: Dict[str, any],
-                              new_plugin: Dict[str, any],
+                              old_plugin: Dict[str, Any],
+                              new_plugin: Dict[str, Any],
                               force: bool = False) -> UpdateCheck:
         """
         Validate plugin update from old to new version.
@@ -207,7 +207,7 @@ class PluginUpdateValidator:
         
         Only suggests non-prerelease updates unless on beta channel.
         """
-        from core.marketplace.semver import VersionResolver
+        from modules.marketplace.semver import VersionResolver
         
         if not available_versions:
             return None

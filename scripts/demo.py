@@ -9,7 +9,7 @@ from pathlib import Path
 
 from core.config import Config
 from core.runtime.runtime import CoreRuntime
-from adapters.sqlite_adapter import SQLiteAdapter
+from core.adapters.sqlite_adapter import SQLiteAdapter
 from plugins.test import ExamplePlugin
 from modules import DevicesModule
 from plugins.test import SystemLoggerPlugin, AutomationStubPlugin

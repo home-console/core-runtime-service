@@ -2,9 +2,18 @@
 API Router для RequestLoggerModule.
 """
 
-from typing import Any, Optional, Dict
+from typing import Any, Dict
 from fastapi import APIRouter, HTTPException, Query, Request, Body
-from fastapi.responses import JSONResponse
+
+
+def _get_services(runtime: Any):
+    # TODO: remove fallback after full KernelContext migration
+    context = getattr(runtime, "context", None)
+    if context is not None and hasattr(context, "get_service"):
+        services = context.get_service("service_registry")
+    else:
+        services = getattr(runtime, "service_registry", None)
+    return services
 
 
 def create_request_logger_router(runtime: Any) -> APIRouter:
@@ -31,13 +40,14 @@ def create_request_logger_router(runtime: Any) -> APIRouter:
             Словарь с информацией о запросе и списком логов
         """
         try:
-            if not await runtime.service_registry.has_service("request_logger.get_request_logs"):
+            services = _get_services(runtime)
+            if not await services.has_service("request_logger.get_request_logs"):
                 raise HTTPException(
                     status_code=503,
                     detail="RequestLogger module is not available. The module may not be loaded or failed to start. Check server logs for details."
                 )
             
-            result = await runtime.service_registry.call(
+            result = await services.call(
                 "request_logger.get_request_logs",
                 request_id=request_id
             )
@@ -63,13 +73,14 @@ def create_request_logger_router(runtime: Any) -> APIRouter:
             Словарь со списком запросов и метаданными
         """
         try:
-            if not await runtime.service_registry.has_service("request_logger.list_requests"):
+            services = _get_services(runtime)
+            if not await services.has_service("request_logger.list_requests"):
                 raise HTTPException(
                     status_code=503,
                     detail="RequestLogger module is not available. The module may not be loaded or failed to start. Check server logs for details."
                 )
             
-            result = await runtime.service_registry.call(
+            result = await services.call(
                 "request_logger.list_requests",
                 limit=limit,
                 offset=offset
@@ -89,13 +100,14 @@ def create_request_logger_router(runtime: Any) -> APIRouter:
             Подтверждение очистки
         """
         try:
-            if not await runtime.service_registry.has_service("request_logger.clear_logs"):
+            services = _get_services(runtime)
+            if not await services.has_service("request_logger.clear_logs"):
                 raise HTTPException(
                     status_code=503,
                     detail="RequestLogger module is not available. The module may not be loaded or failed to start. Check server logs for details."
                 )
             
-            result = await runtime.service_registry.call("request_logger.clear_logs")
+            result = await services.call("request_logger.clear_logs")
             return result
         except HTTPException:
             raise
@@ -121,7 +133,8 @@ def create_request_logger_router(runtime: Any) -> APIRouter:
         }
         """
         try:
-            if not await runtime.service_registry.has_service("request_logger.log"):
+            services = _get_services(runtime)
+            if not await services.has_service("request_logger.log"):
                 raise HTTPException(
                     status_code=503,
                     detail="RequestLogger module is not available. The module may not be loaded or failed to start. Check server logs for details."
@@ -142,7 +155,7 @@ def create_request_logger_router(runtime: Any) -> APIRouter:
                 request_metadata["direction"] = "incoming"
             
             # Логируем сообщение
-            await runtime.service_registry.call(
+            await services.call(
                 "request_logger.log",
                 request_id=request_id,
                 level=level,
@@ -152,7 +165,7 @@ def create_request_logger_router(runtime: Any) -> APIRouter:
             
             # Сохраняем метаданные запроса и ответа, если они есть
             if request_metadata or response_metadata:
-                await runtime.service_registry.call(
+                await services.call(
                     "request_logger.set_request_metadata",
                     request_id=request_id,
                     request_metadata=request_metadata or {},

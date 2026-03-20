@@ -15,7 +15,7 @@ from core.security.rbac_models import (
 )
 from core.security.policy_engine import CredentialPolicyEngine
 from modules.credentials.policy_enforcer import CredentialRBACEnforcer
-from core.credentials import CredentialAccessDenied
+from modules.credentials import CredentialAccessDenied
 
 
 class MockPolicyStore:

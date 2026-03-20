@@ -1,39 +1,42 @@
 """Step 15: Agent Control Plane Services."""
 
-from typing import Any, Dict, List, Optional
-from datetime import datetime, timezone, timedelta
 import asyncio
-import uuid
 import logging
+import uuid
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
 
-async def admin_agent_create_enrollment_token(runtime: Any, body: Any = None) -> Dict[str, Any]:
+async def admin_agent_create_enrollment_token(
+    runtime: Any, body: Optional[Any] = None
+) -> Dict[str, Any]:
     """
     Create enrollment token for new agent.
-    
+
     Args:
         runtime: CoreRuntime instance
         body: {agent_name: str}
-        
+
     Returns:
         {ok: bool, token: {token_id, token_secret, expires_at}, error?: str}
     """
     if not isinstance(body, dict):
         return {"ok": False, "error": "invalid_body"}
-    
+
     agent_name = body.get("agent_name")
     if not agent_name:
         return {"ok": False, "error": "agent_name required"}
-    
+
     if not runtime.agent_manager:
         return {"ok": False, "error": "agent_manager not initialized"}
-    
+
     try:
         now = datetime.now(timezone.utc).isoformat()
         token = await runtime.agent_manager.create_enrollment_token(agent_name, now)
-        
+
         return {
             "ok": True,
             "token": {
@@ -41,7 +44,7 @@ async def admin_agent_create_enrollment_token(runtime: Any, body: Any = None) ->
                 "token_secret": token.token_secret,  # Only shown once!
                 "expires_at": token.expires_at,
                 "agent_name": token.agent_name,
-            }
+            },
         }
     except Exception as e:
         return {"ok": False, "error": str(e)}
@@ -50,32 +53,32 @@ async def admin_agent_create_enrollment_token(runtime: Any, body: Any = None) ->
 async def admin_agent_enroll_agent(runtime: Any, body: Any = None) -> Dict[str, Any]:
     """
     Enroll agent with enrollment token.
-    
+
     Args:
         runtime: CoreRuntime instance
         body: {token_id: str, token_secret: str}
-        
+
     Returns:
         {ok: bool, agent_id: str, identity: {...}, error?: str}
     """
     if not isinstance(body, dict):
         return {"ok": False, "error": "invalid_body"}
-    
+
     token_id = body.get("token_id")
     token_secret = body.get("token_secret")
-    
+
     if not token_id or not token_secret:
         return {"ok": False, "error": "token_id and token_secret required"}
-    
+
     if not runtime.agent_manager:
         return {"ok": False, "error": "agent_manager not initialized"}
-    
+
     try:
         now = datetime.now(timezone.utc).isoformat()
         identity, _ = await runtime.agent_manager.enroll_agent(
             token_id, token_secret, now
         )
-        
+
         # Generate client certificate
         if runtime.mtls_ca:
             client_cert = runtime.mtls_ca.issue_agent_certificate(
@@ -85,7 +88,7 @@ async def admin_agent_enroll_agent(runtime: Any, body: Any = None) -> Dict[str, 
             )
         else:
             client_cert = None
-        
+
         return {
             "ok": True,
             "agent_id": identity.agent_id,
@@ -96,7 +99,9 @@ async def admin_agent_enroll_agent(runtime: Any, body: Any = None) -> Dict[str, 
         return {"ok": False, "error": str(e)}
 
 
-async def admin_agent_generate_bootstrap_token(runtime: Any, body: Any = None) -> Dict[str, Any]:
+async def admin_agent_generate_bootstrap_token(
+    runtime: Any, body: Optional[Any] = None
+) -> Dict[str, Any]:
     """
     Generate one-time HMAC-signed enrollment token for installer / manual bootstrap.
 
@@ -138,26 +143,21 @@ async def admin_agent_generate_bootstrap_token(runtime: Any, body: Any = None) -
     except Exception as e:
         logger.exception("[AdminAgentBootstrapToken] Error generating token: %s", e)
         return {"ok": False, "error": str(e)}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
 
 
 async def admin_agent_list_agents(runtime: Any) -> Dict[str, Any]:
     """
     List all registered agents.
-    
+
     Returns:
         {ok: bool, agents: [AgentMetadata], error?: str}
     """
     if not runtime.agent_registry:
         return {"ok": False, "error": "agent_registry not initialized"}
-    
+
     try:
         agents = await runtime.agent_registry.list_agents()
-        return {
-            "ok": True,
-            "agents": [a.to_dict() for a in agents]
-        }
+        return {"ok": True, "agents": [a.to_dict() for a in agents]}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
@@ -165,29 +165,26 @@ async def admin_agent_list_agents(runtime: Any) -> Dict[str, Any]:
 async def admin_agent_get_agent(runtime: Any, agent_id: str) -> Dict[str, Any]:
     """
     Get agent details.
-    
+
     Args:
         runtime: CoreRuntime instance
         agent_id: Agent ID
-        
+
     Returns:
         {ok: bool, agent: AgentMetadata, error?: str}
     """
     if not runtime.agent_registry:
         return {"ok": False, "error": "agent_registry not initialized"}
-    
+
     if not agent_id:
         return {"ok": False, "error": "agent_id required"}
-    
+
     try:
         agent = await runtime.agent_registry.get_agent(agent_id)
         if not agent:
             return {"ok": False, "error": "agent not found"}
-        
-        return {
-            "ok": True,
-            "agent": agent.to_dict()
-        }
+
+        return {"ok": True, "agent": agent.to_dict()}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
@@ -195,30 +192,30 @@ async def admin_agent_get_agent(runtime: Any, agent_id: str) -> Dict[str, Any]:
 async def admin_agent_deregister_agent(runtime: Any, agent_id: str) -> Dict[str, Any]:
     """
     Deregister agent.
-    
+
     Args:
         runtime: CoreRuntime instance
         agent_id: Agent ID
-        
+
     Returns:
         {ok: bool, error?: str}
     """
     if not runtime.agent_registry:
         return {"ok": False, "error": "agent_registry not initialized"}
-    
+
     if not runtime.agent_manager:
         return {"ok": False, "error": "agent_manager not initialized"}
-    
+
     if not agent_id:
         return {"ok": False, "error": "agent_id required"}
-    
+
     try:
         # Deregister from registry
         await runtime.agent_registry.deregister_agent(agent_id)
-        
+
         # Deregister from enrollment manager (removes keys from SecretStore)
         await runtime.agent_manager.deregister_agent(agent_id)
-        
+
         return {"ok": True}
     except Exception as e:
         return {"ok": False, "error": str(e)}
@@ -229,26 +226,25 @@ async def admin_agent_list_agents_providing_capability(
 ) -> Dict[str, Any]:
     """
     List agents providing a specific capability.
-    
+
     Args:
         runtime: CoreRuntime instance
         capability_id: Capability ID
-        
+
     Returns:
         {ok: bool, agents: [AgentMetadata], error?: str}
     """
     if not runtime.agent_registry:
         return {"ok": False, "error": "agent_registry not initialized"}
-    
+
     if not capability_id:
         return {"ok": False, "error": "capability_id required"}
-    
+
     try:
-        agents = await runtime.agent_registry.list_agents_providing_capability(capability_id)
-        return {
-            "ok": True,
-            "agents": [a.to_dict() for a in agents]
-        }
+        agents = await runtime.agent_registry.list_agents_providing_capability(
+            capability_id
+        )
+        return {"ok": True, "agents": [a.to_dict() for a in agents]}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
@@ -258,10 +254,12 @@ async def admin_agent_list_agents_providing_capability(
 # ============================================================================
 
 
-async def admin_agent_deploy(runtime: Any, body: Dict[str, Any] = None) -> Dict[str, Any]:
+async def admin_agent_deploy(
+    runtime: Any, body: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
     """
     Deploy agent to remote host via SSH.
-    
+
     Workflow:
     1. Validate request
     2. Create deployment tracker entry
@@ -269,7 +267,7 @@ async def admin_agent_deploy(runtime: Any, body: Dict[str, Any] = None) -> Dict[
     4. Execute AgentDeployService.deploy() via SSH
     5. Return deployment_id + heartbeat_timeout
     6. Start async monitoring task (don't wait for it)
-    
+
     Args:
         runtime: CoreRuntime instance
         body: {
@@ -278,7 +276,7 @@ async def admin_agent_deploy(runtime: Any, body: Dict[str, Any] = None) -> Dict[
             "host"?: str (optional override),
             "env"?: dict (optional env vars)
         }
-    
+
     Returns:
         {
             "ok": true,
@@ -291,66 +289,68 @@ async def admin_agent_deploy(runtime: Any, body: Dict[str, Any] = None) -> Dict[
             "polling_interval": 2
         }
     """
-    
+
     # ========== INPUT VALIDATION ==========
     if not isinstance(body, dict):
-        return {
-            "ok": False,
-            "error": "invalid_body: expected JSON object"
-        }
-    
+        return {"ok": False, "error": "invalid_body: expected JSON object"}
+
     agent_name = str(body.get("agent_name") or "").strip()
     credential_id = str(body.get("credential_id") or "").strip()
     custom_host = body.get("host")
     custom_core_url = (body.get("core_url") or "").strip() or None
     custom_env = body.get("env", {})
-    
+
     if not agent_name:
         return {"ok": False, "error": "agent_name required (non-empty string)"}
-    
+
     if not credential_id:
         return {"ok": False, "error": "credential_id required (SSH credential)"}
-    
+
     # ========== RUNTIME CHECKS ==========
     if not runtime.agent_manager:
         return {"ok": False, "error": "agent_manager not initialized"}
-    
+
     if not runtime.deployment_tracker:
         return {"ok": False, "error": "deployment_tracker not initialized"}
-    
+
     # ========== CREATE DEPLOYMENT ENTRY ==========
     deployment_id = str(uuid.uuid4())
-    
+
     # Infer host from credential or request
     try:
         host = custom_host
         if not host:
             storage_manager = getattr(runtime, "storage_manager", None)
-            secret_store = getattr(runtime, "secret_store", None)
             if storage_manager is None:
                 return {"ok": False, "error": "storage_manager not initialized"}
+            credential = None
             try:
-                from core.credentials.repository import CredentialRepository
-                repo = CredentialRepository(storage_manager=storage_manager, secret_store=secret_store)
-                cred = await repo.get(credential_id)
-                if cred is None:
-                    return {"ok": False, "error": f"Credential {credential_id} not found"}
-                host = cred.host
-            except Exception as e:
-                return {"ok": False, "error": f"Failed to read credential: {e}"}
+                credential = await storage_manager.get(credential_id)
+            except TypeError:
+                try:
+                    credential = await storage_manager.get("credentials", credential_id)
+                except Exception:
+                    credential = None
+            except Exception:
+                credential = None
+
+            if credential is None:
+                return {"ok": False, "error": f"Credential {credential_id} not found"}
+
+            if isinstance(credential, dict):
+                host = credential.get("host")
+            else:
+                host = getattr(credential, "host", None)
 
         if not host:
             return {
                 "ok": False,
-                "error": "Cannot determine host: credential has no host field. Please set the host in the SSH credential."
+                "error": "Cannot determine host: credential has no host field. Please set the host in the SSH credential.",
             }
     except Exception as e:
         logger.exception(f"[AdminAgentDeploy] Failed to get credential: {e}")
-        return {
-            "ok": False,
-            "error": f"Failed to get credential: {e}"
-        }
-    
+        return {"ok": False, "error": f"Failed to get credential: {e}"}
+
     # Create deployment tracker entry
     try:
         await runtime.deployment_tracker.create(
@@ -358,19 +358,18 @@ async def admin_agent_deploy(runtime: Any, body: Dict[str, Any] = None) -> Dict[
             agent_name=agent_name,
             credential_id=credential_id,
             host=host,
-            custom_env=custom_env or {}
+            custom_env=custom_env or {},
         )
     except Exception as e:
         logger.exception(f"[AdminAgentDeploy] Failed to create deployment: {e}")
-        return {
-            "ok": False,
-            "error": f"Failed to create deployment: {e}"
-        }
-    
+        return {"ok": False, "error": f"Failed to create deployment: {e}"}
+
     # ========== GENERATE ENROLLMENT TOKEN ==========
     try:
-        enrollment_token = await runtime.agent_manager.generate_enrollment_token(agent_name)
-        
+        enrollment_token = await runtime.agent_manager.generate_enrollment_token(
+            agent_name
+        )
+
         # Store token on deployment for later revocation if needed
         deployment = await runtime.deployment_tracker.get(deployment_id)
         if deployment:
@@ -378,15 +377,10 @@ async def admin_agent_deploy(runtime: Any, body: Dict[str, Any] = None) -> Dict[
     except Exception as e:
         logger.exception(f"[AdminAgentDeploy] Token generation failed: {e}")
         await runtime.deployment_tracker.update_status(
-            deployment_id,
-            "failed",
-            error_message=f"Token generation failed: {e}"
+            deployment_id, "failed", error_message=f"Token generation failed: {e}"
         )
-        return {
-            "ok": False,
-            "error": f"Failed to generate enrollment token: {e}"
-        }
-    
+        return {"ok": False, "error": f"Failed to generate enrollment token: {e}"}
+
     # ========== START BACKGROUND DEPLOYMENT TASK ==========
     # IMPORTANT: We do NOT await this — return immediately
     asyncio.create_task(
@@ -401,17 +395,17 @@ async def admin_agent_deploy(runtime: Any, body: Dict[str, Any] = None) -> Dict[
             core_url=custom_core_url,
         )
     )
-    
+
     logger.info(
-        f"[AdminAgentDeploy] Deployment started",
+        "[AdminAgentDeploy] Deployment started",
         extra={
             "deployment_id": deployment_id,
             "agent_name": agent_name,
             "host": host,
-            "credential_id": credential_id
-        }
+            "credential_id": credential_id,
+        },
     )
-    
+
     # ========== RETURN IMMEDIATELY ==========
     return {
         "ok": True,
@@ -422,7 +416,7 @@ async def admin_agent_deploy(runtime: Any, body: Dict[str, Any] = None) -> Dict[
         "created_at": datetime.now(timezone.utc).isoformat(),
         "heartbeat_timeout": 300,
         "polling_interval": 2,
-        "next_check": f"poll GET /admin/v1/deployments/{deployment_id}"
+        "next_check": f"poll GET /admin/v1/deployments/{deployment_id}",
     }
 
 
@@ -438,7 +432,7 @@ async def _execute_deployment(
 ) -> None:
     """
     Background task: Execute SSH deployment and monitor.
-    
+
     This runs in background and updates deployment_tracker as it progresses.
     States: PENDING → UPLOADING → DEPLOYING → DEPLOYED → REGISTERING → READY/FAILED
     """
@@ -447,35 +441,33 @@ async def _execute_deployment(
         if not deployment:
             logger.error(f"[ExecuteDeployment] Deployment {deployment_id} not found")
             return
-        
+
         # ========== STEP 1: SSH DEPLOYMENT ==========
         logger.info(f"[ExecuteDeployment] Starting SSH deployment: {deployment_id}")
-        
+
         await runtime.deployment_tracker.update_status(
-            deployment_id,
-            status="uploading",
-            progress=10
+            deployment_id, status="uploading", progress=10
         )
-        
+
         # Use AgentDeployService to deploy
-        from modules.agents.agent_deploy_service import AgentDeployService
-        
+        from modules.agent.deploy_service import AgentDeployService
+
         deploy_service = AgentDeployService(runtime)
-        
+
         try:
             deploy_result = await deploy_service.deploy(
                 credential_id=credential_id,
                 agent_name=agent_name,
                 core_url=core_url,
             )
-            
+
             logger.info(
-                f"[ExecuteDeployment] SSH deployment completed",
+                "[ExecuteDeployment] SSH deployment completed",
                 extra={
                     "deployment_id": deployment_id,
                     "agent_name": agent_name,
-                    "result": deploy_result
-                }
+                    "result": deploy_result,
+                },
             )
         except Exception as e:
             logger.exception(f"[ExecuteDeployment] SSH deployment failed: {e}")
@@ -483,10 +475,10 @@ async def _execute_deployment(
                 deployment_id,
                 status="failed",
                 error_message=f"SSH deployment failed: {e}",
-                completed_at=datetime.now(timezone.utc).isoformat()
+                completed_at=datetime.now(timezone.utc).isoformat(),
             )
             return
-        
+
         await runtime.deployment_tracker.update_status(
             deployment_id,
             status="deployed",
@@ -494,21 +486,19 @@ async def _execute_deployment(
             install_stdout=deploy_result.get("install_stdout", ""),
             install_stderr=deploy_result.get("install_stderr", ""),
         )
-        
+
         # ========== STEP 2: WAIT FOR ENROLLMENT ==========
         logger.info(f"[ExecuteDeployment] Waiting for enrollment: {agent_name}")
-        
+
         await runtime.deployment_tracker.update_status(
-            deployment_id,
-            status="deploying",
-            progress=60
+            deployment_id, status="deploying", progress=60
         )
-        
+
         # Now agent should start and try to enroll
         deadline = datetime.now(timezone.utc) + timedelta(seconds=60)  # 60s to enroll
         enrolled_agent_id = None
         poll_count = 0
-        
+
         while datetime.now(timezone.utc) < deadline:
             # Check if agent is enrolled
             try:
@@ -526,143 +516,163 @@ async def _execute_deployment(
                         f"[ExecuteDeployment] Poll #{poll_count}: looking for {agent_name!r}, "
                         f"enrolled_agents={enrolled_names}"
                     )
-                
+
                 # Try to find our agent
                 for agent_id in agents:
                     identity = await runtime.agent_manager.get_agent_identity(agent_id)
                     if identity and identity.agent_name == agent_name:
                         enrolled_agent_id = agent_id
                         break
-                
+
                 if enrolled_agent_id:
                     break
             except Exception as e:
                 logger.warning(f"[ExecuteDeployment] Error checking enrollment: {e}")
                 # Continue polling on error
                 pass
-            
+
             await asyncio.sleep(2)
-        
+
         if not enrolled_agent_id:
-            logger.warning(f"[ExecuteDeployment] Agent did not enroll within timeout: {agent_name}")
+            logger.warning(
+                f"[ExecuteDeployment] Agent did not enroll within timeout: {agent_name}"
+            )
             await runtime.deployment_tracker.update_status(
                 deployment_id,
                 status="timeout",
                 error_message="Agent did not enroll within 60 seconds",
-                completed_at=datetime.now(timezone.utc).isoformat()
+                completed_at=datetime.now(timezone.utc).isoformat(),
             )
-            
+
             # Cleanup: revoke enrollment token
             try:
                 if deployment.enrollment_token_id:
-                    await runtime.agent_manager.revoke_enrollment_token(deployment.enrollment_token_id)
+                    await runtime.agent_manager.revoke_enrollment_token(
+                        deployment.enrollment_token_id
+                    )
             except Exception:
                 pass  # Best effort cleanup
-            
+
             return
-        
+
         logger.info(
-            f"[ExecuteDeployment] Agent enrolled successfully",
+            "[ExecuteDeployment] Agent enrolled successfully",
             extra={
                 "deployment_id": deployment_id,
                 "agent_id": enrolled_agent_id,
-                "agent_name": agent_name
-            }
+                "agent_name": agent_name,
+            },
         )
-        
+
         await runtime.deployment_tracker.update_status(
-            deployment_id,
-            status="registering",
-            agent_id=enrolled_agent_id,
-            progress=75
+            deployment_id, status="registering", agent_id=enrolled_agent_id, progress=75
         )
-        
+
         # ========== STEP 3: WAIT FOR HEARTBEAT ==========
-        logger.info(f"[ExecuteDeployment] Waiting for agent heartbeat: {enrolled_agent_id}")
-        
-        deadline = datetime.now(timezone.utc) + timedelta(seconds=240)  # 240s remaining (300s total - 60s enrollment)
+        logger.info(
+            f"[ExecuteDeployment] Waiting for agent heartbeat: {enrolled_agent_id}"
+        )
+
+        deadline = datetime.now(timezone.utc) + timedelta(
+            seconds=240
+        )  # 240s remaining (300s total - 60s enrollment)
         agent_online = False
-        
+
         while datetime.now(timezone.utc) < deadline:
             try:
-                agent_metadata = await runtime.agent_registry.get_agent(enrolled_agent_id)
-                
+                agent_metadata = await runtime.agent_registry.get_agent(
+                    enrolled_agent_id
+                )
+
                 # Check last heartbeat
-                if agent_metadata and hasattr(agent_metadata, 'last_heartbeat') and agent_metadata.last_heartbeat:
+                if (
+                    agent_metadata
+                    and hasattr(agent_metadata, "last_heartbeat")
+                    and agent_metadata.last_heartbeat
+                ):
                     # Agent has sent heartbeat
                     try:
                         last_hb = datetime.fromisoformat(agent_metadata.last_heartbeat)
                         now = datetime.now(timezone.utc)
                         heartbeat_age = (now - last_hb).total_seconds()
-                        
+
                         if heartbeat_age < 30:  # Recent heartbeat
                             agent_online = True
                             break
                     except (ValueError, TypeError):
                         pass  # Invalid heartbeat format
-                elif agent_metadata and hasattr(agent_metadata, 'status'):
+                elif agent_metadata and hasattr(agent_metadata, "status"):
                     # Check status field
-                    if agent_metadata.status == "online" or agent_metadata.status == "ready":
+                    if (
+                        agent_metadata.status == "online"
+                        or agent_metadata.status == "ready"
+                    ):
                         agent_online = True
                         break
             except Exception as e:
                 logger.debug(f"[ExecuteDeployment] Error checking heartbeat: {e}")
                 pass
-            
+
             await asyncio.sleep(3)
-        
+
         if not agent_online:
-            logger.warning(f"[ExecuteDeployment] Agent did not report heartbeat: {enrolled_agent_id}")
+            logger.warning(
+                f"[ExecuteDeployment] Agent did not report heartbeat: {enrolled_agent_id}"
+            )
             await runtime.deployment_tracker.update_status(
                 deployment_id,
                 status="timeout",
                 agent_id=enrolled_agent_id,
                 error_message="Agent did not report heartbeat within timeout",
-                completed_at=datetime.now(timezone.utc).isoformat()
+                completed_at=datetime.now(timezone.utc).isoformat(),
             )
             return
-        
+
         # ========== SUCCESS ==========
         logger.info(
-            f"[ExecuteDeployment] Deployment successful",
+            "[ExecuteDeployment] Deployment successful",
             extra={
                 "deployment_id": deployment_id,
                 "agent_id": enrolled_agent_id,
-                "agent_name": agent_name
-            }
+                "agent_name": agent_name,
+            },
         )
-        
+
         await runtime.deployment_tracker.update_status(
             deployment_id,
             status="ready",
             agent_id=enrolled_agent_id,
             progress=100,
-            completed_at=datetime.now(timezone.utc).isoformat()
+            completed_at=datetime.now(timezone.utc).isoformat(),
         )
-        
+
     except Exception as e:
         # ========== UNEXPECTED FAILURE HANDLING ==========
         logger.exception(f"[ExecuteDeployment] Unexpected error during deployment: {e}")
-        
+
         try:
             await runtime.deployment_tracker.update_status(
                 deployment_id,
                 status="failed",
                 error_message=str(e),
-                completed_at=datetime.now(timezone.utc).isoformat()
+                completed_at=datetime.now(timezone.utc).isoformat(),
             )
         except Exception as cleanup_error:
-            logger.error(f"[ExecuteDeployment] Failed to update deployment status: {cleanup_error}")
+            logger.error(
+                f"[ExecuteDeployment] Failed to update deployment status: {cleanup_error}"
+            )
 
 
-async def admin_agent_get_deployment_status(runtime: Any, deployment_id: str) -> Dict[str, Any]:
+async def admin_agent_get_deployment_status(
+    runtime: Any, deployment_id: str
+) -> Dict[str, Any]:
     """
     Poll deployment status.
-    
+
     Args:
         runtime: CoreRuntime instance
         deployment_id: Deployment ID to check
-    
+
     Returns:
         {
             "ok": true,
@@ -678,19 +688,16 @@ async def admin_agent_get_deployment_status(runtime: Any, deployment_id: str) ->
     """
     if not runtime.deployment_tracker:
         return {"ok": False, "error": "deployment_tracker not initialized"}
-    
+
     if not deployment_id:
         return {"ok": False, "error": "deployment_id required"}
-    
+
     try:
         deployment = await runtime.deployment_tracker.get(deployment_id)
-        
+
         if not deployment:
-            return {
-                "ok": False,
-                "error": "deployment_not_found"
-            }
-        
+            return {"ok": False, "error": "deployment_not_found"}
+
         result = {
             "ok": True,
             "deployment_id": deployment_id,
@@ -700,38 +707,35 @@ async def admin_agent_get_deployment_status(runtime: Any, deployment_id: str) ->
             "progress": deployment.progress_percentage,
             "created_at": deployment.created_at.isoformat(),
         }
-        
+
         if deployment.agent_id:
             result["agent_id"] = deployment.agent_id
-        
+
         if deployment.error_message:
             result["error_message"] = deployment.error_message
-        
+
         if deployment.completed_at:
             result["completed_at"] = deployment.completed_at.isoformat()
             duration = deployment.duration_seconds()
             if duration is not None:
                 result["duration_seconds"] = duration
-        
+
         if deployment.install_stdout is not None:
             result["install_stdout"] = deployment.install_stdout
         if deployment.install_stderr is not None:
             result["install_stderr"] = deployment.install_stderr
-        
+
         return result
-    
+
     except Exception as e:
         logger.exception(f"[AdminAgentGetDeploymentStatus] Error: {e}")
-        return {
-            "ok": False,
-            "error": str(e)
-        }
+        return {"ok": False, "error": str(e)}
 
 
 async def admin_agent_get_deployment_metrics(runtime: Any) -> Dict[str, Any]:
     """
     Get deployment statistics and metrics for dashboard.
-    
+
     Returns:
         {
             "ok": true,
@@ -747,34 +751,26 @@ async def admin_agent_get_deployment_metrics(runtime: Any) -> Dict[str, Any]:
     """
     if not runtime.deployment_tracker:
         return {"ok": False, "error": "deployment_tracker not initialized"}
-    
+
     try:
         metrics = await runtime.deployment_tracker.get_deployment_metrics()
-        return {
-            "ok": True,
-            **metrics
-        }
+        return {"ok": True, **metrics}
     except Exception as e:
         logger.exception(f"[AdminAgentGetDeploymentMetrics] Error: {e}")
-        return {
-            "ok": False,
-            "error": str(e)
-        }
+        return {"ok": False, "error": str(e)}
 
 
 async def admin_agent_heartbeat(
-    runtime: Any,
-    agent_id: str,
-    body: Dict[str, Any] = None
+    runtime: Any, agent_id: str, body: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """
     Receive heartbeat from agent (called every 5-10 seconds).
-    
+
     Used to:
     1. Update last_heartbeat timestamp
     2. Mark agent as online
     3. Trigger deployment completion if waiting
-    
+
     Args:
         runtime: CoreRuntime instance
         agent_id: Agent ID
@@ -785,35 +781,32 @@ async def admin_agent_heartbeat(
             "memory_mb"?: int,
             "capabilities"?: [...]
         }
-    
+
     Returns:
         {"ok": true, "ack": true, "server_time": "..."}
     """
     if not agent_id:
         return {"ok": False, "error": "agent_id required"}
-    
+
     if not runtime.agent_registry:
         return {"ok": False, "error": "agent_registry not initialized"}
-    
+
     try:
         # Get agent metadata
         agent = await runtime.agent_registry.get_agent(agent_id)
         if not agent:
-            return {
-                "ok": False,
-                "error": "agent_not_found"
-            }
-        
+            return {"ok": False, "error": "agent_not_found"}
+
         # Update last heartbeat
         now = datetime.now(timezone.utc)
         now_iso = now.isoformat()
-        
+
         # Update heartbeat in registry
         await runtime.agent_registry.update_agent_heartbeat(agent_id, now_iso)
-        
+
         # Re-fetch updated agent
         agent = await runtime.agent_registry.get_agent(agent_id)
-        
+
         # Update optional metrics in properties
         if body and isinstance(body, dict):
             if "uptime_seconds" in body:
@@ -832,25 +825,28 @@ async def admin_agent_heartbeat(
                 except (ValueError, TypeError):
                     pass
             if "capabilities" in body and isinstance(body["capabilities"], list):
-                await runtime.agent_registry.update_agent_capabilities(agent_id, body["capabilities"])
-        
+                await runtime.agent_registry.update_agent_capabilities(
+                    agent_id, body["capabilities"]
+                )
+
         logger.debug(
-            f"[AdminAgentHeartbeat] Heartbeat received",
+            "[AdminAgentHeartbeat] Heartbeat received",
             extra={
                 "agent_id": agent_id,
-                "agent_name": agent.agent_name if hasattr(agent, 'agent_name') else None
-            }
+                "agent_name": agent.agent_name
+                if hasattr(agent, "agent_name")
+                else None,
+            },
         )
-        
+
         # Check if there are pending deployments waiting for this agent
         # (this would mark deployment as READY)
         if runtime.deployment_tracker:
             try:
                 pending_deployments = await runtime.deployment_tracker.list_deployments(
-                    status="registering",
-                    limit=100
+                    status="registering", limit=100
                 )
-                
+
                 for deployment in pending_deployments:
                     if deployment.agent_id == agent_id:
                         # Found deployment waiting for this agent
@@ -858,30 +854,25 @@ async def admin_agent_heartbeat(
                             deployment.deployment_id,
                             status="ready",
                             progress=100,
-                            completed_at=now.isoformat()
+                            completed_at=now.isoformat(),
                         )
                         logger.info(
-                            f"[AdminAgentHeartbeat] Deployment ready via heartbeat",
+                            "[AdminAgentHeartbeat] Deployment ready via heartbeat",
                             extra={
                                 "deployment_id": deployment.deployment_id,
-                                "agent_id": agent_id
-                            }
+                                "agent_id": agent_id,
+                            },
                         )
             except Exception as e:
-                logger.debug(f"[AdminAgentHeartbeat] Error updating deployment status: {e}")
-        
-        return {
-            "ok": True,
-            "ack": True,
-            "server_time": now.isoformat()
-        }
-    
+                logger.debug(
+                    f"[AdminAgentHeartbeat] Error updating deployment status: {e}"
+                )
+
+        return {"ok": True, "ack": True, "server_time": now.isoformat()}
+
     except Exception as e:
         logger.exception(f"[AdminAgentHeartbeat] Error: {e}")
-        return {
-            "ok": False,
-            "error": str(e)
-        }
+        return {"ok": False, "error": str(e)}
 
 
 # ============================================================================
@@ -918,7 +909,9 @@ def _resolve_binary_path(arch: str) -> Optional["Path"]:
     return None
 
 
-async def admin_agent_download_checksum(runtime: Any, **query_params: Any) -> Dict[str, Any]:
+async def admin_agent_download_checksum(
+    runtime: Any, **query_params: Any
+) -> Dict[str, Any]:
     """
     Return SHA256 checksum of agent binary for installer verification.
 
@@ -928,12 +921,13 @@ async def admin_agent_download_checksum(runtime: Any, **query_params: Any) -> Di
       - arch: target architecture string (default: linux-amd64)
     """
     import hashlib
-    from pathlib import Path
 
     arch = query_params.get("arch", "linux-amd64")
     binary_path = _resolve_binary_path(arch)
     if binary_path is None:
-        logger.warning("[AdminAgentDownloadChecksum] AGENT_BINARY_PATH not set or binary not found")
+        logger.warning(
+            "[AdminAgentDownloadChecksum] AGENT_BINARY_PATH not set or binary not found"
+        )
         return {
             "ok": False,
             "error": "binary_not_found",
@@ -995,7 +989,9 @@ async def admin_agent_download_binary(
             },
         )
 
-    logger.info(f"[AdminAgentDownloadBinary] Serving {binary_path} ({binary_path.stat().st_size} bytes)")
+    logger.info(
+        f"[AdminAgentDownloadBinary] Serving {binary_path} ({binary_path.stat().st_size} bytes)"
+    )
     return FileResponse(
         path=str(binary_path),
         filename=f"remote-client-{arch}",
@@ -1008,16 +1004,18 @@ async def admin_agent_download_binary(
 # ============================================================================
 
 
-async def admin_agent_get_heartbeat_status(runtime: Any, agent_id: str) -> Dict[str, Any]:
+async def admin_agent_get_heartbeat_status(
+    runtime: Any, agent_id: str
+) -> Dict[str, Any]:
     """
     Get heartbeat status for specific agent.
-    
+
     Used to check if agent is responsive and when it last sent heartbeat.
-    
+
     Args:
         runtime: CoreRuntime instance
         agent_id: Agent ID to check
-    
+
     Returns:
         {
             "ok": true,
@@ -1037,28 +1035,30 @@ async def admin_agent_get_heartbeat_status(runtime: Any, agent_id: str) -> Dict[
     """
     if not agent_id:
         return {"ok": False, "error": "agent_id required"}
-    
+
     if not runtime.agent_registry:
         return {"ok": False, "error": "agent_registry not initialized"}
-    
+
     try:
         # Get agent metadata
         agent = await runtime.agent_registry.get_agent(agent_id)
         if not agent:
             return {"ok": False, "error": "agent_not_found"}
-        
+
         # Get heartbeat info
         now = datetime.now(timezone.utc)
         last_heartbeat_str = getattr(agent, "last_heartbeat", None)
-        
+
         if not last_heartbeat_str:
             status = "unknown"
             age_seconds = None
         else:
             try:
-                last_heartbeat = datetime.fromisoformat(last_heartbeat_str.replace('Z', '+00:00'))
+                last_heartbeat = datetime.fromisoformat(
+                    last_heartbeat_str.replace("Z", "+00:00")
+                )
                 age_seconds = int((now - last_heartbeat).total_seconds())
-                
+
                 # Determine status based on age
                 if age_seconds < 30:  # Fresh within 30 seconds
                     status = "online"
@@ -1069,7 +1069,7 @@ async def admin_agent_get_heartbeat_status(runtime: Any, agent_id: str) -> Dict[
             except (ValueError, AttributeError):
                 status = "unknown"
                 age_seconds = None
-        
+
         # Get metrics from properties
         metrics = {}
         if hasattr(agent, "properties") and isinstance(agent.properties, dict):
@@ -1078,16 +1078,12 @@ async def admin_agent_get_heartbeat_status(runtime: Any, agent_id: str) -> Dict[
                 "cpu_percent": agent.properties.get("cpu_percent"),
                 "memory_mb": agent.properties.get("memory_mb"),
             }
-        
+
         logger.debug(
-            f"[AdminAgentHeartbeatStatus] Status checked",
-            extra={
-                "agent_id": agent_id,
-                "status": status,
-                "age_seconds": age_seconds
-            }
+            "[AdminAgentHeartbeatStatus] Status checked",
+            extra={"agent_id": agent_id, "status": status, "age_seconds": age_seconds},
         )
-        
+
         return {
             "ok": True,
             "agent_id": agent_id,
@@ -1097,9 +1093,9 @@ async def admin_agent_get_heartbeat_status(runtime: Any, agent_id: str) -> Dict[
             "heartbeat_age_seconds": age_seconds,
             "threshold_seconds": 30,  # online if < 30s
             "dead_threshold_seconds": 300,  # dead if > 300s
-            "metrics": metrics
+            "metrics": metrics,
         }
-    
+
     except Exception as e:
         logger.exception(f"[AdminAgentHeartbeatStatus] Error: {e}")
         return {"ok": False, "error": str(e)}
@@ -1108,9 +1104,9 @@ async def admin_agent_get_heartbeat_status(runtime: Any, agent_id: str) -> Dict[
 async def admin_agent_check_agents_health(runtime: Any) -> Dict[str, Any]:
     """
     Perform comprehensive health check on all agents.
-    
+
     Detects dead agents and triggers cleanup if needed.
-    
+
     Returns:
         {
             "ok": true,
@@ -1132,36 +1128,33 @@ async def admin_agent_check_agents_health(runtime: Any) -> Dict[str, Any]:
     """
     if not runtime.agent_registry:
         return {"ok": False, "error": "agent_registry not initialized"}
-    
+
     try:
         # Get all agents
         agents = await runtime.agent_registry.list_agents()
-        
+
         now = datetime.now(timezone.utc)
         now_str = now.isoformat()
-        
-        stats = {
-            "online": 0,
-            "offline": 0,
-            "dead": 0,
-            "unknown": 0
-        }
-        
+
+        stats = {"online": 0, "offline": 0, "dead": 0, "unknown": 0}
+
         agent_statuses = []
         dead_agents = []  # Track agents to mark dead
-        
+
         for agent in agents:
             last_heartbeat_str = getattr(agent, "last_heartbeat", None)
-            
+
             if not last_heartbeat_str:
                 status = "unknown"
                 age_seconds = None
                 stats["unknown"] += 1
             else:
                 try:
-                    last_heartbeat = datetime.fromisoformat(last_heartbeat_str.replace('Z', '+00:00'))
+                    last_heartbeat = datetime.fromisoformat(
+                        last_heartbeat_str.replace("Z", "+00:00")
+                    )
                     age_seconds = int((now - last_heartbeat).total_seconds())
-                    
+
                     if age_seconds < 30:
                         status = "online"
                         stats["online"] += 1
@@ -1176,14 +1169,16 @@ async def admin_agent_check_agents_health(runtime: Any) -> Dict[str, Any]:
                     status = "unknown"
                     age_seconds = None
                     stats["unknown"] += 1
-            
-            agent_statuses.append({
-                "agent_id": getattr(agent, "agent_id", None),
-                "agent_name": getattr(agent, "agent_name", None),
-                "status": status,
-                "age_seconds": age_seconds
-            })
-        
+
+            agent_statuses.append(
+                {
+                    "agent_id": getattr(agent, "agent_id", None),
+                    "agent_name": getattr(agent, "agent_name", None),
+                    "status": status,
+                    "age_seconds": age_seconds,
+                }
+            )
+
         # Mark dead agents if needed (optional cleanup)
         for dead_agent in dead_agents:
             try:
@@ -1191,26 +1186,23 @@ async def admin_agent_check_agents_health(runtime: Any) -> Dict[str, Any]:
                 if agent_id:
                     # Mark as deregistered/dead in DB (non-blocking)
                     logger.warning(
-                        f"[AdminAgentHealthCheck] Agent marked as dead",
-                        extra={"agent_id": agent_id}
+                        "[AdminAgentHealthCheck] Agent marked as dead",
+                        extra={"agent_id": agent_id},
                     )
                     # Optionally call: await runtime.agent_registry.deregister_agent(agent_id)
             except Exception as e:
                 logger.debug(f"[AdminAgentHealthCheck] Error marking dead agent: {e}")
-        
-        logger.info(
-            f"[AdminAgentHealthCheck] Health check completed",
-            extra=stats
-        )
-        
+
+        logger.info("[AdminAgentHealthCheck] Health check completed", extra=stats)
+
         return {
             "ok": True,
             "timestamp": now_str,
             "total_agents": len(agents),
             "stats": stats,
-            "agents": agent_statuses
+            "agents": agent_statuses,
         }
-    
+
     except Exception as e:
         logger.exception(f"[AdminAgentHealthCheck] Error: {e}")
         return {"ok": False, "error": str(e)}
@@ -1219,7 +1211,7 @@ async def admin_agent_check_agents_health(runtime: Any) -> Dict[str, Any]:
 async def admin_agent_list_online_agents(runtime: Any) -> Dict[str, Any]:
     """
     Get list of currently online agents (heartbeat < 30 seconds old).
-    
+
     Returns:
         {
             "ok": true,
@@ -1238,47 +1230,47 @@ async def admin_agent_list_online_agents(runtime: Any) -> Dict[str, Any]:
     """
     if not runtime.agent_registry:
         return {"ok": False, "error": "agent_registry not initialized"}
-    
+
     try:
         # Get all agents
         agents = await runtime.agent_registry.list_agents()
-        
+
         now = datetime.now(timezone.utc)
         online_agents = []
-        
+
         for agent in agents:
             last_heartbeat_str = getattr(agent, "last_heartbeat", None)
-            
+
             if not last_heartbeat_str:
                 continue  # Skip agents with no heartbeat
-            
+
             try:
-                last_heartbeat = datetime.fromisoformat(last_heartbeat_str.replace('Z', '+00:00'))
+                last_heartbeat = datetime.fromisoformat(
+                    last_heartbeat_str.replace("Z", "+00:00")
+                )
                 age_seconds = int((now - last_heartbeat).total_seconds())
-                
+
                 # Consider online if < 30 seconds
                 if age_seconds < 30:
-                    online_agents.append({
-                        "agent_id": getattr(agent, "agent_id", None),
-                        "agent_name": getattr(agent, "agent_name", None),
-                        "last_heartbeat": last_heartbeat_str,
-                        "age_seconds": age_seconds,
-                        "capabilities": getattr(agent, "capabilities", [])
-                    })
+                    online_agents.append(
+                        {
+                            "agent_id": getattr(agent, "agent_id", None),
+                            "agent_name": getattr(agent, "agent_name", None),
+                            "last_heartbeat": last_heartbeat_str,
+                            "age_seconds": age_seconds,
+                            "capabilities": getattr(agent, "capabilities", []),
+                        }
+                    )
             except (ValueError, AttributeError):
                 pass  # Skip if heartbeat parse fails
-        
+
         logger.debug(
-            f"[AdminAgentListOnline] Listed online agents",
-            extra={"count": len(online_agents)}
+            "[AdminAgentListOnline] Listed online agents",
+            extra={"count": len(online_agents)},
         )
-        
-        return {
-            "ok": True,
-            "count": len(online_agents),
-            "agents": online_agents
-        }
-    
+
+        return {"ok": True, "count": len(online_agents), "agents": online_agents}
+
     except Exception as e:
         logger.exception(f"[AdminAgentListOnline] Error: {e}")
         return {"ok": False, "error": str(e)}
@@ -1292,7 +1284,7 @@ async def admin_agent_list_online_agents(runtime: Any) -> Dict[str, Any]:
 async def admin_agent_submit_logs(
     runtime: Any,
     agent_id: str,
-    body: Dict[str, Any] = None,
+    body: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Accept a batch of log entries pushed by the remote agent.
@@ -1457,7 +1449,9 @@ async def admin_agent_get_status(
                 if heartbeat_age < 30:
                     # Check if agent self-reported degraded status
                     reported = agent.properties.get("status", "ok")
-                    status = "degraded" if reported not in ("ok", "online") else "online"
+                    status = (
+                        "degraded" if reported not in ("ok", "online") else "online"
+                    )
                 elif heartbeat_age < 300:
                     status = "offline"
                 else:
@@ -1469,9 +1463,7 @@ async def admin_agent_get_status(
         deployment_id: Optional[str] = None
         if runtime.deployment_tracker:
             try:
-                all_deps = await runtime.deployment_tracker.list_deployments(
-                    limit=200
-                )
+                all_deps = await runtime.deployment_tracker.list_deployments(limit=200)
                 for dep in all_deps:
                     if dep.agent_id == agent_id:
                         deployment_id = dep.deployment_id
@@ -1510,46 +1502,42 @@ async def admin_agent_get_status(
 async def _monitor_agent_health_background(runtime: Any) -> None:
     """
     Background task to monitor agent health continuously.
-    
+
     Runs asynchronously every 60 seconds to:
     1. Check health of all agents
     2. Mark dead agents
     3. Trigger alerts if too many agents are down
-    
+
     This is called from module initialization.
     """
     logger.info("[AgentHealthMonitor] Background health monitor started")
-    
+
     while True:
         try:
             await asyncio.sleep(60)  # Check every 60 seconds
-            
+
             # Run health check
             health_result = await admin_agent_check_agents_health(runtime)
-            
+
             if health_result.get("ok"):
                 stats = health_result.get("stats", {})
-                
+
                 # Log if too many dead agents
                 dead_count = stats.get("dead", 0)
                 total = health_result.get("total_agents", 0)
-                
+
                 if total > 0 and dead_count > total * 0.1:  # More than 10% dead
                     logger.warning(
-                        f"[AgentHealthMonitor] High dead agent rate",
+                        "[AgentHealthMonitor] High dead agent rate",
                         extra={
                             "dead_count": dead_count,
                             "total": total,
-                            "percentage": (dead_count / total) * 100
-                        }
+                            "percentage": (dead_count / total) * 100,
+                        },
                     )
                 else:
-                    logger.debug(
-                        f"[AgentHealthMonitor] Health check OK",
-                        extra=stats
-                    )
-        
+                    logger.debug("[AgentHealthMonitor] Health check OK", extra=stats)
+
         except Exception as e:
             logger.exception(f"[AgentHealthMonitor] Error in health monitoring: {e}")
             await asyncio.sleep(60)  # Wait before retry
-

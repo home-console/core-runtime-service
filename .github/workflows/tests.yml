@@ -25,6 +25,8 @@ jobs:
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           pip install pytest pytest-asyncio coverage codecov
+      - name: Architecture dependency report
+        run: python scripts/validate_architecture_rules.py --enforce
       - name: Run tests with coverage
         run: |
           coverage run -m pytest -q

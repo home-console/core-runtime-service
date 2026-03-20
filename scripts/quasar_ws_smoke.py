@@ -20,7 +20,7 @@ from typing import Any
 
 from core.config import Config
 from core.runtime.runtime import CoreRuntime
-from adapters.sqlite_adapter import SQLiteAdapter
+from core.adapters.sqlite_adapter import SQLiteAdapter
 
 
 async def main() -> None:

@@ -12,10 +12,10 @@ from __future__ import annotations
 import os
 from abc import abstractmethod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Optional, Awaitable, Callable, Any, Literal, Union
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Literal, Optional, Union
 
+from core.runtime.runtime_context import LegacyRuntimeContext
 from sdk.plugin import BasePlugin as SDKBasePlugin
-from core.runtime.runtime_context import RuntimeContext
 
 if TYPE_CHECKING:
     from core.runtime.runtime import CoreRuntime
@@ -24,55 +24,71 @@ if TYPE_CHECKING:
 @dataclass
 class PluginMetadata:
     """Метаданные плагина."""
-    
+
     name: str
     version: str
     description: str = ""
     author: str = ""
-    dependencies: list[str] | None = field(default_factory=list)  # Список имён плагинов-зависимостей
+    dependencies: list[str] | None = field(
+        default_factory=list
+    )  # Список имён плагинов-зависимостей
     # По умолчанию все сервисы плагина доступны не только админам.
     # Можно включить default_admin_only=True для "админских" плагинов.
     default_admin_only: bool = False
     # Capability: плагин объявляет, какие capabilities предоставляет и какие требует.
-    capabilities_provided: list[str] | None = field(default_factory=list)  # ["oauth:yandex"]
-    capabilities_required: list[str] | None = field(default_factory=list)  # ["oauth:yandex", "yandex:session_cookies"]
+    capabilities_provided: list[str] | None = field(
+        default_factory=list
+    )  # ["oauth:yandex"]
+    capabilities_required: list[str] | None = field(
+        default_factory=list
+    )  # ["oauth:yandex", "yandex:session_cookies"]
     # Remote configuration для remote capability providers
     # Если не None, то этот плагин является remote provider
     remote_config: dict | None = None  # {"base_url": "http://...", "timeout": 10}
     # Plugin execution mode (Step 9: Plugin Isolation)
-    execution_mode: Literal["in_process", "process", "container", "remote"] = "in_process"
+    execution_mode: Literal["in_process", "process", "container", "remote"] = (
+        "in_process"
+    )
     # Optional configuration for process/container execution
     process_config: dict | None = None  # {"timeout": 30, "max_memory": "256M"}
     container_config: dict | None = None  # {"image": "...", "timeout": 30}
     # Resource limits (Step 13: Observability & Resource Guardrails)
-    resource_limits: dict | None = None  # {"max_execution_seconds": 30, "max_memory_mb": 512, "max_calls_per_minute": 100}
+    resource_limits: dict | None = (
+        None  # {"max_execution_seconds": 30, "max_memory_mb": 512, "max_calls_per_minute": 100}
+    )
 
 
 class BasePlugin(SDKBasePlugin):
     """
     Базовый класс для всех плагинов (расширяет sdk.BasePlugin).
-    
+
     Lifecycle: on_load → on_start → on_stop → on_unload.
-    
+
     Согласованность с RuntimeModule:
     - Module: __init__ → register() → start() → stop()
     - Plugin: __init__ → on_load() → on_start() → on_stop() → on_unload()
-    
+
     Различия:
     - Module.register() регистрирует сервисы/endpoints (идентично Plugin.on_load())
     - Module.start() инициализирует runtime-зависимые ресурсы (идентично Plugin.on_start())
     - Module.stop() останавливает модуль (идентично Plugin.on_stop())
     - Plugin.on_unload() дополнительно очищает ресурсы (Module не имеет аналога)
-    
+
     Оба используют RuntimeContext для доступа к ядру (storage, services, http, capabilities, operations).
     """
+
     _loaded: bool = False
     _started: bool = False
 
-    def __init__(self, runtime_or_context: Optional[Union["CoreRuntime", RuntimeContext]] = None, *, runtime: Optional[Union["CoreRuntime", RuntimeContext]] = None) -> None:
+    def __init__(
+        self,
+        runtime_or_context: Optional[Union["CoreRuntime", LegacyRuntimeContext]] = None,
+        *,
+        runtime: Optional[Union["CoreRuntime", RuntimeContext]] = None,
+    ) -> None:
         """
         Инициализация плагина.
-        
+
         Args:
             runtime_or_context: экземпляр CoreRuntime или RuntimeContext
                 Если передан CoreRuntime, создаётся RuntimeContext автоматически
@@ -83,25 +99,29 @@ class BasePlugin(SDKBasePlugin):
         if runtime is not None and runtime_or_context is None:
             runtime_or_context = runtime
         # Для обратной совместимости передаём runtime в SDKBasePlugin
-        runtime = runtime_or_context if not isinstance(runtime_or_context, RuntimeContext) else None
+        runtime = (
+            runtime_or_context
+            if not isinstance(runtime_or_context, LegacyRuntimeContext)
+            else None
+        )
         super().__init__(runtime)
-        
+
         # Сохраняем context если передан
-        if isinstance(runtime_or_context, RuntimeContext):
+        if isinstance(runtime_or_context, LegacyRuntimeContext):
             self.context = runtime_or_context
             self.runtime = None  # Не используем runtime напрямую
         elif runtime_or_context is not None:
             # Старый способ: передали runtime
             self.runtime = runtime_or_context
             # Создаём context из runtime если у runtime есть метод create_context
-            if hasattr(runtime_or_context, 'create_context'):
+            if hasattr(runtime_or_context, "create_context"):
                 self.context = runtime_or_context.create_context()
             else:
                 self.context = None  # Будет установлен позже через PluginManager
         else:
             self.runtime = None
             self.context = None  # Будет установлен позже через PluginManager
-        
+
         self._loaded = False
         self._started = False
 
@@ -127,20 +147,25 @@ class BasePlugin(SDKBasePlugin):
         # Если явно не указали admin_only — берём дефолт из metadata (для всего плагина)
         effective_admin_only = admin_only
         try:
-            if effective_admin_only is None and getattr(self, "metadata", None) is not None:
+            if (
+                effective_admin_only is None
+                and getattr(self, "metadata", None) is not None
+            ):
                 effective_admin_only = bool(self.metadata.default_admin_only)
         except Exception:
             # В сомнительных случаях не ужесточаем, оставляем на усмотрение конвенций в ServiceRegistry
             effective_admin_only = admin_only
 
         # Используем context.services если доступен, иначе runtime.service_registry
-        if hasattr(self, 'context') and self.context:
+        if hasattr(self, "context") and self.context:
             reg = self.context.services
         elif self.runtime:
             reg = self.runtime.service_registry
         else:
-            raise RuntimeError("Plugin not initialized: no runtime or context available")
-        
+            raise RuntimeError(
+                "Plugin not initialized: no runtime or context available"
+            )
+
         if hasattr(reg, "register_with_acl"):
             await reg.register_with_acl(
                 name,
@@ -156,27 +181,29 @@ class BasePlugin(SDKBasePlugin):
         else:
             await reg.register(name, func, version=version)
 
-    def get_env_config(self, key: str, default: Optional[str] = None, prefix: Optional[str] = None) -> Optional[str]:
+    def get_env_config(
+        self, key: str, default: Optional[str] = None, prefix: Optional[str] = None
+    ) -> Optional[str]:
         """
         Получить значение конфигурации из переменных окружения.
-        
+
         Ищет переменную в следующем порядке:
         1. {prefix}_{key} (если prefix указан)
         2. {plugin_name}_{key} (где plugin_name из metadata)
         3. {key}
-        
+
         Args:
             key: имя переменной окружения (без префикса)
             default: значение по умолчанию, если переменная не найдена
             prefix: опциональный префикс (если None, используется имя плагина из metadata)
-            
+
         Returns:
             Значение переменной окружения или default
-            
+
         Пример:
             # Ищет PLUGIN_NAME_REMOTE_URL, затем REMOTE_URL
             url = self.get_env_config("REMOTE_URL")
-            
+
             # Ищет CUSTOM_REMOTE_URL, затем PLUGIN_NAME_REMOTE_URL, затем REMOTE_URL
             url = self.get_env_config("REMOTE_URL", prefix="CUSTOM")
         """
@@ -189,54 +216,58 @@ class BasePlugin(SDKBasePlugin):
             except Exception:
                 # Если metadata недоступен, используем имя класса
                 prefix = self.__class__.__name__.upper()
-        
+
         # Пробуем варианты в порядке приоритета
         env_keys = [
             f"{prefix}_{key}",  # С префиксом плагина
             key,  # Без префикса
         ]
-        
+
         for env_key in env_keys:
             value = os.getenv(env_key)
             if value is not None:
                 return value
-        
+
         return default
 
-    def get_env_config_bool(self, key: str, default: bool = False, prefix: Optional[str] = None) -> bool:
+    def get_env_config_bool(
+        self, key: str, default: bool = False, prefix: Optional[str] = None
+    ) -> bool:
         """
         Получить булево значение из переменных окружения.
-        
+
         Args:
             key: имя переменной окружения
             default: значение по умолчанию
             prefix: опциональный префикс
-            
+
         Returns:
             True если значение "true", "1", "yes", "on" (case-insensitive), иначе False
         """
         value = self.get_env_config(key, default=None, prefix=prefix)
         if value is None:
             return default
-        
+
         return value.lower() in ("true", "1", "yes", "on")
 
-    def get_env_config_int(self, key: str, default: Optional[int] = None, prefix: Optional[str] = None) -> Optional[int]:
+    def get_env_config_int(
+        self, key: str, default: Optional[int] = None, prefix: Optional[str] = None
+    ) -> Optional[int]:
         """
         Получить целое число из переменных окружения.
-        
+
         Args:
             key: имя переменной окружения
             default: значение по умолчанию
             prefix: опциональный префикс
-            
+
         Returns:
             Целое число или default если не удалось распарсить
         """
         value = self.get_env_config(key, default=None, prefix=prefix)
         if value is None:
             return default
-        
+
         try:
             return int(value)
         except (ValueError, TypeError):
@@ -264,12 +295,12 @@ class BasePlugin(SDKBasePlugin):
     async def on_load(self) -> None:
         """
         Вызывается при загрузке плагина.
-        
+
         Здесь можно:
         - инициализировать ресурсы
         - регистрировать сервисы
         - подписываться на события
-        
+
         Для логирования используйте:
             await self.runtime.service_registry.call(
                 "logger.log",
@@ -286,7 +317,7 @@ class BasePlugin(SDKBasePlugin):
     async def on_start(self) -> None:
         """
         Вызывается при запуске плагина.
-        
+
         Здесь можно:
         - запустить фоновые задачи
         - начать обработку данных
@@ -296,7 +327,7 @@ class BasePlugin(SDKBasePlugin):
     async def on_stop(self) -> None:
         """
         Вызывается при остановке плагина.
-        
+
         Здесь нужно:
         - остановить фоновые задачи
         - освободить ресурсы
@@ -306,7 +337,7 @@ class BasePlugin(SDKBasePlugin):
     async def on_unload(self) -> None:
         """
         Вызывается при выгрузке плагина.
-        
+
         Здесь нужно:
         - отписаться от событий
         - удалить сервисы

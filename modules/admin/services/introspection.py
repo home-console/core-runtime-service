@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 import time
 
-from core.plugins import PluginState
+from modules.plugins import PluginState
 from core.logger_helper import debug
 from core.kernel.plugin_loader import PluginManifestLoader
 
@@ -140,7 +140,7 @@ def _get_plugins_dir(runtime: Any) -> Path:
             return Path(pd)
     # Тот же default, что в core.plugins.manager
     try:
-        from core.plugins import manager as _pm
+        from modules.plugins import manager as _pm
         return Path(_pm.__file__).resolve().parent.parent.parent / "plugins"
     except Exception:
         return Path(__file__).resolve().parent.parent.parent.parent / "plugins"

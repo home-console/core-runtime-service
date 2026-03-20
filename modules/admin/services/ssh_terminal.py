@@ -29,10 +29,13 @@ logger = logging.getLogger(__name__)
 # Session store
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 class _SshSession:
     """Один PTY-сеанс SSH, к которому могут attach-иться несколько WebSocket."""
 
-    def __init__(self, session_id: str, credential_id: Optional[str], host: str, username: str):
+    def __init__(
+        self, session_id: str, credential_id: Optional[str], host: str, username: str
+    ):
         self.session_id = session_id
         self.credential_id = credential_id
         self.host = host
@@ -90,7 +93,11 @@ class _SshSession:
     def _start_reader(self) -> None:
         if self._reader_thread and self._reader_thread.is_alive():
             return
-        t = threading.Thread(target=self._read_loop, daemon=True, name=f"ssh-reader-{self.session_id[:8]}")
+        t = threading.Thread(
+            target=self._read_loop,
+            daemon=True,
+            name=f"ssh-reader-{self.session_id[:8]}",
+        )
         self._reader_thread = t
         t.start()
 
@@ -126,7 +133,9 @@ class _SshSession:
             pass
 
     def is_alive(self) -> bool:
-        return not self._closed and (self.channel is not None) and not self.channel.closed
+        return (
+            not self._closed and (self.channel is not None) and not self.channel.closed
+        )
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -149,7 +158,14 @@ _sessions: Dict[str, _SshSession] = {}
 # SSH helpers (paramiko)
 # ──────────────────────────────────────────────────────────────────────────────
 
-def _open_shell_paramiko(host: str, port: int, username: str, password: Optional[str], private_key_pem: Optional[str]):
+
+def _open_shell_paramiko(
+    host: str,
+    port: int,
+    username: str,
+    password: Optional[str],
+    private_key_pem: Optional[str],
+):
     """Synchronous — вызывать через run_in_executor."""
     try:
         import paramiko
@@ -178,7 +194,9 @@ def _open_shell_paramiko(host: str, port: int, username: str, password: Optional
             except Exception:
                 continue
         if pkey is None:
-            raise RuntimeError("Не удалось распарсить приватный ключ (RSA/Ed25519/ECDSA)")
+            raise RuntimeError(
+                "Не удалось распарсить приватный ключ (RSA/Ed25519/ECDSA)"
+            )
         connect_kwargs["pkey"] = pkey
     else:
         raise RuntimeError("Нужен password или private_key")
@@ -192,6 +210,7 @@ def _open_shell_paramiko(host: str, port: int, username: str, password: Optional
 # Public API — create / list / get / close
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 async def create_session(
     host: str,
     port: int,
@@ -203,7 +222,8 @@ async def create_session(
     """Создать новую PTY-сессию. Возвращает объект сессии."""
     loop = asyncio.get_event_loop()
     client, channel = await loop.run_in_executor(
-        None, lambda: _open_shell_paramiko(host, port, username, password, private_key_pem)
+        None,
+        lambda: _open_shell_paramiko(host, port, username, password, private_key_pem),
     )
     session = _SshSession(
         session_id=str(uuid4()),
@@ -215,7 +235,9 @@ async def create_session(
     session.channel = channel
     session._start_reader()
     _sessions[session.session_id] = session
-    logger.info(f"[ssh-session] Created {session.session_id[:8]} for {username}@{host}:{port}")
+    logger.info(
+        f"[ssh-session] Created {session.session_id[:8]} for {username}@{host}:{port}"
+    )
     return session
 
 
@@ -249,6 +271,7 @@ def gc_dead_sessions() -> None:
 # WebSocket attach handler
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 async def attach_websocket(websocket: Any, session_id: str) -> None:
     """
     Attach WebSocket к существующей PTY-сессии.
@@ -257,14 +280,18 @@ async def attach_websocket(websocket: Any, session_id: str) -> None:
     """
     session = _sessions.get(session_id)
     if session is None or not session.is_alive():
-        await websocket.send_text(json.dumps({"type": "error", "message": "Session not found or closed"}))
+        await websocket.send_text(
+            json.dumps({"type": "error", "message": "Session not found or closed"})
+        )
         await websocket.close(code=1008)
         return
 
     loop = asyncio.get_event_loop()
     queue = session.subscribe(loop)
     channel = session.channel
-    logger.info(f"[ssh-ws] attach to {session_id[:8]}, subscribers now: {len(session._subscribers)}")
+    logger.info(
+        f"[ssh-ws] attach to {session_id[:8]}, subscribers now: {len(session._subscribers)}"
+    )
 
     # SSH → WS
     async def _ssh_to_ws():
@@ -274,7 +301,11 @@ async def attach_websocket(websocket: Any, session_id: str) -> None:
                 if data is None:
                     # SSH сессия завершилась
                     try:
-                        await websocket.send_text(json.dumps({"type": "closed", "message": "SSH session ended"}))
+                        await websocket.send_text(
+                            json.dumps(
+                                {"type": "closed", "message": "SSH session ended"}
+                            )
+                        )
                         await websocket.close(code=1000)
                     except Exception:
                         pass
@@ -305,7 +336,9 @@ async def attach_websocket(websocket: Any, session_id: str) -> None:
                 # binary
                 raw_bytes = msg.get("bytes")
                 if raw_bytes:
-                    await loop.run_in_executor(None, lambda d=raw_bytes: channel.send(d))
+                    await loop.run_in_executor(
+                        None, lambda d=raw_bytes: channel.send(d)
+                    )
                     continue
 
                 text = msg.get("text")
@@ -318,12 +351,15 @@ async def attach_websocket(websocket: Any, session_id: str) -> None:
                                 cols = int(payload.get("cols") or 80)
                                 rows = int(payload.get("rows") or 24)
                                 await loop.run_in_executor(
-                                    None, lambda: channel.resize_pty(width=cols, height=rows)
+                                    None,
+                                    lambda: channel.resize_pty(width=cols, height=rows),
                                 )
                                 continue
                             elif ptype == "ping":
                                 try:
-                                    await websocket.send_text(json.dumps({"type": "pong"}))
+                                    await websocket.send_text(
+                                        json.dumps({"type": "pong"})
+                                    )
                                 except Exception:
                                     pass
                                 continue
@@ -338,14 +374,19 @@ async def attach_websocket(websocket: Any, session_id: str) -> None:
         await asyncio.gather(_ssh_to_ws(), _ws_to_ssh())
     finally:
         session.unsubscribe(queue)
-        logger.info(f"[ssh-ws] detach from {session_id[:8]}, subscribers now: {len(session._subscribers)}")
+        logger.info(
+            f"[ssh-ws] detach from {session_id[:8]}, subscribers now: {len(session._subscribers)}"
+        )
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 # HTTP handlers
 # ──────────────────────────────────────────────────────────────────────────────
 
-async def http_create_session(runtime: Any, body: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+
+async def http_create_session(
+    runtime: Any, body: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
     """
     POST /admin/v1/ssh/sessions
     Body:
@@ -369,7 +410,8 @@ async def http_create_session(runtime: Any, body: Optional[Dict[str, Any]] = Non
         if sm is None or ss is None:
             return {"error": "Storage not available"}
         try:
-            from core.credentials.repository import CredentialRepository
+            from modules.credentials import CredentialRepository
+
             repo = CredentialRepository(storage_manager=sm, secret_store=ss)
             pair = await repo.get_with_secret(credential_id)
         except Exception as e:
@@ -381,7 +423,8 @@ async def http_create_session(runtime: Any, body: Optional[Dict[str, Any]] = Non
         port = cred.port or 22
         username = cred.username
         secret_str = secret_bytes.decode("utf-8", errors="replace").strip()
-        from core.credentials.domain import CredentialType
+        from modules.credentials import CredentialType
+
         if cred.type == CredentialType.SSH_PASSWORD:
             password = secret_str
         else:

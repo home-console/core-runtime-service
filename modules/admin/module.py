@@ -76,7 +76,7 @@ from .operations import (
     admin_operations_retry,
 )
 # Agent deploy (SSH bootstrap)
-from modules.agents.agent_deploy_service import admin_agent_deploy
+from modules.agent.services import admin_agent_deploy
 # Auth services moved to AuthModule
 
 

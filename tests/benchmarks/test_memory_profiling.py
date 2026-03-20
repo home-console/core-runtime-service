@@ -11,8 +11,7 @@ import pytest
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
-from core.agents.deployment_tracker import DeploymentTracker
-from core.agent.registry import AgentRegistry
+from modules.agent import DeploymentTracker, AgentRegistry
 
 
 # ---------------------------------------------------------------------------

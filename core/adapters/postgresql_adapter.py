@@ -23,7 +23,7 @@ try:
 except ImportError:
     ASYNCPG_AVAILABLE = False
 
-from core.storage_exceptions import StorageCorruptionError
+from modules.storage.exceptions import StorageCorruptionError
 
 from .storage_adapter import StorageAdapter
 

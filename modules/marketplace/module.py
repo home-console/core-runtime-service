@@ -229,7 +229,19 @@ class MarketplaceModule(RuntimeModule):
     def list_installed_plugins(self) -> Dict[str, Any]:
         """Get installed plugins from storage."""
         # Legacy: синхронный метод (storage.get асинхронный); при необходимости переделать на async
-        storage = self.context.storage if hasattr(self, "context") and self.context else self.runtime.storage
+        # TODO: remove fallback after full KernelContext migration
+        if hasattr(self, "context") and self.context:
+            storage = (
+                self.context.get_service("storage")
+                if hasattr(self.context, "get_service")
+                else self.context.storage
+            )
+        else:
+            storage = None
+
+        if storage is None and hasattr(self, "runtime"):
+            storage = getattr(self.runtime, "storage", None)
+
         # Внимание: это синхронный вызов, но storage.get асинхронный
         # Это legacy код, который нужно будет переделать
         if hasattr(storage, "get_sync"):

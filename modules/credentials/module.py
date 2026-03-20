@@ -13,26 +13,26 @@ Step 17.9: Trust restoration engine
 Step 17.10: Unified security decision orchestrator
 """
 
-from typing import Any, Dict, Optional, List, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, Optional
+
 from core.runtime_module import RuntimeModule
-from core.credentials import CredentialRepository
-from core.security.secret_store import SecretStore
-from core.security.rbac_models import Role, CredentialAccessLevel
-from core.security.policy_engine import CredentialPolicyEngine
-from core.security.mfa.service import MFAService
-from core.security.risk.engine import RiskEngine
-from core.security.trust.trust_engine import TrustEngine
-from core.security.trust.trust_state import TrustConfigs
-from modules.credentials.policy_enforcer import CredentialRBACEnforcer
-from modules.credentials.services import CredentialService
+from core.security import (
+    MFAService,
+    CredentialPolicyEngine,
+    Role,
+    RiskEngine,
+    TrustEngine,
+    TrustConfigs,
+)
+from modules.credentials import CredentialRepository
 from modules.credentials.abuse_detection import CredentialAbuseDetector
-from modules.credentials.security_orchestrator import CredentialSecurityOrchestrator
+from modules.credentials.policy_enforcer import CredentialRBACEnforcer
 from modules.credentials.schemas import (
     CreateCredentialRequest,
     UpdateCredentialRequest,
-    CredentialMetadata,
-    CredentialWithSecretResponse,
 )
+from modules.credentials.security_orchestrator import CredentialSecurityOrchestrator
+from modules.credentials.services import CredentialService
 
 if TYPE_CHECKING:
     from core.audit.binder import AuditBinder
@@ -40,10 +40,10 @@ if TYPE_CHECKING:
 
 class PolicyStoreAdapter:
     """Adapter implementing PolicyStore protocol for repository."""
-    
+
     def __init__(self, repository: CredentialRepository):
         self.repo = repository
-    
+
     async def get_policy(self, credential_id: str):
         return await self.repo.get_policy(credential_id)
 
@@ -51,17 +51,17 @@ class PolicyStoreAdapter:
 class CredentialModule(RuntimeModule):
     """
     Credential management module with full RBAC enforcement and audit binding.
-    
+
     Provides 8 operations (credential.create, get, get_with_secret, list,
     update, delete, exists, count) through OperationManager.
-    
+
     All operations:
     - Are capability-driven (strict authorization)
     - Have RBAC enforcement BEFORE service call
     - Support tamper-evident audit logging (via AuditBinder)
     - Enforce rate limiting
     - Use immutable optimistic locking patterns
-    
+
     Security Stack (Step 17.1-17.10):
     - Step 17.1-5: RBAC enforcement
     - Step 17.6: MFA elevation
@@ -74,7 +74,7 @@ class CredentialModule(RuntimeModule):
     def __init__(self, runtime: Any):
         """
         Initialize credential module.
-        
+
         Args:
             runtime: CoreRuntime instance
         """
@@ -97,7 +97,7 @@ class CredentialModule(RuntimeModule):
     async def register(self) -> None:
         """
         Register credential operations with OperationManager and ServiceRegistry.
-        
+
         Creates 8 operations:
         - credential.create (POST)
         - credential.get (GET metadata)
@@ -107,20 +107,32 @@ class CredentialModule(RuntimeModule):
         - credential.delete (DELETE)
         - credential.exists (GET check)
         - credential.count (GET count)
-        
+
         RBAC Enforcement:
         Each operation checks policies BEFORE calling service layer.
-        
+
         Audit:
         All operations logged to P0 protected storage (Step 17.5).
-        
+
         Abuse Detection:
         Secret access validated for behavioral anomalies (Step 17.7).
         """
         # Initialize repository (StorageManager для core/vault, иначе только secret_store)
         sm = getattr(self.runtime, "storage_manager", None)
         if sm is None:
-            sm = self.context.storage if hasattr(self, "context") and self.context else self.runtime.storage
+            # TODO: remove fallback after full KernelContext migration
+            if hasattr(self, "context") and self.context:
+                sm = (
+                    self.context.get_service("storage")
+                    if hasattr(self.context, "get_service")
+                    else self.context.storage
+                )
+            else:
+                sm = None
+
+            if sm is None and hasattr(self, "runtime"):
+                sm = getattr(self.runtime, "storage", None)
+
         self._repository = CredentialRepository(
             storage_manager=sm,
             secret_store=self.runtime.secret_store,
@@ -129,17 +141,18 @@ class CredentialModule(RuntimeModule):
         # Initialize RBAC policy engine and enforcer
         policy_store = PolicyStoreAdapter(self._repository)
         policy_engine = CredentialPolicyEngine(policy_store=policy_store)
-        
+
         # Initialize audit binder (Step 17.5)
-        if hasattr(self.runtime, 'secure_storage'):
+        if hasattr(self.runtime, "secure_storage"):
             from core.audit.binder import AuditBinder
+
             self._audit_binder = AuditBinder(self.runtime.secure_storage)
-        
+
         # Initialize abuse detector (Step 17.7)
         self._abuse_detector = CredentialAbuseDetector(
             audit_binder=self._audit_binder,
         )
-        
+
         # Initialize MFA service (Step 17.6)
         self._mfa_service = MFAService(
             secret_store=self.runtime.secret_store,
@@ -149,7 +162,7 @@ class CredentialModule(RuntimeModule):
             max_failed_attempts=5,
             lockout_seconds=300,
         )
-        
+
         # Create enforcer with audit binder and elevation session manager
         self._rbac_enforcer = CredentialRBACEnforcer(
             policy_engine=policy_engine,
@@ -189,25 +202,25 @@ class CredentialModule(RuntimeModule):
             risk_engine=self._risk_engine,
             trust_engine=self._trust_engine,
             security_orchestrator=self._security_orchestrator,
-            audit_logger=self.runtime.audit if hasattr(self.runtime, 'audit') else None,
+            audit_logger=self.runtime.audit if hasattr(self.runtime, "audit") else None,
         )
-        
+
         # Start background cleanup tasks
         try:
             await self._abuse_detector.start()
         except Exception as e:
             print(f"[WARNING] Failed to start abuse detector: {e}")
-        
+
         try:
             await self._mfa_service.start()
         except Exception as e:
             print(f"[WARNING] Failed to start MFA service: {e}")
-        
+
         try:
             await self._risk_engine.start()
         except Exception as e:
             print(f"[WARNING] Failed to start risk engine: {e}")
-        
+
         try:
             self._trust_engine.start()  # Non-async start
         except Exception as e:
@@ -225,19 +238,23 @@ class CredentialModule(RuntimeModule):
 
     async def _register_create_operation(self) -> None:
         """Register credential.create operation (requires credentials.write)."""
+
         async def create_handler(runtime, **params) -> Dict[str, Any]:
             user_id = params.get("_user_id")
-            user_roles = [Role(r) if isinstance(r, str) else r for r in params.get("_user_roles", [])]
+            user_roles = [
+                Role(r) if isinstance(r, str) else r
+                for r in params.get("_user_roles", [])
+            ]
             request_data = params.get("credential", {})
             secret_bytes = params.get("secret")
-            
+
             # Validate inputs
             if not request_data or not secret_bytes:
                 raise ValueError("credential and secret required")
-            
+
             # Create and validate request object
             request = CreateCredentialRequest(**request_data)
-            
+
             # Call service (RBAC enforcement happens inside service)
             metadata = await self._service.create(
                 request=request,
@@ -245,9 +262,9 @@ class CredentialModule(RuntimeModule):
                 user_id=user_id,
                 user_roles=user_roles,
             )
-            
+
             return metadata.to_dict()
-        
+
         await self.register_service(
             "credential.create",
             lambda runtime, **kw: create_handler(runtime, **kw),
@@ -256,23 +273,27 @@ class CredentialModule(RuntimeModule):
 
     async def _register_get_operation(self) -> None:
         """Register credential.get operation (requires credentials.read)."""
+
         async def get_handler(runtime, **params) -> Dict[str, Any]:
             credential_id = params.get("credential_id")
             user_id = params.get("_user_id")
-            user_roles = [Role(r) if isinstance(r, str) else r for r in params.get("_user_roles", [])]
-            
+            user_roles = [
+                Role(r) if isinstance(r, str) else r
+                for r in params.get("_user_roles", [])
+            ]
+
             if not credential_id:
                 raise ValueError("credential_id required")
-            
+
             # RBAC enforcement happens in service
             metadata = await self._service.get(
                 credential_id=credential_id,
                 user_id=user_id,
                 user_roles=user_roles,
             )
-            
+
             return metadata.to_dict()
-        
+
         await self.register_service(
             "credential.get",
             lambda runtime, **kw: get_handler(runtime, **kw),
@@ -281,26 +302,30 @@ class CredentialModule(RuntimeModule):
 
     async def _register_get_with_secret_operation(self) -> None:
         """Register credential.get_with_secret operation (requires credentials.secret.read - ELEVATED)."""
+
         async def get_with_secret_handler(runtime, **params) -> Dict[str, Any]:
             credential_id = params.get("credential_id")
             user_id = params.get("_user_id")
-            user_roles = [Role(r) if isinstance(r, str) else r for r in params.get("_user_roles", [])]
-            
+            user_roles = [
+                Role(r) if isinstance(r, str) else r
+                for r in params.get("_user_roles", [])
+            ]
+
             if not credential_id:
                 raise ValueError("credential_id required")
-            
+
             # RBAC enforcement for elevated access (inside service)
             response = await self._service.get_with_secret(
                 credential_id=credential_id,
                 user_id=user_id,
                 user_roles=user_roles,
             )
-            
+
             return {
                 "metadata": response.metadata.to_dict(),
                 "secret": response.secret.hex(),  # Encode as hex for JSON safety
             }
-        
+
         await self.register_service(
             "credential.get_with_secret",
             lambda runtime, **kw: get_with_secret_handler(runtime, **kw),
@@ -309,21 +334,25 @@ class CredentialModule(RuntimeModule):
 
     async def _register_list_operation(self) -> None:
         """Register credential.list operation (requires credentials.read)."""
+
         async def list_handler(runtime, **params) -> Dict[str, Any]:
             user_id = params.get("_user_id")
-            user_roles = [Role(r) if isinstance(r, str) else r for r in params.get("_user_roles", [])]
-            
+            user_roles = [
+                Role(r) if isinstance(r, str) else r
+                for r in params.get("_user_roles", [])
+            ]
+
             # RBAC filtering happens in service
             credentials = await self._service.list(
                 user_id=user_id,
                 user_roles=user_roles,
             )
-            
+
             return {
                 "credentials": [c.to_dict() for c in credentials],
                 "count": len(credentials),
             }
-        
+
         await self.register_service(
             "credential.list",
             lambda runtime, **kw: list_handler(runtime, **kw),
@@ -332,18 +361,22 @@ class CredentialModule(RuntimeModule):
 
     async def _register_update_operation(self) -> None:
         """Register credential.update operation (requires credentials.write + optimistic locking)."""
+
         async def update_handler(runtime, **params) -> Dict[str, Any]:
             user_id = params.get("_user_id")
-            user_roles = [Role(r) if isinstance(r, str) else r for r in params.get("_user_roles", [])]
+            user_roles = [
+                Role(r) if isinstance(r, str) else r
+                for r in params.get("_user_roles", [])
+            ]
             request_data = params.get("credential", {})
             secret_bytes = params.get("secret")  # Optional: new secret
-            
+
             if not request_data:
                 raise ValueError("credential required")
-            
+
             # Create and validate request object
             request = UpdateCredentialRequest(**request_data)
-            
+
             # RBAC enforcement happens in service
             metadata = await self._service.update(
                 request=request,
@@ -351,9 +384,9 @@ class CredentialModule(RuntimeModule):
                 user_id=user_id,
                 user_roles=user_roles,
             )
-            
+
             return metadata.to_dict()
-        
+
         await self.register_service(
             "credential.update",
             lambda runtime, **kw: update_handler(runtime, **kw),
@@ -362,23 +395,27 @@ class CredentialModule(RuntimeModule):
 
     async def _register_delete_operation(self) -> None:
         """Register credential.delete operation (requires credentials.delete - ADMIN only)."""
+
         async def delete_handler(runtime, **params) -> Dict[str, Any]:
             credential_id = params.get("credential_id")
             user_id = params.get("_user_id")
-            user_roles = [Role(r) if isinstance(r, str) else r for r in params.get("_user_roles", [])]
-            
+            user_roles = [
+                Role(r) if isinstance(r, str) else r
+                for r in params.get("_user_roles", [])
+            ]
+
             if not credential_id:
                 raise ValueError("credential_id required")
-            
+
             # RBAC enforcement happens in service
             await self._service.delete(
                 credential_id=credential_id,
                 user_id=user_id,
                 user_roles=user_roles,
             )
-            
+
             return {"deleted": True}
-        
+
         await self.register_service(
             "credential.delete",
             lambda runtime, **kw: delete_handler(runtime, **kw),
@@ -387,23 +424,27 @@ class CredentialModule(RuntimeModule):
 
     async def _register_exists_operation(self) -> None:
         """Register credential.exists operation (requires credentials.read)."""
+
         async def exists_handler(runtime, **params) -> Dict[str, Any]:
             credential_id = params.get("credential_id")
             user_id = params.get("_user_id")
-            user_roles = [Role(r) if isinstance(r, str) else r for r in params.get("_user_roles", [])]
-            
+            user_roles = [
+                Role(r) if isinstance(r, str) else r
+                for r in params.get("_user_roles", [])
+            ]
+
             if not credential_id:
                 raise ValueError("credential_id required")
-            
+
             # RBAC enforcement happens in service
             exists = await self._service.exists(
                 credential_id=credential_id,
                 user_id=user_id,
                 user_roles=user_roles,
             )
-            
+
             return {"exists": exists}
-        
+
         await self.register_service(
             "credential.exists",
             lambda runtime, **kw: exists_handler(runtime, **kw),
@@ -412,18 +453,22 @@ class CredentialModule(RuntimeModule):
 
     async def _register_count_operation(self) -> None:
         """Register credential.count operation (requires credentials.read)."""
+
         async def count_handler(runtime, **params) -> Dict[str, Any]:
             user_id = params.get("_user_id")
-            user_roles = [Role(r) if isinstance(r, str) else r for r in params.get("_user_roles", [])]
-            
+            user_roles = [
+                Role(r) if isinstance(r, str) else r
+                for r in params.get("_user_roles", [])
+            ]
+
             # RBAC filtering happens in service
             count = await self._service.count(
                 user_id=user_id,
                 user_roles=user_roles,
             )
-            
+
             return {"count": count}
-        
+
         await self.register_service(
             "credential.count",
             lambda runtime, **kw: count_handler(runtime, **kw),

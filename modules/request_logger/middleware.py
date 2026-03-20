@@ -16,6 +16,16 @@ _request_id_var: ContextVar[Optional[str]] = ContextVar("request_id", default=No
 _operation_id_var: ContextVar[Optional[str]] = ContextVar("operation_id", default=None)
 
 
+def _get_services(runtime: Any):
+    # TODO: remove fallback after full KernelContext migration
+    context = getattr(runtime, "context", None)
+    if context is not None and hasattr(context, "get_service"):
+        services = context.get_service("service_registry")
+    else:
+        services = getattr(runtime, "service_registry", None)
+    return services
+
+
 def get_request_id() -> Optional[str]:
     """Получить request_id из текущего контекста выполнения."""
     return _request_id_var.get()
@@ -69,8 +79,9 @@ async def _log_request_to_console(
     message = f"{method} {path} {status_code} {duration_ms}ms{client_str}{err_str}"
 
     try:
-        if runtime and await runtime.service_registry.has_service("logger.log"):
-            await runtime.service_registry.call(
+        services = _get_services(runtime)
+        if runtime and await services.has_service("logger.log"):
+            await services.call(
                 "logger.log",
                 level="info",
                 message=message,
@@ -188,18 +199,19 @@ async def request_logger_middleware(request: Request, call_next: Callable) -> Re
     
     try:
         # Проверяем, доступен ли RequestLoggerModule
-        has_request_logger = await runtime.service_registry.has_service("request_logger.log")
+        services = _get_services(runtime)
+        has_request_logger = await services.has_service("request_logger.log")
         
         if has_request_logger:
             # Сохраняем метаданные запроса используя operation_id (который равен request_id для HTTP запросов)
-            await runtime.service_registry.call(
+            await services.call(
                 "request_logger.set_request_metadata",
                 request_id=operation_id,  # Используем operation_id вместо request_id
                 request_metadata=request_metadata
             )
             
             # Логируем начало запроса (только в request_logger, не в обычный logger чтобы избежать двойного логирования)
-            await runtime.service_registry.call(
+            await services.call(
                 "request_logger.log",
                 request_id=operation_id,  # Используем operation_id вместо request_id
                 level="info",
@@ -261,7 +273,7 @@ async def request_logger_middleware(request: Request, call_next: Callable) -> Re
         
         if has_request_logger:
             # Сохраняем метаданные ответа используя operation_id
-            await runtime.service_registry.call(
+            await services.call(
                 "request_logger.set_request_metadata",
                 request_id=operation_id,  # Используем operation_id вместо request_id
                 request_metadata=request_metadata,
@@ -269,7 +281,7 @@ async def request_logger_middleware(request: Request, call_next: Callable) -> Re
             )
             
             # Логируем завершение запроса
-            await runtime.service_registry.call(
+            await services.call(
                 "request_logger.log",
                 request_id=operation_id,  # Используем operation_id вместо request_id
                 level="info",
@@ -306,20 +318,21 @@ async def request_logger_middleware(request: Request, call_next: Callable) -> Re
         }
         
         try:
-            has_request_logger = await runtime.service_registry.has_service("request_logger.log")
+            services = _get_services(runtime)
+            has_request_logger = await services.has_service("request_logger.log")
             if has_request_logger:
                 # Получаем operation_id для этого запроса
                 operation_id = _operation_id_var.get() or request_id
                 
                 # Сохраняем метаданные ответа с ошибкой используя operation_id
-                await runtime.service_registry.call(
+                await services.call(
                     "request_logger.set_request_metadata",
                     request_id=operation_id,  # Используем operation_id вместо request_id
                     request_metadata=request_metadata,
                     response_metadata=error_response_metadata
                 )
                 
-                await runtime.service_registry.call(
+                await services.call(
                     "request_logger.log",
                     request_id=operation_id,  # Используем operation_id вместо request_id
                     level="error",

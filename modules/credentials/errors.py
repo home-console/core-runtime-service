@@ -4,7 +4,7 @@ Credential Repository errors.
 Custom exceptions for repository operations.
 """
 
-from core.storage_errors import StorageSecurityError
+from modules.storage.errors import StorageSecurityError
 
 
 class CredentialRepositoryError(StorageSecurityError):
@@ -47,7 +47,9 @@ class CredentialSecretLeakage(CredentialRepositoryError):
 class CredentialAccessDenied(CredentialRepositoryError):
     """Raised when RBAC policy denies access to credential."""
 
-    def __init__(self, user_id: str, credential_id: str, access_level: str, reason: str = ""):
+    def __init__(
+        self, user_id: str, credential_id: str, access_level: str, reason: str = ""
+    ):
         self.user_id = user_id
         self.credential_id = credential_id
         self.access_level = access_level

@@ -1,0 +1,164 @@
+"""
+StorageWithStateMirror - обёртка для синхронизации Storage и StateEngine.
+
+Обеспечивает консистентность между persistent storage (source of truth)
+и in-memory state_engine (read-only cache).
+"""
+
+from typing import Any, AsyncIterator
+
+from core.state_engine import StateEngine
+from modules.storage.storage import Storage
+
+
+class StorageWithStateMirror:
+    """
+    Обёртка для Storage, которая автоматически синхронизирует изменения
+    с StateEngine.
+
+    Формат ключей в state_engine: f"{namespace}.{key}"
+
+    Гарантирует консистентность: если операция с storage падает,
+    state_engine не обновляется.
+    """
+
+    def __init__(self, storage: Storage, state_engine: StateEngine):
+        """
+        Инициализация обёртки.
+
+        Args:
+            storage: экземпляр Storage (source of truth)
+            state_engine: экземпляр StateEngine (read-only cache)
+        """
+        self._storage = storage
+        self._state_engine = state_engine
+
+    def get_backend_name(self) -> str:
+        """Имя бэкенда хранилища (для метрик/диагностики). Делегирует во внутренний Storage."""
+        return self._storage.get_backend_name()
+
+    async def get(self, namespace: str, key: str) -> Any:
+        """
+        Получить значение из storage.
+
+        Args:
+            namespace: пространство имён
+            key: ключ
+
+        Returns:
+            Значение из storage
+        """
+        return await self._storage.get(namespace, key)
+
+    async def set(self, namespace: str, key: str, value: dict[str, Any]) -> None:
+        """
+        Сохранить значение в storage и синхронизировать с state_engine.
+
+        Гарантирует консистентность: если storage.set() падает,
+        state_engine не обновляется.
+
+        Args:
+            namespace: пространство имён
+            key: ключ
+            value: значение для сохранения (должен быть dict)
+
+        Raises:
+            TypeError: если value не является dict (пробрасывается из Storage.set)
+            ValueError: если namespace или key невалидны (пробрасывается из Storage.set)
+        """
+        state_key = f"{namespace}.{key}"
+        try:
+            # Сначала сохраняем в storage (source of truth)
+            await self._storage.set(namespace, key, value)
+            # Только после успешного сохранения обновляем state_engine
+            await self._state_engine.set(state_key, value)
+        except Exception:
+            # Если storage.set() упал, откатываем state_engine (если был обновлён)
+            try:
+                await self._state_engine.delete(state_key)
+            except Exception:
+                pass
+            # Пробрасываем оригинальную ошибку
+            raise
+
+    async def delete(self, namespace: str, key: str) -> bool:
+        """
+        Удалить значение из storage и state_engine.
+
+        Гарантирует консистентность: если storage.delete() падает,
+        state_engine не обновляется.
+
+        Args:
+            namespace: пространство имён
+            key: ключ
+
+        Returns:
+            True если запись была удалена
+        """
+        state_key = f"{namespace}.{key}"
+        try:
+            # Сначала удаляем из storage
+            res = await self._storage.delete(namespace, key)
+            # Только после успешного удаления обновляем state_engine
+            if res:
+                await self._state_engine.delete(state_key)
+            return res
+        except Exception:
+            # Если storage.delete() упал, state_engine остаётся без изменений
+            # Пробрасываем оригинальную ошибку
+            raise
+
+    async def list_keys(self, namespace: str) -> list[str]:
+        """
+        Получить список всех ключей в namespace.
+
+        Args:
+            namespace: пространство имён
+
+        Returns:
+            Список ключей
+        """
+        return await self._storage.list_keys(namespace)
+
+    async def list_namespaces(self) -> list[str]:
+        """
+        Получить список всех namespace в persistent storage.
+
+        NOTE: используется только для introspection (admin/inspector),
+        не для бизнес-логики. StateEngine здесь не участвует, т.к.
+        source of truth для namespace — именно storage.
+        """
+        # Делегируем в базовый Storage, который в свою очередь обращается к адаптеру.
+        return await self._storage.list_namespaces()
+
+    async def clear_namespace(self, namespace: str) -> None:
+        """
+        Очистить все записи в namespace.
+
+        Args:
+            namespace: пространство имён
+        """
+        return await self._storage.clear_namespace(namespace)
+
+    async def close(self) -> None:
+        """Закрыть соединение с storage."""
+        return await self._storage.close()
+
+    async def iter_namespace(
+        self, namespace: str, batch_size: int = 100
+    ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
+        """
+        Итерировать по всем ключам в namespace батчами (для efficient streaming).
+
+        Делегирует в базовый Storage без синхронизации со StateEngine
+        (используется для гидратации и миграций, где синхронизация не требуется).
+
+        Args:
+            namespace: пространство имён
+            batch_size: размер батча для fetch
+
+        Yields:
+            (key, value) кортежи
+        """
+        async for item in self._storage.iter_namespace(namespace, batch_size):
+            yield item

@@ -14,7 +14,7 @@ import sys
 from typing import Optional
 from pathlib import Path
 
-from core.storage_exceptions import (
+from modules.storage.exceptions import (
     StorageCorruptionError,
     StorageRollbackDetected,
 )
@@ -216,7 +216,7 @@ class StorageInitializer:
     Создание адаптеров вынесено в слой adapters; фабрику передаёт вызывающий код.
 
     Использование:
-        from adapters.storage_factory import create_storage_adapter
+        from core.adapters.storage_factory import create_storage_adapter
         init = StorageInitializer(config, create_adapter=create_storage_adapter)
         storage = await init.initialize()
     """
@@ -227,7 +227,7 @@ class StorageInitializer:
 
         Args:
             config: объект конфигурации
-            create_adapter: async callable(config) -> IStorageBackend (из adapters.storage_factory.create_storage_adapter)
+            create_adapter: async callable(config) -> IStorageBackend (из core.adapters.storage_factory.create_storage_adapter)
         """
         self.config = config
         self._create_adapter = create_adapter
@@ -250,11 +250,11 @@ class StorageInitializer:
             StorageCorruptionError: if integrity check fails
             StorageRollbackDetected: if rollback detected
         """
-        from core.secure_storage import SecureStorageWrapper
+        from modules.storage.secure import SecureStorageWrapper
 
         if self._create_adapter is None:
             raise ValueError(
-                "StorageInitializer requires create_adapter (e.g. from adapters.storage_factory import create_storage_adapter)"
+                "StorageInitializer requires create_adapter (e.g. from core.adapters.storage_factory import create_storage_adapter)"
             )
 
         # Step 1: Checks
