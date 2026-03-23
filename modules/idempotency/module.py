@@ -10,6 +10,7 @@ from modules.hooks.system import (
     register_system_hook,
     unregister_system_hook,
 )
+from modules.hooks.runtime_contract import ensure_runtime_execution_contract
 
 
 class IdempotencyModule(RuntimeModule):
@@ -22,6 +23,8 @@ class IdempotencyModule(RuntimeModule):
         self._hook_bindings: list[tuple[str, Any]] = []
 
     async def register(self) -> None:
+        ensure_runtime_execution_contract(self.runtime)
+
         register_system_hook("before_execute", self._before_execute)
         register_system_hook("after_execute", self._after_execute)
         self._hook_bindings.extend(

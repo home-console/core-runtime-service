@@ -1,13 +1,11 @@
 """
-Core/Remote package - remote execution and provider interfaces.
+Core/Remote package - remote provider interfaces.
 """
 
-from core.remote_executor import RemoteOperationExecutor
 from core.remote_executor_interface import IRemoteExecutor
-from core.remote_provider import RemoteProvider
+from core.remote_provider import RemoteCapabilityProvider
 
 __all__ = [
-    "RemoteOperationExecutor",
     "IRemoteExecutor",
-    "RemoteProvider",
+    "RemoteCapabilityProvider",
 ]

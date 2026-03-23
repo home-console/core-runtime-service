@@ -17,7 +17,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from typing import Any, Dict
 
 from core.operations import Operation, OperationInitiator, OperationInitiatorKind, OperationStatus
-from core.remote_executor import RemoteOperationExecutor
+from modules.execution.remote_executor import RemoteOperationExecutor
 from core.capability_protocol import (
     PROTOCOL_VERSION,
     ProtocolCompatibilityError,

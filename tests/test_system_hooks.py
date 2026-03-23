@@ -23,6 +23,7 @@ from modules.hooks.system import (
     register_system_hook,
 )
 from modules.hooks.context_merge import ContextPatch, resolve_context_patches
+from modules.hooks.runtime_contract import ensure_runtime_execution_contract
 
 
 @pytest.fixture(autouse=True)
@@ -176,6 +177,7 @@ async def test_worker_applies_retry_override_from_failure_hook(
             actions=(ScheduleRetry(at=1030.0),),
         ),
     )
+    ensure_runtime_execution_contract(runtime)
 
     worker = OperationWorker(runtime)
     result = await worker.execute_operation_now(operation)
@@ -219,6 +221,7 @@ async def test_before_execute_hook_can_block_execution(monkeypatch: pytest.Monke
         "before_execute",
         lambda ctx: SystemHookResult(allow=False, reason="maintenance window"),
     )
+    ensure_runtime_execution_contract(runtime)
 
     operation = Operation(
         operation_id="op-block",

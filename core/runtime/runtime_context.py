@@ -12,7 +12,6 @@ from core.capability_registry import CapabilityRegistry
 from core.http import HttpRegistry
 from core.operations.manager import OperationManager
 from core.service_registry import ServiceRegistry
-from modules.storage import Storage
 
 
 @dataclass
@@ -35,7 +34,7 @@ class LegacyRuntimeContext:
     """
 
     # Storage (обязательные — без default)
-    storage: Storage  # Core storage (через StoragePort)
+    storage: Any  # Core storage (через StoragePort)
     services: ServiceRegistry  # Service registry
     http: HttpRegistry  # HTTP registry
     capabilities: CapabilityRegistry  # Capability registry

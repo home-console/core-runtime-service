@@ -17,6 +17,7 @@ from typing import Any
 
 from core.runtime_module import RuntimeModule
 from modules.hooks.system import register_system_hook, unregister_system_hook
+from modules.hooks.runtime_contract import ensure_runtime_execution_contract
 
 
 class LoggerModule(RuntimeModule):
@@ -42,6 +43,8 @@ class LoggerModule(RuntimeModule):
         
         Создаёт logger и регистрирует сервис logger.log.
         """
+        ensure_runtime_execution_contract(self.runtime)
+
         # Сохраняем уровень логирования для фильтрации
         # Можно установить LOG_LEVEL=DEBUG для отладки, или LOG_LEVEL=WARNING для тихих логов
         log_level_str = os.getenv("LOG_LEVEL", "INFO").upper()

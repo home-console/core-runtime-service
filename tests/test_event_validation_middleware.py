@@ -61,6 +61,7 @@ async def test_runtime_registers_event_validation_middleware(
 ):
     monkeypatch.setenv("TEST_MODE", "1")
     runtime = CoreRuntime(memory_adapter)
+    runtime.event_validation_middleware_factory = EventValidationMiddleware
 
     await runtime.start()
 

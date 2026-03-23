@@ -8,6 +8,13 @@ from .actions import (
 )
 from .context_merge import ContextPatch, MergeRule, resolve_context_patches
 from .action_resolver import PRIORITY, resolve_actions
+from .runtime_contract import (
+    ModulesActionDispatcherAdapter,
+    ModulesActionResolverAdapter,
+    ModulesHooksAdapter,
+    ModulesOperationSourceAdapter,
+    ensure_runtime_execution_contract,
+)
 from .system import (
     CancelOperation,
     CompleteOperation,
@@ -43,6 +50,11 @@ __all__ = [
     "resolve_context_patches",
     "PRIORITY",
     "resolve_actions",
+    "ModulesHooksAdapter",
+    "ModulesActionDispatcherAdapter",
+    "ModulesActionResolverAdapter",
+    "ModulesOperationSourceAdapter",
+    "ensure_runtime_execution_contract",
     "ActionHandler",
     "ScheduleRetryActionHandler",
     "CancelOperationActionHandler",

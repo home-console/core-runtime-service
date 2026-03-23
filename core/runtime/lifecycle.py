@@ -18,7 +18,6 @@ import os
 from core.logger_helper import info, warning
 from core.plugins import PluginState
 from core.dependency import RuntimeIntegrityError
-from modules.events.validation import EventValidationMiddleware
 
 if TYPE_CHECKING:
     from core.runtime import CoreRuntime
@@ -106,8 +105,12 @@ async def start_runtime(runtime: "CoreRuntime") -> None:
             await info(runtime, "🔧 KERNEL DEBUG: Starting Core Runtime bootstrap", component="runtime")
 
         middleware_names = await runtime.event_bus.list_middleware()
-        if EventValidationMiddleware.__name__ not in middleware_names:
-            await runtime.event_bus.add_middleware(EventValidationMiddleware())
+        middleware_factory = getattr(runtime, "event_validation_middleware_factory", None)
+        if callable(middleware_factory):
+            middleware = middleware_factory()
+            middleware_name = type(middleware).__name__
+            if middleware_name not in middleware_names:
+                await runtime.event_bus.add_middleware(middleware)
         
         # Модули регистрируются приложением (bootstrap) через register_module_specs() до вызова start().
         # Проверка, что все REQUIRED модули зарегистрированы (список required задаётся приложением)

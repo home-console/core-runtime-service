@@ -12,6 +12,7 @@ from modules.hooks.system import (
     register_system_hook,
     unregister_system_hook,
 )
+from modules.hooks.runtime_contract import ensure_runtime_execution_contract
 from modules.retry_policy.policy import can_schedule_retry, compute_next_retry_at, is_retry_due
 
 
@@ -25,6 +26,8 @@ class RetryPolicyModule(RuntimeModule):
         self._hook_bindings: list[tuple[str, Any]] = []
 
     async def register(self) -> None:
+        ensure_runtime_execution_contract(self.runtime)
+
         register_system_hook("before_claim", self.on_before_claim)
         register_system_hook("on_failure", self.on_failure)
         register_system_hook("after_execute", self.on_after_execute)

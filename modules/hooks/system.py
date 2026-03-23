@@ -142,8 +142,17 @@ class HookDispatcher:
     ) -> list[SystemHookResult]:
         handlers = get_system_hooks(hook_name)
         results: list[SystemHookResult] = []
+        ctx_runtime = ctx.get("runtime") if hasattr(ctx, "get") else None
 
         for handler in handlers:
+            owner = getattr(handler, "__self__", None)
+            owner_runtime = getattr(owner, "runtime", None)
+            if (
+                ctx_runtime is not None
+                and owner_runtime is not None
+                and owner_runtime is not ctx_runtime
+            ):
+                continue
             try:
                 outcome = handler(ctx)
                 if inspect.isawaitable(outcome):

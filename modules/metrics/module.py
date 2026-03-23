@@ -5,6 +5,7 @@ from typing import Any
 from core.observability.metrics import get_metrics_registry
 from core.runtime_module import RuntimeModule
 from modules.hooks.system import register_system_hook, unregister_system_hook
+from modules.hooks.runtime_contract import ensure_runtime_execution_contract
 
 
 class MetricsModule(RuntimeModule):
@@ -17,6 +18,8 @@ class MetricsModule(RuntimeModule):
         return "metrics"
 
     async def register(self) -> None:
+        ensure_runtime_execution_contract(self.runtime)
+
         register_system_hook("after_execute", self._after_execute)
         register_system_hook("on_failure", self._on_failure)
         self._hook_bindings.extend(

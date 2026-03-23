@@ -45,12 +45,6 @@ from core.runtime.module_manager import ModuleManager
 from core.runtime.runtime_context import RuntimeContext
 from core.service_registry import ServiceRegistry
 from core.state_engine import StateEngine
-from modules.agent import (
-    AgentEnrollmentManager,
-    AgentRegistry,
-    MTLSCertificateAuthority,
-)
-from modules.events.validation import EventValidationMiddleware
 
 class CoreRuntime:
     """
@@ -124,14 +118,16 @@ class CoreRuntime:
 
         # Step 15: Agent Control Plane components
         # Will be initialized in start() when SecretStore is ready
-        self.agent_manager: Optional[AgentEnrollmentManager] = None
-        self.agent_registry: Optional[AgentRegistry] = None
+        self.agent_manager: Optional[Any] = None
+        self.agent_registry: Optional[Any] = None
         self.deployment_tracker: Optional[Any] = None  # DeploymentTracker instance
-        self.mtls_ca: Optional[MTLSCertificateAuthority] = None
+        self.mtls_ca: Optional[Any] = None
         # SecretStore (vault) — выставляется в main; используется credentials и inspector в debug
         self.secret_store: Optional[Any] = None
         # StorageManager (core + vault) — выставляется в main для модуля credentials
         self.storage_manager: Optional[Any] = None
+        # Optional app-level middleware factory. Core keeps no direct module dependency.
+        self.event_validation_middleware_factory: Optional[Callable[[], Any]] = None
 
         # Сохраняем config для shutdown_timeout
         self._config = config
@@ -359,8 +355,12 @@ class CoreRuntime:
                 )
 
             middleware_names = await self.event_bus.list_middleware()
-            if EventValidationMiddleware.__name__ not in middleware_names:
-                await self.event_bus.add_middleware(EventValidationMiddleware())
+            middleware_factory = self.event_validation_middleware_factory
+            if callable(middleware_factory):
+                middleware = middleware_factory()
+                middleware_name = type(middleware).__name__
+                if middleware_name not in middleware_names:
+                    await self.event_bus.add_middleware(middleware)
 
             # Модули регистрируются приложением (bootstrap) через register_module_specs() до вызова start().
             # Проверка, что все REQUIRED модули зарегистрированы (список required задаётся приложением)

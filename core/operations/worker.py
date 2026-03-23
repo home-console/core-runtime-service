@@ -1,13 +1,26 @@
 from __future__ import annotations
 
 import asyncio
-import importlib
 import inspect
 import time
 import uuid
 from typing import Any, Iterable
 
 from core.operations.models import Attempt, AttemptStatus, Operation, OperationStatus, TERMINAL_STATUSES
+from core.operations.runtime_contract import (
+    HookDecision,
+    NoopActionDispatcher,
+    NoopExecutionHooks,
+    NoopOperationSource,
+    OperationSource,
+    PassThroughActionResolver,
+)
+
+
+_NOOP_HOOKS = NoopExecutionHooks()
+_NOOP_ACTION_DISPATCHER = NoopActionDispatcher()
+_PASS_THROUGH_ACTION_RESOLVER = PassThroughActionResolver()
+_NOOP_OPERATION_SOURCE = NoopOperationSource()
 
 
 class OperationWorker:
@@ -42,56 +55,82 @@ class OperationWorker:
                 pass
         self._task = None
 
-    def _load_hook_stack(self) -> tuple[Any, Any]:
+    def _resolve_hooks(self) -> Any:
         runtime_dict = getattr(self.runtime, "__dict__", {})
-        dispatch = runtime_dict.get("dispatch_system_hooks")
-        merge = runtime_dict.get("merge_system_hook_results")
-        if callable(dispatch) and callable(merge):
-            return dispatch, merge
+        hooks = runtime_dict.get("hooks")
+        if hooks is not None and callable(getattr(hooks, "run", None)):
+            return hooks
+        return _NOOP_HOOKS
 
-        module = importlib.import_module("modules.hooks.system")
-        return (
-            getattr(module, "dispatch_system_hooks"),
-            getattr(module, "merge_system_hook_results"),
-        )
-
-    def _load_action_stack(self) -> tuple[Any, Any]:
+    def _resolve_action_dispatcher(self) -> Any:
         runtime_dict = getattr(self.runtime, "__dict__", {})
-        dispatch = runtime_dict.get("dispatch_execution_action")
-        resolve = runtime_dict.get("resolve_execution_actions")
-        if callable(dispatch) and callable(resolve):
-            return dispatch, resolve
+        dispatcher = runtime_dict.get("action_dispatcher")
+        if dispatcher is not None and callable(getattr(dispatcher, "dispatch", None)):
+            return dispatcher
+        return _NOOP_ACTION_DISPATCHER
 
-        actions_mod = importlib.import_module("modules.hooks.actions")
-        resolver_mod = importlib.import_module("modules.hooks.action_resolver")
-        return (
-            getattr(actions_mod, "dispatch_action"),
-            getattr(resolver_mod, "resolve_actions"),
-        )
+    def _resolve_action_resolver(self) -> Any:
+        runtime_dict = getattr(self.runtime, "__dict__", {})
+        resolver = runtime_dict.get("action_resolver")
+        if resolver is not None and callable(getattr(resolver, "resolve", None)):
+            return resolver
+        return _PASS_THROUGH_ACTION_RESOLVER
+
+    def _resolve_operation_source(self) -> OperationSource:
+        runtime_dict = getattr(self.runtime, "__dict__", {})
+        source = runtime_dict.get("operation_source")
+        if source is not None and callable(getattr(source, "get_runnable", None)):
+            return source
+        return _NOOP_OPERATION_SOURCE
+
+    def _normalize_hook_decision(
+        self,
+        decision: Any,
+        ctx: dict[str, Any],
+    ) -> tuple[dict[str, Any], bool, tuple[Any, ...]]:
+        if isinstance(decision, HookDecision):
+            return (
+                dict(decision.context),
+                bool(decision.allow),
+                tuple(decision.actions or ()),
+            )
+
+        if (
+            isinstance(decision, tuple)
+            and len(decision) == 3
+            and isinstance(decision[0], dict)
+        ):
+            merged_ctx, allow, actions = decision
+            return dict(merged_ctx), bool(allow), tuple(actions or ())
+
+        if isinstance(decision, dict):
+            merged_ctx = dict(ctx)
+            context_patch = decision.get("context_patch")
+            if isinstance(context_patch, dict):
+                merged_ctx.update(context_patch)
+            allow = bool(decision.get("allow", True))
+            actions = tuple(decision.get("actions") or ())
+            return merged_ctx, allow, actions
+
+        return dict(ctx), True, ()
 
     async def _dispatch_system_hooks(
         self, hook_name: str, ctx: dict[str, Any]
     ) -> tuple[dict[str, Any], bool, tuple[Any, ...]]:
-        dispatch_hooks, merge_hook_results = self._load_hook_stack()
-        results = await dispatch_hooks(hook_name, ctx)
-        decision = merge_hook_results(results)
-
-        merged_ctx = dict(ctx)
-        context_patch = getattr(decision, "context_patch", None)
-        if context_patch:
-            merged_ctx.update(context_patch)
-        return merged_ctx, bool(getattr(decision, "allow", True)), tuple(
-            getattr(decision, "actions", ()) or ()
-        )
+        hooks = self._resolve_hooks()
+        outcome = hooks.run(hook_name, ctx)
+        if inspect.isawaitable(outcome):
+            outcome = await outcome
+        return self._normalize_hook_decision(outcome, ctx)
 
     async def _dispatch_actions(
         self, actions: Iterable[Any], hook_context: dict[str, Any], operation: Operation
     ) -> None:
-        dispatch_action, resolve_actions = self._load_action_stack()
-        for action in resolve_actions(actions):
-            outcome = dispatch_action(
-                action,
-                {**hook_context, "operation": operation, "now": time.time()},
+        dispatcher = self._resolve_action_dispatcher()
+        resolver = self._resolve_action_resolver()
+        for action in resolver.resolve(actions):
+            outcome = dispatcher.dispatch(
+                action, {**hook_context, "operation": operation, "now": time.time()}
             )
             if inspect.isawaitable(outcome):
                 await outcome
@@ -133,6 +172,7 @@ class OperationWorker:
 
         hook_context: dict[str, Any] = {
             "stage": "before_claim",
+            "runtime": self.runtime,
             "worker_id": self.worker_id,
             "now": now,
             "operation": operation,
@@ -239,9 +279,8 @@ class OperationWorker:
         return result
 
     async def tick(self):
-        created_ops = await self.runtime.operations.list(limit=1000, status="created")
-        failed_ops = await self.runtime.operations.list(limit=1000, status="failed")
-        ops = list(created_ops) + list(failed_ops)
+        source = self._resolve_operation_source()
+        ops = await source.get_runnable(self.runtime)
         for op in ops:
             if op.status in (OperationStatus.CREATED, OperationStatus.FAILED):
                 await self.execute_operation_now(op)

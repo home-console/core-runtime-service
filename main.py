@@ -9,10 +9,9 @@ import asyncio
 import os
 from pathlib import Path
 
+from app.bootstrap import APP_MODULES, build_runtime, parse_module_specs
 from core.adapters.storage_factory import build_storage_stack
 from core.config import Config
-from core.runtime import CoreRuntime
-from core.runtime.module_manager import ModuleSpec
 from core.state_engine import StateEngine
 
 
@@ -42,57 +41,6 @@ def _load_dotenv() -> None:
 _load_dotenv()
 
 
-APP_MODULES: list[ModuleSpec] = [
-    ModuleSpec("logger", required=True),
-    ModuleSpec("request_logger", required=True),
-    ModuleSpec("retry_policy", required=True),
-    ModuleSpec("idempotency", required=True),
-    ModuleSpec("api", required=True),
-    ModuleSpec("admin", required=True),
-    ModuleSpec("auth", required=True),
-    ModuleSpec("operations", required=True),
-    ModuleSpec("agent", required=False),
-    ModuleSpec("credentials", required=False),
-    ModuleSpec("execution", required=True),
-    ModuleSpec("integrations", required=True),
-    ModuleSpec("devices", required=True),
-    ModuleSpec("automation", required=False),
-    ModuleSpec("presence", required=True),
-    ModuleSpec("product_api", required=False),
-]
-
-
-def _parse_module_specs(config: Config) -> list[ModuleSpec]:
-    """
-    Получить список модулей из config/modules env.
-
-    Формат `RUNTIME_MODULES`:
-    - `api,admin,agent`
-    - `api:true,admin:true,agent:false`
-    """
-    raw = getattr(config, "modules_config", None)
-    if not raw:
-        return APP_MODULES
-
-    specs: list[ModuleSpec] = []
-    for item in raw.split(","):
-        token = item.strip()
-        if not token:
-            continue
-        if ":" in token:
-            name, _, required_raw = token.partition(":")
-            required = required_raw.strip().lower() not in (
-                "false",
-                "0",
-                "no",
-                "optional",
-            )
-            specs.append(ModuleSpec(name.strip(), required=required))
-        else:
-            specs.append(ModuleSpec(token, required=True))
-    return specs or APP_MODULES
-
-
 async def main() -> None:
     config = Config.from_env()
     if config.storage_type == "sqlite":
@@ -106,13 +54,14 @@ async def main() -> None:
 
     state_engine = StateEngine()
     storage_stack = await build_storage_stack(config, state_engine)
-    runtime = CoreRuntime(
+    runtime = await build_runtime(
         storage_port=storage_stack.core_port,
         config=config,
         vault_port=storage_stack.vault_port,
         state_engine=state_engine,
+        storage_manager=storage_stack.manager,
+        module_specs=parse_module_specs(config),
     )
-    runtime.storage_manager = storage_stack.manager
 
     # SecretStore для inspector (debug) и credentials: один раз при старте
     try:
@@ -145,8 +94,6 @@ async def main() -> None:
     if config.storage_mode == "dual":
         print(f"[Runtime] Vault storage: {config.vault_storage_type}")
     print("[Runtime] Регистрация модулей...")
-    module_specs = _parse_module_specs(config)
-    await runtime.module_manager.register_module_specs(runtime, module_specs)
     try:
         modules = runtime.module_manager.list_modules()
         if modules:

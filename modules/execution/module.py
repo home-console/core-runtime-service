@@ -29,6 +29,7 @@ from modules.hooks.system import (
     register_system_hook,
     unregister_system_hook,
 )
+from modules.hooks.runtime_contract import ensure_runtime_execution_contract
 
 
 class ExecutionModule(RuntimeModule):
@@ -44,6 +45,8 @@ class ExecutionModule(RuntimeModule):
         self._hook_bindings: list[tuple[str, Any]] = []
 
     async def register(self) -> None:
+        ensure_runtime_execution_contract(self.runtime)
+
         # Создаём controller и публикуем в runtime как расширение (не Core API).
         self._controller = ExecutionControllerImpl(self.runtime)
         self.runtime.execution_controller = self._controller
@@ -400,7 +403,7 @@ class ExecutionModule(RuntimeModule):
         operation: Operation,
         provider_metadata: Any,
     ) -> dict[str, Any]:
-        from core.remote_executor import RemoteOperationExecutor
+        from modules.execution.remote_executor import RemoteOperationExecutor
 
         remote_config = getattr(provider_metadata, "remote_config", None) or {}
         base_url = remote_config.get("base_url")
@@ -463,6 +466,17 @@ class ExecutionModule(RuntimeModule):
             "finished_at": time.time(),
         }
 
+    def _unknown_operation_payload(self, operation: Operation) -> dict[str, Any]:
+        return {
+            "status": "failed",
+            "result": None,
+            "error": {
+                "code": "unknown_operation_type",
+                "message": f"No provider or handler for operation type: {operation.type}",
+            },
+            "finished_at": time.time(),
+        }
+
     async def _before_execute(self, ctx: dict[str, Any]) -> SystemHookResult:
         operation = ctx.get("operation")
         if not isinstance(operation, Operation):
@@ -491,19 +505,33 @@ class ExecutionModule(RuntimeModule):
             local_handler = registry.find_handler(operation.type, self.runtime)
         if local_handler is None:
             local_handler = get_operation_handler(operation.type)
+
         if local_handler is not None:
-            return SystemHookResult(allow=True)
+            payload = await self._execute_with_controller(operation, provider_metadata=None)
+            return SystemHookResult(
+                allow=False,
+                actions=[CompleteOperation(result=payload)],
+                reason="execution_routed_by_module",
+            )
 
         cap_reg = getattr(self.runtime, "capability_registry", None)
         if cap_reg is None:
-            return SystemHookResult(allow=True)
+            return SystemHookResult(
+                allow=False,
+                actions=[CompleteOperation(result=self._unknown_operation_payload(operation))],
+                reason="unknown_operation_type",
+            )
 
         try:
             provider_metadata = cap_reg.select_provider_for(operation.type)
         except Exception:
             provider_metadata = None
         if provider_metadata is None:
-            return SystemHookResult(allow=True)
+            return SystemHookResult(
+                allow=False,
+                actions=[CompleteOperation(result=self._unknown_operation_payload(operation))],
+                reason="unknown_operation_type",
+            )
 
         if getattr(provider_metadata, "provider_type", "local") == "remote":
             payload = await self._execute_remote(operation, provider_metadata)

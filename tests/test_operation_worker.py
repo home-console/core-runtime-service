@@ -13,6 +13,7 @@ from core.operations.models import (
 )
 from core.operations.worker import OperationWorker
 from core.runtime.runtime import CoreRuntime
+from modules.hooks.runtime_contract import ensure_runtime_execution_contract
 
 
 @pytest.mark.asyncio
@@ -59,6 +60,7 @@ async def test_worker_executes_created_and_due_failed_operations(monkeypatch):
     runtime.operations._executor.execute_attempt = AsyncMock(
         side_effect=[created_ready_completed, failed_due]
     )
+    ensure_runtime_execution_contract(runtime)
 
     worker = OperationWorker(runtime)
 
