@@ -4,8 +4,10 @@ import inspect
 import logging
 import threading
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
-from typing import Any, TypeAlias
+from dataclasses import dataclass
+from typing import Any, TypeAlias, cast
+
+from .context_merge import ContextPatch, resolve_context_patches
 
 SystemHookContext: TypeAlias = Mapping[str, Any]
 SystemHookHandler: TypeAlias = Callable[[SystemHookContext], Any]
@@ -31,10 +33,15 @@ class CancelOperation(ExecutionAction):
 
 
 @dataclass(frozen=True)
+class CompleteOperation(ExecutionAction):
+    result: Any
+
+
+@dataclass(frozen=True)
 class SystemHookResult:
     allow: bool = True
-    actions: list[ExecutionAction] = field(default_factory=list)
-    context_patch: dict[str, Any] | None = None
+    actions: tuple[ExecutionAction, ...] = ()
+    context_patch: dict[str, Any] | ContextPatch | None = None
     reason: str | None = None
 
 
@@ -50,18 +57,23 @@ def _normalize_action(action: Any) -> ExecutionAction:
     if isinstance(action, ExecutionAction):
         return action
     if isinstance(action, dict):
+        action_data = cast(dict[str, Any], action)
         action_type = "".join(
-            ch for ch in str(action.get("type", "")).strip().lower() if ch.isalnum()
+            ch
+            for ch in str(action_data.get("type", "")).strip().lower()
+            if ch.isalnum()
         )
         if action_type == "scheduleretry":
-            return ScheduleRetry(at=float(action["at"]))
+            return ScheduleRetry(at=float(action_data["at"]))
         if action_type == "canceloperation":
-            return CancelOperation(reason=str(action["reason"]))
+            return CancelOperation(reason=str(action_data["reason"]))
+        if action_type == "completeoperation":
+            return CompleteOperation(result=action_data.get("result"))
     raise TypeError("system hook actions must be ExecutionAction instances")
 
 
 def register_system_hook(hook_name: str, handler: SystemHookHandler) -> None:
-    if not hook_name or not isinstance(hook_name, str):
+    if not hook_name:
         raise ValueError("hook_name must be a non-empty string")
     if not callable(handler):
         raise TypeError("handler must be callable")
@@ -86,12 +98,13 @@ def _normalize_hook_result(result: Any) -> SystemHookResult | None:
     if isinstance(result, SystemHookResult):
         return result
     if isinstance(result, dict):
-        actions = result.get("actions") or []
+        result_data = cast(dict[str, Any], result)
+        actions = cast(list[Any], result_data.get("actions") or [])
         return SystemHookResult(
-            allow=bool(result.get("allow", True)),
-            actions=[_normalize_action(action) for action in actions],
-            context_patch=result.get("context_patch"),
-            reason=result.get("reason"),
+            allow=bool(result_data.get("allow", True)),
+            actions=tuple(_normalize_action(action) for action in actions),
+            context_patch=cast(dict[str, Any] | ContextPatch | None, result_data.get("context_patch")),
+            reason=cast(str | None, result_data.get("reason")),
         )
     raise TypeError("system hooks must return SystemHookResult, dict, or None")
 
@@ -132,7 +145,7 @@ def merge_system_hook_results(
 ) -> SystemHookDecision:
     allow = True
     actions: list[ExecutionAction] = []
-    context_patch: dict[str, Any] = {}
+    context_patches: list[dict[str, Any] | ContextPatch] = []
     reasons: list[str] = []
 
     for result in results:
@@ -142,7 +155,7 @@ def merge_system_hook_results(
             actions.extend(result.actions)
 
         if result.context_patch:
-            context_patch.update(result.context_patch)
+            context_patches.append(result.context_patch)
 
         if result.reason:
             reasons.append(result.reason)
@@ -150,6 +163,6 @@ def merge_system_hook_results(
     return SystemHookDecision(
         allow=allow,
         actions=tuple(actions),
-        context_patch=context_patch or None,
+        context_patch=resolve_context_patches(context_patches) or None,
         reasons=tuple(reasons),
     )

@@ -22,6 +22,7 @@ from modules.hooks.system import (
     merge_system_hook_results,
     register_system_hook,
 )
+from modules.hooks.context_merge import ContextPatch, resolve_context_patches
 
 
 @pytest.fixture(autouse=True)
@@ -29,6 +30,57 @@ def clear_hooks_registry():
     clear_system_hooks()
     yield
     clear_system_hooks()
+
+
+def test_resolve_context_patches_last_wins_conflict():
+    resolved = resolve_context_patches(
+        [
+            {"timeout": 10},
+            {"timeout": 30},
+        ]
+    )
+
+    assert resolved == {"timeout": 30}
+
+
+def test_resolve_context_patches_merges_nested_dicts():
+    resolved = resolve_context_patches(
+        [
+            {"timeout": 10, "retry": {"count": 1, "policy": {"base": 2}}},
+            {"retry": {"policy": {"max": 8}, "jitter": True}},
+        ]
+    )
+
+    assert resolved == {
+        "timeout": 10,
+        "retry": {"count": 1, "policy": {"base": 2, "max": 8}, "jitter": True},
+    }
+
+
+def test_resolve_context_patches_deny_override_preserves_value():
+    resolved = resolve_context_patches(
+        [
+            ContextPatch(data={"timeout": 10}, deny_override=True),
+            {"timeout": 30, "mode": "fast"},
+        ],
+        rule="deny_override",
+    )
+
+    assert resolved == {"timeout": 10, "mode": "fast"}
+
+
+def test_merge_system_hook_results_uses_context_patch_resolution():
+    decision = merge_system_hook_results(
+        [
+            SystemHookResult(context_patch={"timeout": 10, "retry": {"count": 1}}),
+            SystemHookResult(context_patch={"timeout": 30, "retry": {"policy": "linear"}}),
+        ]
+    )
+
+    assert decision.context_patch == {
+        "timeout": 30,
+        "retry": {"count": 1, "policy": "linear"},
+    }
 
 
 @pytest.mark.asyncio
@@ -47,7 +99,7 @@ async def test_hook_dispatcher_collects_results_and_survives_failures():
     def third_handler(ctx: Mapping[str, Any]) -> SystemHookResult:
         return SystemHookResult(
             allow=False,
-            actions=[ScheduleRetry(at=1005.0)],
+            actions=(ScheduleRetry(at=1005.0),),
             context_patch={"third": True},
             reason="third",
         )
@@ -121,7 +173,7 @@ async def test_worker_applies_retry_override_from_failure_hook(
         "on_failure",
         lambda ctx: SystemHookResult(
             allow=True,
-            actions=[ScheduleRetry(at=1030.0)],
+            actions=(ScheduleRetry(at=1030.0),),
         ),
     )
 

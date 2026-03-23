@@ -1,12 +1,16 @@
 from .actions import (
     ActionHandler,
     CancelOperationActionHandler,
+    CompleteOperationActionHandler,
     ScheduleRetryActionHandler,
     dispatch_action,
     register_action_handler,
 )
+from .context_merge import ContextPatch, MergeRule, resolve_context_patches
+from .action_resolver import PRIORITY, resolve_actions
 from .system import (
     CancelOperation,
+    CompleteOperation,
     ExecutionAction,
     HookDispatcher,
     ScheduleRetry,
@@ -24,6 +28,7 @@ __all__ = [
     "ExecutionAction",
     "ScheduleRetry",
     "CancelOperation",
+    "CompleteOperation",
     "SystemHookDecision",
     "SystemHookResult",
     "clear_system_hooks",
@@ -31,9 +36,15 @@ __all__ = [
     "get_system_hooks",
     "merge_system_hook_results",
     "register_system_hook",
+    "ContextPatch",
+    "MergeRule",
+    "resolve_context_patches",
+    "PRIORITY",
+    "resolve_actions",
     "ActionHandler",
     "ScheduleRetryActionHandler",
     "CancelOperationActionHandler",
+    "CompleteOperationActionHandler",
     "dispatch_action",
     "register_action_handler",
 ]

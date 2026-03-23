@@ -10,9 +10,7 @@ from typing import Any, Dict, Optional
 
 from core import capability_protocol
 from core.health_monitor import ProviderHealthMonitor
-from core.observability.metrics import get_metrics_registry
 from core.operations.interface import IOperationExecutor
-from core.logger_helper import info
 from core.operations.models import (
     AttemptStatus,
     RETRYABLE_ERRORS,
@@ -53,26 +51,6 @@ class OperationExecutor(IOperationExecutor):
         self.storage = storage
         # Health monitor for remote providers (Protocol v1)
         self._health_monitor = ProviderHealthMonitor()
-
-    def _schedule_retry(self, operation: Operation) -> None:
-        """Schedule the next retry attempt using exponential backoff."""
-        delay_seconds = 2 ** operation.retry_count
-        operation.retry_count += 1
-        operation.next_retry_at = time.time() + delay_seconds
-
-    def _apply_retry_policy(self, operation: Operation) -> None:
-        """Persist retry metadata for retryable failures."""
-        if (
-            operation.error
-            and operation.error.code in RETRYABLE_ERRORS
-            and operation.retry_count < operation.max_retries
-        ):
-            self._schedule_retry(operation)
-        else:
-            operation.next_retry_at = None
-
-    def _is_retry_due(self, operation: Operation) -> bool:
-        return operation.can_retry()
 
     def _find_remote_provider(self, operation_type: str) -> Optional[Dict[str, Any]]:
         """
@@ -286,9 +264,6 @@ class OperationExecutor(IOperationExecutor):
         Returns:
             Operation with updated status and result
         """
-        start_time = time.time()
-        metrics = get_metrics_registry()
-
         try:
             declared_handler = get_operation_handler(operation.type)
             if declared_handler is not None:
@@ -315,16 +290,6 @@ class OperationExecutor(IOperationExecutor):
 
                 operation.finished_at = time.time()
                 await self.storage.persist(operation)
-
-                metrics.increment_counter(
-                    "operations_total", label_value=operation.type
-                )
-                if operation.status == OperationStatus.FAILED:
-                    metrics.increment_counter(
-                        "operations_failed_total", label_value=operation.type
-                    )
-                latency = (time.time() - start_time) * 1000
-                metrics.observe_histogram("operation_latency_seconds", latency / 1000.0)
                 return operation
 
             # 1. Validate - try to find handler (direct or capability-based)
@@ -366,17 +331,6 @@ class OperationExecutor(IOperationExecutor):
                     message=f"No handler or remote provider for operation type: {operation.type}",
                 )
                 await self.storage.persist(operation)
-
-                # Step 13: Record metrics
-                metrics.increment_counter(
-                    "operations_total", label_value=operation.type
-                )
-                metrics.increment_counter(
-                    "operations_failed_total", label_value=operation.type
-                )
-                latency = (time.time() - start_time) * 1000  # ms
-                metrics.observe_histogram("operation_latency_seconds", latency / 1000.0)
-
                 return operation
 
             # Mark as running
@@ -405,16 +359,6 @@ class OperationExecutor(IOperationExecutor):
                         message=f"Execution controller is not available: {_ctrl_err}",
                     )
                     await self.storage.persist(operation)
-                    metrics.increment_counter(
-                        "operations_total", label_value=operation.type
-                    )
-                    metrics.increment_counter(
-                        "operations_failed_total", label_value=operation.type
-                    )
-                    latency = (time.time() - start_time) * 1000
-                    metrics.observe_histogram(
-                        "operation_latency_seconds", latency / 1000.0
-                    )
                     return operation
 
             # Используем ExecutionController
@@ -460,24 +404,11 @@ class OperationExecutor(IOperationExecutor):
 
             operation.finished_at = time.time()
 
-            # Step 13: Record metrics
-            metrics.increment_counter("operations_total", label_value=operation.type)
-            latency = (time.time() - start_time) * 1000  # ms
-            metrics.observe_histogram("operation_latency_seconds", latency / 1000.0)
-
         except Exception as e:
             # Any exception → failed operation
             operation.status = OperationStatus.FAILED
             operation.error = OperationError(code="execution_error", message=str(e))
             operation.finished_at = time.time()
-
-            # Step 13: Record failure metrics
-            metrics.increment_counter("operations_total", label_value=operation.type)
-            metrics.increment_counter(
-                "operations_failed_total", label_value=operation.type
-            )
-            latency = (time.time() - start_time) * 1000  # ms
-            metrics.observe_histogram("operation_latency_seconds", latency / 1000.0)
 
         # Persist final state
         await self.storage.persist(operation)
@@ -549,62 +480,6 @@ class OperationExecutor(IOperationExecutor):
 
         # Guard passed: transition attempt to RUNNING.
         execution_token = attempt.execution_token or claim_token
-        cached = await self.runtime.storage.get(
-            "operation_results", execution_token
-        )
-        if isinstance(cached, dict):
-            # Side-effect idempotency hit: do not execute handler again.
-            operation = await self.storage.get(attempt.operation_id)
-            if operation is None:
-                raise ValueError(
-                    f"Operation not found for attempt: {attempt.operation_id}"
-                )
-
-            status_value = cached.get("status", OperationStatus.FAILED.value)
-            operation.status = OperationStatus(str(status_value))
-            operation.result = cached.get("result")
-            operation.finished_at = cached.get("finished_at") or now
-
-            error_dict = cached.get("error")
-            if operation.status == OperationStatus.COMPLETED:
-                operation.error = None
-            else:
-                if isinstance(error_dict, dict):
-                    operation.error = OperationError(
-                        code=str(error_dict.get("code", "execution_error")),
-                        message=str(error_dict.get("message", "Execution failed")),
-                        details=error_dict.get("details"),
-                    )
-                else:
-                    operation.error = OperationError(
-                        code="execution_error",
-                        message="Execution failed",
-                    )
-
-            # Mark attempt as completed/failed from cached outcome.
-            attempt.status = (
-                AttemptStatus.COMPLETED
-                if operation.status == OperationStatus.COMPLETED
-                else AttemptStatus.FAILED
-            )
-            attempt.error = error_dict if isinstance(error_dict, dict) else None
-            attempt.finished_at = operation.finished_at
-            await self.storage.persist(operation)
-            await self.storage.persist_attempt(attempt)
-
-            await info(
-                self.runtime,
-                "execution finished",
-                attempt_id=attempt_id,
-                operation_id=attempt.operation_id,
-                status=operation.status.value,
-                worker_id=attempt.worker_id,
-                error_code=operation.error.code if operation.error else None,
-                correlation_id=operation.correlation_id,
-                causation_id=operation.causation_id,
-                source_event=operation.source_event,
-            )
-            return operation
 
         attempt.status = AttemptStatus.RUNNING
         attempt.started_at = now
@@ -654,18 +529,6 @@ class OperationExecutor(IOperationExecutor):
                 operation.finished_at = latest_attempt.finished_at
                 await self.storage.persist(operation)
                 return operation
-
-        await info(
-            self.runtime,
-            "execution started",
-            attempt_id=attempt_id,
-            operation_id=operation.operation_id,
-            worker_id=attempt.worker_id,
-            execution_token=execution_token,
-            correlation_id=operation.correlation_id,
-            causation_id=operation.causation_id,
-            source_event=operation.source_event,
-        )
 
         # Execute handler (single attempt execution, no retry decisions here).
         # Heartbeat extends claim lease during long-running execution.
@@ -774,18 +637,6 @@ class OperationExecutor(IOperationExecutor):
                 op.result = None
                 await self.storage.persist(op)
 
-                await info(
-                    self.runtime,
-                    "execution finished",
-                    attempt_id=attempt_id,
-                    operation_id=op.operation_id,
-                    status=OperationStatus.CREATED.value,
-                    worker_id=latest_attempt.worker_id,
-                    error_code="lost_claim",
-                    correlation_id=op.correlation_id,
-                    causation_id=op.causation_id,
-                    source_event=op.source_event,
-                )
             return op if op is not None else operation
 
         if abort_reason == "cancelled":
@@ -856,16 +707,4 @@ class OperationExecutor(IOperationExecutor):
             "operation_results", execution_token, outcome
         )
 
-        await info(
-            self.runtime,
-            "execution finished",
-            attempt_id=attempt_id,
-            operation_id=latest_attempt.operation_id,
-            status=res.status.value,
-            worker_id=latest_attempt.worker_id,
-            error_code=res.error.code if res.error else None,
-            correlation_id=res.correlation_id,
-            causation_id=res.causation_id,
-            source_event=res.source_event,
-        )
         return res

@@ -14,7 +14,6 @@ from core.operations.models import (
     Operation,
     OperationInitiator,
 )
-from core.logger_helper import info
 
 
 class OperationStorage:
@@ -68,32 +67,7 @@ class OperationStorage:
             # Best-effort heuristic: if the caller provided any event-like metadata → 'event'.
             triggered_by = "event" if (params.get("event_id") or params.get("source_event") or "raw" in params) else "manual"
 
-        # Idempotency:
-        # - from event: use event_id
-        # - manual: use provided idempotency_key or generate one
-        raw = params.get("raw")
-        raw_event_id = None
-        if isinstance(raw, dict):
-            raw_event_id = raw.get("id") or raw.get("event_id")
-
-        idempotency_key = (
-            params.get("idempotency_key")
-            or params.get("event_id")
-            or raw_event_id
-        )
-        if not idempotency_key:
-            idempotency_key = uuid.uuid4().hex
-
-        # Deduplication index: idempotency_key -> operation_id
-        existing_idx = await self.runtime.storage.get(
-            "operation_idempotency_keys", idempotency_key
-        )
-        if isinstance(existing_idx, dict):
-            existing_op_id = existing_idx.get("operation_id")
-            if isinstance(existing_op_id, str):
-                existing_op = await self.get(existing_op_id)
-                if existing_op is not None:
-                    return existing_op
+        idempotency_key = params.get("idempotency_key")
         
         operation = Operation(
             operation_id=operation_id,
@@ -115,13 +89,6 @@ class OperationStorage:
         
         # Persist to storage
         await self.persist(operation)
-
-        # Persist idempotency index best-effort.
-        await self.runtime.storage.set(
-            "operation_idempotency_keys",
-            idempotency_key,
-            {"operation_id": operation.operation_id},
-        )
         
         return operation
     
@@ -216,7 +183,6 @@ class OperationStorage:
         Idempotent: if the attempt already exists, returns it as-is.
         """
 
-        created_payload: Optional[dict[str, Any]] = None
         attempt: Optional[Attempt] = None
 
         async with self.runtime.storage.transaction():
@@ -252,18 +218,6 @@ class OperationStorage:
             )
             await self.runtime.storage.set("operation_attempts", attempt_id, attempt.to_dict())
 
-            created_payload = {
-                "attempt_id": attempt_id,
-                "operation_id": operation_id,
-                "attempt_index": attempt_index,
-                "trigger_type": trigger_type,
-                "parent_attempt_id": parent_attempt_id,
-                "retry_reason": retry_reason,
-            }
-
-        if created_payload is not None and attempt is not None:
-            await info(self.runtime, "attempt created", **created_payload)
-
         return attempt  # type: ignore[return-value]
 
     async def get_attempt(self, attempt_id: str) -> Optional[Attempt]:
@@ -289,7 +243,6 @@ class OperationStorage:
         """
 
         now = time.time()
-        claim_payload: Optional[dict[str, Any]] = None
         async with self.runtime.storage.transaction():
             data = await self.runtime.storage.get("operation_attempts", attempt_id)
             if data is None:
@@ -321,16 +274,6 @@ class OperationStorage:
             attempt.claimed_by = worker_id
             attempt.worker_id = worker_id
             await self.runtime.storage.set("operation_attempts", attempt_id, attempt.to_dict())
-
-            claim_payload = {
-                "attempt_id": attempt_id,
-                "operation_id": attempt.operation_id,
-                "worker_id": worker_id,
-                "lease_expires_at": attempt.lease_expires_at,
-            }
-
-        if claim_payload is not None:
-            await info(self.runtime, "claim acquired", **claim_payload)
 
         return True, claim_token
 

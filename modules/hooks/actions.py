@@ -6,9 +6,15 @@ from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from typing import Any
 
-from core.operations.models import Operation, OperationStatus
+from core.operations.models import (
+    Attempt,
+    AttemptStatus,
+    Operation,
+    OperationError,
+    OperationStatus,
+)
 
-from .system import CancelOperation, ExecutionAction, ScheduleRetry
+from .system import CancelOperation, CompleteOperation, ExecutionAction, ScheduleRetry
 
 
 ActionContext = Mapping[str, Any]
@@ -74,5 +80,63 @@ class CancelOperationActionHandler(ActionHandler):
         operation.finished_at = ctx.get("now")
 
 
+class CompleteOperationActionHandler(ActionHandler):
+    async def handle(self, action: ExecutionAction, ctx: ActionContext) -> None:
+        if not isinstance(action, CompleteOperation):
+            return
+
+        operation = ctx.get("operation")
+        if not isinstance(operation, Operation):
+            return
+
+        payload = action.result
+        finished_at = ctx.get("now")
+
+        if isinstance(payload, dict):
+            status_value = payload.get("status", OperationStatus.COMPLETED.value)
+            try:
+                operation.status = OperationStatus(str(status_value))
+            except Exception:
+                operation.status = OperationStatus.COMPLETED
+            operation.result = payload.get("result")
+
+            error_payload = payload.get("error")
+            if operation.status == OperationStatus.COMPLETED:
+                operation.error = None
+            elif isinstance(error_payload, dict):
+                operation.error = OperationError(
+                    code=str(error_payload.get("code", "execution_error")),
+                    message=str(error_payload.get("message", "Execution failed")),
+                    details=error_payload.get("details"),
+                )
+            else:
+                operation.error = OperationError(
+                    code="execution_error",
+                    message="Execution failed",
+                )
+
+            finished_at = payload.get("finished_at") or finished_at
+        else:
+            operation.status = OperationStatus.COMPLETED
+            operation.result = payload
+            operation.error = None
+
+        operation.finished_at = finished_at
+
+        attempt = ctx.get("attempt")
+        if isinstance(attempt, Attempt):
+            if operation.status == OperationStatus.COMPLETED:
+                attempt.status = AttemptStatus.COMPLETED
+                attempt.error = None
+            elif operation.status == OperationStatus.CANCELLED:
+                attempt.status = AttemptStatus.CANCELLED
+                attempt.error = operation.error.to_dict() if operation.error else None
+            else:
+                attempt.status = AttemptStatus.FAILED
+                attempt.error = operation.error.to_dict() if operation.error else None
+            attempt.finished_at = finished_at
+
+
 register_action_handler("ScheduleRetry", ScheduleRetryActionHandler())
 register_action_handler("CancelOperation", CancelOperationActionHandler())
+register_action_handler("CompleteOperation", CompleteOperationActionHandler())

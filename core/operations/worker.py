@@ -1,16 +1,20 @@
 import asyncio
+import inspect
 import time
 import uuid
 from typing import Any
 
 from modules.hooks.actions import dispatch_action
+from modules.hooks.action_resolver import resolve_actions
 from modules.hooks.system import dispatch_system_hooks, merge_system_hook_results
 
 from core.operations.models import (
+    Attempt,
     AttemptStatus,
     Operation,
     OperationError,
     OperationStatus,
+    TERMINAL_STATUSES,
 )
 
 
@@ -125,18 +129,51 @@ class OperationWorker:
         if not ok or not claim_token:
             return operation
 
+        attempt = None
+        get_attempt = getattr(storage, "get_attempt", None)
+        if callable(get_attempt):
+            maybe_attempt = get_attempt(attempt_id)
+            if inspect.isawaitable(maybe_attempt):
+                attempt = await maybe_attempt
+            else:
+                attempt = maybe_attempt
+
         hook_context.update(
             {
                 "stage": "before_execute",
                 "claim_token": claim_token,
+                "execution_token": claim_token,
+                "attempt": attempt,
             }
         )
-        hook_context, allow, _ = await self._dispatch_system_hooks(
+        hook_context, allow, actions = await self._dispatch_system_hooks(
             "before_execute", hook_context
         )
-        if not allow:
-            latest_attempt = await storage.get_attempt(attempt_id)
+        actions = resolve_actions(actions)
+        if actions:
+            for action in actions:
+                await dispatch_action(
+                    action,
+                    {**hook_context, "operation": operation, "now": time.time()},
+                )
+
+            latest_attempt = hook_context.get("attempt")
             if latest_attempt is not None:
+                await storage.persist_attempt(latest_attempt)
+            await storage.persist(operation)
+
+        if actions and operation.status in TERMINAL_STATUSES:
+            return operation
+
+        if not allow:
+            latest_attempt = attempt
+            if latest_attempt is None and callable(get_attempt):
+                maybe_attempt = get_attempt(attempt_id)
+                if inspect.isawaitable(maybe_attempt):
+                    latest_attempt = await maybe_attempt
+                else:
+                    latest_attempt = maybe_attempt
+            if isinstance(latest_attempt, Attempt):
                 latest_attempt.status = AttemptStatus.FAILED
                 latest_attempt.finished_at = time.time()
                 latest_attempt.error = {
@@ -169,6 +206,7 @@ class OperationWorker:
             hook_context, allow, actions = await self._dispatch_system_hooks(
                 "on_failure", hook_context
             )
+            actions = resolve_actions(actions)
             if allow and actions:
                 for action in actions:
                     await dispatch_action(
@@ -185,6 +223,7 @@ class OperationWorker:
             _, allow, actions = await self._dispatch_system_hooks(
                 "after_execute", hook_context
             )
+            actions = resolve_actions(actions)
             if allow and actions:
                 for action in actions:
                     await dispatch_action(

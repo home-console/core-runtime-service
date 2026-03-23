@@ -16,6 +16,7 @@ import logging
 from typing import Any
 
 from core.runtime_module import RuntimeModule
+from modules.hooks.system import register_system_hook
 
 
 class LoggerModule(RuntimeModule):
@@ -55,11 +56,14 @@ class LoggerModule(RuntimeModule):
         # Регистрируем сервис logger.log (ACL обвязка в ядре — без ограничений)
         # Поддерживаем старые FakeRegistry объекты в тестах, поэтому используем
         # register_with_acl если доступен, иначе падаем back на register().
-        services = self.runtime.kernel_context.get_service("service_registry")
+        services = self._get_service_registry()
         if hasattr(services, "register_with_acl"):
             await services.register_with_acl("logger.log", self._log_service)
         else:
             await services.register("logger.log", self._log_service)
+
+        register_system_hook("after_execute", self._after_execute)
+        register_system_hook("on_failure", self._on_failure)
 
     async def start(self) -> None:
         """
@@ -100,10 +104,18 @@ class LoggerModule(RuntimeModule):
 
         # Отменяем регистрацию сервиса
         try:
-            services = self.runtime.kernel_context.get_service("service_registry")
+            services = self._get_service_registry()
             await services.unregister("logger.log")
         except Exception:
             pass
+
+    def _get_service_registry(self):
+        kernel_context = getattr(self.runtime, "kernel_context", None)
+        if kernel_context is not None:
+            services = kernel_context.get_service("service_registry")
+            if services is not None:
+                return services
+        return getattr(self.runtime, "service_registry", None)
 
     async def _log_service(self, level: str, message: str, **context: Any) -> None:
         """
@@ -213,3 +225,37 @@ class LoggerModule(RuntimeModule):
             # Игнорируем ошибки при записи в RequestLoggerModule
             # Это не должно влиять на основное логирование
             pass
+
+    async def _after_execute(self, ctx: dict[str, Any]):
+        operation = ctx.get("operation")
+        if operation is None:
+            return None
+        await self.runtime.service_registry.call(
+            "logger.log",
+            level="info",
+            message="operation executed",
+            component="execution",
+            stage="after_execute",
+            operation_id=getattr(operation, "operation_id", None),
+            operation_type=getattr(operation, "type", None),
+            status=getattr(getattr(operation, "status", None), "value", None),
+            error_code=getattr(getattr(operation, "error", None), "code", None),
+        )
+        return None
+
+    async def _on_failure(self, ctx: dict[str, Any]):
+        operation = ctx.get("operation")
+        if operation is None:
+            return None
+        await self.runtime.service_registry.call(
+            "logger.log",
+            level="warning",
+            message="operation failed",
+            component="execution",
+            stage="on_failure",
+            operation_id=getattr(operation, "operation_id", None),
+            operation_type=getattr(operation, "type", None),
+            status=getattr(getattr(operation, "status", None), "value", None),
+            error_code=getattr(getattr(operation, "error", None), "code", None),
+        )
+        return None
