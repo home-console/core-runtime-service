@@ -7,7 +7,7 @@ Provides:
 - SystemContext: для системных внутренних вызовов
 """
 
-from core.runtime_context import RuntimeContext
+from core.runtime.runtime_context import RuntimeContext
 from core.operation_context import (
     OperationContextProvider,
     set_operation_context_provider,

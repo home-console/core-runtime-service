@@ -5,11 +5,11 @@ This package provides a stable storage API surface without conflicting with
 core/storage.py module naming.
 """
 
-from core.storage import Storage
 from core.storage_mirror import StorageWithStateMirror
 from core.storage_port import CoreStoragePort, VaultStoragePort, StorageStack
 from core.storage_manager import StorageManager, CRITICAL_VAULT_NAMESPACES
-from core.storage_startup import StorageStartupChecker
+from modules.storage import Storage
+from modules.storage.startup import StorageStartupChecker
 from core.storage_abstraction import IStorageBackend
 from core.storage_errors import (
     StorageSecurityError,

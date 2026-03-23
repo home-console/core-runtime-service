@@ -26,7 +26,7 @@ from core.dependency_resolver import (  # Step 10
     DependencyResolver,
     RuntimeIntegrityError,
 )
-from core.http_registry import HttpRegistry
+from core.http import HttpRegistry
 from core.integration_registry import IntegrationRegistry
 from core.logger_helper import info, warning
 from core.messaging.event_bus import EventBus

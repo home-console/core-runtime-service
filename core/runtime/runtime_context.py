@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from core.capability_registry import CapabilityRegistry
-from core.http_registry import HttpRegistry
+from core.http import HttpRegistry
 from core.operations.manager import OperationManager
 from core.service_registry import ServiceRegistry
 from modules.storage import Storage

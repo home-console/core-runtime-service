@@ -9,8 +9,7 @@ PluginSandbox - создание изолированного контекста
 
 from typing import Optional, Any
 
-from core.base_plugin import BasePlugin
-from core.plugin_isolation import StorageProxy, ServiceProxy, DEFAULT_ALLOWED_SERVICES
+from core.kernel.base_plugin import BasePlugin
 from core.kernel.plugin_runtime_facade import PluginRuntimeFacade
 
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from core.runtime_context import RuntimeContext
+from core.runtime.runtime_context import RuntimeContext
 
 
 @dataclass(frozen=True)
