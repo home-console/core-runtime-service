@@ -7,13 +7,12 @@ OperationManager - Facade для управления операциями.
 - OperationStorage: персистентность операций
 """
 
-import time
-import uuid
 from typing import Any, Optional
 
 from core.operations.models import (
     RETRYABLE_ERRORS,
     Operation,
+    Attempt,
     OperationInitiator,
     OperationStatus,
 )
@@ -161,6 +160,14 @@ class OperationManager:
             "success": OperationStatus.COMPLETED.value,
         }.get(str(status), str(status))
         return [op for op in operations if op.status.value == normalized_status]
+
+    # ========== ATTEMPT HISTORY ==========
+
+    async def get_attempts(self, operation_id: str) -> list[Attempt]:
+        """
+        Read API: return ordered attempt history for an operation.
+        """
+        return await self._storage.get_attempts(operation_id)
     
     # ========== EXECUTION ==========
     
@@ -183,47 +190,11 @@ class OperationManager:
         Returns:
             Operation with updated status and result
         """
-        now = time.time()
-
-        # Eligibility gating (mirrors worker semantics to avoid accidental early execution).
-        if operation.status.value == "failed" and not operation.can_retry(now):
-            return operation
-        if (
-            operation.status.value == "created"
-            and operation.next_retry_at is not None
-            and now < operation.next_retry_at
-        ):
-            return operation
-
-        # In CLAIM + ATTEMPT model, the execution unit is Attempt.
-        attempt_index = int(operation.retry_count or 0)
-        attempt_id = f"attempt-{operation.operation_id}-i{attempt_index}"
-
-        lease_ttl_s = int(getattr(self.runtime, "operation_attempt_lease_ttl", 30))
-        worker_id = f"opmgr-inline-{id(self)}-{uuid.uuid4().hex[:8]}"
-
-        await self._storage.ensure_attempt_created(
-            attempt_id=attempt_id,
-            operation_id=operation.operation_id,
-            attempt_index=attempt_index,
-        )
-
-        ok, claim_token = await self._storage.try_claim_attempt(
-            attempt_id=attempt_id,
-            worker_id=worker_id,
-            lease_ttl=lease_ttl_s,
-        )
-        if not ok or not claim_token:
-            return operation
-
-        # Dispatch guarded attempt execution.
-        # OperationExecutor already owns the guard logic; we only pass claim/token.
-        return await self._executor.execute_attempt(  # type: ignore[attr-defined]
-            operation,
-            attempt_id=attempt_id,
-            claim_token=claim_token,
-            worker_id=worker_id,
-        )
+        # Worker is the execution owner; OperationManager delegates.
+        worker = getattr(self.runtime, "worker", None)
+        if worker is None or not hasattr(worker, "execute_operation_now"):
+            raise RuntimeError("OperationWorker not available for execution")
+        return await worker.execute_operation_now(operation)
     
     async def cancel(self, operation_id: str) -> Optional[Operation]:
         """
@@ -242,6 +213,7 @@ class OperationManager:
         if operation.status not in (OperationStatus.CREATED, OperationStatus.RUNNING):
             return operation  # Already terminal
         
+        operation.cancel_requested = True
         operation.status = OperationStatus.CANCELLED
         import time
         operation.finished_at = time.time()

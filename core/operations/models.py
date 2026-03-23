@@ -86,6 +86,13 @@ class Operation:
         retry_count: int = 0,
         max_retries: int = 2,
         next_retry_at: Optional[float] = None,
+        idempotency_key: Optional[str] = None,
+        cancel_requested: bool = False,
+        timeout_seconds: Optional[int] = None,
+        correlation_id: Optional[str] = None,
+        causation_id: Optional[str] = None,
+        source_event: Optional[str] = None,
+        triggered_by: str = "manual",
     ):
         # Immutable fields
         self.operation_id = operation_id
@@ -96,6 +103,14 @@ class Operation:
         self.retry_count = retry_count
         self.max_retries = max_retries
         self.next_retry_at = next_retry_at
+        self.idempotency_key = idempotency_key
+        self.cancel_requested = bool(cancel_requested)
+        self.timeout_seconds = timeout_seconds
+        # Causality/observability metadata (purely metadata; execution flow must not depend on it).
+        self.correlation_id = correlation_id
+        self.causation_id = causation_id
+        self.source_event = source_event
+        self.triggered_by = triggered_by
 
         # Timestamps
         self.created_at = time.time()
@@ -118,6 +133,11 @@ class Operation:
             "type": self.type,
             "params": self.params,
             "initiator": self.initiator.to_dict(),
+            "idempotency_key": self.idempotency_key,
+            "correlation_id": self.correlation_id,
+            "causation_id": self.causation_id,
+            "source_event": self.source_event,
+            "triggered_by": self.triggered_by,
             "status": self.status.value,
             "created_at": self.created_at,
             "started_at": self.started_at,
@@ -125,6 +145,8 @@ class Operation:
             "retry_count": self.retry_count,
             "max_retries": self.max_retries,
             "next_retry_at": self.next_retry_at,
+            "cancel_requested": self.cancel_requested,
+            "timeout_seconds": self.timeout_seconds,
         }
 
         if self.error:
@@ -159,6 +181,13 @@ class Operation:
             retry_count=int(data.get("retry_count", 0) or 0),
             max_retries=int(data.get("max_retries", 2) or 0),
             next_retry_at=data.get("next_retry_at"),
+            idempotency_key=data.get("idempotency_key"),
+            cancel_requested=bool(data.get("cancel_requested", False)),
+            timeout_seconds=data.get("timeout_seconds"),
+            correlation_id=data.get("correlation_id"),
+            causation_id=data.get("causation_id"),
+            source_event=data.get("source_event"),
+            triggered_by=data.get("triggered_by", "manual"),
         )
 
         op.status = _normalize_status(data.get("status", OperationStatus.CREATED.value))
@@ -205,15 +234,6 @@ class Operation:
             return False
         return True
 
-    def reset_for_retry(self) -> None:
-        self.status = OperationStatus.CREATED
-        self.started_at = None
-        self.finished_at = None
-        self.error = None
-        self.result = None
-        self.next_retry_at = None
-
-
 class AttemptStatus(str, Enum):
     """Attempt lifecycle statuses (CLAIM + ATTEMPT model)."""
 
@@ -222,6 +242,9 @@ class AttemptStatus(str, Enum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    LOST_CLAIM = "lost_claim"
+    CANCELLED = "cancelled"
+    TIMEOUT = "timeout"
 
 
 @dataclass
@@ -239,13 +262,20 @@ class Attempt:
     status: AttemptStatus = AttemptStatus.CREATED
 
     claim_token: Optional[str] = None
+    execution_token: Optional[str] = None  # Alias for claim_token (for observability)
     claimed_at: Optional[float] = None
     lease_expires_at: Optional[float] = None
     claimed_by: Optional[str] = None
+    worker_id: Optional[str] = None
 
     started_at: Optional[float] = None
     finished_at: Optional[float] = None
     error: Optional[Dict[str, Any]] = None
+
+    # Attempt execution metadata (causality/observability)
+    trigger_type: Optional[str] = None  # initial | retry
+    parent_attempt_id: Optional[str] = None
+    retry_reason: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         data: Dict[str, Any] = {
@@ -254,12 +284,17 @@ class Attempt:
             "attempt_index": self.attempt_index,
             "status": self.status.value,
             "claim_token": self.claim_token,
+            "execution_token": self.execution_token,
             "claimed_at": self.claimed_at,
             "lease_expires_at": self.lease_expires_at,
             "claimed_by": self.claimed_by,
+            "worker_id": self.worker_id,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
             "error": self.error,
+            "trigger_type": self.trigger_type,
+            "parent_attempt_id": self.parent_attempt_id,
+            "retry_reason": self.retry_reason,
         }
         # Keep storage payload small-ish: drop None fields.
         return {k: v for k, v in data.items() if v is not None}
@@ -273,12 +308,17 @@ class Attempt:
             attempt_index=int(data["attempt_index"]),
             status=status,
             claim_token=data.get("claim_token"),
+            execution_token=data.get("execution_token"),
             claimed_at=data.get("claimed_at"),
             lease_expires_at=data.get("lease_expires_at"),
             claimed_by=data.get("claimed_by"),
+            worker_id=data.get("worker_id"),
             started_at=data.get("started_at"),
             finished_at=data.get("finished_at"),
             error=data.get("error"),
+            trigger_type=data.get("trigger_type"),
+            parent_attempt_id=data.get("parent_attempt_id"),
+            retry_reason=data.get("retry_reason"),
         )
 
 

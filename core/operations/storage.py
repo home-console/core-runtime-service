@@ -14,6 +14,7 @@ from core.operations.models import (
     Operation,
     OperationInitiator,
 )
+from core.logger_helper import info
 
 
 class OperationStorage:
@@ -55,6 +56,44 @@ class OperationStorage:
             Created operation
         """
         operation_id = f"op-{uuid.uuid4().hex[:12]}"
+
+        # Causality/observability metadata may be injected by event->operation bridges
+        # (e.g. automation handlers). Execution flow MUST NOT depend on these fields.
+        correlation_id = params.get("correlation_id")
+        causation_id = params.get("causation_id")
+        # If event_id is provided, prefer it. Otherwise keep legacy "source_event" value.
+        source_event = params.get("event_id") or params.get("source_event")
+        triggered_by = params.get("triggered_by")
+        if not triggered_by:
+            # Best-effort heuristic: if the caller provided any event-like metadata → 'event'.
+            triggered_by = "event" if (params.get("event_id") or params.get("source_event") or "raw" in params) else "manual"
+
+        # Idempotency:
+        # - from event: use event_id
+        # - manual: use provided idempotency_key or generate one
+        raw = params.get("raw")
+        raw_event_id = None
+        if isinstance(raw, dict):
+            raw_event_id = raw.get("id") or raw.get("event_id")
+
+        idempotency_key = (
+            params.get("idempotency_key")
+            or params.get("event_id")
+            or raw_event_id
+        )
+        if not idempotency_key:
+            idempotency_key = uuid.uuid4().hex
+
+        # Deduplication index: idempotency_key -> operation_id
+        existing_idx = await self.runtime.storage.get(
+            "operation_idempotency_keys", idempotency_key
+        )
+        if isinstance(existing_idx, dict):
+            existing_op_id = existing_idx.get("operation_id")
+            if isinstance(existing_op_id, str):
+                existing_op = await self.get(existing_op_id)
+                if existing_op is not None:
+                    return existing_op
         
         operation = Operation(
             operation_id=operation_id,
@@ -65,10 +104,24 @@ class OperationStorage:
             retry_count=retry_count,
             max_retries=max_retries,
             next_retry_at=next_retry_at,
+            idempotency_key=idempotency_key,
+            cancel_requested=bool(params.get("cancel_requested", False)),
+            timeout_seconds=params.get("timeout_seconds"),
+            correlation_id=correlation_id,
+            causation_id=causation_id,
+            source_event=source_event,
+            triggered_by=triggered_by,
         )
         
         # Persist to storage
         await self.persist(operation)
+
+        # Persist idempotency index best-effort.
+        await self.runtime.storage.set(
+            "operation_idempotency_keys",
+            idempotency_key,
+            {"operation_id": operation.operation_id},
+        )
         
         return operation
     
@@ -132,6 +185,26 @@ class OperationStorage:
             operation.to_dict()
         )
 
+    async def get_attempts(self, operation_id: str) -> List[Attempt]:
+        """
+        Return ordered attempt history for an operation (by attempt_index asc).
+        """
+        keys = await self.runtime.storage.list_keys("operation_attempts")
+        attempts: List[Attempt] = []
+        for key in keys:
+            try:
+                data = await self.runtime.storage.get("operation_attempts", key)
+                if not data:
+                    continue
+                if data.get("operation_id") != operation_id:
+                    continue
+                attempts.append(Attempt.from_dict(data))
+            except Exception:
+                continue
+
+        attempts.sort(key=lambda a: a.attempt_index)
+        return attempts
+
     # ===================== ATTEMPTS (CLAIM + ATTEMPT model) =====================
 
     async def ensure_attempt_created(
@@ -143,23 +216,55 @@ class OperationStorage:
         Idempotent: if the attempt already exists, returns it as-is.
         """
 
+        created_payload: Optional[dict[str, Any]] = None
+        attempt: Optional[Attempt] = None
+
         async with self.runtime.storage.transaction():
-            existing = await self.runtime.storage.get(
-                "operation_attempts", attempt_id
-            )
+            existing = await self.runtime.storage.get("operation_attempts", attempt_id)
             if existing is not None:
-                return Attempt.from_dict(existing)
+                attempt = Attempt.from_dict(existing)
+                return attempt
+
+            trigger_type = "initial" if int(attempt_index) == 0 else "retry"
+            parent_attempt_id = (
+                f"attempt-{operation_id}-i{attempt_index - 1}"
+                if int(attempt_index) > 0
+                else None
+            )
+            retry_reason = None
+            if int(attempt_index) > 0:
+                try:
+                    op_data = await self.runtime.storage.get("operations", operation_id)
+                    if isinstance(op_data, dict):
+                        op = Operation.from_dict(op_data)
+                        retry_reason = op.error.code if op.error else None
+                except Exception:
+                    retry_reason = None
 
             attempt = Attempt(
                 attempt_id=attempt_id,
                 operation_id=operation_id,
                 attempt_index=attempt_index,
                 status=AttemptStatus.CREATED,
+                trigger_type=trigger_type,
+                parent_attempt_id=parent_attempt_id,
+                retry_reason=retry_reason,
             )
-            await self.runtime.storage.set(
-                "operation_attempts", attempt_id, attempt.to_dict()
-            )
-            return attempt
+            await self.runtime.storage.set("operation_attempts", attempt_id, attempt.to_dict())
+
+            created_payload = {
+                "attempt_id": attempt_id,
+                "operation_id": operation_id,
+                "attempt_index": attempt_index,
+                "trigger_type": trigger_type,
+                "parent_attempt_id": parent_attempt_id,
+                "retry_reason": retry_reason,
+            }
+
+        if created_payload is not None and attempt is not None:
+            await info(self.runtime, "attempt created", **created_payload)
+
+        return attempt  # type: ignore[return-value]
 
     async def get_attempt(self, attempt_id: str) -> Optional[Attempt]:
         data = await self.runtime.storage.get("operation_attempts", attempt_id)
@@ -184,6 +289,7 @@ class OperationStorage:
         """
 
         now = time.time()
+        claim_payload: Optional[dict[str, Any]] = None
         async with self.runtime.storage.transaction():
             data = await self.runtime.storage.get("operation_attempts", attempt_id)
             if data is None:
@@ -191,7 +297,11 @@ class OperationStorage:
 
             attempt = Attempt.from_dict(data)
 
-            if attempt.status not in (AttemptStatus.CREATED, AttemptStatus.CLAIMED):
+            if attempt.status not in (
+                AttemptStatus.CREATED,
+                AttemptStatus.CLAIMED,
+                AttemptStatus.LOST_CLAIM,
+            ):
                 return False, None
 
             claim_absent = attempt.claim_token is None
@@ -205,9 +315,52 @@ class OperationStorage:
             claim_token = uuid.uuid4().hex
             attempt.status = AttemptStatus.CLAIMED
             attempt.claim_token = claim_token
+            attempt.execution_token = claim_token
             attempt.claimed_at = now
             attempt.lease_expires_at = now + float(lease_ttl)
             attempt.claimed_by = worker_id
-
+            attempt.worker_id = worker_id
             await self.runtime.storage.set("operation_attempts", attempt_id, attempt.to_dict())
-            return True, claim_token
+
+            claim_payload = {
+                "attempt_id": attempt_id,
+                "operation_id": attempt.operation_id,
+                "worker_id": worker_id,
+                "lease_expires_at": attempt.lease_expires_at,
+            }
+
+        if claim_payload is not None:
+            await info(self.runtime, "claim acquired", **claim_payload)
+
+        return True, claim_token
+
+    async def extend_claim(
+        self, attempt_id: str, claim_token: str, lease_ttl: int
+    ) -> bool:
+        """
+        Extend an existing claim lease.
+
+        Returns True if and only if:
+        - attempt exists
+        - attempt.claim_token matches claim_token
+
+        Does not change attempt status; only moves lease_expires_at forward.
+        """
+
+        now = time.time()
+        async with self.runtime.storage.transaction():
+            data = await self.runtime.storage.get(
+                "operation_attempts", attempt_id
+            )
+            if data is None:
+                return False
+
+            attempt = Attempt.from_dict(data)
+            if attempt.claim_token != claim_token:
+                return False
+
+            attempt.lease_expires_at = now + float(lease_ttl)
+            await self.runtime.storage.set(
+                "operation_attempts", attempt_id, attempt.to_dict()
+            )
+            return True

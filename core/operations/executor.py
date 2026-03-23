@@ -4,6 +4,7 @@ OperationExecutor - выполнение операций.
 Отвечает за выполнение операций через различные backends (in_process, process, container, remote).
 """
 
+import asyncio
 import time
 from typing import Any, Dict, Optional
 
@@ -11,6 +12,7 @@ from core import capability_protocol
 from core.health_monitor import ProviderHealthMonitor
 from core.observability.metrics import get_metrics_registry
 from core.operations.interface import IOperationExecutor
+from core.logger_helper import info
 from core.operations.models import (
     AttemptStatus,
     RETRYABLE_ERRORS,
@@ -287,11 +289,6 @@ class OperationExecutor(IOperationExecutor):
         start_time = time.time()
         metrics = get_metrics_registry()
 
-        if operation.status == OperationStatus.FAILED:
-            if not self._is_retry_due(operation):
-                return operation
-            # CLAIM + ATTEMPT model: do not reset_for_retry (retry happens via new attempt)
-
         try:
             declared_handler = get_operation_handler(operation.type)
             if declared_handler is not None:
@@ -315,7 +312,6 @@ class OperationExecutor(IOperationExecutor):
                         code="execution_error",
                         message=str(e),
                     )
-                    self._apply_retry_policy(operation)
 
                 operation.finished_at = time.time()
                 await self.storage.persist(operation)
@@ -369,7 +365,6 @@ class OperationExecutor(IOperationExecutor):
                     code="unknown_operation_type",
                     message=f"No handler or remote provider for operation type: {operation.type}",
                 )
-                self._apply_retry_policy(operation)
                 await self.storage.persist(operation)
 
                 # Step 13: Record metrics
@@ -462,7 +457,6 @@ class OperationExecutor(IOperationExecutor):
                     message=str(error_info.get("message", "Execution failed")),
                     details=error_info,
                 )
-                self._apply_retry_policy(operation)
 
             operation.finished_at = time.time()
 
@@ -475,7 +469,6 @@ class OperationExecutor(IOperationExecutor):
             # Any exception → failed operation
             operation.status = OperationStatus.FAILED
             operation.error = OperationError(code="execution_error", message=str(e))
-            self._apply_retry_policy(operation)
             operation.finished_at = time.time()
 
             # Step 13: Record failure metrics
@@ -492,25 +485,30 @@ class OperationExecutor(IOperationExecutor):
 
     async def execute_attempt(
         self,
-        operation: Operation,
         attempt_id: str,
         claim_token: str,
         *,
-        worker_id: Optional[str] = None,
         lease_guard_epsilon_s: float = 0.0,
     ) -> Operation:
         """
-        Execute only if attempt is claimed (token matches + lease not expired).
+        Attempt-only execution.
+
+        Executor loads Operation from storage using attempt metadata and executes handler
+        only if the attempt is currently claimed and the lease is not expired.
         """
 
         now = time.time()
 
         attempt = await self.storage.get_attempt(attempt_id)
         if attempt is None:
-            # No attempt record → refuse execution.
-            return operation
+            raise ValueError(f"Attempt not found: {attempt_id}")
 
         if attempt.status != AttemptStatus.CLAIMED:
+            operation = await self.storage.get(attempt.operation_id)
+            if operation is None:
+                raise ValueError(
+                    f"Operation not found for attempt: {attempt.operation_id}"
+                )
             return operation
 
         if attempt.claim_token != claim_token:
@@ -521,6 +519,12 @@ class OperationExecutor(IOperationExecutor):
                 "message": "claim_token mismatch for attempt execution",
             }
             await self.storage.persist_attempt(attempt)
+
+            operation = await self.storage.get(attempt.operation_id)
+            if operation is None:
+                raise ValueError(
+                    f"Operation not found for attempt: {attempt.operation_id}"
+                )
             return operation
 
         lease_expires_at = attempt.lease_expires_at or 0.0
@@ -535,40 +539,295 @@ class OperationExecutor(IOperationExecutor):
             attempt.finished_at = None
             attempt.error = None
             await self.storage.persist_attempt(attempt)
+
+            operation = await self.storage.get(attempt.operation_id)
+            if operation is None:
+                raise ValueError(
+                    f"Operation not found for attempt: {attempt.operation_id}"
+                )
             return operation
 
-        if worker_id is not None and attempt.claimed_by != worker_id:
-            attempt.status = AttemptStatus.FAILED
-            attempt.finished_at = now
-            attempt.error = {
-                "code": "invalid_claim",
-                "message": "claimed_by mismatch for attempt execution",
-            }
+        # Guard passed: transition attempt to RUNNING.
+        execution_token = attempt.execution_token or claim_token
+        cached = await self.runtime.storage.get(
+            "operation_results", execution_token
+        )
+        if isinstance(cached, dict):
+            # Side-effect idempotency hit: do not execute handler again.
+            operation = await self.storage.get(attempt.operation_id)
+            if operation is None:
+                raise ValueError(
+                    f"Operation not found for attempt: {attempt.operation_id}"
+                )
+
+            status_value = cached.get("status", OperationStatus.FAILED.value)
+            operation.status = OperationStatus(str(status_value))
+            operation.result = cached.get("result")
+            operation.finished_at = cached.get("finished_at") or now
+
+            error_dict = cached.get("error")
+            if operation.status == OperationStatus.COMPLETED:
+                operation.error = None
+            else:
+                if isinstance(error_dict, dict):
+                    operation.error = OperationError(
+                        code=str(error_dict.get("code", "execution_error")),
+                        message=str(error_dict.get("message", "Execution failed")),
+                        details=error_dict.get("details"),
+                    )
+                else:
+                    operation.error = OperationError(
+                        code="execution_error",
+                        message="Execution failed",
+                    )
+
+            # Mark attempt as completed/failed from cached outcome.
+            attempt.status = (
+                AttemptStatus.COMPLETED
+                if operation.status == OperationStatus.COMPLETED
+                else AttemptStatus.FAILED
+            )
+            attempt.error = error_dict if isinstance(error_dict, dict) else None
+            attempt.finished_at = operation.finished_at
+            await self.storage.persist(operation)
             await self.storage.persist_attempt(attempt)
+
+            await info(
+                self.runtime,
+                "execution finished",
+                attempt_id=attempt_id,
+                operation_id=attempt.operation_id,
+                status=operation.status.value,
+                worker_id=attempt.worker_id,
+                error_code=operation.error.code if operation.error else None,
+                correlation_id=operation.correlation_id,
+                causation_id=operation.causation_id,
+                source_event=operation.source_event,
+            )
             return operation
 
-        # If operation is failed but not actually due now, release attempt.
-        if operation.status == OperationStatus.FAILED and not operation.can_retry(now):
-            attempt.status = AttemptStatus.CREATED
-            attempt.claim_token = None
-            attempt.claimed_at = None
-            attempt.lease_expires_at = None
-            attempt.claimed_by = None
-            await self.storage.persist_attempt(attempt)
-            return operation
-
-        # Transition to running (guard passed).
         attempt.status = AttemptStatus.RUNNING
         attempt.started_at = now
         attempt.error = None
         await self.storage.persist_attempt(attempt)
 
-        res: Operation = await self.execute(operation)
+        operation = await self.storage.get(attempt.operation_id)
+        if operation is None:
+            raise ValueError(f"Operation not found for attempt: {attempt.operation_id}")
+
+        # Pre-start cancellation / timeout checks.
+        started_at_ts = attempt.started_at or now
+        if operation.cancel_requested:
+            latest_attempt = await self.storage.get_attempt(attempt_id) or attempt
+            latest_attempt.status = AttemptStatus.CANCELLED
+            latest_attempt.error = {"code": "cancelled", "message": "operation cancelled"}
+            latest_attempt.finished_at = time.time()
+            await self.storage.persist_attempt(latest_attempt)
+
+            operation.status = OperationStatus.CANCELLED
+            operation.error = None
+            operation.result = None
+            operation.finished_at = latest_attempt.finished_at
+            operation.cancel_requested = True
+            await self.storage.persist(operation)
+            return operation
+
+        if operation.timeout_seconds is not None:
+            try:
+                timeout_seconds_i = int(operation.timeout_seconds)
+            except Exception:
+                timeout_seconds_i = None
+            if timeout_seconds_i is not None and time.time() - float(started_at_ts) > float(
+                timeout_seconds_i
+            ):
+                latest_attempt = await self.storage.get_attempt(attempt_id) or attempt
+                latest_attempt.status = AttemptStatus.TIMEOUT
+                latest_attempt.error = {"code": "timeout", "message": "execution timeout"}
+                latest_attempt.finished_at = time.time()
+                await self.storage.persist_attempt(latest_attempt)
+
+                operation.status = OperationStatus.FAILED
+                operation.error = OperationError(
+                    code="timeout", message="execution timeout"
+                )
+                operation.result = None
+                operation.finished_at = latest_attempt.finished_at
+                await self.storage.persist(operation)
+                return operation
+
+        await info(
+            self.runtime,
+            "execution started",
+            attempt_id=attempt_id,
+            operation_id=operation.operation_id,
+            worker_id=attempt.worker_id,
+            execution_token=execution_token,
+            correlation_id=operation.correlation_id,
+            causation_id=operation.causation_id,
+            source_event=operation.source_event,
+        )
+
+        # Execute handler (single attempt execution, no retry decisions here).
+        # Heartbeat extends claim lease during long-running execution.
+        lease_ttl_raw = getattr(self.runtime, "operation_attempt_lease_ttl", 30)
+        try:
+            lease_ttl_s = int(lease_ttl_raw)
+        except Exception:
+            lease_ttl_s = 30
+        heartbeat_interval_s = max(0.1, float(lease_ttl_s) / 2.0)
+
+        handler_task = asyncio.create_task(self.execute(operation))
+        abort_reason: Optional[str] = None
+        operation_id = operation.operation_id
+        started_at_ts = attempt.started_at or now
+
+        async def _heartbeat() -> None:
+            nonlocal abort_reason
+            while True:
+                if handler_task.done():
+                    return
+                await asyncio.sleep(heartbeat_interval_s)
+                if handler_task.done():
+                    return
+
+                # Cancellation / timeout checks live inside the heartbeat loop
+                # so we can stop long-running handlers without changing handler API.
+                try:
+                    op_current = await self.runtime.storage.get(
+                        "operations", operation_id
+                    )
+                except Exception:
+                    op_current = None
+
+                if isinstance(op_current, dict) and op_current.get(
+                    "cancel_requested", False
+                ):
+                    abort_reason = "cancelled"
+                    handler_task.cancel()
+                    return
+
+                timeout_seconds = None
+                if isinstance(op_current, dict):
+                    timeout_seconds = op_current.get("timeout_seconds")
+
+                if timeout_seconds is not None:
+                    try:
+                        timeout_seconds_i = int(timeout_seconds)
+                    except Exception:
+                        timeout_seconds_i = None
+                    if timeout_seconds_i is not None:
+                        if time.time() - float(started_at_ts) > float(
+                            timeout_seconds_i
+                        ):
+                            abort_reason = "timeout"
+                            handler_task.cancel()
+                            return
+
+                ok = await self.storage.extend_claim(
+                    attempt_id=attempt_id,
+                    claim_token=claim_token,
+                    lease_ttl=lease_ttl_s,
+                )
+                if not ok:
+                    abort_reason = "lost_claim"
+                    handler_task.cancel()
+                    return
+
+        heartbeat_task = asyncio.create_task(_heartbeat())
+
+        try:
+            res: Operation = await handler_task
+        except asyncio.CancelledError:
+            if abort_reason in ("lost_claim", "cancelled", "timeout"):
+                res = None  # type: ignore[assignment]
+            else:
+                raise
+        finally:
+            heartbeat_task.cancel()
+            try:
+                await heartbeat_task
+            except asyncio.CancelledError:
+                pass
 
         final_now = time.time()
-        latest_attempt = await self.storage.get_attempt(attempt_id)
-        if latest_attempt is None:
-            latest_attempt = attempt
+        latest_attempt = await self.storage.get_attempt(attempt_id) or attempt
+
+        if abort_reason == "lost_claim":
+            # Lost claim => stop execution, mark attempt as LOST_CLAIM (non-terminal),
+            # and revert operation to CREATED to make worker pick it up again.
+            latest_attempt.status = AttemptStatus.LOST_CLAIM
+            latest_attempt.error = {
+                "code": "lost_claim",
+                "message": "claim lease couldn't be extended",
+            }
+            latest_attempt.finished_at = final_now
+            # Force immediate expiration so another worker can re-claim soon.
+            latest_attempt.lease_expires_at = final_now - 0.001
+            await self.storage.persist_attempt(latest_attempt)
+
+            op = await self.storage.get(latest_attempt.operation_id)
+            if op is not None:
+                op.status = OperationStatus.CREATED
+                op.started_at = None
+                op.finished_at = None
+                op.error = None
+                op.result = None
+                await self.storage.persist(op)
+
+                await info(
+                    self.runtime,
+                    "execution finished",
+                    attempt_id=attempt_id,
+                    operation_id=op.operation_id,
+                    status=OperationStatus.CREATED.value,
+                    worker_id=latest_attempt.worker_id,
+                    error_code="lost_claim",
+                    correlation_id=op.correlation_id,
+                    causation_id=op.causation_id,
+                    source_event=op.source_event,
+                )
+            return op if op is not None else operation
+
+        if abort_reason == "cancelled":
+            latest_attempt.status = AttemptStatus.CANCELLED
+            latest_attempt.error = {
+                "code": "cancelled",
+                "message": "operation cancelled",
+            }
+            latest_attempt.finished_at = final_now
+            await self.storage.persist_attempt(latest_attempt)
+
+            op = await self.storage.get(latest_attempt.operation_id)
+            if op is not None:
+                op.status = OperationStatus.CANCELLED
+                op.error = None
+                op.result = None
+                op.finished_at = final_now
+                op.cancel_requested = True
+                await self.storage.persist(op)
+
+            return op if op is not None else operation
+
+        if abort_reason == "timeout":
+            latest_attempt.status = AttemptStatus.TIMEOUT
+            latest_attempt.error = {
+                "code": "timeout",
+                "message": "execution timeout",
+            }
+            latest_attempt.finished_at = final_now
+            await self.storage.persist_attempt(latest_attempt)
+
+            op = await self.storage.get(latest_attempt.operation_id)
+            if op is not None:
+                op.status = OperationStatus.FAILED
+                op.error = OperationError(
+                    code="timeout", message="execution timeout"
+                )
+                op.result = None
+                op.finished_at = final_now
+                await self.storage.persist(op)
+
+            return op if op is not None else operation
 
         if res.status == OperationStatus.COMPLETED:
             latest_attempt.status = AttemptStatus.COMPLETED
@@ -577,7 +836,6 @@ class OperationExecutor(IOperationExecutor):
             latest_attempt.status = AttemptStatus.FAILED
             latest_attempt.error = res.error.to_dict() if res.error else None
         else:
-            # CANCELLED/unknown: treat as failed for attempt tracking
             latest_attempt.status = AttemptStatus.FAILED
             latest_attempt.error = {
                 "code": "not_executed_or_cancelled",
@@ -586,4 +844,28 @@ class OperationExecutor(IOperationExecutor):
 
         latest_attempt.finished_at = final_now
         await self.storage.persist_attempt(latest_attempt)
+
+        # Persist side-effect outcome for idempotent replays.
+        outcome = {
+            "status": res.status.value,
+            "result": res.result,
+            "error": res.error.to_dict() if res.error else None,
+            "finished_at": res.finished_at,
+        }
+        await self.runtime.storage.set(
+            "operation_results", execution_token, outcome
+        )
+
+        await info(
+            self.runtime,
+            "execution finished",
+            attempt_id=attempt_id,
+            operation_id=latest_attempt.operation_id,
+            status=res.status.value,
+            worker_id=latest_attempt.worker_id,
+            error_code=res.error.code if res.error else None,
+            correlation_id=res.correlation_id,
+            causation_id=res.causation_id,
+            source_event=res.source_event,
+        )
         return res
