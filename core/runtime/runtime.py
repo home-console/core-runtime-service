@@ -31,6 +31,7 @@ from core.integration_registry import IntegrationRegistry
 from core.logger_helper import info, warning
 from core.messaging.event_bus import EventBus
 from core.operations.manager import OperationManager
+from core.operations.worker import OperationWorker
 from core.policy import PolicyEngine
 from core.orchestration import (
     DockerOrchestrationBackend,
@@ -50,11 +51,6 @@ from modules.agent import (
     MTLSCertificateAuthority,
 )
 from modules.events.validation import EventValidationMiddleware
-
-# Import extracted lifecycle and monitoring functions
-from core.runtime.lifecycle import start_runtime, stop_runtime, shutdown_runtime, hydrate_critical_state
-from core.runtime.monitoring import health_check as _health_check, get_metrics as _get_metrics
-
 
 class CoreRuntime:
     """
@@ -151,6 +147,8 @@ class CoreRuntime:
 
         # Execution controller (опционально; выставляется модулем execution)
         self.execution_controller: Optional[Any] = None
+        self.worker: Optional[OperationWorker] = None
+        self._worker_task: Optional[asyncio.Task] = None
 
         # OrchestrationService — DI зависимость, configurable backend.
         self.orchestration_service = orchestration_service or self._build_default_orchestration_service()
@@ -509,6 +507,12 @@ class CoreRuntime:
             self._running = True
             self._start_time = time.time()
 
+            if self.worker is None:
+                self.worker = OperationWorker(self)
+            if self._worker_task is None or self._worker_task.done():
+                self._worker_task = asyncio.create_task(self.worker.start())
+                self.worker._task = self._worker_task
+
             # DEBUG KERNEL: Log successful startup
             if debug_mode:
                 uptime_ms = int((time.time() - self._start_time) * 1000)
@@ -571,6 +575,9 @@ class CoreRuntime:
 
         async def _stop_internal() -> None:
             """Внутренняя функция остановки."""
+            if self.worker is not None:
+                await self.worker.stop()
+
             if debug_mode:
                 await info(
                     self, "🔧 KERNEL DEBUG: Stopping all plugins", component="runtime"
@@ -595,6 +602,7 @@ class CoreRuntime:
             # Установить состояние runtime
             await self.state_engine.set("runtime.status", "stopped")
             self._running = False
+            self._worker_task = None
 
             if debug_mode:
                 await info(

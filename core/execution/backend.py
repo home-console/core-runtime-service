@@ -7,10 +7,11 @@ Backend знает КАК запускать, но не знает ЧТО он �
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Dict, Optional, Protocol, Literal
 import asyncio
+from dataclasses import dataclass
+from typing import Any, Dict, Literal, Optional, Protocol
 
+from core.operations.registry import get_operation_handler
 
 BackendId = Literal["in_process", "process", "container"]
 
@@ -71,13 +72,20 @@ class InProcessBackend:
         if ops_mgr is None:
             return OperationResult(
                 ok=False,
-                error={"code": "no_operations_manager", "message": "Operations manager not available"},
+                error={
+                    "code": "no_operations_manager",
+                    "message": "Operations manager not available",
+                },
                 backend="in_process",
             )
 
         # IMPORTANT: не используем ops_mgr.execute(), чтобы не зациклиться на execution layer.
-        # Handlers хранятся в ops_mgr._registry, не в ops_mgr._handlers (OperationManager — фасад).
-        handler = getattr(ops_mgr, "_find_handler", lambda _: None)(operation_type)
+        # Сначала пробуем декларативный registry, затем legacy OperationManager registry.
+        handler = get_operation_handler(operation_type)
+        use_legacy_handler = False
+        if handler is None:
+            handler = getattr(ops_mgr, "_find_handler", lambda _: None)(operation_type)
+            use_legacy_handler = handler is not None
         if handler is None:
             return OperationResult(
                 ok=False,
@@ -92,10 +100,13 @@ class InProcessBackend:
 
         async def _run() -> OperationResult:
             try:
-                result = await handler(
-                    params,
-                    {"runtime": self._runtime, **(context or {})},
-                )
+                if use_legacy_handler:
+                    result = await handler(
+                        params,
+                        {"runtime": self._runtime, **(context or {})},
+                    )
+                else:
+                    result = await handler(params)
                 if not isinstance(result, Dict):
                     result = {"value": result}
                 return OperationResult(ok=True, result=result, backend="in_process")
@@ -109,7 +120,11 @@ class InProcessBackend:
             except Exception as e:
                 return OperationResult(
                     ok=False,
-                    error={"code": "execution_error", "message": str(e), "type": type(e).__name__},
+                    error={
+                        "code": "execution_error",
+                        "message": str(e),
+                        "type": type(e).__name__,
+                    },
                     backend="in_process",
                 )
 
@@ -140,7 +155,9 @@ class InProcessBackend:
 class ProcessBackend:
     def __init__(self) -> None:
         # Один реальный backend на все вызовы, чтобы можно было управлять процессами.
-        from .backends.process import ProcessBackend as RealProcessBackend  # локальный импорт — это не Core
+        from .backends.process import (
+            ProcessBackend as RealProcessBackend,  # локальный импорт — это не Core
+        )
 
         self._real = RealProcessBackend()
 
@@ -172,7 +189,9 @@ class ContainerBackend:
     """
 
     def __init__(self) -> None:
-        from .backends.container import ContainerBackend as RealContainerBackend  # локальный импорт — это не Core
+        from .backends.container import (
+            ContainerBackend as RealContainerBackend,  # локальный импорт — это не Core
+        )
 
         self._real = RealContainerBackend()
 
@@ -193,4 +212,3 @@ class ContainerBackend:
 
     async def cancel(self, execution_id: str) -> bool:
         return await self._real.cancel(execution_id)
-

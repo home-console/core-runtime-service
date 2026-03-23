@@ -41,7 +41,7 @@ async def test_execution_module_wires_operations_execute(memory_adapter):
     )
     res = await runtime.operations.execute(op)
 
-    assert res.status.value == "success"
+    assert res.status.value == "completed"
     assert res.result["pong"] is True
     assert res.result["echo"] == 1
 
@@ -87,7 +87,7 @@ async def test_execution_policy_can_route_to_process_backend_without_core_change
 
     # ProcessBackend теперь настоящий backend: операция уходит в runner через subprocess.
     # Важно: routing произошёл без изменений Core/SDK/plugin/automation.
-    assert res.status.value in ("success", "failed")
+    assert res.status.value in ("completed", "failed")
     assert res.error is None or res.error.code is not None
 
     await runtime.stop()
@@ -121,7 +121,7 @@ async def test_execution_trace_created_and_updated_in_storage(memory_adapter):
     )
     res = await runtime.operations.execute(op)
 
-    assert res.status.value == "success"
+    assert res.status.value == "completed"
 
     # Ищем execution traces в storage
     keys = await runtime.storage.list_keys("execution")
@@ -271,7 +271,7 @@ async def test_cancel_running_execution_marks_trace_cancelled_and_calls_backend(
         initiator=OperationInitiator(kind=OperationInitiatorKind.SYSTEM),
     )
     cancel_res = await runtime.operations.execute(cancel_op)
-    assert cancel_res.status.value in ("success", "failed")
+    assert cancel_res.status.value in ("completed", "failed")
 
     # Дожидаемся завершения исходной операции.
     await execute_task
@@ -729,7 +729,7 @@ async def test_retry_running_execution_rejected(memory_adapter):
         initiator=OperationInitiator(kind=OperationInitiatorKind.SYSTEM),
     )
     retry_res = await runtime.operations.execute(retry_op)
-    assert retry_res.status.value in ("success", "failed")
+    assert retry_res.status.value in ("completed", "failed")
     # в ответе от handler смотрим error.code
     if retry_res.error:
         assert retry_res.error.code in ("retry_not_allowed", "execution_error")

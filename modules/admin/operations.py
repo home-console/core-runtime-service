@@ -62,7 +62,11 @@ async def admin_operations_list(runtime: Any, limit: int = 100, offset: int = 0,
         ops = await ops_mgr.list(limit=limit, offset=offset)
 
         if status:
-            ops = [op for op in ops if op.status.value == status]
+            normalized_status = {
+                "pending": "created",
+                "success": "completed",
+            }.get(str(status), str(status))
+            ops = [op for op in ops if op.status.value == normalized_status]
 
         return {
             "ok": True,

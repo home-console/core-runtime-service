@@ -4,6 +4,8 @@
 
 from typing import Any, Dict
 
+from .registry import get_event_handlers
+
 
 async def handle_external_state_reported(runtime, data: Dict[str, Any]) -> None:
     """
@@ -53,20 +55,26 @@ async def handle_external_state_reported(runtime, data: Dict[str, Any]) -> None:
             if current_reported == data.get("state"):
                 return
 
+            bridge_data = dict(data)
+            bridge_data["source_event"] = "external.device_state_reported"
+            bridge_data["internal_id"] = internal_id
+            bridge_data["reported_state"] = data.get("state")
+            bridge_data["raw"] = data
+
+            handlers = get_event_handlers("external.device_state_reported")
+            if not handlers:
+                return
+
             from core.operations import OperationInitiator, OperationInitiatorKind
 
             # Automation не исполняет действия сама — только описывает intent через operations.
-            await ops_mgr.create(
-                op_type="automation.run",
-                params={
-                    "source_event": "external.device_state_reported",
-                    "external_id": external_id,
-                    "internal_id": internal_id,
-                    "reported_state": data.get("state"),
-                    "raw": data,
-                },
-                initiator=OperationInitiator(kind=OperationInitiatorKind.SYSTEM),
-            )
+            for handler in handlers:
+                op = handler(bridge_data)
+                if op:
+                    await ops_mgr.create(
+                        **op,
+                        initiator=OperationInitiator(kind=OperationInitiatorKind.SYSTEM),
+                    )
         except Exception:
             # Automation best-effort: не ломаем event loop из-за ошибок оркестрации
             pass

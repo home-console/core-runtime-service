@@ -9,6 +9,13 @@ import asyncio
 import os
 from pathlib import Path
 
+from core.adapters.storage_factory import build_storage_stack
+from core.config import Config
+from core.runtime import CoreRuntime
+from core.runtime.module_manager import ModuleSpec
+from core.state_engine import StateEngine
+
+
 def _load_dotenv() -> None:
     def _load_file(path: Path) -> None:
         if not path.is_file():
@@ -27,16 +34,12 @@ def _load_dotenv() -> None:
                             os.environ[key] = value
         except OSError:
             pass
+
     _load_file(Path(__file__).resolve().parent / ".env")
     _load_file(Path.cwd() / ".env")
 
-_load_dotenv()
 
-from core.config import Config
-from core.runtime import CoreRuntime
-from core.adapters.storage_factory import build_storage_stack
-from core.runtime.module_manager import ModuleSpec
-from core.state_engine import StateEngine
+_load_dotenv()
 
 
 APP_MODULES: list[ModuleSpec] = [
@@ -76,7 +79,12 @@ def _parse_module_specs(config: Config) -> list[ModuleSpec]:
             continue
         if ":" in token:
             name, _, required_raw = token.partition(":")
-            required = required_raw.strip().lower() not in ("false", "0", "no", "optional")
+            required = required_raw.strip().lower() not in (
+                "false",
+                "0",
+                "no",
+                "optional",
+            )
             specs.append(ModuleSpec(name.strip(), required=required))
         else:
             specs.append(ModuleSpec(token, required=True))
@@ -107,10 +115,17 @@ async def main() -> None:
     # SecretStore для inspector (debug) и credentials: один раз при старте
     try:
         from core.security import SecretStore, SecretStoreStorageAdapter
-        backend = storage_stack.manager.get_vault() if storage_stack.manager.is_dual_mode else storage_stack.manager.get_core()
+
+        backend = (
+            storage_stack.manager.get_vault()
+            if storage_stack.manager.is_dual_mode
+            else storage_stack.manager.get_core()
+        )
         wrapper = SecretStoreStorageAdapter(backend)
         secret_store = SecretStore(wrapper)
-        passphrase = os.getenv("AGENT_SECRET_STORE_PASSPHRASE", "default-dev-passphrase")
+        passphrase = os.getenv(
+            "AGENT_SECRET_STORE_PASSPHRASE", "default-dev-passphrase"
+        )
         # Сначала открыть существующий store (salt уже в vault), иначе — новая инициализация.
         # Раньше вызывали initialize() первым — он перезаписывал salt, после перезапуска секреты не расшифровывались.
         try:

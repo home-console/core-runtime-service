@@ -7,9 +7,16 @@ OperationManager - Facade для управления операциями.
 - OperationStorage: персистентность операций
 """
 
+import time
+import uuid
 from typing import Any, Optional
 
-from core.operations.models import Operation, OperationInitiator, OperationStatus
+from core.operations.models import (
+    RETRYABLE_ERRORS,
+    Operation,
+    OperationInitiator,
+    OperationStatus,
+)
 from core.operations.registry import OperationHandlerRegistry
 from core.operations.interface import IOperationExecutor
 from core.operations.executor import OperationExecutor
@@ -46,11 +53,6 @@ class OperationManager:
         self._registry = OperationHandlerRegistry(execution_router=None)
         self._storage = OperationStorage(runtime)
         self._executor: IOperationExecutor = OperationExecutor(self._registry, runtime, self._storage)
-        
-        # Error codes that allow retry
-        self._retryable_errors = {
-            "timeout", "transient", "network", "device_offline", "integration_unavailable"
-        }
     
     # ========== HANDLER REGISTRATION ==========
     
@@ -96,6 +98,9 @@ class OperationManager:
         params: dict,
         initiator: OperationInitiator,
         parent_operation_id: Optional[str] = None,
+        retry_count: int = 0,
+        max_retries: int = 2,
+        next_retry_at: Optional[float] = None,
     ) -> Operation:
         """
         Create and persist new operation.
@@ -109,7 +114,15 @@ class OperationManager:
         Returns:
             Created operation
         """
-        return await self._storage.create(op_type, params, initiator, parent_operation_id)
+        return await self._storage.create(
+            op_type,
+            params,
+            initiator,
+            parent_operation_id,
+            retry_count,
+            max_retries,
+            next_retry_at,
+        )
     
     async def get(self, operation_id: str) -> Optional[Operation]:
         """
@@ -123,7 +136,12 @@ class OperationManager:
         """
         return await self._storage.get(operation_id)
     
-    async def list(self, limit: int = 100, offset: int = 0) -> list[Operation]:
+    async def list(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        status: Optional[str] = None,
+    ) -> list[Operation]:
         """
         List operations (newest first).
         
@@ -134,7 +152,15 @@ class OperationManager:
         Returns:
             List of operations
         """
-        return await self._storage.list(limit, offset)
+        operations = await self._storage.list(limit, offset)
+        if status is None:
+            return operations
+
+        normalized_status = {
+            "pending": OperationStatus.CREATED.value,
+            "success": OperationStatus.COMPLETED.value,
+        }.get(str(status), str(status))
+        return [op for op in operations if op.status.value == normalized_status]
     
     # ========== EXECUTION ==========
     
@@ -157,7 +183,47 @@ class OperationManager:
         Returns:
             Operation with updated status and result
         """
-        return await self._executor.execute(operation)
+        now = time.time()
+
+        # Eligibility gating (mirrors worker semantics to avoid accidental early execution).
+        if operation.status.value == "failed" and not operation.can_retry(now):
+            return operation
+        if (
+            operation.status.value == "created"
+            and operation.next_retry_at is not None
+            and now < operation.next_retry_at
+        ):
+            return operation
+
+        # In CLAIM + ATTEMPT model, the execution unit is Attempt.
+        attempt_index = int(operation.retry_count or 0)
+        attempt_id = f"attempt-{operation.operation_id}-i{attempt_index}"
+
+        lease_ttl_s = int(getattr(self.runtime, "operation_attempt_lease_ttl", 30))
+        worker_id = f"opmgr-inline-{id(self)}-{uuid.uuid4().hex[:8]}"
+
+        await self._storage.ensure_attempt_created(
+            attempt_id=attempt_id,
+            operation_id=operation.operation_id,
+            attempt_index=attempt_index,
+        )
+
+        ok, claim_token = await self._storage.try_claim_attempt(
+            attempt_id=attempt_id,
+            worker_id=worker_id,
+            lease_ttl=lease_ttl_s,
+        )
+        if not ok or not claim_token:
+            return operation
+
+        # Dispatch guarded attempt execution.
+        # OperationExecutor already owns the guard logic; we only pass claim/token.
+        return await self._executor.execute_attempt(  # type: ignore[attr-defined]
+            operation,
+            attempt_id=attempt_id,
+            claim_token=claim_token,
+            worker_id=worker_id,
+        )
     
     async def cancel(self, operation_id: str) -> Optional[Operation]:
         """
@@ -173,7 +239,7 @@ class OperationManager:
         if not operation:
             return None
         
-        if operation.status not in (OperationStatus.PENDING, OperationStatus.RUNNING):
+        if operation.status not in (OperationStatus.CREATED, OperationStatus.RUNNING):
             return operation  # Already terminal
         
         operation.status = OperationStatus.CANCELLED
@@ -204,7 +270,7 @@ class OperationManager:
             return None
         
         # Only if error code is retryable
-        if original.error and original.error.code not in self._retryable_errors:
+        if original.error and original.error.code not in RETRYABLE_ERRORS:
             return None
         
         # Create new operation as retry
@@ -213,6 +279,7 @@ class OperationManager:
             params=original.params,
             initiator=original.initiator,
             parent_operation_id=operation_id,
+            max_retries=original.max_retries,
         )
         
         return new_op

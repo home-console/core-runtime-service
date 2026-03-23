@@ -6,7 +6,12 @@ AutomationModule — встроенный модуль автоматизаци�
 """
 
 from core.runtime_module import RuntimeModule
+from core.operations.registry import get_operation_handler, register_operation_handler
+
 from . import handlers
+from .events import device_state_to_operation
+from .registry import get_event_handlers, register_event_handler
+from .operations import handle_automation_run
 
 
 class AutomationModule(RuntimeModule):
@@ -32,6 +37,17 @@ class AutomationModule(RuntimeModule):
         Подписывается на событие external.device_state_reported.
         Дальше — только оркестрация через создание operations.
         """
+        handlers = get_event_handlers("external.device_state_reported")
+        if device_state_to_operation not in handlers:
+            register_event_handler(
+                "external.device_state_reported",
+                device_state_to_operation,
+            )
+
+        op_handler = get_operation_handler("automation.run")
+        if op_handler is None:
+            register_operation_handler("automation.run", handle_automation_run)
+
         # Подписываем обработчик события
         await self.runtime.event_bus.subscribe(
             "external.device_state_reported",

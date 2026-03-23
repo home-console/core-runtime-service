@@ -9,6 +9,18 @@ from typing import Any, Dict, Optional, List, Callable, Awaitable
 
 from core.operations.models import Operation
 
+OperationHandler = Callable[[dict[str, Any]], Awaitable[Any]]
+
+_operation_registry: Dict[str, OperationHandler] = {}
+
+
+def register_operation_handler(op_type: str, handler: OperationHandler) -> None:
+    _operation_registry[op_type] = handler
+
+
+def get_operation_handler(op_type: str) -> OperationHandler | None:
+    return _operation_registry.get(op_type)
+
 
 class OperationHandlerRegistry:
     """
