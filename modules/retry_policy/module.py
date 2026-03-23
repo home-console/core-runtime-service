@@ -72,7 +72,19 @@ class RetryPolicyModule(RuntimeModule):
             operation.next_retry_at = None
             return SystemHookResult(allow=True)
 
-        next_retry_at = compute_next_retry_at(operation, now=time.time())
+        now = time.time()
+        next_retry_at = compute_next_retry_at(operation, now=now)
+        if next_retry_at <= now:
+            event_bus = getattr(self.runtime, "event_bus", None)
+            publish = getattr(event_bus, "publish", None)
+            if callable(publish):
+                await publish(
+                    "operation_ready",
+                    {
+                        "type": "operation_ready",
+                        "operation_id": operation.operation_id,
+                    },
+                )
         return SystemHookResult(
             allow=True,
             actions=[ScheduleRetry(at=next_retry_at)],

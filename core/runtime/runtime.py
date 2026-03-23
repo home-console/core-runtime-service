@@ -29,7 +29,6 @@ from core.dependency_resolver import (  # Step 10
 from core.http import HttpRegistry
 from core.integration_registry import IntegrationRegistry
 from core.logger_helper import info, warning
-from core.messaging.event_bus import EventBus
 from core.operations.manager import OperationManager
 from core.operations.worker import OperationWorker
 from core.policy import PolicyEngine
@@ -45,6 +44,7 @@ from core.runtime.module_manager import ModuleManager
 from core.runtime.runtime_context import RuntimeContext
 from core.service_registry import ServiceRegistry
 from core.state_engine import StateEngine
+from modules.event_bus.inmemory import InMemoryEventBus
 
 class CoreRuntime:
     """
@@ -83,7 +83,7 @@ class CoreRuntime:
         self.config = config
 
         # Инициализация компонентов
-        self.event_bus = EventBus()
+        self.event_bus = InMemoryEventBus(storage=storage_port.storage)
         # PolicyEngine — per-runtime dependency, без обязательного глобального singleton.
         self.policy_engine = policy_engine or PolicyEngine()
 

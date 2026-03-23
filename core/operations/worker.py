@@ -28,11 +28,14 @@ class OperationWorker:
         self.running = False
         self._task: asyncio.Task[Any] | None = None
         self.worker_id = f"worker-{id(self)}-{uuid.uuid4().hex[:8]}"
+        self._event_subscription_active = False
 
     async def start(self):
         self.running = True
         if self._task is None:
             self._task = asyncio.current_task()
+        await self._subscribe_operation_events()
+        await self._replay_unprocessed_events()
         try:
             while self.running:
                 await self.tick()
@@ -40,6 +43,7 @@ class OperationWorker:
         except asyncio.CancelledError:
             raise
         finally:
+            await self._unsubscribe_operation_events()
             self.running = False
 
     async def stop(self) -> None:
@@ -81,6 +85,110 @@ class OperationWorker:
         if source is not None and callable(getattr(source, "get_runnable", None)):
             return source
         return _NOOP_OPERATION_SOURCE
+
+    def _resolve_event_bus(self) -> Any:
+        runtime_dict = getattr(self.runtime, "__dict__", {})
+        event_bus = runtime_dict.get("event_bus")
+        if event_bus is not None and callable(getattr(event_bus, "subscribe", None)):
+            return event_bus
+        return None
+
+    async def _subscribe_operation_events(self) -> None:
+        if self._event_subscription_active:
+            return
+        event_bus = self._resolve_event_bus()
+        if event_bus is None:
+            return
+        outcome = event_bus.subscribe("operation_ready", self._on_event)
+        if inspect.isawaitable(outcome):
+            await outcome
+        self._event_subscription_active = True
+
+    async def _unsubscribe_operation_events(self) -> None:
+        if not self._event_subscription_active:
+            return
+        event_bus = self._resolve_event_bus()
+        if event_bus is None:
+            self._event_subscription_active = False
+            return
+        unsubscribe = getattr(event_bus, "unsubscribe", None)
+        if callable(unsubscribe):
+            outcome = unsubscribe("operation_ready", self._on_event)
+            if inspect.isawaitable(outcome):
+                await outcome
+        self._event_subscription_active = False
+
+    async def _replay_unprocessed_events(self) -> None:
+        event_bus = self._resolve_event_bus()
+        if event_bus is None:
+            return
+        get_unprocessed_events = getattr(event_bus, "get_unprocessed_events", None)
+        if not callable(get_unprocessed_events):
+            return
+
+        events_outcome = get_unprocessed_events()
+        events = await events_outcome if inspect.isawaitable(events_outcome) else events_outcome
+        if not isinstance(events, list):
+            return
+        events_list: list[Any] = list(events)
+        for event in events_list:
+            if not isinstance(event, dict):
+                continue
+            await self._on_event(event)
+
+    async def _mark_event_processed(self, event_id: str) -> None:
+        event_bus = self._resolve_event_bus()
+        if event_bus is None:
+            return
+        mark = getattr(event_bus, "mark_event_processed", None)
+        if not callable(mark):
+            return
+        outcome = mark(event_id)
+        if inspect.isawaitable(outcome):
+            await outcome
+
+    async def _is_event_processed(self, event_id: str) -> bool:
+        event_bus = self._resolve_event_bus()
+        if event_bus is None:
+            return False
+        is_processed = getattr(event_bus, "is_event_processed", None)
+        if not callable(is_processed):
+            return False
+        outcome = is_processed(event_id)
+        value = await outcome if inspect.isawaitable(outcome) else outcome
+        return bool(value)
+
+    async def _on_event(self, event_type: Any, data: Any | None = None) -> None:
+        payload: dict[str, Any]
+        if isinstance(event_type, dict) and data is None:
+            payload = dict(event_type)
+            resolved_type = payload.get("type")
+        else:
+            payload = dict(data) if isinstance(data, dict) else {}
+            resolved_type = event_type
+
+        if resolved_type != "operation_ready":
+            return
+
+        operation_id = payload.get("operation_id")
+        event_id = payload.get("id")
+        if not operation_id:
+            return
+
+        if event_id and await self._is_event_processed(str(event_id)):
+            return
+
+        operation = await self.runtime.operations.get(str(operation_id))
+        if operation is None:
+            return
+
+        try:
+            await self.execute_operation_now(operation)
+            if event_id:
+                await self._mark_event_processed(str(event_id))
+        except Exception:
+            # at-least-once: keep event unacked so replay can retry later
+            raise
 
     def _normalize_hook_decision(
         self,

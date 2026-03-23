@@ -11,6 +11,20 @@ from core.operations.models import OperationStatus
 from modules.retry_policy.policy import is_retry_due
 
 
+async def _publish_operation_ready(runtime: Any, operation_id: str) -> None:
+    event_bus = getattr(runtime, "event_bus", None)
+    publish = getattr(event_bus, "publish", None)
+    if not callable(publish):
+        return
+    await publish(
+        "operation_ready",
+        {
+            "type": "operation_ready",
+            "operation_id": operation_id,
+        },
+    )
+
+
 async def admin_operations_create(runtime: Any, body: Any = None, **kwargs) -> Dict[str, Any]:
     """Create and execute an operation."""
     try:
@@ -39,6 +53,8 @@ async def admin_operations_create(runtime: Any, body: Any = None, **kwargs) -> D
             params=params,
             initiator=initiator,
         )
+
+        await _publish_operation_ready(runtime, operation.operation_id)
 
         result = await ops_mgr.execute(operation)
 
@@ -150,6 +166,8 @@ async def admin_operations_retry(runtime: Any, operation_id: str, **kwargs) -> D
             retry_count=original_op.retry_count,
             max_retries=original_op.max_retries,
         )
+
+        await _publish_operation_ready(runtime, new_op.operation_id)
 
         result = await ops_mgr.execute(new_op)
 

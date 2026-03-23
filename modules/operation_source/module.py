@@ -7,7 +7,13 @@ from core.operations.models import Operation
 
 
 class DefaultOperationSource:
-    def __init__(self, storage: Any, *, limit: int = 1000, max_runnable: int = 100) -> None:
+    def __init__(
+        self,
+        storage: Any,
+        *,
+        limit: int = 1000,
+        max_runnable: int = 100,
+    ) -> None:
         self.storage = storage
         self.limit = int(limit)
         self.max_runnable = int(max_runnable)
@@ -18,12 +24,8 @@ class DefaultOperationSource:
         return getattr(status, "value", status) or ""
 
     @staticmethod
-    def _is_failed_retry_due(operation: Operation, now: float) -> bool:
-        retry_count = int(getattr(operation, "retry_count", 0) or 0)
-        max_retries = int(getattr(operation, "max_retries", 0) or 0)
+    def _is_ready(operation: Operation, now: float) -> bool:
         next_retry_at = getattr(operation, "next_retry_at", None)
-        if retry_count >= max_retries:
-            return False
         if next_retry_at is None:
             return True
         try:
@@ -39,7 +41,7 @@ class DefaultOperationSource:
 
         runnable: list[Operation] = list(created_ops)
         for operation in failed_ops:
-            if self._status_value(operation) == "failed" and self._is_failed_retry_due(operation, now):
+            if self._status_value(operation) == "failed" and self._is_ready(operation, now):
                 runnable.append(operation)
 
         runnable.sort(key=lambda operation: getattr(operation, "priority", 0) or 0)
