@@ -12,7 +12,6 @@ from .runtime_contract import (
     ModulesActionDispatcherAdapter,
     ModulesActionResolverAdapter,
     ModulesHooksAdapter,
-    ModulesOperationSourceAdapter,
     ensure_runtime_execution_contract,
 )
 from .system import (
@@ -53,7 +52,6 @@ __all__ = [
     "ModulesHooksAdapter",
     "ModulesActionDispatcherAdapter",
     "ModulesActionResolverAdapter",
-    "ModulesOperationSourceAdapter",
     "ensure_runtime_execution_contract",
     "ActionHandler",
     "ScheduleRetryActionHandler",

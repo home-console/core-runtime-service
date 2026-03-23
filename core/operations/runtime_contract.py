@@ -29,7 +29,7 @@ class ActionResolver(Protocol):
 
 
 class OperationSource(Protocol):
-    async def get_runnable(self, runtime: Any) -> list[Operation]:
+    async def get_runnable(self) -> list[Operation]:
         ...
 
 
@@ -51,6 +51,5 @@ class PassThroughActionResolver:
 
 
 class NoopOperationSource:
-    async def get_runnable(self, runtime: Any) -> list[Operation]:
-        del runtime
+    async def get_runnable(self) -> list[Operation]:
         return []

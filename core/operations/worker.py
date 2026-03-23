@@ -6,7 +6,7 @@ import time
 import uuid
 from typing import Any, Iterable
 
-from core.operations.models import Attempt, AttemptStatus, Operation, OperationStatus, TERMINAL_STATUSES
+from core.operations.models import TERMINAL_STATUSES, Attempt, AttemptStatus, Operation
 from core.operations.runtime_contract import (
     HookDecision,
     NoopActionDispatcher,
@@ -15,7 +15,6 @@ from core.operations.runtime_contract import (
     OperationSource,
     PassThroughActionResolver,
 )
-
 
 _NOOP_HOOKS = NoopExecutionHooks()
 _NOOP_ACTION_DISPATCHER = NoopActionDispatcher()
@@ -215,7 +214,11 @@ class OperationWorker:
         get_attempt = getattr(storage, "get_attempt", None)
         if callable(get_attempt):
             maybe_attempt = get_attempt(attempt_id)
-            attempt = await maybe_attempt if inspect.isawaitable(maybe_attempt) else maybe_attempt
+            attempt = (
+                await maybe_attempt
+                if inspect.isawaitable(maybe_attempt)
+                else maybe_attempt
+            )
 
         hook_context.update(
             {
@@ -280,7 +283,6 @@ class OperationWorker:
 
     async def tick(self):
         source = self._resolve_operation_source()
-        ops = await source.get_runnable(self.runtime)
+        ops = await source.get_runnable()
         for op in ops:
-            if op.status in (OperationStatus.CREATED, OperationStatus.FAILED):
-                await self.execute_operation_now(op)
+            await self.execute_operation_now(op)

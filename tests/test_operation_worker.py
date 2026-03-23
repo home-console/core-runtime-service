@@ -17,7 +17,7 @@ from modules.hooks.runtime_contract import ensure_runtime_execution_contract
 
 
 @pytest.mark.asyncio
-async def test_worker_executes_created_and_due_failed_operations(monkeypatch):
+async def test_worker_executes_runnable_operations_from_operation_source(monkeypatch):
     monkeypatch.setattr("core.operations.worker.time.time", lambda: 1000.0)
     runtime = Mock()
 
@@ -28,25 +28,11 @@ async def test_worker_executes_created_and_due_failed_operations(monkeypatch):
         initiator=OperationInitiator(kind=OperationInitiatorKind.SYSTEM),
     )
 
-    failed_due = Operation(
-        operation_id="op-failed-due",
-        op_type="test.failed",
-        params={},
-        initiator=OperationInitiator(kind=OperationInitiatorKind.SYSTEM),
-        retry_count=1,
-        max_retries=3,
-        next_retry_at=-2600.0,
-    )
-    failed_due.status = OperationStatus.FAILED
-    failed_due.error = OperationError(code="timeout", message="temporary failure")
-
     runtime.operations = Mock()
-    runtime.operations.list = AsyncMock(side_effect=[[created_ready], [failed_due]])
+    runtime.operations.list = AsyncMock(return_value=[created_ready])
     runtime.operations._storage = Mock()
     runtime.operations._storage.ensure_attempt_created = AsyncMock()
-    runtime.operations._storage.try_claim_attempt = AsyncMock(
-        side_effect=[(True, "t1"), (True, "t2")]
-    )
+    runtime.operations._storage.try_claim_attempt = AsyncMock(return_value=(True, "t1"))
     runtime.operations._storage.persist = AsyncMock()
     runtime.operations._executor = Mock()
 
@@ -57,23 +43,18 @@ async def test_worker_executes_created_and_due_failed_operations(monkeypatch):
         initiator=OperationInitiator(kind=OperationInitiatorKind.SYSTEM),
     )
     created_ready_completed.status = OperationStatus.COMPLETED
-    runtime.operations._executor.execute_attempt = AsyncMock(
-        side_effect=[created_ready_completed, failed_due]
-    )
+    runtime.operations._executor.execute_attempt = AsyncMock(return_value=created_ready_completed)
     ensure_runtime_execution_contract(runtime)
 
     worker = OperationWorker(runtime)
 
     await worker.tick()
 
-    assert runtime.operations._executor.execute_attempt.await_count == 2
+    assert runtime.operations._executor.execute_attempt.await_count == 1
     attempt_ids = [call.args[0] for call in runtime.operations._executor.execute_attempt.await_args_list]
     claim_tokens = [call.args[1] for call in runtime.operations._executor.execute_attempt.await_args_list]
-    assert attempt_ids == [
-        "attempt-op-created-ready-i0",
-        "attempt-op-failed-due-i1",
-    ]
-    assert claim_tokens == ["t1", "t2"]
+    assert attempt_ids == ["attempt-op-created-ready-i0"]
+    assert claim_tokens == ["t1"]
 
 
 @pytest.mark.asyncio

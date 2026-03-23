@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Iterable, Mapping
 
-from core.operations.models import Operation
 from core.operations.runtime_contract import HookDecision
+from modules.operation_source.module import DefaultOperationSource
 
 from .action_resolver import resolve_actions
 from .actions import dispatch_action
@@ -37,17 +37,6 @@ class ModulesActionResolverAdapter:
         return list(resolve_actions(actions))
 
 
-class ModulesOperationSourceAdapter:
-    async def get_runnable(self, runtime: Any) -> list[Operation]:
-        operations = getattr(runtime, "operations", None)
-        if operations is None or not hasattr(operations, "list"):
-            return []
-
-        created_ops = await operations.list(limit=1000, status="created")
-        failed_ops = await operations.list(limit=1000, status="failed")
-        return list(created_ops) + list(failed_ops)
-
-
 def ensure_runtime_execution_contract(runtime: Any) -> None:
     runtime_dict = getattr(runtime, "__dict__", {})
 
@@ -58,4 +47,4 @@ def ensure_runtime_execution_contract(runtime: Any) -> None:
     if runtime_dict.get("action_resolver") is None:
         runtime.action_resolver = ModulesActionResolverAdapter()
     if runtime_dict.get("operation_source") is None:
-        runtime.operation_source = ModulesOperationSourceAdapter()
+        runtime.operation_source = DefaultOperationSource(runtime.operations)
