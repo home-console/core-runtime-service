@@ -1,21 +1,13 @@
+from __future__ import annotations
+
 import asyncio
+import importlib
 import inspect
 import time
 import uuid
-from typing import Any
+from typing import Any, Iterable
 
-from modules.hooks.actions import dispatch_action
-from modules.hooks.action_resolver import resolve_actions
-from modules.hooks.system import dispatch_system_hooks, merge_system_hook_results
-
-from core.operations.models import (
-    Attempt,
-    AttemptStatus,
-    Operation,
-    OperationError,
-    OperationStatus,
-    TERMINAL_STATUSES,
-)
+from core.operations.models import Attempt, AttemptStatus, Operation, OperationStatus, TERMINAL_STATUSES
 
 
 class OperationWorker:
@@ -50,32 +42,85 @@ class OperationWorker:
                 pass
         self._task = None
 
+    def _load_hook_stack(self) -> tuple[Any, Any]:
+        runtime_dict = getattr(self.runtime, "__dict__", {})
+        dispatch = runtime_dict.get("dispatch_system_hooks")
+        merge = runtime_dict.get("merge_system_hook_results")
+        if callable(dispatch) and callable(merge):
+            return dispatch, merge
+
+        module = importlib.import_module("modules.hooks.system")
+        return (
+            getattr(module, "dispatch_system_hooks"),
+            getattr(module, "merge_system_hook_results"),
+        )
+
+    def _load_action_stack(self) -> tuple[Any, Any]:
+        runtime_dict = getattr(self.runtime, "__dict__", {})
+        dispatch = runtime_dict.get("dispatch_execution_action")
+        resolve = runtime_dict.get("resolve_execution_actions")
+        if callable(dispatch) and callable(resolve):
+            return dispatch, resolve
+
+        actions_mod = importlib.import_module("modules.hooks.actions")
+        resolver_mod = importlib.import_module("modules.hooks.action_resolver")
+        return (
+            getattr(actions_mod, "dispatch_action"),
+            getattr(resolver_mod, "resolve_actions"),
+        )
+
     async def _dispatch_system_hooks(
         self, hook_name: str, ctx: dict[str, Any]
     ) -> tuple[dict[str, Any], bool, tuple[Any, ...]]:
-        results = await dispatch_system_hooks(hook_name, ctx)
-        decision = merge_system_hook_results(results)
+        dispatch_hooks, merge_hook_results = self._load_hook_stack()
+        results = await dispatch_hooks(hook_name, ctx)
+        decision = merge_hook_results(results)
+
         merged_ctx = dict(ctx)
-        if decision.context_patch:
-            merged_ctx.update(decision.context_patch)
-        return merged_ctx, decision.allow, decision.actions
+        context_patch = getattr(decision, "context_patch", None)
+        if context_patch:
+            merged_ctx.update(context_patch)
+        return merged_ctx, bool(getattr(decision, "allow", True)), tuple(
+            getattr(decision, "actions", ()) or ()
+        )
+
+    async def _dispatch_actions(
+        self, actions: Iterable[Any], hook_context: dict[str, Any], operation: Operation
+    ) -> None:
+        dispatch_action, resolve_actions = self._load_action_stack()
+        for action in resolve_actions(actions):
+            outcome = dispatch_action(
+                action,
+                {**hook_context, "operation": operation, "now": time.time()},
+            )
+            if inspect.isawaitable(outcome):
+                await outcome
+
+    async def _release_claim(self, storage: Any, attempt_id: str) -> None:
+        latest_attempt = await storage.get_attempt(attempt_id)
+        if not isinstance(latest_attempt, Attempt):
+            return
+        latest_attempt.status = AttemptStatus.CREATED
+        latest_attempt.claim_token = None
+        latest_attempt.execution_token = None
+        latest_attempt.claimed_at = None
+        latest_attempt.lease_expires_at = None
+        latest_attempt.claimed_by = None
+        latest_attempt.started_at = None
+        latest_attempt.finished_at = None
+        latest_attempt.error = None
+        await self._persist_attempt(storage, latest_attempt)
+
+    async def _persist_attempt(self, storage: Any, attempt: Attempt) -> None:
+        persist_attempt = getattr(storage, "persist_attempt", None)
+        if not callable(persist_attempt):
+            return
+        outcome = persist_attempt(attempt)
+        if inspect.isawaitable(outcome):
+            await outcome
 
     async def execute_operation_now(self, operation: Operation) -> Operation:
-        """
-        Inline execution path using CLAIM + ATTEMPT.
-
-        Used by OperationManager as a thin delegate for backward compatibility.
-        """
-
         now = time.time()
-
-        # Eligibility gating: executor is attempt-only; worker decides if attempt should be started.
-        if operation.status == OperationStatus.CREATED:
-            if operation.next_retry_at is not None and now < operation.next_retry_at:
-                return operation
-        elif operation.status == OperationStatus.FAILED:
-            if not operation.can_retry(now):
-                return operation
 
         attempt_index = int(operation.retry_count or 0)
         attempt_id = f"attempt-{operation.operation_id}-i{attempt_index}"
@@ -100,18 +145,15 @@ class OperationWorker:
             "lease_ttl_s": lease_ttl_s,
         }
 
-        hook_context, allow, _ = await self._dispatch_system_hooks(
+        hook_context, allow, actions = await self._dispatch_system_hooks(
             "before_claim", hook_context
         )
-        if not allow:
-            operation.status = OperationStatus.FAILED
-            operation.error = OperationError(
-                code="hook_blocked",
-                message="before_claim system hook blocked execution",
-                details={"hook_name": "before_claim"},
-            )
-            operation.finished_at = now
+        if actions:
+            await self._dispatch_actions(actions, hook_context, operation)
             await self.runtime.operations._storage.persist(operation)
+            if operation.status in TERMINAL_STATUSES:
+                return operation
+        if not allow:
             return operation
 
         storage = self.runtime.operations._storage
@@ -133,10 +175,7 @@ class OperationWorker:
         get_attempt = getattr(storage, "get_attempt", None)
         if callable(get_attempt):
             maybe_attempt = get_attempt(attempt_id)
-            if inspect.isawaitable(maybe_attempt):
-                attempt = await maybe_attempt
-            else:
-                attempt = maybe_attempt
+            attempt = await maybe_attempt if inspect.isawaitable(maybe_attempt) else maybe_attempt
 
         hook_context.update(
             {
@@ -149,108 +188,60 @@ class OperationWorker:
         hook_context, allow, actions = await self._dispatch_system_hooks(
             "before_execute", hook_context
         )
-        actions = resolve_actions(actions)
         if actions:
-            for action in actions:
-                await dispatch_action(
-                    action,
-                    {**hook_context, "operation": operation, "now": time.time()},
-                )
-
+            await self._dispatch_actions(actions, hook_context, operation)
             latest_attempt = hook_context.get("attempt")
-            if latest_attempt is not None:
-                await storage.persist_attempt(latest_attempt)
+            if isinstance(latest_attempt, Attempt):
+                await self._persist_attempt(storage, latest_attempt)
             await storage.persist(operation)
-
-        if actions and operation.status in TERMINAL_STATUSES:
-            return operation
+            if operation.status in TERMINAL_STATUSES:
+                return operation
 
         if not allow:
-            latest_attempt = attempt
-            if latest_attempt is None and callable(get_attempt):
-                maybe_attempt = get_attempt(attempt_id)
-                if inspect.isawaitable(maybe_attempt):
-                    latest_attempt = await maybe_attempt
-                else:
-                    latest_attempt = maybe_attempt
-            if isinstance(latest_attempt, Attempt):
-                latest_attempt.status = AttemptStatus.FAILED
-                latest_attempt.finished_at = time.time()
-                latest_attempt.error = {
-                    "code": "hook_blocked",
-                    "message": "before_execute system hook blocked execution",
-                }
-                await storage.persist_attempt(latest_attempt)
-
-            operation.status = OperationStatus.FAILED
-            operation.error = OperationError(
-                code="hook_blocked",
-                message="before_execute system hook blocked execution",
-                details={"hook_name": "before_execute"},
-            )
-            operation.finished_at = time.time()
-            await storage.persist(operation)
+            await self._release_claim(storage, attempt_id)
             return operation
 
-        res: Operation = await executor.execute_attempt(attempt_id, claim_token)
+        result: Operation = await executor.execute_attempt(attempt_id, claim_token)
+        hook_context.update(
+            {
+                "stage": "on_failure",
+                "result": result,
+                "operation": result,
+                "error": result.error,
+            }
+        )
+        hook_context, _, actions = await self._dispatch_system_hooks(
+            "on_failure", hook_context
+        )
+        if actions:
+            await self._dispatch_actions(actions, hook_context, result)
+            latest_attempt = hook_context.get("attempt")
+            if isinstance(latest_attempt, Attempt):
+                await self._persist_attempt(storage, latest_attempt)
 
-        if res.status == OperationStatus.FAILED:
-            hook_context.update(
-                {
-                    "stage": "on_failure",
-                    "operation": res,
-                    "result": res,
-                    "error": res.error,
-                }
-            )
-            hook_context, allow, actions = await self._dispatch_system_hooks(
-                "on_failure", hook_context
-            )
-            actions = resolve_actions(actions)
-            if allow and actions:
-                for action in actions:
-                    await dispatch_action(
-                        action,
-                        {**hook_context, "operation": res, "now": time.time()},
-                    )
-        else:
-            hook_context.update(
-                {
-                    "stage": "after_execute",
-                    "result": res,
-                }
-            )
-            _, allow, actions = await self._dispatch_system_hooks(
-                "after_execute", hook_context
-            )
-            actions = resolve_actions(actions)
-            if allow and actions:
-                for action in actions:
-                    await dispatch_action(
-                        action,
-                        {**hook_context, "operation": res, "now": time.time()},
-                    )
-            res.next_retry_at = None
+        hook_context.update(
+            {
+                "stage": "after_execute",
+                "result": result,
+                "operation": result,
+            }
+        )
+        hook_context, _, actions = await self._dispatch_system_hooks(
+            "after_execute", hook_context
+        )
+        if actions:
+            await self._dispatch_actions(actions, hook_context, result)
+            latest_attempt = hook_context.get("attempt")
+            if isinstance(latest_attempt, Attempt):
+                await self._persist_attempt(storage, latest_attempt)
 
-        await storage.persist(res)
-        return res
+        await storage.persist(result)
+        return result
 
     async def tick(self):
-        now = time.time()
-
         created_ops = await self.runtime.operations.list(limit=1000, status="created")
         failed_ops = await self.runtime.operations.list(limit=1000, status="failed")
-
         ops = list(created_ops) + list(failed_ops)
-
         for op in ops:
-            if op.status == OperationStatus.CREATED:
-                if op.next_retry_at is not None and now < op.next_retry_at:
-                    continue
-                await self.execute_operation_now(op)
-                continue
-
-            if op.status == OperationStatus.FAILED:
-                if op.next_retry_at is None or now < op.next_retry_at:
-                    continue
+            if op.status in (OperationStatus.CREATED, OperationStatus.FAILED):
                 await self.execute_operation_now(op)

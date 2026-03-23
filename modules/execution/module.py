@@ -16,11 +16,19 @@ import time
 import asyncio
 from typing import Any, Optional, Callable, Awaitable
 
+from core import capability_protocol
+from core.operations.registry import get_operation_handler
 from core.runtime_module import RuntimeModule
-from core.operations.models import Operation, OperationStatus, OperationError
+from core.operations.models import Operation, OperationStatus
 
 from core.execution.controller import ExecutionControllerImpl
 from core.execution.scheduler import ExecutionScheduler, ExecutionSchedule, generate_schedule_id
+from modules.hooks.system import (
+    CompleteOperation,
+    SystemHookResult,
+    register_system_hook,
+    unregister_system_hook,
+)
 
 
 class ExecutionModule(RuntimeModule):
@@ -33,11 +41,14 @@ class ExecutionModule(RuntimeModule):
         self._controller: Optional[ExecutionControllerImpl] = None
         self._scheduler: Optional[ExecutionScheduler] = None
         self._scheduler_task: Optional[asyncio.Task] = None
+        self._hook_bindings: list[tuple[str, Any]] = []
 
     async def register(self) -> None:
         # Создаём controller и публикуем в runtime как расширение (не Core API).
         self._controller = ExecutionControllerImpl(self.runtime)
         self.runtime.execution_controller = self._controller
+        register_system_hook("before_execute", self._before_execute)
+        self._hook_bindings.append(("before_execute", self._before_execute))
 
         ops_mgr = getattr(self.runtime, "operations", None)
         if ops_mgr is None:
@@ -334,6 +345,177 @@ class ExecutionModule(RuntimeModule):
         # NOTE: Больше не нужен monkey-patch ops_mgr.execute
         # OperationManager теперь сам использует ExecutionController если доступен
 
+    async def _execute_with_controller(
+        self,
+        operation: Operation,
+        provider_metadata: Any | None,
+    ) -> dict[str, Any]:
+        controller: ExecutionControllerImpl | None = self.runtime.execution_controller
+        if controller is None:
+            controller = self._controller
+        if controller is None:
+            return {
+                "status": "failed",
+                "result": None,
+                "error": {
+                    "code": "execution_controller_unavailable",
+                    "message": "Execution controller is not available",
+                },
+                "finished_at": time.time(),
+            }
+
+        context = {"runtime": self.runtime, "operation_id": operation.operation_id}
+        if provider_metadata is not None:
+            context["_execution_policy"] = {
+                "execution_mode": getattr(provider_metadata, "execution_mode", "in_process"),
+                "process_config": getattr(provider_metadata, "process_config", None),
+                "container_config": getattr(provider_metadata, "container_config", None),
+            }
+
+        op_res = await controller.execute_operation(
+            operation_id=operation.operation_id,
+            operation_type=operation.type,
+            params=operation.params,
+            context=context,
+        )
+        if op_res.ok:
+            return {
+                "status": "completed",
+                "result": op_res.result or {},
+                "error": None,
+                "finished_at": time.time(),
+            }
+        return {
+            "status": "failed",
+            "result": None,
+            "error": op_res.error or {
+                "code": "execution_error",
+                "message": "Execution failed",
+            },
+            "finished_at": time.time(),
+        }
+
+    async def _execute_remote(
+        self,
+        operation: Operation,
+        provider_metadata: Any,
+    ) -> dict[str, Any]:
+        from core.remote_executor import RemoteOperationExecutor
+
+        remote_config = getattr(provider_metadata, "remote_config", None) or {}
+        base_url = remote_config.get("base_url")
+        if not base_url:
+            return {
+                "status": "failed",
+                "result": None,
+                "error": {
+                    "code": "remote_config_missing",
+                    "message": "Remote provider missing base_url in config",
+                },
+                "finished_at": time.time(),
+            }
+
+        timeout = (getattr(provider_metadata, "timeouts", None) or {}).get(
+            operation.type, capability_protocol.DEFAULT_CAPABILITY_TIMEOUT
+        )
+        context = {
+            "operation_id": operation.operation_id,
+            "initiator": operation.initiator.to_dict() if operation.initiator else None,
+        }
+
+        try:
+            response = await RemoteOperationExecutor.execute_remote(
+                base_url=base_url,
+                capability=operation.type,
+                operation_id=operation.operation_id,
+                params=operation.params,
+                context=context,
+                timeout=timeout,
+            )
+        except Exception as exc:
+            return {
+                "status": "failed",
+                "result": None,
+                "error": {
+                    "code": "remote_execution_failed",
+                    "message": str(exc),
+                },
+                "finished_at": time.time(),
+            }
+
+        if response.get("status") == "success":
+            return {
+                "status": "completed",
+                "result": response.get("result", {}),
+                "error": None,
+                "finished_at": time.time(),
+            }
+
+        error_info = response.get("error") if isinstance(response.get("error"), dict) else {}
+        return {
+            "status": "failed",
+            "result": None,
+            "error": {
+                "code": str(error_info.get("code", "remote_error")),
+                "message": str(error_info.get("message", "Remote provider error")),
+                "details": error_info.get("details"),
+            },
+            "finished_at": time.time(),
+        }
+
+    async def _before_execute(self, ctx: dict[str, Any]) -> SystemHookResult:
+        operation = ctx.get("operation")
+        if not isinstance(operation, Operation):
+            return SystemHookResult(allow=True)
+
+        if operation.status not in (OperationStatus.CREATED, OperationStatus.FAILED):
+            return SystemHookResult(allow=True)
+
+        execution_token = (
+            ctx.get("execution_token")
+            or getattr(ctx.get("attempt"), "execution_token", None)
+            or ctx.get("claim_token")
+        )
+        if execution_token:
+            try:
+                cached = await self.runtime.storage.get("operation_results", execution_token)
+            except Exception:
+                cached = None
+            if isinstance(cached, dict):
+                return SystemHookResult(allow=True)
+
+        local_handler = None
+        ops_mgr = getattr(self.runtime, "operations", None)
+        registry = getattr(ops_mgr, "_registry", None)
+        if registry is not None and hasattr(registry, "find_handler"):
+            local_handler = registry.find_handler(operation.type, self.runtime)
+        if local_handler is None:
+            local_handler = get_operation_handler(operation.type)
+        if local_handler is not None:
+            return SystemHookResult(allow=True)
+
+        cap_reg = getattr(self.runtime, "capability_registry", None)
+        if cap_reg is None:
+            return SystemHookResult(allow=True)
+
+        try:
+            provider_metadata = cap_reg.select_provider_for(operation.type)
+        except Exception:
+            provider_metadata = None
+        if provider_metadata is None:
+            return SystemHookResult(allow=True)
+
+        if getattr(provider_metadata, "provider_type", "local") == "remote":
+            payload = await self._execute_remote(operation, provider_metadata)
+        else:
+            payload = await self._execute_with_controller(operation, provider_metadata)
+
+        return SystemHookResult(
+            allow=False,
+            actions=[CompleteOperation(result=payload)],
+            reason="execution_routed_by_module",
+        )
+
     async def start(self) -> None:
         # Запускаем фоновый scheduler (D3.6).
         if self._controller is None:
@@ -354,6 +536,10 @@ class ExecutionModule(RuntimeModule):
         self._scheduler_task = asyncio.create_task(_run_scheduler())
 
     async def stop(self) -> None:
+        for hook_name, handler in self._hook_bindings:
+            unregister_system_hook(hook_name, handler)
+        self._hook_bindings.clear()
+
         # Останавливаем scheduler task, если он был запущен.
         if self._scheduler_task is not None:
             self._scheduler_task.cancel()
@@ -362,4 +548,3 @@ class ExecutionModule(RuntimeModule):
             except asyncio.CancelledError:
                 pass
             self._scheduler_task = None
-

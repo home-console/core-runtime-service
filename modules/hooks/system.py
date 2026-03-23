@@ -79,7 +79,34 @@ def register_system_hook(hook_name: str, handler: SystemHookHandler) -> None:
         raise TypeError("handler must be callable")
 
     with _hook_registry_lock:
-        _hook_registry.setdefault(hook_name, []).append(handler)
+        handlers = _hook_registry.setdefault(hook_name, [])
+        if any(_same_handler(existing, handler) for existing in handlers):
+            return
+        handlers.append(handler)
+
+
+def _same_handler(left: SystemHookHandler, right: SystemHookHandler) -> bool:
+    left_func = getattr(left, "__func__", left)
+    right_func = getattr(right, "__func__", right)
+    left_self = getattr(left, "__self__", None)
+    right_self = getattr(right, "__self__", None)
+    return left_func is right_func and left_self is right_self
+
+
+def unregister_system_hook(hook_name: str, handler: SystemHookHandler) -> None:
+    if not hook_name:
+        return
+
+    with _hook_registry_lock:
+        handlers = _hook_registry.get(hook_name)
+        if not handlers:
+            return
+
+        _hook_registry[hook_name] = [
+            existing for existing in handlers if not _same_handler(existing, handler)
+        ]
+        if not _hook_registry[hook_name]:
+            _hook_registry.pop(hook_name, None)
 
 
 def get_system_hooks(hook_name: str) -> list[SystemHookHandler]:

@@ -45,6 +45,8 @@ _load_dotenv()
 APP_MODULES: list[ModuleSpec] = [
     ModuleSpec("logger", required=True),
     ModuleSpec("request_logger", required=True),
+    ModuleSpec("retry_policy", required=True),
+    ModuleSpec("idempotency", required=True),
     ModuleSpec("api", required=True),
     ModuleSpec("admin", required=True),
     ModuleSpec("auth", required=True),

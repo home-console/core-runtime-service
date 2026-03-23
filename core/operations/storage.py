@@ -6,6 +6,7 @@ OperationStorage - персистентность операций.
 
 import time
 import uuid
+from contextlib import asynccontextmanager
 from typing import Optional, List, Any, Tuple
 
 from core.operations.models import (
@@ -31,6 +32,15 @@ class OperationStorage:
             runtime: экземпляр CoreRuntime
         """
         self.runtime = runtime
+
+    @asynccontextmanager
+    async def _transaction(self):
+        transaction = getattr(self.runtime.storage, "transaction", None)
+        if callable(transaction):
+            async with transaction():
+                yield
+            return
+        yield
     
     async def create(
         self,
@@ -62,10 +72,7 @@ class OperationStorage:
         causation_id = params.get("causation_id")
         # If event_id is provided, prefer it. Otherwise keep legacy "source_event" value.
         source_event = params.get("event_id") or params.get("source_event")
-        triggered_by = params.get("triggered_by")
-        if not triggered_by:
-            # Best-effort heuristic: if the caller provided any event-like metadata → 'event'.
-            triggered_by = "event" if (params.get("event_id") or params.get("source_event") or "raw" in params) else "manual"
+        triggered_by = params.get("triggered_by", "manual")
 
         idempotency_key = params.get("idempotency_key")
         
@@ -185,36 +192,17 @@ class OperationStorage:
 
         attempt: Optional[Attempt] = None
 
-        async with self.runtime.storage.transaction():
+        async with self._transaction():
             existing = await self.runtime.storage.get("operation_attempts", attempt_id)
             if existing is not None:
                 attempt = Attempt.from_dict(existing)
                 return attempt
-
-            trigger_type = "initial" if int(attempt_index) == 0 else "retry"
-            parent_attempt_id = (
-                f"attempt-{operation_id}-i{attempt_index - 1}"
-                if int(attempt_index) > 0
-                else None
-            )
-            retry_reason = None
-            if int(attempt_index) > 0:
-                try:
-                    op_data = await self.runtime.storage.get("operations", operation_id)
-                    if isinstance(op_data, dict):
-                        op = Operation.from_dict(op_data)
-                        retry_reason = op.error.code if op.error else None
-                except Exception:
-                    retry_reason = None
 
             attempt = Attempt(
                 attempt_id=attempt_id,
                 operation_id=operation_id,
                 attempt_index=attempt_index,
                 status=AttemptStatus.CREATED,
-                trigger_type=trigger_type,
-                parent_attempt_id=parent_attempt_id,
-                retry_reason=retry_reason,
             )
             await self.runtime.storage.set("operation_attempts", attempt_id, attempt.to_dict())
 
@@ -243,7 +231,7 @@ class OperationStorage:
         """
 
         now = time.time()
-        async with self.runtime.storage.transaction():
+        async with self._transaction():
             data = await self.runtime.storage.get("operation_attempts", attempt_id)
             if data is None:
                 return False, None
@@ -291,7 +279,7 @@ class OperationStorage:
         """
 
         now = time.time()
-        async with self.runtime.storage.transaction():
+        async with self._transaction():
             data = await self.runtime.storage.get(
                 "operation_attempts", attempt_id
             )

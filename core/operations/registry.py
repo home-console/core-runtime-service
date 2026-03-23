@@ -102,40 +102,6 @@ class OperationHandlerRegistry:
         Returns:
             Handler callable or None
         """
+        del runtime
         with self._handlers_lock:
-            # Strategy 1: Direct lookup (backward compatibility)
-            if operation_type in self._handlers:
-                return self._handlers[operation_type]
-        
-        # Strategy 2: Capability-based lookup (outside lock, for CapabilityRegistry)
-        # Try to find provider through capability registry
-        try:
-            if runtime and hasattr(runtime, 'capability_registry') and runtime.capability_registry:
-                cap_reg = runtime.capability_registry
-                providers = cap_reg.get_providers(operation_type)
-                
-                if providers:
-                    # Get primary provider (first one, or could be configurable)
-                    provider_name = providers[0]
-                    
-                    # Try to find handler registered under provider name + capability
-                    # Fallback handler names:
-                    # For capability "client.command.execute" and provider "client_manager":
-                    # Try: "client_manager.client.command.execute" or
-                    #      "client.command.execute" (already tried above)
-                    # The handler should be registered under the capability name, 
-                    # not provider name + capability
-                    # So, if we reached here, handler might not be registered properly
-                    
-                    # Actually, the handler SHOULD be registered under capability name
-                    # in _handlers by the plugin itself. If not found in step 1, it's an error.
-                    # But we could also check if handler exists under provider-namespaced name
-                    with self._handlers_lock:
-                        fallback_type = f"{provider_name}.{operation_type}"
-                        if fallback_type in self._handlers:
-                            return self._handlers[fallback_type]
-        except Exception:
-            # Capability registry might not be available - continue
-            pass
-        
-        return None
+            return self._handlers.get(operation_type)

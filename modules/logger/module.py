@@ -16,7 +16,7 @@ import logging
 from typing import Any
 
 from core.runtime_module import RuntimeModule
-from modules.hooks.system import register_system_hook
+from modules.hooks.system import register_system_hook, unregister_system_hook
 
 
 class LoggerModule(RuntimeModule):
@@ -26,6 +26,10 @@ class LoggerModule(RuntimeModule):
     Предоставляет сервис logger.log для централизованного логирования.
     Не меняет глобальное состояние logging (не трогает root logger).
     """
+
+    def __init__(self, runtime: Any):
+        super().__init__(runtime)
+        self._hook_bindings: list[tuple[str, Any]] = []
 
     @property
     def name(self) -> str:
@@ -64,6 +68,12 @@ class LoggerModule(RuntimeModule):
 
         register_system_hook("after_execute", self._after_execute)
         register_system_hook("on_failure", self._on_failure)
+        self._hook_bindings.extend(
+            [
+                ("after_execute", self._after_execute),
+                ("on_failure", self._on_failure),
+            ]
+        )
 
     async def start(self) -> None:
         """
@@ -95,6 +105,10 @@ class LoggerModule(RuntimeModule):
             )
         except Exception:
             pass
+
+        for hook_name, handler in self._hook_bindings:
+            unregister_system_hook(hook_name, handler)
+        self._hook_bindings.clear()
 
         # Очищаем ссылки (больше не используем logger)
         try:

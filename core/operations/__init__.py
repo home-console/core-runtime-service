@@ -16,7 +16,6 @@ from core.operations.models import (
     OperationInitiatorKind,
     OperationError,
     OperationInitiator,
-    RETRYABLE_ERRORS,
     TERMINAL_STATUSES,
 )
 from core.operations.registry import OperationHandlerRegistry
@@ -32,7 +31,6 @@ __all__ = [
     'OperationInitiatorKind',
     'OperationError',
     'OperationInitiator',
-    'RETRYABLE_ERRORS',
     'TERMINAL_STATUSES',
     # Manager
     'OperationManager',

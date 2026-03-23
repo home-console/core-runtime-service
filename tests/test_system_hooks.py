@@ -230,9 +230,8 @@ async def test_before_execute_hook_can_block_execution(monkeypatch: pytest.Monke
     worker = OperationWorker(runtime)
     result = await worker.execute_operation_now(operation)
 
-    assert result.status == OperationStatus.FAILED
-    assert result.error is not None
-    assert result.error.code == "hook_blocked"
-    assert result.finished_at == 1000.0
+    assert result.status == OperationStatus.CREATED
+    assert result.error is None
+    assert result.finished_at is None
     runtime.operations._executor.execute_attempt.assert_not_called()
     runtime.operations._storage.persist_attempt.assert_awaited_once()

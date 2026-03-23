@@ -67,6 +67,7 @@ async def test_retryable_failure_schedules_next_retry(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_retry_is_skipped_until_due():
+    clear_system_hooks()
     runtime = Mock()
     runtime.operations = Mock()
     runtime.operations._storage = Mock()
@@ -87,6 +88,9 @@ async def test_retry_is_skipped_until_due():
     )
     operation.status = OperationStatus.FAILED
     operation.error = OperationError(code="timeout", message="temporary failure")
+
+    module = RetryPolicyModule(runtime)
+    await module.register()
 
     monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setattr("core.operations.worker.time.time", lambda: 1000.0)

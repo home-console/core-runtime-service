@@ -4,10 +4,14 @@ from typing import Any
 
 from core.observability.metrics import get_metrics_registry
 from core.runtime_module import RuntimeModule
-from modules.hooks.system import register_system_hook
+from modules.hooks.system import register_system_hook, unregister_system_hook
 
 
 class MetricsModule(RuntimeModule):
+    def __init__(self, runtime: Any):
+        super().__init__(runtime)
+        self._hook_bindings: list[tuple[str, Any]] = []
+
     @property
     def name(self) -> str:
         return "metrics"
@@ -15,6 +19,17 @@ class MetricsModule(RuntimeModule):
     async def register(self) -> None:
         register_system_hook("after_execute", self._after_execute)
         register_system_hook("on_failure", self._on_failure)
+        self._hook_bindings.extend(
+            [
+                ("after_execute", self._after_execute),
+                ("on_failure", self._on_failure),
+            ]
+        )
+
+    async def stop(self) -> None:
+        for hook_name, handler in self._hook_bindings:
+            unregister_system_hook(hook_name, handler)
+        self._hook_bindings.clear()
 
     async def _after_execute(self, ctx: dict[str, Any]):
         operation = ctx.get("operation")

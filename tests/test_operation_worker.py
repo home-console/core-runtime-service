@@ -27,14 +27,6 @@ async def test_worker_executes_created_and_due_failed_operations(monkeypatch):
         initiator=OperationInitiator(kind=OperationInitiatorKind.SYSTEM),
     )
 
-    created_waiting = Operation(
-        operation_id="op-created-waiting",
-        op_type="test.created",
-        params={},
-        initiator=OperationInitiator(kind=OperationInitiatorKind.SYSTEM),
-        next_retry_at=1060.0,
-    )
-
     failed_due = Operation(
         operation_id="op-failed-due",
         op_type="test.failed",
@@ -46,10 +38,9 @@ async def test_worker_executes_created_and_due_failed_operations(monkeypatch):
     )
     failed_due.status = OperationStatus.FAILED
     failed_due.error = OperationError(code="timeout", message="temporary failure")
-    assert failed_due.can_retry(1000.0) is True
 
     runtime.operations = Mock()
-    runtime.operations.list = AsyncMock(side_effect=[[created_ready, created_waiting], [failed_due]])
+    runtime.operations.list = AsyncMock(side_effect=[[created_ready], [failed_due]])
     runtime.operations._storage = Mock()
     runtime.operations._storage.ensure_attempt_created = AsyncMock()
     runtime.operations._storage.try_claim_attempt = AsyncMock(

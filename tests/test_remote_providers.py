@@ -17,6 +17,7 @@ from typing import Any, Dict
 os.environ['TEST_MODE'] = '1'
 
 from core.runtime.runtime import CoreRuntime
+from core.runtime.module_manager import ModuleSpec
 from core.kernel.base_plugin import BasePlugin, PluginMetadata
 from core.remote_provider import RemoteCapabilityProvider
 from core.operations import OperationInitiator, OperationInitiatorKind, OperationStatus
@@ -66,11 +67,23 @@ class LocalCapabilityProvider(BasePlugin):
         return {"result": "from_local_handler", "plugin": "local_provider"}
 
 
+async def _start_runtime(runtime: CoreRuntime) -> None:
+    await runtime.module_manager.register_module_specs(
+        runtime,
+        [
+            ModuleSpec("execution", required=True),
+            ModuleSpec("retry_policy", required=True),
+            ModuleSpec("idempotency", required=True),
+        ],
+    )
+    await runtime.start()
+
+
 @pytest.mark.asyncio
 async def test_remote_provider_metadata_validation(memory_adapter):
     """Test that remote provider requires remote_config in metadata."""
     runtime = CoreRuntime(memory_adapter)
-    await runtime.start()
+    await _start_runtime(runtime)
     
     # Create remote provider with proper config
     provider = MockRemoteProvider(runtime)
@@ -86,7 +99,7 @@ async def test_remote_provider_metadata_validation(memory_adapter):
 async def test_remote_provider_registered_in_capability_registry(memory_adapter):
     """Test that remote provider is registered with correct type in registry."""
     runtime = CoreRuntime(memory_adapter)
-    await runtime.start()
+    await _start_runtime(runtime)
     
     provider = MockRemoteProvider(runtime)
     await runtime.plugin_manager.load_plugin(provider)
@@ -108,7 +121,7 @@ async def test_remote_provider_registered_in_capability_registry(memory_adapter)
 async def test_remote_operation_execution_successful(memory_adapter):
     """Test successful remote operation execution via HTTP."""
     runtime = CoreRuntime(memory_adapter)
-    await runtime.start()
+    await _start_runtime(runtime)
     
     provider = MockRemoteProvider(runtime)
     await runtime.plugin_manager.load_plugin(provider)
@@ -154,7 +167,7 @@ async def test_remote_operation_execution_successful(memory_adapter):
 async def test_remote_operation_execution_error(memory_adapter):
     """Test remote operation error handling."""
     runtime = CoreRuntime(memory_adapter)
-    await runtime.start()
+    await _start_runtime(runtime)
     
     provider = MockRemoteProvider(runtime)
     await runtime.plugin_manager.load_plugin(provider)
@@ -201,7 +214,7 @@ async def test_remote_operation_execution_error(memory_adapter):
 async def test_local_provider_preferred_over_remote(memory_adapter):
     """Test that local providers take precedence over remote."""
     runtime = CoreRuntime(memory_adapter)
-    await runtime.start()
+    await _start_runtime(runtime)
     
     # Create both local and remote providers for same capability
     
@@ -277,7 +290,7 @@ async def test_local_provider_preferred_over_remote(memory_adapter):
 async def test_inspector_shows_provider_types(memory_adapter):
     """Test that Inspector shows whether providers are local or remote."""
     runtime = CoreRuntime(memory_adapter)
-    await runtime.start()
+    await _start_runtime(runtime)
     
     # Load mixed providers
     local = LocalCapabilityProvider(runtime)
@@ -313,7 +326,7 @@ async def test_inspector_shows_provider_types(memory_adapter):
 async def test_network_error_handling(memory_adapter):
     """Test graceful handling of network errors."""
     runtime = CoreRuntime(memory_adapter)
-    await runtime.start()
+    await _start_runtime(runtime)
     
     provider = MockRemoteProvider(runtime)
     await runtime.plugin_manager.load_plugin(provider)
@@ -349,7 +362,7 @@ async def test_network_error_handling(memory_adapter):
 async def test_timeout_handling(memory_adapter):
     """Test timeout handling for remote operations."""
     runtime = CoreRuntime(memory_adapter)
-    await runtime.start()
+    await _start_runtime(runtime)
     
     provider = MockRemoteProvider(runtime)
     await runtime.plugin_manager.load_plugin(provider)
@@ -390,7 +403,7 @@ async def test_can_remove_local_keep_remote(memory_adapter):
     remote provider takes over.
     """
     runtime = CoreRuntime(memory_adapter)
-    await runtime.start()
+    await _start_runtime(runtime)
     
     # Create local provider for same capability
     class LocalTestProvider(BasePlugin):

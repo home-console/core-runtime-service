@@ -19,7 +19,7 @@ class OperationStatus(str, Enum):
     FAILED = "failed"
     CANCELLED = "cancelled"
 
-    # Backward-compatible aliases
+    # Compatibility aliases (data-only aliases; no behavior).
     PENDING = CREATED
     SUCCESS = COMPLETED
 
@@ -220,20 +220,6 @@ class Operation:
 
         return op
 
-    def can_retry(self, now: Optional[float] = None) -> bool:
-        now = time.time() if now is None else now
-        if self.status != OperationStatus.FAILED:
-            return False
-        if self.error is None:
-            return False
-        if self.error and self.error.code not in RETRYABLE_ERRORS:
-            return False
-        if self.retry_count >= self.max_retries:
-            return False
-        if self.next_retry_at is not None and now < self.next_retry_at:
-            return False
-        return True
-
 class AttemptStatus(str, Enum):
     """Attempt lifecycle statuses (CLAIM + ATTEMPT model)."""
 
@@ -322,16 +308,6 @@ class Attempt:
         )
 
 
-# Marker for retryable error codes
-RETRYABLE_ERRORS = {
-    "timeout",
-    "transient",
-    "network",
-    "device_offline",
-    "integration_unavailable",
-    "rate_limited",
-}
-
 # Marker for terminal status
 TERMINAL_STATUSES = {
     OperationStatus.COMPLETED,
@@ -343,10 +319,6 @@ TERMINAL_STATUSES = {
 def _normalize_status(value: Any) -> OperationStatus:
     if isinstance(value, OperationStatus):
         return value
-    if value == "pending":
-        return OperationStatus.CREATED
-    if value == "success":
-        return OperationStatus.COMPLETED
     try:
         return OperationStatus(str(value))
     except Exception:

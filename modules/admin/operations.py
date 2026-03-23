@@ -4,7 +4,11 @@ Admin operations services.
 Moved from AdminModule for architectural clarity.
 Behavior is unchanged.
 """
+import time
 from typing import Any, Dict, Optional
+
+from core.operations.models import OperationStatus
+from modules.retry_policy.policy import is_retry_due
 
 
 async def admin_operations_create(runtime: Any, body: Any = None, **kwargs) -> Dict[str, Any]:
@@ -127,12 +131,25 @@ async def admin_operations_retry(runtime: Any, operation_id: str, **kwargs) -> D
         if not original_op:
             raise ValueError(f"Operation {operation_id} not found")
 
-        new_op = await ops_mgr.retry(operation_id)
-        if not new_op:
+        if original_op.status != OperationStatus.FAILED:
             raise ValueError(
                 f"Cannot retry operation {operation_id} "
-                "(not failed or error not retryable)"
+                "(operation is not failed)"
             )
+        if not is_retry_due(original_op, now=time.time()):
+            raise ValueError(
+                f"Cannot retry operation {operation_id} "
+                "(error not retryable or retry limit reached)"
+            )
+
+        new_op = await ops_mgr.create(
+            op_type=original_op.type,
+            params=original_op.params,
+            initiator=original_op.initiator,
+            parent_operation_id=operation_id,
+            retry_count=original_op.retry_count,
+            max_retries=original_op.max_retries,
+        )
 
         result = await ops_mgr.execute(new_op)
 

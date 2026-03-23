@@ -10,7 +10,6 @@ OperationManager - Facade для управления операциями.
 from typing import Any, Optional
 
 from core.operations.models import (
-    RETRYABLE_ERRORS,
     Operation,
     Attempt,
     OperationInitiator,
@@ -155,11 +154,7 @@ class OperationManager:
         if status is None:
             return operations
 
-        normalized_status = {
-            "pending": OperationStatus.CREATED.value,
-            "success": OperationStatus.COMPLETED.value,
-        }.get(str(status), str(status))
-        return [op for op in operations if op.status.value == normalized_status]
+        return [op for op in operations if op.status.value == str(status)]
 
     # ========== ATTEMPT HISTORY ==========
 
@@ -209,16 +204,9 @@ class OperationManager:
         operation = await self.get(operation_id)
         if not operation:
             return None
-        
-        if operation.status not in (OperationStatus.CREATED, OperationStatus.RUNNING):
-            return operation  # Already terminal
-        
+
         operation.cancel_requested = True
-        operation.status = OperationStatus.CANCELLED
-        import time
-        operation.finished_at = time.time()
         await self._storage.persist(operation)
-        
         return operation
     
     async def retry(self, operation_id: str) -> Optional[Operation]:
@@ -236,24 +224,16 @@ class OperationManager:
         original = await self.get(operation_id)
         if not original:
             return None
-        
-        # Only allow retry for failed operations
-        if original.status != OperationStatus.FAILED:
-            return None
-        
-        # Only if error code is retryable
-        if original.error and original.error.code not in RETRYABLE_ERRORS:
-            return None
-        
-        # Create new operation as retry
+
         new_op = await self.create(
             op_type=original.type,
             params=original.params,
             initiator=original.initiator,
             parent_operation_id=operation_id,
+            retry_count=original.retry_count,
             max_retries=original.max_retries,
         )
-        
+
         return new_op
     
     # ========== INTERNAL METHODS (для обратной совместимости) ==========

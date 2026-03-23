@@ -21,6 +21,7 @@ from .system import (
     get_system_hooks,
     merge_system_hook_results,
     register_system_hook,
+    unregister_system_hook,
 )
 
 __all__ = [
@@ -36,6 +37,7 @@ __all__ = [
     "get_system_hooks",
     "merge_system_hook_results",
     "register_system_hook",
+    "unregister_system_hook",
     "ContextPatch",
     "MergeRule",
     "resolve_context_patches",
