@@ -9,7 +9,15 @@ from __future__ import annotations
 from importlib import import_module
 from typing import Any
 
-__all__ = ["DevicesModule", "AutomationModule", "PresenceModule", "LoggerModule", "ApiModule", "AdminModule"]
+__all__ = [
+    "DevicesModule",
+    "AutomationModule",
+    "PresenceModule",
+    "LoggerModule",
+    "ApiModule",
+    "AdminModule",
+    "RetryPolicyModule",
+]
 
 _LAZY_EXPORTS = {
     "DevicesModule": ("modules.devices", "DevicesModule"),
@@ -18,6 +26,7 @@ _LAZY_EXPORTS = {
     "LoggerModule": ("modules.logger", "LoggerModule"),
     "ApiModule": ("modules.api", "ApiModule"),
     "AdminModule": ("modules.admin", "AdminModule"),
+    "RetryPolicyModule": ("modules.retry_policy", "RetryPolicyModule"),
 }
 
 

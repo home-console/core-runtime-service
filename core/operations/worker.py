@@ -3,15 +3,22 @@ import time
 import uuid
 from typing import Any
 
-from core.operations.models import RETRYABLE_ERRORS, Operation, OperationStatus
-from core.logger_helper import info
+from modules.hooks.actions import dispatch_action
+from modules.hooks.system import dispatch_system_hooks, merge_system_hook_results
+
+from core.operations.models import (
+    AttemptStatus,
+    Operation,
+    OperationError,
+    OperationStatus,
+)
 
 
 class OperationWorker:
     def __init__(self, runtime: Any):
         self.runtime = runtime
         self.running = False
-        self._task: asyncio.Task | None = None
+        self._task: asyncio.Task[Any] | None = None
         self.worker_id = f"worker-{id(self)}-{uuid.uuid4().hex[:8]}"
 
     async def start(self):
@@ -39,40 +46,15 @@ class OperationWorker:
                 pass
         self._task = None
 
-    def _apply_retry_policy_after_failure(self, operation: Operation, now: float) -> None:
-        """
-        Scheduler-side retry policy.
-
-        Executor must not decide retry; worker applies backoff and mutates operation metadata
-        for the next attempt eligibility window.
-        """
-        if (
-            operation.error
-            and operation.error.code in RETRYABLE_ERRORS
-            and operation.retry_count < operation.max_retries
-        ):
-            delay_seconds = 2 ** operation.retry_count
-            operation.retry_count += 1
-            operation.next_retry_at = now + delay_seconds
-            # Scheduler-side observability: execution ownership stays with worker.
-            # Logging is best-effort; must not affect flow.
-            try:
-                # This method is sync; we enqueue a log task.
-                import asyncio as _asyncio
-                _asyncio.create_task(
-                    info(
-                        self.runtime,
-                        "retry scheduled",
-                        operation_id=operation.operation_id,
-                        retry_count=operation.retry_count,
-                        next_retry_at=operation.next_retry_at,
-                        error_code=operation.error.code if operation.error else None,
-                    )
-                )
-            except Exception:
-                pass
-        else:
-            operation.next_retry_at = None
+    async def _dispatch_system_hooks(
+        self, hook_name: str, ctx: dict[str, Any]
+    ) -> tuple[dict[str, Any], bool, tuple[Any, ...]]:
+        results = await dispatch_system_hooks(hook_name, ctx)
+        decision = merge_system_hook_results(results)
+        merged_ctx = dict(ctx)
+        if decision.context_patch:
+            merged_ctx.update(decision.context_patch)
+        return merged_ctx, decision.allow, decision.actions
 
     async def execute_operation_now(self, operation: Operation) -> Operation:
         """
@@ -100,6 +82,34 @@ class OperationWorker:
         except Exception:
             lease_ttl_s = 30
 
+        hook_context: dict[str, Any] = {
+            "stage": "before_claim",
+            "worker_id": self.worker_id,
+            "now": now,
+            "operation": operation,
+            "operation_id": operation.operation_id,
+            "operation_type": operation.type,
+            "retry_count": operation.retry_count,
+            "max_retries": operation.max_retries,
+            "attempt_id": attempt_id,
+            "attempt_index": attempt_index,
+            "lease_ttl_s": lease_ttl_s,
+        }
+
+        hook_context, allow, _ = await self._dispatch_system_hooks(
+            "before_claim", hook_context
+        )
+        if not allow:
+            operation.status = OperationStatus.FAILED
+            operation.error = OperationError(
+                code="hook_blocked",
+                message="before_claim system hook blocked execution",
+                details={"hook_name": "before_claim"},
+            )
+            operation.finished_at = now
+            await self.runtime.operations._storage.persist(operation)
+            return operation
+
         storage = self.runtime.operations._storage
         executor = self.runtime.operations._executor
 
@@ -115,12 +125,72 @@ class OperationWorker:
         if not ok or not claim_token:
             return operation
 
+        hook_context.update(
+            {
+                "stage": "before_execute",
+                "claim_token": claim_token,
+            }
+        )
+        hook_context, allow, _ = await self._dispatch_system_hooks(
+            "before_execute", hook_context
+        )
+        if not allow:
+            latest_attempt = await storage.get_attempt(attempt_id)
+            if latest_attempt is not None:
+                latest_attempt.status = AttemptStatus.FAILED
+                latest_attempt.finished_at = time.time()
+                latest_attempt.error = {
+                    "code": "hook_blocked",
+                    "message": "before_execute system hook blocked execution",
+                }
+                await storage.persist_attempt(latest_attempt)
+
+            operation.status = OperationStatus.FAILED
+            operation.error = OperationError(
+                code="hook_blocked",
+                message="before_execute system hook blocked execution",
+                details={"hook_name": "before_execute"},
+            )
+            operation.finished_at = time.time()
+            await storage.persist(operation)
+            return operation
+
         res: Operation = await executor.execute_attempt(attempt_id, claim_token)
 
-        # Retry metadata is scheduler-side.
         if res.status == OperationStatus.FAILED:
-            self._apply_retry_policy_after_failure(res, now)
+            hook_context.update(
+                {
+                    "stage": "on_failure",
+                    "operation": res,
+                    "result": res,
+                    "error": res.error,
+                }
+            )
+            hook_context, allow, actions = await self._dispatch_system_hooks(
+                "on_failure", hook_context
+            )
+            if allow and actions:
+                for action in actions:
+                    await dispatch_action(
+                        action,
+                        {**hook_context, "operation": res, "now": time.time()},
+                    )
         else:
+            hook_context.update(
+                {
+                    "stage": "after_execute",
+                    "result": res,
+                }
+            )
+            _, allow, actions = await self._dispatch_system_hooks(
+                "after_execute", hook_context
+            )
+            if allow and actions:
+                for action in actions:
+                    await dispatch_action(
+                        action,
+                        {**hook_context, "operation": res, "now": time.time()},
+                    )
             res.next_retry_at = None
 
         await storage.persist(res)
@@ -142,6 +212,6 @@ class OperationWorker:
                 continue
 
             if op.status == OperationStatus.FAILED:
-                if not op.can_retry(now):
+                if op.next_retry_at is None or now < op.next_retry_at:
                     continue
                 await self.execute_operation_now(op)

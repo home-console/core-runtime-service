@@ -5,18 +5,18 @@ Execution — подключаемая подсистема (policy + backend), 
 в разных режимах (in-process / process / container) без знания доменов, UI, SDK, automation.
 """
 
-from .controller import ExecutionControllerImpl
-from .policy import ExecutionPolicy, StateExecutionPolicy
 from .backend import (
     BackendId,
+    ContainerBackend,
     ExecutionBackend,
     InProcessBackend,
-    ProcessBackend,
-    ContainerBackend,
     OperationResult,
+    ProcessBackend,
 )
+from .controller import ExecutionControllerImpl
+from .policy import ExecutionPolicy, StateExecutionPolicy
+from .scheduler import ExecutionSchedule, ExecutionScheduler
 from .trace import ExecutionTrace
-from .scheduler import ExecutionScheduler, ExecutionSchedule
 
 __all__ = [
     "ExecutionControllerImpl",
@@ -32,4 +32,3 @@ __all__ = [
     "ExecutionScheduler",
     "ExecutionSchedule",
 ]
-

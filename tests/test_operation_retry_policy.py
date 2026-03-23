@@ -11,10 +11,13 @@ from core.operations.models import (
     OperationInitiatorKind,
     OperationStatus,
 )
+from modules.hooks.system import clear_system_hooks
+from modules.retry_policy import RetryPolicyModule
 
 
 @pytest.mark.asyncio
 async def test_retryable_failure_schedules_next_retry(monkeypatch):
+    clear_system_hooks()
     runtime = Mock()
     runtime.operations = Mock()
     runtime.operations._storage = Mock()
@@ -46,6 +49,9 @@ async def test_retryable_failure_schedules_next_retry(monkeypatch):
     after_failure.error = OperationError(code="timeout", message="temporary failure")
 
     runtime.operations._executor.execute_attempt = AsyncMock(return_value=after_failure)
+
+    module = RetryPolicyModule(runtime)
+    await module.register()
 
     monkeypatch.setattr("core.operations.worker.time.time", lambda: 1000.0)
 
