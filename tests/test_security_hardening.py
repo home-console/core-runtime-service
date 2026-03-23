@@ -26,11 +26,11 @@ from core.capability_protocol import PROTOCOL_VERSION
 from core.kernel.plugin_registry import PluginRegistry
 from core.plugins import PluginManager
 from core.base_plugin import BasePlugin, PluginMetadata
-from core.plugin_isolation import StorageProxy
 from core.errors import ForbiddenError
 from core.operations import Operation, OperationInitiator, OperationInitiatorKind, OperationManager
 from core.execution_router import ExecutionRouter
 from core.exceptions.errors import ForbiddenError
+from modules.plugins.isolation import StorageProxy
 
 
 # ============================================================================

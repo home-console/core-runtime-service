@@ -10,9 +10,9 @@ import os
 from pathlib import Path
 
 from app.bootstrap import APP_MODULES, build_runtime, parse_module_specs
-from core.adapters.storage_factory import build_storage_stack
 from core.config import Config
 from core.state_engine import StateEngine
+from modules.storage.factory import build_storage_stack
 
 
 def _load_dotenv() -> None:

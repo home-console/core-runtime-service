@@ -875,7 +875,17 @@ class OAuthYandexPlugin(BasePlugin):
 
         # Register operation handler for oauth.refresh_token so operations API can invoke refresh
         try:
-            from modules.operations.handlers import handle_oauth_refresh
+            async def handle_oauth_refresh(params: Dict[str, Any], context: Any) -> Dict[str, Any]:
+                service = params.get("service", "yandex")
+                service_name = f"{service}.refresh_tokens"
+                result = await self.runtime.service_registry.call(service_name)
+                return {
+                    "success": True,
+                    "service": service,
+                    "token_expires_in": result.get("token_expires_in"),
+                    "timestamp": result.get("timestamp"),
+                }
+
             ops = getattr(self.runtime, "operations", None)
             if ops:
                 # register_handler is synchronous

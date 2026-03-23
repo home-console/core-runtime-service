@@ -156,8 +156,6 @@ class DeviceStatusChecker:
         offline_count = 0
         now = time.time()
 
-        from modules.devices.services import _is_device_online
-
         for device in devices:
             if not isinstance(device, dict):
                 continue
@@ -184,7 +182,7 @@ class DeviceStatusChecker:
 
             try:
                 device["last_seen"] = now if is_online else device.get("last_seen")
-                device["online"] = _is_device_online(device["last_seen"]) if is_online else False
+                device["online"] = bool(is_online)
                 device["updated_at"] = now
 
                 await self.runtime.service_registry.call(

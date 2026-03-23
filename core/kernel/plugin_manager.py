@@ -105,7 +105,7 @@ class PluginManager:
         plugins_dir: Optional[Path] = None,
         logger_func: Optional[Callable[..., Awaitable[None]]] = None,
     ) -> bool:
-        if self._registry.has_plugin(plugin_name):
+        if await self._registry.has_plugin(plugin_name):
             return True
         
         if plugins_dir is None:
@@ -118,9 +118,10 @@ class PluginManager:
         manifest = PluginManifestLoader.load_manifest(plugin_dir)
         if not manifest or manifest.get("name") != plugin_name:
             return False
-        
+
         deps = manifest.get("dependencies", [])
-        missing = [d for d in deps if d not in self._registry.list_plugins()]
+        loaded_plugins = await self._registry.list_plugins()
+        missing = [d for d in deps if d not in loaded_plugins]
         if missing:
             if logger_func:
                 await logger_func(
@@ -172,9 +173,10 @@ class PluginManager:
             plugin_dir = plugin_dirs.get(plugin_name)
             if not plugin_dir:
                 continue
-            
+
             dependencies = manifest.get("dependencies", [])
-            missing_deps = [dep for dep in dependencies if dep not in self._registry.list_plugins()]
+            loaded_plugins = await self._registry.list_plugins()
+            missing_deps = [dep for dep in dependencies if dep not in loaded_plugins]
             
             if missing_deps:
                 await actual_logger_func(
@@ -259,4 +261,3 @@ class PluginManager:
             )
         except Exception:
             pass
-

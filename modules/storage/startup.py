@@ -216,7 +216,7 @@ class StorageInitializer:
     Создание адаптеров вынесено в слой adapters; фабрику передаёт вызывающий код.
 
     Использование:
-        from core.adapters.storage_factory import create_storage_adapter
+        from modules.storage.factory import create_storage_adapter
         init = StorageInitializer(config, create_adapter=create_storage_adapter)
         storage = await init.initialize()
     """
@@ -227,7 +227,7 @@ class StorageInitializer:
 
         Args:
             config: объект конфигурации
-            create_adapter: async callable(config) -> IStorageBackend (из core.adapters.storage_factory.create_storage_adapter)
+            create_adapter: async callable(config) -> IStorageBackend (из modules.storage.factory.create_storage_adapter)
         """
         self.config = config
         self._create_adapter = create_adapter
@@ -254,7 +254,7 @@ class StorageInitializer:
 
         if self._create_adapter is None:
             raise ValueError(
-                "StorageInitializer requires create_adapter (e.g. from core.adapters.storage_factory import create_storage_adapter)"
+                "StorageInitializer requires create_adapter (e.g. from modules.storage.factory import create_storage_adapter)"
             )
 
         # Step 1: Checks

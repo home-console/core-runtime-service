@@ -1,16 +1,22 @@
-"""Compatibility exports for storage exceptions.
+"""Core storage integrity exceptions."""
 
-Canonical implementations live in modules.storage.exceptions.
-"""
 
-from modules.storage.exceptions import (
-    StorageCorruptionError,
-    StorageRollbackDetected,
-    StorageTamperDetected,
-)
+class StorageCorruptionError(RuntimeError):
+    """Storage corruption detected (invalid JSON, hash mismatch, etc.)."""
 
-__all__ = [
-    "StorageCorruptionError",
-    "StorageRollbackDetected",
-    "StorageTamperDetected",
-]
+    pass
+
+
+class StorageRollbackDetected(RuntimeError):
+    """Rollback attack detected via epoch regression."""
+
+    pass
+
+
+class StorageTamperDetected(RuntimeError):
+    """Protected data was modified outside expected secure flow."""
+
+    pass
+
+
+__all__ = ["StorageCorruptionError", "StorageRollbackDetected", "StorageTamperDetected"]

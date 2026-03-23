@@ -1,8 +1,8 @@
 """
-Фабрика storage-адаптеров и сборка стека (слой adapters).
+Storage adapter factory and stack assembly for application/runtime composition.
 
-Создаёт конкретные реализации (SQLite, PostgreSQL) и собирает StorageStack для ядра.
-Core не зависит от этого модуля — только от абстракции IStorageBackend и портов.
+This module lives in modules layer because it wires storage policies
+(startup checks, dual-mode vault wrapping, secure wrapper usage).
 """
 
 from core.adapters.storage_adapter import StorageAdapter
@@ -16,19 +16,7 @@ from modules.storage.startup import StorageStartupChecker
 
 
 async def create_storage_adapter(config: Config) -> StorageAdapter:
-    """
-    Создать storage-адаптер по конфигурации (один хранилище).
-
-    Args:
-        config: конфигурация Core Runtime (должна быть валидирована)
-
-    Returns:
-        экземпляр StorageAdapter (SQLite или PostgreSQL)
-
-    Raises:
-        ValueError: неизвестный storage_type
-        ImportError: для PostgreSQL не установлен asyncpg
-    """
+    """Create single storage adapter from config."""
     config.validate()
 
     if config.storage_type == "sqlite":
@@ -59,7 +47,7 @@ async def create_storage_adapter(config: Config) -> StorageAdapter:
 
 
 async def _create_vault_storage_adapter(config: Config) -> StorageAdapter:
-    """Создать vault-адаптер для dual-mode."""
+    """Create vault adapter for dual-mode storage."""
     if config.storage_mode != "dual":
         raise StorageConfigurationError(
             f"_create_vault_storage_adapter requires storage_mode='dual', got {config.storage_mode!r}"
@@ -96,13 +84,7 @@ async def _create_vault_storage_adapter(config: Config) -> StorageAdapter:
 
 
 async def create_storage_manager(config: Config) -> StorageManager:
-    """
-    Создать StorageManager (single или dual mode).
-
-    Raises:
-        StorageConfigurationError: невалидная конфигурация dual mode
-        ValueError: неизвестный storage_type
-    """
+    """Create storage manager for single/dual mode."""
     config.validate()
     core_storage = await create_storage_adapter(config)
     vault_storage = None
@@ -115,22 +97,8 @@ async def create_storage_manager(config: Config) -> StorageManager:
     )
 
 
-async def build_storage_stack(
-    config: Config, state_engine: StateEngine
-) -> StorageStack:
-    """
-    Собрать полный storage stack для ядра.
-
-    1. Startup checks (StorageStartupChecker)
-    2. Создание адаптеров (core + vault при dual-mode)
-    3. Обёртка vault в SecureStorageWrapper
-    4. StorageManager
-    5. CoreStoragePort и VaultStoragePort
-
-    Raises:
-        StorageConfigurationError: невалидная конфигурация
-        StorageCorruptionError: не прошла проверка целостности
-    """
+async def build_storage_stack(config: Config, state_engine: StateEngine) -> StorageStack:
+    """Build full storage stack for runtime startup."""
     checker = StorageStartupChecker(config)
     await checker.check_all()
 
@@ -142,8 +110,6 @@ async def build_storage_stack(
         secure_storage = SecureStorageWrapper(vault_adapter)
         await secure_storage.initialize()
 
-    # В dual mode vault идёт через SecureStorage, чтобы все записи обновляли root hash
-    # (иначе при старте проверка целостности падает: expected hash пустого vault, current — с данными)
     vault_backend = secure_storage if secure_storage else vault_adapter
     manager = StorageManager(
         core_storage=core_adapter,

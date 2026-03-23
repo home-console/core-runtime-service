@@ -19,21 +19,15 @@ import shutil
 import tarfile
 import tempfile
 import zipfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
-import shutil
-import os
-import asyncio
-from pathlib import Path, PurePosixPath
-from typing import Dict, Any, Optional, Tuple
-from datetime import UTC, datetime
+from pathlib import PurePosixPath
+from typing import Tuple
 
 from core.trust import PluginTrustError, PluginTrustVerifier, TrustStore
 from modules.plugins.schema import ValidationError as SchemaValidationError
 from modules.plugins.schema import validate_plugin_json
-from core.plugin_schema import validate_plugin_json, ValidationError as SchemaValidationError
-from core.security.trust.legacy_crypto import PluginTrustVerifier, PluginTrustError, TrustStore
 
 
 class InstallerError(Exception):

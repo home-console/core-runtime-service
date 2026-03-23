@@ -25,8 +25,8 @@ import time
 from core.event_bus import EventBus
 from core.service import ServiceRegistry
 from core.state_engine import StateEngine
-from core.storage_layer import Storage, StorageWithStateMirror
-from core.plugins import PluginManager, PluginState
+from core.kernel.plugin_manager import PluginManager
+from core.kernel.plugin_registry import PluginState
 from core.module import ModuleManager
 from core.http import HttpRegistry
 from core.integration_registry import IntegrationRegistry
@@ -36,9 +36,6 @@ from core.base_plugin import BasePlugin
 from core.operations.manager import OperationManager
 from core.dependency import DependencyResolver, RuntimeIntegrityError  # Step 10
 from core.policy import PolicyEngine
-from core.agent.enrollment import AgentEnrollmentManager
-from core.agent.registry import AgentRegistry
-from core.agent.tls import MTLSCertificateAuthority
 from core.runtime_context import RuntimeContext
 from core.runtime_interface import IRuntimeModule, IPluginRegistry
 from core.orchestration import (
@@ -120,10 +117,10 @@ class CoreRuntime:
         
         # Step 15: Agent Control Plane components
         # Will be initialized in start() when SecretStore is ready
-        self.agent_manager: Optional[AgentEnrollmentManager] = None
-        self.agent_registry: Optional[AgentRegistry] = None
+        self.agent_manager: Optional[Any] = None
+        self.agent_registry: Optional[Any] = None
         self.deployment_tracker: Optional[Any] = None  # DeploymentTracker instance
-        self.mtls_ca: Optional[MTLSCertificateAuthority] = None
+        self.mtls_ca: Optional[Any] = None
         # SecretStore (vault) — выставляется в main; используется credentials и inspector в debug
         self.secret_store: Optional[Any] = None
         # StorageManager (core + vault) — выставляется в main для модуля credentials

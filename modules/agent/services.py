@@ -363,7 +363,7 @@ async def admin_agent_deploy(
 
             repo_error: Optional[Exception] = None
             try:
-                from core.credentials.repository import CredentialRepository
+                from modules.credentials.repository import CredentialRepository
                 repo = CredentialRepository(storage_manager=storage_manager, secret_store=secret_store)
                 cred = await repo.get(credential_id)
                 host = _extract_host(cred)

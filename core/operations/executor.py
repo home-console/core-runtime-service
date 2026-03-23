@@ -77,17 +77,6 @@ class OperationExecutor(IOperationExecutor):
         )
 
     async def execute(self, operation: Operation) -> Operation:
-        handler = self.resolve_handler(operation)
-        if handler is None:
-            operation.status = OperationStatus.FAILED
-            operation.error = OperationError(
-                code="handler_not_found",
-                message=f"No handler for operation type: {operation.type}",
-            )
-            operation.finished_at = time.time()
-            await self.storage.persist(operation)
-            return operation
-
         operation.status = OperationStatus.RUNNING
         operation.started_at = time.time()
         operation.error = None
@@ -95,6 +84,10 @@ class OperationExecutor(IOperationExecutor):
         await self.storage.persist(operation)
 
         try:
+            handler = self.resolve_handler(operation)
+            if handler is None:
+                raise LookupError(f"No handler for operation type: {operation.type}")
+
             maybe_result = await self._invoke_handler(handler, operation)
 
             if isinstance(maybe_result, Operation):
@@ -107,7 +100,12 @@ class OperationExecutor(IOperationExecutor):
                     operation.status = OperationStatus.COMPLETED
         except Exception as exc:
             operation.status = OperationStatus.FAILED
-            operation.error = OperationError(code="execution_error", message=str(exc))
+            if operation.error is None:
+                operation.error = OperationError(
+                    code="failed",
+                    message=str(exc),
+                    details={"exception_type": type(exc).__name__},
+                )
 
         operation.finished_at = time.time()
         await self.storage.persist(operation)

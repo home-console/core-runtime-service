@@ -29,6 +29,11 @@ from .secure import (
     SYSTEM_NAMESPACES,
     SecureStorageWrapper,
 )
+from .factory import (
+    build_storage_stack,
+    create_storage_adapter,
+    create_storage_manager,
+)
 from .startup import StorageInitializer, StorageStartupChecker
 from .storage import Storage
 
@@ -60,4 +65,7 @@ __all__ = [
     "StorageInitializer",
     "IStorageBackend",
     "Storage",
+    "create_storage_adapter",
+    "create_storage_manager",
+    "build_storage_stack",
 ]

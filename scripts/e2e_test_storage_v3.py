@@ -35,7 +35,7 @@ async def e2e_test_dual_mode_workflow():
             print("\n[PHASE 1] Initial Single-Mode Setup")
             print("-" * 70)
 
-            from core.adapters.storage_factory import create_storage_manager
+            from modules.storage.factory import create_storage_manager
             from core.config import Config
 
             single_config = Config(

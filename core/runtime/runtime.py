@@ -128,6 +128,10 @@ class CoreRuntime:
         self.storage_manager: Optional[Any] = None
         # Optional app-level middleware factory. Core keeps no direct module dependency.
         self.event_validation_middleware_factory: Optional[Callable[[], Any]] = None
+        # Optional app-level plugin isolation wiring. Core keeps no direct module dependency.
+        self.plugin_storage_proxy_cls: Optional[type] = None
+        self.plugin_service_proxy_cls: Optional[type] = None
+        self.plugin_default_allowed_services: list[str] = []
 
         # Сохраняем config для shutdown_timeout
         self._config = config

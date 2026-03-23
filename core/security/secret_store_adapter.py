@@ -7,9 +7,7 @@ This wrapper maps keys like "secrets.store.xxx" to namespace "secrets.store", ke
 
 from __future__ import annotations
 
-from typing import Optional
-
-from modules.storage import IStorageBackend
+from typing import Any, Optional
 
 SECRETS_NS = "secrets.store"
 PREFIX = "secrets.store."
@@ -22,7 +20,7 @@ class SecretStoreStorageAdapter:
     Values are stored as dict {"_v": value_str} so backend (dict-only) is satisfied.
     """
 
-    def __init__(self, backend: IStorageBackend) -> None:
+    def __init__(self, backend: Any) -> None:
         self._backend = backend
 
     def _ns_key(self, full_key: str) -> tuple[str, str]:

@@ -26,10 +26,9 @@ Usage:
     event_id = await binder.append(event)
 """
 
-from typing import AsyncIterator, Optional
+from typing import Any, AsyncIterator, Optional
 
 from core.audit.events import SecurityEvent, SecurityEventType
-from modules.storage.secure import SecureStorageWrapper
 
 
 class AuditBinder:
@@ -60,7 +59,7 @@ class AuditBinder:
 
     NAMESPACE = "_audit.security"
 
-    def __init__(self, secure_storage: SecureStorageWrapper):
+    def __init__(self, secure_storage: Any):
         """
         Initialize AuditBinder with secure storage.
 

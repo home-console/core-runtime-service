@@ -44,22 +44,22 @@ class PluginSandbox:
         try:
             # P0 SECURITY: Do NOT set plugin.runtime directly
             # Instead, provide only isolated access through proxies
-            from modules.plugins.isolation import (
-                DEFAULT_ALLOWED_SERVICES,
-                ServiceProxy,
-                StorageProxy,
+            storage_proxy_cls = getattr(runtime, "plugin_storage_proxy_cls", None)
+            service_proxy_cls = getattr(runtime, "plugin_service_proxy_cls", None)
+            default_allowed_services = getattr(
+                runtime, "plugin_default_allowed_services", []
             )
 
             # Create StorageProxy for plugin (isolated namespace)
-            if hasattr(runtime, "storage"):
-                plugin.storage = StorageProxy(runtime.storage, namespace=plugin_name)
+            if storage_proxy_cls is not None and hasattr(runtime, "storage"):
+                plugin.storage = storage_proxy_cls(runtime.storage, namespace=plugin_name)
 
             # Create ServiceProxy for plugin (limited service access)
-            if hasattr(runtime, "service_registry"):
+            if service_proxy_cls is not None and hasattr(runtime, "service_registry"):
                 allowed = getattr(plugin, "_manifest_allowed_services", None)
                 if not allowed or not isinstance(allowed, list):
-                    allowed = DEFAULT_ALLOWED_SERVICES
-                plugin.services = ServiceProxy(
+                    allowed = default_allowed_services
+                plugin.services = service_proxy_cls(
                     runtime.service_registry,
                     allowed_services=allowed,
                     plugin_name=plugin_name,

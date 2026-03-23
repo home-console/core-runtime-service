@@ -241,7 +241,7 @@ async def test_factory_backward_compat():
     print("\n[TEST 5] Storage Factory Backward Compatibility")
     print("-" * 60)
 
-    from core.adapters.storage_factory import (
+    from modules.storage.factory import (
         create_storage_adapter,
         create_storage_manager,
     )
@@ -287,7 +287,7 @@ async def test_single_to_dual_migration():
     print("\n[TEST 6] Migration Single → Dual Mode")
     print("-" * 60)
 
-    from core.adapters.storage_factory import create_storage_manager
+    from modules.storage.factory import create_storage_manager
     from core.config import Config
     from modules.storage.migrate import migrate_to_dual_mode
 

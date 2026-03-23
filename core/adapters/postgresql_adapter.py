@@ -23,10 +23,8 @@ try:
 except ImportError:
     ASYNCPG_AVAILABLE = False
 
-from modules.storage.exceptions import StorageCorruptionError
-
 from .storage_adapter import StorageAdapter
-from core.storage_layer import StorageCorruptionError
+from core.storage_exceptions import StorageCorruptionError
 
 
 class PostgreSQLAdapter(StorageAdapter):

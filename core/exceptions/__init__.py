@@ -15,7 +15,7 @@ from core.exceptions.errors import (
     ForbiddenError,
     NotFoundError,
 )
-from core.storage_layer import (
+from core.storage_errors import (
     StorageSecurityError,
     StorageConfigurationError,
     NamespaceViolationError,

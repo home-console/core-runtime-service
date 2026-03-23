@@ -24,8 +24,8 @@ import logging
 import sys
 from typing import Dict, Tuple
 
-from core.adapters.storage_factory import create_storage_manager
 from core.config import Config
+from modules.storage.factory import create_storage_manager
 from modules.storage.manager import CRITICAL_VAULT_NAMESPACES
 
 logger = logging.getLogger(__name__)

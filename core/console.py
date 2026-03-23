@@ -10,9 +10,9 @@ import asyncio
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from app.storage_factory import build_storage_stack
 from core.config import Config
 from core.runtime.runtime import CoreRuntime
-from core.adapters.storage_factory import build_storage_stack
 from core.state_engine import StateEngine
 from core.http import HttpEndpoint
 

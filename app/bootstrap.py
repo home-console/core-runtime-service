@@ -6,6 +6,11 @@ from core.config import Config
 from core.runtime import CoreRuntime
 from core.runtime.module_manager import ModuleSpec
 from modules.events.validation import EventValidationMiddleware
+from modules.plugins.isolation import (
+    DEFAULT_ALLOWED_SERVICES,
+    ServiceProxy,
+    StorageProxy,
+)
 
 
 APP_MODULES: list[ModuleSpec] = [
@@ -69,6 +74,9 @@ async def build_runtime(
     )
     runtime.storage_manager = storage_manager
     runtime.event_validation_middleware_factory = EventValidationMiddleware
+    runtime.plugin_storage_proxy_cls = StorageProxy
+    runtime.plugin_service_proxy_cls = ServiceProxy
+    runtime.plugin_default_allowed_services = list(DEFAULT_ALLOWED_SERVICES)
 
     specs = module_specs or parse_module_specs(config)
     await runtime.module_manager.register_module_specs(runtime, specs)

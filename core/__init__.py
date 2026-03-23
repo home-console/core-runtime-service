@@ -3,7 +3,6 @@ Core Runtime - минимальное ядро для plugin-first платфо�
 """
 
 from .config import Config
-from .console import run_cli
 from core.messaging.event_bus import EventBus
 # from .http_registry import HttpRegistry
 from core.runtime.module_manager import ModuleManager
@@ -11,8 +10,6 @@ from core.runtime.runtime import CoreRuntime
 from .runtime_module import RuntimeModule
 from .service import ServiceRegistry
 from .state_engine import StateEngine
-from .storage_mirror import StorageWithStateMirror
-from .storage_port import StorageStack
 from .integration_registry import IntegrationRegistry
 from .logger_helper import info, warning, error
 from core.kernel.base_plugin import BasePlugin
@@ -55,13 +52,10 @@ __all__ = [
     "EventBus",
     "ServiceRegistry",
     "StateEngine",
-    "StorageWithStateMirror",
-    "StorageStack",
     "IntegrationRegistry",
     "info",
     "warning",
     "error",
-    "HttpRegistry",
     "ModuleManager",
     "RuntimeModule",
 ]
