@@ -4,7 +4,7 @@ import asyncio
 import inspect
 import time
 import uuid
-from typing import Any, Iterable
+from typing import Any, Iterable, cast
 
 from core.operations.models import TERMINAL_STATUSES, Attempt, AttemptStatus, Operation
 from core.operations.runtime_contract import (
@@ -130,7 +130,7 @@ class OperationWorker:
         events = await events_outcome if inspect.isawaitable(events_outcome) else events_outcome
         if not isinstance(events, list):
             return
-        events_list: list[Any] = list(events)
+        events_list = cast(list[Any], events)
         for event in events_list:
             if not isinstance(event, dict):
                 continue
@@ -158,14 +158,26 @@ class OperationWorker:
         value = await outcome if inspect.isawaitable(outcome) else outcome
         return bool(value)
 
+    async def _claim_event(self, event_id: str) -> bool:
+        event_bus = self._resolve_event_bus()
+        if event_bus is None:
+            return True
+        claim = getattr(event_bus, "claim_event", None)
+        if not callable(claim):
+            return True
+        outcome = claim(event_id, self.worker_id)
+        value = await outcome if inspect.isawaitable(outcome) else outcome
+        return bool(value)
+
     async def _on_event(self, event_type: Any, data: Any | None = None) -> None:
         payload: dict[str, Any]
+        resolved_type: Any
         if isinstance(event_type, dict) and data is None:
-            payload = dict(event_type)
+            payload = cast(dict[str, Any], event_type)
             resolved_type = payload.get("type")
         else:
-            payload = dict(data) if isinstance(data, dict) else {}
-            resolved_type = event_type
+            payload = cast(dict[str, Any], data) if isinstance(data, dict) else {}
+            resolved_type = event_type if isinstance(event_type, str) else ""
 
         if resolved_type != "operation_ready":
             return
@@ -176,6 +188,8 @@ class OperationWorker:
             return
 
         if event_id and await self._is_event_processed(str(event_id)):
+            return
+        if event_id and not await self._claim_event(str(event_id)):
             return
 
         operation = await self.runtime.operations.get(str(operation_id))

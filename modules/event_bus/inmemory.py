@@ -77,9 +77,10 @@ class InMemoryEventBus:
         if not isinstance(keys_value, list):
             return []
 
+        keys_list = [str(key) for key in cast(list[Any], keys_value)]
+
         events: list[Event] = []
-        for key in keys_value:
-            event_id = str(key)
+        for event_id in keys_list:
             raw_outcome = get("event_bus_events", event_id)
             raw = await raw_outcome if inspect.isawaitable(raw_outcome) else raw_outcome
             if not isinstance(raw, dict):
@@ -124,10 +125,140 @@ class InMemoryEventBus:
         event = Event.from_dict(cast(dict[str, Any], raw))
         event.processed = True
         event.processed_at = time.time()
+        event.claimed_by = None
+        event.claimed_at = None
 
         save_outcome = save("event_bus_events", event_id, event.to_dict())
         if inspect.isawaitable(save_outcome):
             await save_outcome
+
+    async def _claim_event_sqlite_atomic(
+        self, adapter: Any, event_id: str, worker_id: str
+    ) -> bool:
+        run_atomic = getattr(adapter, "run_atomic", None)
+        if not callable(run_atomic):
+            return False
+
+        now = time.time()
+
+        def _sync_claim(conn: Any, _adapter: Any) -> bool:
+            cursor = conn.execute(
+                """
+                UPDATE storage
+                SET value = json_set(
+                    json_set(value, '$.claimed_by', ?),
+                    '$.claimed_at', ?
+                )
+                WHERE namespace = ?
+                  AND key = ?
+                  AND COALESCE(json_extract(value, '$.processed'), 0) = 0
+                  AND (
+                        json_extract(value, '$.claimed_by') IS NULL
+                     OR json_extract(value, '$.claimed_by') = ?
+                     OR (
+                            ? - COALESCE(json_extract(value, '$.claimed_at'), 0.0)
+                          ) > COALESCE(json_extract(value, '$.claim_ttl'), 60.0)
+                  )
+                """,
+                (
+                    worker_id,
+                    now,
+                    "event_bus_events",
+                    event_id,
+                    worker_id,
+                    now,
+                ),
+            )
+            return cursor.rowcount > 0
+
+        result = run_atomic(_sync_claim)
+        return await result if inspect.isawaitable(result) else bool(result)
+
+    async def _claim_event_postgresql_atomic(
+        self, adapter: Any, event_id: str, worker_id: str
+    ) -> bool:
+        get_pool = getattr(adapter, "_get_pool", None)
+        if not callable(get_pool):
+            return False
+
+        pool = get_pool()
+        pool_value = cast(Any, await pool if inspect.isawaitable(pool) else pool)
+        if pool_value is None:
+            return False
+
+        now = time.time()
+        async with pool_value.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                UPDATE storage
+                SET value = jsonb_set(
+                    jsonb_set(value, '{claimed_by}', to_jsonb($3::text), true),
+                    '{claimed_at}',
+                    to_jsonb($4::double precision),
+                    true
+                )
+                WHERE namespace = $1
+                  AND key = $2
+                  AND COALESCE((value ->> 'processed')::boolean, false) = false
+                  AND (
+                        value ->> 'claimed_by' IS NULL
+                     OR value ->> 'claimed_by' = $3
+                     OR (
+                            $4 - COALESCE((value ->> 'claimed_at')::double precision, 0.0)
+                          ) > COALESCE((value ->> 'claim_ttl')::double precision, 60.0)
+                  )
+                RETURNING 1
+                """,
+                "event_bus_events",
+                event_id,
+                worker_id,
+                now,
+            )
+            return row is not None
+
+    async def _claim_event_fallback(self, event_id: str, worker_id: str) -> bool:
+        get = getattr(self._storage, "get", None)
+        save = getattr(self._storage, "set", None)
+        if not callable(get) or not callable(save):
+            return True
+
+        raw_outcome = get("event_bus_events", event_id)
+        raw = await raw_outcome if inspect.isawaitable(raw_outcome) else raw_outcome
+        if not isinstance(raw, dict):
+            return False
+
+        event = Event.from_dict(cast(dict[str, Any], raw))
+        now = time.time()
+        if event.processed:
+            return False
+        if event.claimed_by is not None and event.claimed_by != worker_id:
+            claimed_at = float(event.claimed_at or 0.0)
+            if now - claimed_at <= float(event.claim_ttl):
+                return False
+
+        event.claimed_by = worker_id
+        event.claimed_at = now
+        save_outcome = save("event_bus_events", event_id, event.to_dict())
+        if inspect.isawaitable(save_outcome):
+            await save_outcome
+        return True
+
+    async def claim_event(self, event_id: str, worker_id: str) -> bool:
+        if self._storage is None:
+            return True
+
+        adapter = getattr(self._storage, "_adapter", None)
+        adapter_name = type(adapter).__name__.lower() if adapter is not None else ""
+
+        if "sqlite" in adapter_name:
+            return await self._claim_event_sqlite_atomic(adapter, event_id, worker_id)
+
+        if "postgres" in adapter_name:
+            return await self._claim_event_postgresql_atomic(
+                adapter, event_id, worker_id
+            )
+
+        return await self._claim_event_fallback(event_id, worker_id)
 
     async def add_middleware(self, middleware: EventBusMiddleware) -> None:
         async with self._lock:
