@@ -10,7 +10,7 @@ from core.runtime.runtime import CoreRuntime
 from .runtime_module import RuntimeModule
 from .service import ServiceRegistry
 from .state_engine import StateEngine
-from .integration_registry import IntegrationRegistry
+from modules.integrations.registry import IntegrationRegistry
 from .logger_helper import info, warning, error
 from core.kernel.base_plugin import BasePlugin
 

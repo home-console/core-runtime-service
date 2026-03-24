@@ -109,7 +109,7 @@ class OAuthYandexPlugin(BasePlugin):
         # Check if encrypted
         if isinstance(tokens_raw, dict) and "encrypted" in tokens_raw:
             try:
-                from core.security import TokenEncryption
+                from modules.security import TokenEncryption
                 encryptor = TokenEncryption.from_env()
                 return encryptor.decrypt(tokens_raw["encrypted"])
             except Exception:
@@ -127,7 +127,7 @@ class OAuthYandexPlugin(BasePlugin):
         Args:
             tokens: Tokens dict to encrypt and save
         """
-        from core.security import TokenEncryption
+        from modules.security import TokenEncryption
         try:
             encryptor = TokenEncryption.from_env()
             encrypted_blob = encryptor.encrypt(tokens)
@@ -216,7 +216,7 @@ class OAuthYandexPlugin(BasePlugin):
             if tokens_raw:
                 if isinstance(tokens_raw, dict) and "encrypted" in tokens_raw:
                     try:
-                        from core.security import TokenEncryption
+                        from modules.security import TokenEncryption
                         encryptor = TokenEncryption.from_env()
                         tokens = encryptor.decrypt(tokens_raw["encrypted"])
                     except Exception:
@@ -377,7 +377,7 @@ class OAuthYandexPlugin(BasePlugin):
                             pass
 
                 # SECURITY P0: Encrypt tokens before storing
-                from core.security import TokenEncryption
+                from modules.security import TokenEncryption
                 try:
                     encryptor = TokenEncryption.from_env()
                     encrypted_blob = encryptor.encrypt(tokens_to_save)

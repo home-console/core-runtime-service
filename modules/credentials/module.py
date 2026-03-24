@@ -16,7 +16,7 @@ Step 17.10: Unified security decision orchestrator
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from core.runtime_module import RuntimeModule
-from core.security import (
+from modules.security import (
     MFAService,
     CredentialPolicyEngine,
     Role,

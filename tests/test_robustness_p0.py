@@ -351,7 +351,7 @@ def test_concurrent_provider_unregister_during_execution():
     """P0: Provider unregister while operation is executing should not crash."""
     import threading
 
-    from core.capability_registry import CapabilityRegistry
+    from modules.capability.registry import CapabilityRegistry
 
     reg = CapabilityRegistry()
     # Use sync_lock for direct dict manipulation in tests
@@ -458,7 +458,7 @@ def test_capability_registry_thread_safety():
     """P0: CapabilityRegistry should safely handle concurrent registration/unregistration."""
     import threading
 
-    from core.capability_registry import CapabilityRegistry
+    from modules.capability.registry import CapabilityRegistry
 
     reg = CapabilityRegistry()
     results = {"errors": [], "ops": 0}
@@ -542,7 +542,7 @@ def test_provider_disappears_between_selection_and_execution():
     """P0: Multiple snapshot selections ensure atomic provider references."""
     import threading
 
-    from core.capability_registry import CapabilityRegistry
+    from modules.capability.registry import CapabilityRegistry
 
     reg = CapabilityRegistry()
     # Directly insert provider via sync lock (tests thread-safety only)

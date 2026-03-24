@@ -10,7 +10,7 @@ Secure persistence layer for credentials with:
 
 from typing import Optional
 
-from core.security import CredentialPolicy, SecretStore
+from modules.security import CredentialPolicy, SecretStore
 from modules.credentials.domain import Credential
 from modules.credentials.errors import (
     CredentialAlreadyExists,

@@ -65,7 +65,7 @@ async def main() -> None:
 
     # SecretStore для inspector (debug) и credentials: один раз при старте
     try:
-        from core.security import SecretStore, SecretStoreStorageAdapter
+        from modules.security import SecretStore, SecretStoreStorageAdapter
 
         backend = (
             storage_stack.manager.get_vault()

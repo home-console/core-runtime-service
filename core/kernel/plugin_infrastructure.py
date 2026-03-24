@@ -16,9 +16,9 @@ from __future__ import annotations
 
 from typing import Optional
 from core.kernel.base_plugin import BasePlugin, PluginMetadata
-from core.capability_registry import CapabilityRegistry
+from modules.capability.registry import CapabilityRegistry
 from core.operations.manager import OperationManager
-from core.integration_registry import IntegrationRegistry
+from modules.integrations.registry import IntegrationRegistry
 
 
 class PluginInfrastructureCoordinator:

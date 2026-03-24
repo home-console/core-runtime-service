@@ -4,11 +4,11 @@ import asyncio
 import logging
 import os
 
-# from core.http_registry import EndpointAuthConfig, HttpEndpoint
+# from modules.api.registry import EndpointAuthConfig, HttpEndpoint
 from core.runtime_module import RuntimeModule
 
 try:
-    from core.security import SecretStore
+    from modules.security import SecretStore
 except ImportError:
     SecretStore = None  # type: ignore[misc, assignment]
 

@@ -5,7 +5,7 @@ WebSocket Test Plugin для демонстрации поддержки WebSock
 """
 
 from core.kernel.base_plugin import BasePlugin, PluginMetadata
-from core.http_registry import HttpEndpoint
+from modules.api.registry import HttpEndpoint
 from fastapi import WebSocket
 from datetime import datetime, UTC
 

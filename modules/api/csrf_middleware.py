@@ -92,7 +92,7 @@ async def csrf_protection_middleware(request: Request, call_next: Callable) -> R
     
     # Validate CSRF token
     try:
-        from core.security import CSRFProtection
+        from modules.security import CSRFProtection
         csrf = CSRFProtection.from_env()
         csrf.validate_token(csrf_token, session_id)
     except RuntimeError as e:
@@ -165,7 +165,7 @@ async def rate_limit_middleware(request: Request, call_next: Callable) -> Respon
     
     # Check rate limit
     try:
-        from core.security import RateLimiter
+        from modules.security import RateLimiter
         # Use singleton rate limiter (stored in app state)
         if not hasattr(request.app.state, "rate_limiter"):
             request.app.state.rate_limiter = RateLimiter()

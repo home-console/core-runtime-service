@@ -117,7 +117,7 @@ async def request_logger_middleware(request: Request, call_next: Callable) -> Re
     import os
     
     # SECURITY: Import sanitizer
-    from core.security import sanitize_for_logging
+    from modules.security import sanitize_for_logging
     
     # Check if DEBUG mode enabled
     debug_mode = os.getenv("DEBUG", "false").lower() in ("true", "1", "yes")

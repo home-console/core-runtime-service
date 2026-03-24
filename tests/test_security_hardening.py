@@ -21,7 +21,7 @@ import json
 from pathlib import Path
 from unittest.mock import Mock, AsyncMock, patch, MagicMock
 
-from core.capability import CapabilityRegistry
+from modules.capability.registry import CapabilityRegistry
 from core.capability_protocol import PROTOCOL_VERSION
 from core.kernel.plugin_registry import PluginRegistry
 from core.plugins import PluginManager

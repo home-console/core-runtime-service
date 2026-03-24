@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 from core.kernel.base_plugin import BasePlugin, PluginMetadata
-from core.http_registry import HttpEndpoint
+from modules.api.registry import HttpEndpoint
 
 if TYPE_CHECKING:
     from core.runtime.runtime import CoreRuntime
@@ -224,8 +224,8 @@ class ClientManagerPlugin(BasePlugin):
         _ensure_client_manager_plugin_on_path()
 
         try:
-            from app.core.websocket_handler import WebSocketHandler
-            from app.core.security.auth_service import AuthService
+            from modules.api.websocket_handler import WebSocketHandler
+            from modules.security.auth_service import AuthService
 
             self.handler = WebSocketHandler()
             

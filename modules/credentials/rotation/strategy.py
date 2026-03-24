@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Optional, Dict
 from enum import Enum
 
-from core.security import TrustLevel
+from modules.security import TrustLevel
 
 
 class RotationStrategyType(Enum):

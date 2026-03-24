@@ -10,7 +10,7 @@ Step 17.6: Zero-trust secret access with MFA elevation
 from typing import Any, Dict, Optional, List, TYPE_CHECKING
 from datetime import datetime, UTC
 
-from core.security import CredentialAccessLevel, CredentialPolicy, RiskAction, Role
+from modules.security import CredentialAccessLevel, CredentialPolicy, RiskAction, Role
 from modules.credentials import (
     Credential,
     CredentialAccessDenied,
@@ -32,7 +32,7 @@ from .schemas import (
 
 if TYPE_CHECKING:
     from core.audit.binder import AuditBinder
-    from core.security import MFAService, RiskEngine, TrustEngine
+    from modules.security import MFAService, RiskEngine, TrustEngine
     from modules.credentials.abuse_detection import CredentialAbuseDetector
     from modules.credentials.security_orchestrator import CredentialSecurityOrchestrator
 

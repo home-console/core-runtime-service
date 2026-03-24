@@ -146,7 +146,7 @@ class LoggerModule(RuntimeModule):
             **context: дополнительный контекст (может включать operation_id, plugin, module и др.)
         """
         # SECURITY: Sanitize all data before logging
-        from core.security import sanitize_for_logging
+        from modules.security import sanitize_for_logging
         message = sanitize_for_logging(message)
         context = sanitize_for_logging(context)
         

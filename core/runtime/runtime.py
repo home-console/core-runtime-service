@@ -19,32 +19,34 @@ CoreRuntime - главный класс Core Runtime (D1).
 
 import asyncio
 import time
-from typing import Any, Dict, Optional, Awaitable, Callable, cast
+from typing import Any, Awaitable, Callable, Dict, Optional, cast
 
-from core.capability_registry import CapabilityRegistry
+from modules.capability.registry import CapabilityRegistry
+from modules.event_bus.inmemory import InMemoryEventBus
+from modules.policy.engine import PolicyEngine
+
 from core.dependency_resolver import (  # Step 10
     DependencyResolver,
     RuntimeIntegrityError,
 )
 from core.http import HttpRegistry
-from core.integration_registry import IntegrationRegistry
+from core.kernel.context import KernelContext
+from core.kernel.plugin_manager import PluginManager
 from core.logger_helper import info, warning
 from core.operations.manager import OperationManager
 from core.operations.worker import OperationWorker
-from core.policy import PolicyEngine
 from core.orchestration import (
     DockerOrchestrationBackend,
     NullOrchestrationBackend,
     OrchestrationService,
 )
-from core.kernel.context import KernelContext
 from core.plugins import PluginState
-from core.kernel.plugin_manager import PluginManager
 from core.runtime.module_manager import ModuleManager
 from core.runtime.runtime_context import RuntimeContext
-from core.service_registry import ServiceRegistry
+from core.service import ServiceRegistry
 from core.state_engine import StateEngine
-from modules.event_bus.inmemory import InMemoryEventBus
+from modules.integrations.registry import IntegrationRegistry
+
 
 class CoreRuntime:
     """
@@ -55,15 +57,10 @@ class CoreRuntime:
     """
 
     def __init__(
-        
         self,
-       
         storage_port: Any,
-       
         config: Optional[Any] = None,
-       
         vault_port: Optional[Any] = None,
-       
         state_engine: Optional[Any] = None,
         *,
         policy_engine: Optional[PolicyEngine] = None,
@@ -109,7 +106,11 @@ class CoreRuntime:
         self.operations = OperationManager(self)
         # TODO: remove modules.plugins.manager shim (backward compat)
         self.plugin_manager = PluginManager(self)
-        module_path_prefix = getattr(config, "module_path_prefix", "modules") if config is not None else "modules"
+        module_path_prefix = (
+            getattr(config, "module_path_prefix", "modules")
+            if config is not None
+            else "modules"
+        )
         self.module_manager = ModuleManager(self, module_path_prefix=module_path_prefix)
         # Dependency resolver для проверки integrity (не знает про HTTP/marketplace)
         self.dependency_resolver = DependencyResolver(
@@ -151,16 +152,24 @@ class CoreRuntime:
         self._worker_task: Optional[asyncio.Task] = None
 
         # OrchestrationService — DI зависимость, configurable backend.
-        self.orchestration_service = orchestration_service or self._build_default_orchestration_service()
+        self.orchestration_service = (
+            orchestration_service or self._build_default_orchestration_service()
+        )
 
     def _build_default_orchestration_service(self) -> OrchestrationService:
         """Собрать orchestration service из runtime config без глобального singleton."""
-        backend_name = getattr(self._config, "orchestration_backend", "docker") if self._config is not None else "docker"
+        backend_name = (
+            getattr(self._config, "orchestration_backend", "docker")
+            if self._config is not None
+            else "docker"
+        )
         if backend_name == "none":
             return OrchestrationService(NullOrchestrationBackend())
         return OrchestrationService(DockerOrchestrationBackend())
 
-    def _iter_transport_runners(self) -> list[tuple[str, Callable[[Any], Awaitable[Any]]]]:
+    def _iter_transport_runners(
+        self,
+    ) -> list[tuple[str, Callable[[Any], Awaitable[Any]]]]:
         """
         Найти transport runner'ы среди зарегистрированных модулей.
 
@@ -175,29 +184,48 @@ class CoreRuntime:
 
             run_transport = getattr(module, "run_transport", None)
             if callable(run_transport):
-                runners.append((module_name, cast(Callable[[Any], Awaitable[Any]], run_transport)))
+                runners.append(
+                    (module_name, cast(Callable[[Any], Awaitable[Any]], run_transport))
+                )
                 continue
 
             run_http = getattr(module, "run_http", None)
             if callable(run_http):
-                runners.append((module_name, cast(Callable[[Any], Awaitable[Any]], run_http)))
+                runners.append(
+                    (module_name, cast(Callable[[Any], Awaitable[Any]], run_http))
+                )
         return runners
 
     async def _run_transports(self) -> None:
         """Запустить transport runner'ы модулей."""
         runners = self._iter_transport_runners()
         if not runners:
-            await info(self, "RUNTIME: no transport runners registered", component="runtime")
+            await info(
+                self, "RUNTIME: no transport runners registered", component="runtime"
+            )
             return
 
         for module_name, runner in runners:
             try:
-                await info(self, f"RUNTIME: running transport for module '{module_name}'", component="runtime")
+                await info(
+                    self,
+                    f"RUNTIME: running transport for module '{module_name}'",
+                    component="runtime",
+                )
                 await runner(self)
-                await info(self, f"RUNTIME: transport runner for '{module_name}' returned", component="runtime")
+                await info(
+                    self,
+                    f"RUNTIME: transport runner for '{module_name}' returned",
+                    component="runtime",
+                )
             except Exception as e:
-                await warning(self, f"Ошибка transport runner '{module_name}': {e}", component="runtime")
+                await warning(
+                    self,
+                    f"Ошибка transport runner '{module_name}': {e}",
+                    component="runtime",
+                )
                 import traceback
+
                 traceback.print_exc()
 
     async def run(self) -> None:
@@ -211,7 +239,9 @@ class CoreRuntime:
 
         await info(self, "RUNTIME: about to run HTTP", component="runtime")
         api_module = self.module_manager.get_module("api")
-        run_http = getattr(api_module, "run_http", None) if api_module is not None else None
+        run_http = (
+            getattr(api_module, "run_http", None) if api_module is not None else None
+        )
         if callable(run_http):
             try:
                 run_http_fn = cast(Callable[[Any], Awaitable[Any]], run_http)

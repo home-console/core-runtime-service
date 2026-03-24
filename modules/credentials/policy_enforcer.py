@@ -9,7 +9,7 @@ Integrates MFA elevation session validation for zero-trust secret access.
 
 from typing import TYPE_CHECKING, Optional
 
-from core.security import (
+from modules.security import (
     CredentialAccessLevel,
     CredentialPolicyEngine,
     ElevationSessionInvalid,
@@ -20,7 +20,7 @@ from .errors import CredentialAccessDenied
 
 if TYPE_CHECKING:
     from core.audit.binder import AuditBinder
-    from core.security import ElevationSessionManager
+    from modules.security import ElevationSessionManager
 
 
 class CredentialRBACEnforcer:

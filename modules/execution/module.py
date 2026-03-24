@@ -21,8 +21,8 @@ from core.operations.registry import get_operation_handler
 from core.runtime_module import RuntimeModule
 from core.operations.models import Operation, OperationStatus
 
-from core.execution.controller import ExecutionControllerImpl
-from core.execution.scheduler import ExecutionScheduler, ExecutionSchedule, generate_schedule_id
+from modules.execution.controller import ExecutionControllerImpl
+from modules.execution.scheduler import ExecutionScheduler, ExecutionSchedule, generate_schedule_id
 from modules.hooks.system import (
     CompleteOperation,
     SystemHookResult,
@@ -124,7 +124,7 @@ class ExecutionModule(RuntimeModule):
             every_seconds = trigger.get("every_seconds")
             at_raw = trigger.get("at")
 
-            from core.execution.scheduler import _parse_datetime_optional, compute_next_run  # type: ignore[attr-defined]
+            from modules.execution.scheduler import _parse_datetime_optional, compute_next_run  # type: ignore[attr-defined]
 
             trigger_at = None
             if at_raw is not None:
@@ -185,7 +185,7 @@ class ExecutionModule(RuntimeModule):
                 next_run_at = now + timedelta(seconds=sec)
 
             schedule_id = generate_schedule_id()
-            from core.execution.scheduler import ExecutionSchedule
+            from modules.execution.scheduler import ExecutionSchedule
 
             sched = ExecutionSchedule(
                 schedule_id=schedule_id,

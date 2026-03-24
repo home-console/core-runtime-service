@@ -29,13 +29,13 @@ from core.kernel.plugin_manager import PluginManager
 from core.kernel.plugin_registry import PluginState
 from core.module import ModuleManager
 from core.http import HttpRegistry
-from core.integration_registry import IntegrationRegistry
-from core.capability import CapabilityRegistry
+from modules.capability.registry import CapabilityRegistry
 from core.logger_helper import info, warning
 from core.base_plugin import BasePlugin
 from core.operations.manager import OperationManager
 from core.dependency import DependencyResolver, RuntimeIntegrityError  # Step 10
-from core.policy import PolicyEngine
+from modules.policy.engine import PolicyEngine
+from modules.integrations.registry import IntegrationRegistry
 from core.runtime_context import RuntimeContext
 from core.runtime_interface import IRuntimeModule, IPluginRegistry
 from core.orchestration import (

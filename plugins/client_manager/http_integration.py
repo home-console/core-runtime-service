@@ -30,8 +30,8 @@ async def integrate_into_main_app(
     мог управлять его жизненным циклом (cleanup и т.п.).
     """
     # Импортируем зависимости client-manager-service
-    from app.core.websocket_handler import WebSocketHandler
-    from app.core.security.auth_service import AuthService
+    from modules.api.websocket_handler import WebSocketHandler
+    from modules.security.auth_service import AuthService
     from app.dependencies import set_websocket_handler, get_websocket_handler
     from app.routes import (
         clients,

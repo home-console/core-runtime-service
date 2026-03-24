@@ -14,7 +14,7 @@ from typing import Optional
 from core.kernel.base_plugin import BasePlugin, PluginMetadata
 from core.plugins import PluginState
 from core.runtime.runtime import CoreRuntime
-from core.capability_registry import CapabilityRegistry
+from modules.capability.registry import CapabilityRegistry
 
 
 class CapabilityProviderPlugin(BasePlugin):

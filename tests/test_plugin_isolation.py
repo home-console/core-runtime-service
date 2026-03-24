@@ -20,7 +20,7 @@ from core.operations import (
 )
 from core.execution_router import ExecutionRouter
 from core.capability_protocol import ProviderMetadata
-from core.capability import CapabilityRegistry
+from modules.capability.registry import CapabilityRegistry
 
 
 def _make_execution_router(runtime):
