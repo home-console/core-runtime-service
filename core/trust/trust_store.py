@@ -8,6 +8,6 @@ warnings.warn(
     stacklevel=2,
 )
 
-from core.security.trust.trust_store import TrustError, TrustLevel, TrustStore
+from modules.security.trust.trust_store import TrustError, TrustLevel, TrustStore
 
 __all__ = ["TrustStore", "TrustLevel", "TrustError"]

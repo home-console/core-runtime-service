@@ -163,13 +163,17 @@ class CredentialRBACEnforcer:
             ElevationSessionInvalid: If no elevation session found
         """
 
-        # First: Evaluate RBAC policy
+        # First: Evaluate RBAC policy (has built-in admin bypass)
         await self.enforce_or_raise(
             user_id=user_id,
             user_roles=user_roles,
             credential_id=credential_id,
             access_level=CredentialAccessLevel.READ_SECRET,
         )
+
+        # Admin bypass: skip MFA elevation gate (same logic as enforce_or_raise)
+        if user_id == "admin":
+            return
 
         # Second: Check MFA elevation session (if session manager provided)
         if self.elevation_session_manager:

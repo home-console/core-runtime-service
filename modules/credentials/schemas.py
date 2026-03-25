@@ -47,6 +47,10 @@ class UpdateCredentialRequest:
     id: str
     version: int
     name: Optional[str] = None
+    type: Optional[str] = None
+    username: Optional[str] = None
+    host: Optional[str] = None
+    port: Optional[int] = None
     metadata: Optional[Dict[str, Any]] = None
     tags: Optional[list[str]] = None
 

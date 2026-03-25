@@ -454,6 +454,14 @@ class CredentialService:
         changes = {}
         if request.name is not None:
             changes["name"] = request.name
+        if request.type is not None:
+            changes["type"] = request.type
+        if request.username is not None:
+            changes["username"] = request.username
+        if request.host is not None:
+            changes["host"] = request.host
+        if request.port is not None:
+            changes["port"] = request.port
         if request.metadata is not None:
             changes["metadata"] = request.metadata
         if request.tags is not None:

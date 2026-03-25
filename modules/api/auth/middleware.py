@@ -126,10 +126,16 @@ async def require_auth_middleware(request: Request, call_next):
                     response.headers["Access-Control-Allow-Credentials"] = "true"
                 return response
     
+    # Приоритет 0: JWT из query param ?token= (только для WebSocket — браузер не может слать header)
+    jwt_token = None
+    if request.scope.get("type") == "websocket":
+        jwt_token = request.query_params.get("token")
+
     # Приоритет 1: JWT access token из Authorization header или Cookie
     # SECURITY FIX: extract_jwt_from_header проверяет формат JWT (3 части через точку)
     # Если это не JWT, функция вернёт None и мы перейдём к проверке API key
-    jwt_token = extract_jwt_from_header(request)
+    if not jwt_token:
+        jwt_token = extract_jwt_from_header(request)
     jwt_from_cookie = False
     
     # Если токен не в header, проверяем cookie

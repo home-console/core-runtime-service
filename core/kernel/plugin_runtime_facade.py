@@ -24,6 +24,8 @@ class PluginRuntimeFacade:
     capabilities: Any
     vault: Optional[Any] = None
     config: Optional[Any] = None
+    agent_manager: Optional[Any] = None
+    agent_registry: Optional[Any] = None
 
     def create_context(self) -> RuntimeContext:
         return RuntimeContext(

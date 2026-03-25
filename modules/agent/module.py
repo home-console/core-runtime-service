@@ -4,13 +4,15 @@ import asyncio
 import logging
 import os
 
-# from modules.api.registry import EndpointAuthConfig, HttpEndpoint
+from core.http.models import EndpointAuthConfig, HttpEndpoint
 from core.runtime_module import RuntimeModule
 
 try:
     from modules.security import SecretStore
+    from modules.security.secret_store_adapter import SecretStoreStorageAdapter
 except ImportError:
     SecretStore = None  # type: ignore[misc, assignment]
+    SecretStoreStorageAdapter = None  # type: ignore[misc, assignment]
 
 from modules.agent.services import (
     admin_agent_check_agents_health,
@@ -95,9 +97,10 @@ class AgentControlPlaneModule(RuntimeModule):
                 "AGENT_SECRET_STORE_PASSPHRASE", "default-dev-passphrase"
             )
             try:
-                await secret_store.initialize(passphrase)
-            except RuntimeError:
                 await secret_store.open_with_passphrase(passphrase)
+            except RuntimeError:
+                # Salt doesn't exist yet — first-time initialization
+                await secret_store.initialize(passphrase)
             self.runtime.secret_store = secret_store
 
         # Initialize mTLS Certificate Authority

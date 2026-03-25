@@ -279,6 +279,14 @@ async def attach_websocket(websocket: Any, session_id: str) -> None:
     При дисконнекте WS сессия остаётся живой (detach).
     """
     session = _sessions.get(session_id)
+
+    # FastAPI/Starlette WS must be accepted before send/receive.
+    try:
+        await websocket.accept()
+    except Exception:
+        # Already accepted by upstream wrapper or incompatible WS object.
+        pass
+
     if session is None or not session.is_alive():
         await websocket.send_text(
             json.dumps({"type": "error", "message": "Session not found or closed"})

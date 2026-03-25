@@ -8,6 +8,6 @@ warnings.warn(
     stacklevel=2,
 )
 
-from core.security.trust.verifier import PluginTrustError, PluginTrustVerifier
+from modules.security.trust.verifier import PluginTrustError, PluginTrustVerifier
 
 __all__ = ["PluginTrustVerifier", "PluginTrustError"]

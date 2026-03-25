@@ -70,12 +70,13 @@ class ModuleManager:
                 f"Use unregister() first or use a different name."
             )
 
-        # Регистрируем модуль
-        self._modules[module_name] = module
-
-        # Вызываем register() модуля для регистрации в CoreRuntime
-        # Вызывается ровно один раз при регистрации
+        # Вызываем register() модуля ДО добавления в реестр.
+        # Если register() упадёт — модуль не попадёт в _modules и
+        # не будет числиться как "зарегистрированный" (zombie-state).
         await module.register()
+
+        # Только после успешной инициализации добавляем в реестр
+        self._modules[module_name] = module
 
     def unregister(self, module_name: str) -> None:
         """

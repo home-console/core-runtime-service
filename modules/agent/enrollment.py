@@ -338,27 +338,60 @@ class AgentEnrollmentManager:
         self._pending_tokens[token_id].status = EnrollmentTokenStatus.REVOKED
         return True
 
-    async def register_agent_from_ws(self, agent_name: str, ws_client_id: str) -> str:
+    async def register_agent_from_ws(
+        self,
+        agent_name: str,
+        ws_client_id: str,
+        agent_registry: Optional[Any] = None,
+    ) -> str:
+        import logging
         from datetime import datetime, timezone
 
         now = datetime.now(timezone.utc).isoformat()
-        identity, private_pem = AgentIdentityFactory.create_identity(agent_name, now)
 
-        try:
-            secret_key = f"agent:{identity.agent_id}:private_key"
-            await self._secret_store.put(secret_key, private_pem)
-        except Exception:
-            pass
+        # Дедупликация по имени: при реконнекте возвращаем существующий agent_id
+        existing_id = self._agent_id_by_name(agent_name)
+        if existing_id:
+            identity = self._enrolled_agents[existing_id]
+            logging.getLogger(__name__).info(
+                f"[AgentEnrollment] ♻️ Reusing agent_id for reconnect: "
+                f"agent_name={agent_name!r} agent_id={existing_id} ws_client_id={ws_client_id}"
+            )
+        else:
+            identity, private_pem = AgentIdentityFactory.create_identity(agent_name, now)
+            try:
+                secret_key = f"agent:{identity.agent_id}:private_key"
+                await self._secret_store.put(secret_key, private_pem)
+            except Exception:
+                pass
+            self._enrolled_agents[identity.agent_id] = identity
+            logging.getLogger(__name__).info(
+                f"[AgentEnrollment] ✅ Registered agent from WS: agent_name={agent_name!r} "
+                f"agent_id={identity.agent_id} ws_client_id={ws_client_id}"
+            )
 
-        self._enrolled_agents[identity.agent_id] = identity
+        # Синхронизируем с AgentRegistry чтобы list_agents() видел агента
+        if agent_registry is not None:
+            try:
+                await agent_registry.register_agent_online(
+                    agent_id=identity.agent_id,
+                    agent_name=agent_name,
+                    version="",
+                    address=ws_client_id,
+                    capabilities=[],
+                    now=now,
+                )
+            except Exception:
+                pass
 
-        import logging
-
-        logging.getLogger(__name__).warning(
-            f"[AgentEnrollment] ✅ Registered agent from WS: agent_name={agent_name!r} "
-            f"agent_id={identity.agent_id} ws_client_id={ws_client_id}"
-        )
         return identity.agent_id
+
+    def _agent_id_by_name(self, agent_name: str) -> Optional[str]:
+        """Найти существующий agent_id по имени агента."""
+        for agent_id, identity in self._enrolled_agents.items():
+            if identity.agent_name == agent_name:
+                return agent_id
+        return None
 
     async def deregister_agent(self, agent_id: str) -> bool:
         if agent_id not in self._enrolled_agents:

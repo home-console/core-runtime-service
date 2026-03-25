@@ -8,7 +8,7 @@ warnings.warn(
     stacklevel=2,
 )
 
-from core.security.trust.legacy_crypto import (
+from modules.security.trust.legacy_crypto import (
     PluginTrustError,
     PluginTrustVerifier,
     SignatureError,

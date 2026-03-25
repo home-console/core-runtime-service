@@ -247,9 +247,13 @@ class UserCredentialsAdapter(DomainAdapter):
         ctx = getattr(request.state, "auth_context", None)
         if ctx and getattr(ctx, "user_id", None):
             params["_user_id"] = ctx.user_id
-            params["_user_roles"] = (
-                ["admin"] if getattr(ctx, "is_admin", False) else ["operator"]
+            scopes = set(getattr(ctx, "scopes", set()) or set())
+            has_admin_scope = (
+                getattr(ctx, "is_admin", False)
+                or "admin.*" in scopes
+                or any(scope.startswith("admin.") for scope in scopes)
             )
+            params["_user_roles"] = ["admin"] if has_admin_scope else ["operator"]
         return params
 
 

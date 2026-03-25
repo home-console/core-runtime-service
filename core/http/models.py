@@ -7,27 +7,28 @@ HTTP Endpoint Models (D2).
 - HttpEndpoint: описание HTTP-контракта
 """
 
-from dataclasses import dataclass, field
-from typing import List, Optional, Dict, Any, Literal, Callable, Awaitable
+from dataclasses import dataclass
+from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional
 
 
 @dataclass
 class EndpointAuthConfig:
     """
     Декларативная конфигурация авторизации для endpoint.
-    
+
     Декларативная authz и param_mapping для endpoints.
     """
+
     # Публичный endpoint (не требует авторизации)
     public: bool = False
-    
+
     # Требуемые scopes (если не публичный)
     required_scopes: Optional[List[str]] = None
-    
+
     # Проверка ресурса (resource-based authorization)
     # Если True, endpoint будет получать resource из доменного адаптера
     requires_resource_check: bool = False
-    
+
     # Имя доменного адаптера для получения resource (например, "devices", "auth")
     # Если указано, route_binding будет вызывать соответствующий адаптер
     resource_adapter: Optional[str] = None
@@ -37,13 +38,16 @@ class EndpointAuthConfig:
 class EndpointParamMapping:
     """
     Декларативная конфигурация маппинга параметров для endpoint.
-    
+
     Декларативная конфигурация маппинга параметров.
     """
+
     # Функция для извлечения/преобразования параметров из request
     # Принимает: (request, body, path_params, query_params) -> dict для service call
-    param_extractor: Optional[Callable[[Any, Optional[Dict], Dict, Dict], Awaitable[Dict]]] = None
-    
+    param_extractor: Optional[
+        Callable[[Any, Optional[Dict], Dict, Dict], Awaitable[Dict]]
+    ] = None
+
     # Функция для валидации body перед вызовом сервиса
     body_validator: Optional[Callable[[Dict], Dict]] = None
 
@@ -69,6 +73,7 @@ class HttpEndpoint:
       - Если websocket=True → method должен быть None
       - Если websocket=False → method обязателен (не пустая строка)
     """
+
     path: str
     service: str
     method: Optional[str] = None
@@ -90,8 +95,10 @@ class HttpEndpoint:
                 raise ValueError("Если websocket=True → method должен быть None")
         else:
             if not self.method or not isinstance(self.method, str):
-                raise ValueError("Если websocket=False → method обязателен (непустая строка)")
-        
+                raise ValueError(
+                    "Если websocket=False → method обязателен (непустая строка)"
+                )
+
         # Нормализуем tags
         if self.tags is None:
             self.tags = []

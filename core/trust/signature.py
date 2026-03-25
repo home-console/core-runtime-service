@@ -8,7 +8,7 @@ warnings.warn(
     stacklevel=2,
 )
 
-from core.security.trust.signature import (
+from modules.security.trust.signature import (
     SignatureError,
     compute_archive_sha256,
     compute_payload_hash,

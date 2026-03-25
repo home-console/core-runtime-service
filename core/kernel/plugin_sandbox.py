@@ -80,6 +80,8 @@ class PluginSandbox:
                 capabilities=getattr(runtime, "capability_registry", None) or getattr(runtime, "capabilities", None),
                 vault=getattr(runtime, "vault", None),
                 config=getattr(runtime, "config", None),
+                agent_manager=getattr(runtime, "agent_manager", None),
+                agent_registry=getattr(runtime, "agent_registry", None),
             )  # type: ignore[assignment]
             
         except Exception as e:
