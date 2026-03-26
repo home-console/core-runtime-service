@@ -130,6 +130,18 @@ def register_admin_core_http_endpoints(http_registry: Any) -> None:
             description="Admin: WebSocket терминал по креду (?credential_id=...)",
         ),
         HttpEndpoint(
+            method="POST",
+            path="/admin/v1/agents/{agent_id}/terminal/start",
+            service="admin.v1.agents.terminal.start",
+            description="Admin: запустить терминальную сессию на агенте",
+        ),
+        HttpEndpoint(
+            path="/admin/v1/agents/terminal/ws/{session_id}",
+            service="admin.v1.agents.terminal.ws",
+            websocket=True,
+            description="Admin: WebSocket attach к терминальной сессии агента",
+        ),
+        HttpEndpoint(
             method="GET",
             path="/admin/v1/inspector/executions/{execution_id}",
             service="admin.v1.inspector.executions.get",

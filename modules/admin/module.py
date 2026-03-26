@@ -16,6 +16,7 @@ import logging
 import time
 
 from core.runtime_module import RuntimeModule
+
 # OrchestrationService (Docker/k8s абстракция)
 from core.orchestration import OrchestrationService
 
@@ -37,9 +38,6 @@ from .http_endpoints import register_admin_core_http_endpoints
 from .plugin_control_bindings import register_plugin_control_bindings
 from .device_admin_bindings import register_device_admin_bindings
 from .ssh_bindings import register_ssh_bindings
-from .plugin_control_bindings import register_plugin_control_bindings
-from .device_admin_bindings import register_device_admin_bindings
-from .ssh_bindings import register_ssh_bindings
 from .introspection import (
     get_runtime_info,
     list_plugins,
@@ -53,7 +51,6 @@ from .introspection import (
     list_state_keys,
     get_state_value,
     list_operations_available,
-    list_integrations,
     integrations_inspector_response,
     auth_inspector_response,
     inventory_inspector_response,
@@ -78,6 +75,7 @@ from .operations import (
     admin_operations_cancel,
     admin_operations_retry,
 )
+
 # Agent deploy (SSH bootstrap)
 from modules.agent.services import admin_agent_deploy
 # Auth services moved to AuthModule
@@ -110,14 +108,16 @@ class AdminModule(RuntimeModule):
         # --- Webhook demo (C4) ---
         async def webhook_test_service(payload, **kwargs):
             import logging
+
             logger = logging.getLogger(__name__)
             logger.info(f"[C4 Webhook Demo] Received payload: {payload}")
             return {
                 "ok": True,
                 "message": "Webhook received and processed",
                 "payload_type": str(type(payload).__name__),
-                "payload_sample": str(payload)[:100] if payload else None
+                "payload_sample": str(payload)[:100] if payload else None,
             }
+
         services = self.runtime.kernel_context.get_service("service_registry")
         await services.register("system.webhook_test", webhook_test_service)
 
@@ -135,32 +135,49 @@ class AdminModule(RuntimeModule):
             async def handler(key=None, **kw):
                 k = key if key is not None else kw.get("key")
                 return await get_state_value(self.runtime, k)
+
             return handler
 
         def wrap_execution_get():
             async def handler(execution_id=None, **kw):
-                eid = execution_id if execution_id is not None else kw.get("execution_id") or kw.get("id")
+                eid = (
+                    execution_id
+                    if execution_id is not None
+                    else kw.get("execution_id") or kw.get("id")
+                )
                 return await get_execution_trace(self.runtime, eid)
 
             return handler
 
         def wrap_operation_executions():
             async def handler(operation_id=None, **kw):
-                oid = operation_id if operation_id is not None else kw.get("operation_id") or kw.get("id")
+                oid = (
+                    operation_id
+                    if operation_id is not None
+                    else kw.get("operation_id") or kw.get("id")
+                )
                 return await list_operation_executions(self.runtime, oid)
 
             return handler
 
         def wrap_execution_retries():
             async def handler(execution_id=None, **kw):
-                eid = execution_id if execution_id is not None else kw.get("execution_id") or kw.get("id")
+                eid = (
+                    execution_id
+                    if execution_id is not None
+                    else kw.get("execution_id") or kw.get("id")
+                )
                 return await list_execution_retries(self.runtime, eid)
 
             return handler
 
         def wrap_execution_tree():
             async def handler(execution_id=None, **kw):
-                eid = execution_id if execution_id is not None else kw.get("execution_id") or kw.get("id")
+                eid = (
+                    execution_id
+                    if execution_id is not None
+                    else kw.get("execution_id") or kw.get("id")
+                )
                 return await get_execution_tree(self.runtime, eid)
 
             return handler
@@ -170,14 +187,22 @@ class AdminModule(RuntimeModule):
 
         def wrap_schedule_get():
             async def handler(schedule_id=None, **kw):
-                sid = schedule_id if schedule_id is not None else kw.get("schedule_id") or kw.get("id")
+                sid = (
+                    schedule_id
+                    if schedule_id is not None
+                    else kw.get("schedule_id") or kw.get("id")
+                )
                 return await get_schedule(self.runtime, sid)
 
             return handler
 
         def wrap_operation_schedules():
             async def handler(operation_id=None, **kw):
-                oid = operation_id if operation_id is not None else kw.get("operation_id") or kw.get("id")
+                oid = (
+                    operation_id
+                    if operation_id is not None
+                    else kw.get("operation_id") or kw.get("id")
+                )
                 return await list_operation_schedules(self.runtime, oid)
 
             return handler
@@ -199,70 +224,117 @@ class AdminModule(RuntimeModule):
         def wrap_credentials_list():
             async def handler(**kw):
                 return await admin_credentials_list(self.runtime)
+
             return handler
 
         def wrap_credentials_create():
             async def handler(body=None, **kw):
                 b = body if body is not None else kw.get("body")
                 return await admin_credentials_create(self.runtime, b)
+
             return handler
 
         def wrap_credentials_get():
             async def handler(credential_id=None, **kw):
                 cid = credential_id or kw.get("credential_id")
                 return await admin_credentials_get(self.runtime, credential_id=cid)
+
             return handler
 
         def wrap_credentials_get_secret():
             async def handler(credential_id=None, **kw):
                 cid = credential_id or kw.get("credential_id")
-                return await admin_credentials_get_secret(self.runtime, credential_id=cid)
+                return await admin_credentials_get_secret(
+                    self.runtime, credential_id=cid
+                )
+
             return handler
 
         def wrap_credentials_delete():
             async def handler(credential_id=None, **kw):
                 cid = credential_id or kw.get("credential_id")
                 return await admin_credentials_delete(self.runtime, credential_id=cid)
+
             return handler
 
         def wrap_credentials_update():
             async def handler(credential_id=None, body=None, **kw):
                 cid = credential_id or kw.get("credential_id")
                 b = body if body is not None else kw.get("body")
-                return await admin_credentials_update(self.runtime, credential_id=cid, body=b)
+                return await admin_credentials_update(
+                    self.runtime, credential_id=cid, body=b
+                )
+
             return handler
 
         def wrap_credentials_connect():
             async def handler(credential_id=None, **kw):
                 cid = credential_id or kw.get("credential_id")
                 return await admin_credentials_connect(self.runtime, credential_id=cid)
+
             return handler
 
         def wrap_credentials_terminal_ws():
             async def handler(websocket=None, **kw):
                 ws = websocket or kw.get("websocket")
                 return await admin_credentials_terminal_ws(self.runtime, ws)
+
             return handler
 
         def wrap_credentials_terminal_sessions():
             async def handler(**kw):
                 return await admin_credentials_terminal_sessions(self.runtime)
+
             return handler
 
         def wrap_credentials_terminal_session_close():
             async def handler(session_id: str, **kw):
-                return await admin_credentials_terminal_session_close(self.runtime, session_id=session_id)
+                return await admin_credentials_terminal_session_close(
+                    self.runtime, session_id=session_id
+                )
+
             return handler
 
         def wrap_agent_deploy():
             async def handler(body=None, **kw):
                 b = body if body is not None else kw.get("body")
                 return await admin_agent_deploy(self.runtime, b)
+
+            return handler
+
+        def wrap_agent_terminal_start():
+            async def handler(agent_id=None, body=None, **kw):
+                aid = agent_id or kw.get("agent_id")
+                b = body if body is not None else kw.get("body")
+                services = self.runtime.kernel_context.get_service("service_registry")
+                if not await services.has_service(
+                    "client_manager.start_agent_terminal"
+                ):
+                    raise RuntimeError("Agent terminal service not available")
+                return await services.call(
+                    "client_manager.start_agent_terminal", aid, b
+                )
+
+            return handler
+
+        def wrap_agent_terminal_ws():
+            async def handler(websocket=None, session_id=None, **kw):
+                ws = websocket or kw.get("websocket")
+                sid = session_id or kw.get("session_id")
+                services = self.runtime.kernel_context.get_service("service_registry")
+                if not await services.has_service("client_manager.agent_terminal_ws"):
+                    raise RuntimeError("Agent terminal websocket service not available")
+                return await services.call(
+                    "client_manager.agent_terminal_ws", websocket=ws, session_id=sid
+                )
+
             return handler
 
         async def _marketplace_catalog(*args, **kw):
             """Список плагинов для маркетплейса: один захардкоженный файл catalog.json (ссылки на репо)."""
-            catalog_path = Path(__file__).resolve().parent.parent / "marketplace" / "catalog.json"
+            catalog_path = (
+                Path(__file__).resolve().parent.parent / "marketplace" / "catalog.json"
+            )
             try:
                 if catalog_path.exists():
                     data = json.loads(catalog_path.read_text(encoding="utf-8"))
@@ -272,9 +344,15 @@ class AdminModule(RuntimeModule):
             return {"catalog": []}
 
         registrations = [
-            ("admin.v1.runtime", wrap_introspection(get_runtime_info, with_started_at=True)),
+            (
+                "admin.v1.runtime",
+                wrap_introspection(get_runtime_info, with_started_at=True),
+            ),
             ("admin.v1.plugins", wrap_introspection(list_plugins)),
-            ("admin.v1.inspector.plugins.discover", wrap_introspection(discover_manifests_for_inspector)),
+            (
+                "admin.v1.inspector.plugins.discover",
+                wrap_introspection(discover_manifests_for_inspector),
+            ),
             ("admin.v1.inspector.plugins.get", wrap_plugin_get()),
             ("admin.v1.services", wrap_introspection(list_services)),
             ("admin.v1.http", wrap_introspection(list_http_endpoints)),
@@ -290,17 +368,37 @@ class AdminModule(RuntimeModule):
             ("admin.v1.credentials.delete", wrap_credentials_delete()),
             ("admin.v1.credentials.connect", wrap_credentials_connect()),
             ("admin.v1.credentials.terminal_ws", wrap_credentials_terminal_ws()),
-            ("admin.v1.credentials.terminal_sessions", wrap_credentials_terminal_sessions()),
-            ("admin.v1.credentials.terminal_session_close", wrap_credentials_terminal_session_close()),
+            (
+                "admin.v1.credentials.terminal_sessions",
+                wrap_credentials_terminal_sessions(),
+            ),
+            (
+                "admin.v1.credentials.terminal_session_close",
+                wrap_credentials_terminal_session_close(),
+            ),
+            ("admin.v1.agents.terminal.start", wrap_agent_terminal_start()),
+            ("admin.v1.agents.terminal.ws", wrap_agent_terminal_ws()),
             ("admin.v1.state", wrap_introspection(get_state)),
             ("admin.v1.state.keys", wrap_introspection(list_state_keys)),
             ("admin.v1.state.get", wrap_state_get()),
-            ("admin.v1.inspector.operations", wrap_introspection(list_operations_available)),
+            (
+                "admin.v1.inspector.operations",
+                wrap_introspection(list_operations_available),
+            ),
             ("admin.v1.inspector.auth", wrap_introspection(auth_inspector_response)),
-            ("admin.v1.inspector.integrations", wrap_introspection(integrations_inspector_response)),
-            ("admin.v1.inspector.inventory", wrap_introspection(inventory_inspector_response)),
+            (
+                "admin.v1.inspector.integrations",
+                wrap_introspection(integrations_inspector_response),
+            ),
+            (
+                "admin.v1.inspector.inventory",
+                wrap_introspection(inventory_inspector_response),
+            ),
             ("admin.v1.inspector.capabilities", wrap_introspection(list_capabilities)),
-            ("admin.v1.inspector.executions", wrap_introspection(list_execution_traces)),
+            (
+                "admin.v1.inspector.executions",
+                wrap_introspection(list_execution_traces),
+            ),
             ("admin.v1.inspector.executions.get", wrap_execution_get()),
             ("admin.v1.inspector.operations.executions", wrap_operation_executions()),
             ("admin.v1.inspector.executions.retries", wrap_execution_retries()),
@@ -309,14 +407,55 @@ class AdminModule(RuntimeModule):
             ("admin.v1.inspector.schedules.get", wrap_schedule_get()),
             ("admin.v1.inspector.operations.schedules", wrap_operation_schedules()),
             ("admin.v1.inspector.system_health", wrap_introspection(get_system_health)),
-            ("admin.v1.inspector.dashboard", wrap_introspection(dashboard_inspector_response)),
+            (
+                "admin.v1.inspector.dashboard",
+                wrap_introspection(dashboard_inspector_response),
+            ),
             ("admin.v1.marketplace.catalog", _marketplace_catalog),
             # Admin devices read-only proxy services (kept for Admin UI compatibility)
-            ("admin.v1.devices.list", wrap_domain(__import__("modules.admin.devices", fromlist=["admin_devices_list"]).admin_devices_list)),
-            ("admin.v1.devices.get", wrap_domain(__import__("modules.admin.devices", fromlist=["admin_devices_get"]).admin_devices_get)),
-            ("admin.v1.devices.list_external", wrap_domain(__import__("modules.admin.devices", fromlist=["admin_devices_list_external"]).admin_devices_list_external)),
-            ("admin.v1.devices.list_mappings", wrap_domain(__import__("modules.admin.devices", fromlist=["admin_devices_list_mappings"]).admin_devices_list_mappings)),
-            ("admin.v1.devices.get_external_for_device", wrap_domain(__import__("modules.admin.devices", fromlist=["admin_devices_get_external_for_device"]).admin_devices_get_external_for_device)),
+            (
+                "admin.v1.devices.list",
+                wrap_domain(
+                    __import__(
+                        "modules.admin.devices", fromlist=["admin_devices_list"]
+                    ).admin_devices_list
+                ),
+            ),
+            (
+                "admin.v1.devices.get",
+                wrap_domain(
+                    __import__(
+                        "modules.admin.devices", fromlist=["admin_devices_get"]
+                    ).admin_devices_get
+                ),
+            ),
+            (
+                "admin.v1.devices.list_external",
+                wrap_domain(
+                    __import__(
+                        "modules.admin.devices",
+                        fromlist=["admin_devices_list_external"],
+                    ).admin_devices_list_external
+                ),
+            ),
+            (
+                "admin.v1.devices.list_mappings",
+                wrap_domain(
+                    __import__(
+                        "modules.admin.devices",
+                        fromlist=["admin_devices_list_mappings"],
+                    ).admin_devices_list_mappings
+                ),
+            ),
+            (
+                "admin.v1.devices.get_external_for_device",
+                wrap_domain(
+                    __import__(
+                        "modules.admin.devices",
+                        fromlist=["admin_devices_get_external_for_device"],
+                    ).admin_devices_get_external_for_device
+                ),
+            ),
             ("admin.operations.create", wrap_domain(admin_operations_create)),
             ("admin.operations.list", wrap_domain(admin_operations_list)),
             ("admin.operations.get", wrap_domain(admin_operations_get)),
@@ -350,8 +489,12 @@ class AdminModule(RuntimeModule):
         )
         # Прокидываем runtime в RuntimeContext, чтобы device_admin_bindings мог использовать runtime.kernel_context.
         setattr(self.context, "runtime", self.runtime)
-        self._registered_services.extend(await register_device_admin_bindings(self.context))
-        self._registered_services.extend(await register_ssh_bindings(self.runtime, self.context))
+        self._registered_services.extend(
+            await register_device_admin_bindings(self.context)
+        )
+        self._registered_services.extend(
+            await register_ssh_bindings(self.runtime, self.context)
+        )
 
     async def start(self) -> None:
         pass
@@ -359,7 +502,9 @@ class AdminModule(RuntimeModule):
     async def stop(self) -> None:
         for service_name in self._registered_services:
             try:
-                await self.runtime.kernel_context.get_service("service_registry").unregister(service_name)
+                await self.runtime.kernel_context.get_service(
+                    "service_registry"
+                ).unregister(service_name)
             except Exception:
                 pass
         self._registered_services.clear()

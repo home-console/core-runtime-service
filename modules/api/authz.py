@@ -105,6 +105,8 @@ ACTION_SCOPE_MAP: Dict[str, str] = {
 
     # Agent deploy
     "admin.agents.deploy": "admin.write",
+    "admin.v1.agents.terminal.start": "admin.write",
+    "admin.v1.agents.terminal.ws": "admin.write",
     
     # User v1 services (user-scoped operations)
     "user.v1.integrations": "integrations.read",

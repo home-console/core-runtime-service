@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, UTC
-from typing import Any, Dict, Optional, Literal, List
+from datetime import UTC, datetime, timedelta
+from typing import Any, Dict, Literal, Optional
 from uuid import uuid4
 from zoneinfo import ZoneInfo
-
 
 ScheduleTriggerType = Literal["delay", "interval", "cron"]
 
@@ -31,9 +30,9 @@ class ExecutionSchedule:
     context: Dict[str, Any]
 
     trigger_type: ScheduleTriggerType
-    trigger_at: Optional[datetime] = None        # delay
+    trigger_at: Optional[datetime] = None  # delay
     trigger_every_seconds: Optional[int] = None  # interval
-    trigger_cron: Optional[str] = None           # legacy cron field (D3.6)
+    trigger_cron: Optional[str] = None  # legacy cron field (D3.6)
 
     # Cron trigger metadata (D3.7)
     cron_expr: Optional[str] = None
@@ -229,7 +228,9 @@ def compute_next_run(
 
     minute_field, hour_field, dom_field, month_field, dow_field = parts
     if hour_field != "*" or dom_field != "*" or month_field != "*" or dow_field != "*":
-        raise ValueError(f"Unsupported cron expression (only minute-level '*' supported): {cron_expr}")
+        raise ValueError(
+            f"Unsupported cron expression (only minute-level '*' supported): {cron_expr}"
+        )
 
     # Разбираем минутное поле
     step: Optional[int] = None
@@ -243,14 +244,18 @@ def compute_next_run(
             if step <= 0:
                 raise ValueError
         except Exception:
-            raise ValueError(f"Invalid minute step in cron expression: {cron_expr}") from None
+            raise ValueError(
+                f"Invalid minute step in cron expression: {cron_expr}"
+            ) from None
     else:
         try:
             exact_minute = int(minute_field)
             if not (0 <= exact_minute < 60):
                 raise ValueError
         except Exception:
-            raise ValueError(f"Invalid minute field in cron expression: {cron_expr}") from None
+            raise ValueError(
+                f"Invalid minute field in cron expression: {cron_expr}"
+            ) from None
 
     try:
         tz = ZoneInfo(timezone)
@@ -361,11 +366,11 @@ class ExecutionScheduler:
                     context=dict(sched.context),
                 )
             except Exception:
-                pass
+                # Не отмечаем запуск успешным и оставляем schedule доступным для retry на следующем tick.
+                continue
             sched.run_count += 1
             sched.last_run_at = now
             sched.compute_next_after_run(now)
             if sched.max_runs is not None and sched.run_count >= sched.max_runs:
                 sched.enabled = False
             await self.save_schedule(sched)
-

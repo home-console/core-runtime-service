@@ -135,7 +135,7 @@ class TestRevocationServiceRegistryAlsoRaises:
 
 
 class TestIsRevokedStorageRaises:
-    """Cover is_revoked exception path (lines 179-181 equivalent)."""
+    """Cover is_revoked exception path with fail-closed behavior."""
 
     @pytest.mark.asyncio
     async def test_is_revoked_with_raising_storage(self):
@@ -150,7 +150,7 @@ class TestIsRevokedStorageRaises:
                 raise Exception("get error")
         rt2 = SimpleNamespace(storage=GetRaises())
         result = await is_revoked(rt2, "any-id", "api_key")
-        assert result is False
+        assert result is True
 
     @pytest.mark.asyncio
     async def test_is_revoked_entry_with_none_type(self):

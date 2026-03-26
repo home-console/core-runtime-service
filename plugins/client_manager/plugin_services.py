@@ -5,6 +5,9 @@ Service Registry Integration - регистрация сервисов Client Ma
 """
 
 import logging
+import base64
+import json
+from uuid import uuid4
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from datetime import datetime, UTC
 
@@ -208,6 +211,138 @@ async def register_services(plugin: "ClientManagerPlugin") -> None:
             return []
     
     await registry.register("client_manager.list_transfers", list_transfers)
+
+    # POST /admin/v1/agents/{agent_id}/terminal/start
+    async def start_agent_terminal(agent_id: str, body: Any = None, **kwargs) -> Dict[str, Any]:
+        """Запустить терминальную сессию на подключенном агенте."""
+        if not plugin.handler:
+            return {"error": "Handler not initialized"}
+
+        ws = plugin.handler.websocket_manager.get_connection(agent_id)
+        if not ws:
+            return {"error": "Agent not connected"}
+
+        session_id = str(uuid4())
+        cols = 80
+        rows = 24
+        command = ""
+        if isinstance(body, dict):
+            try:
+                cols = int(body.get("cols", 80))
+                rows = int(body.get("rows", 24))
+            except Exception:
+                cols, rows = 80, 24
+            command = str(body.get("command") or "")
+
+        initiator = {"type": "unknown"}
+        try:
+            from modules.api.auth.contextvars import get_current_request_context
+
+            ctx = get_current_request_context()
+            if ctx is not None:
+                initiator = {
+                    "type": "user",
+                    "id": ctx.user_id or ctx.subject,
+                    "scopes": list(ctx.scopes),
+                    "is_admin": bool(ctx.is_admin),
+                }
+        except Exception:
+            pass
+
+        await plugin.handler.register_terminal_session(
+            session_id,
+            agent_id,
+            initiator=initiator,
+        )
+
+        msg = {
+            "type": "terminal.start",
+            "data": {
+                "session_id": session_id,
+                "command": command,
+                "cols": cols,
+                "rows": rows,
+            },
+        }
+        try:
+            enc = await plugin.handler.encryption_service.encrypt_message(msg, agent_id)
+            ok = await plugin.handler.websocket_manager.send_message(agent_id, enc)
+            if not ok:
+                await plugin.handler.detach_session(session_id)
+                return {"error": "Failed to send start message to agent"}
+        except Exception as e:
+            await plugin.handler.detach_session(session_id)
+            return {"error": str(e)}
+
+        return {"session_id": session_id}
+
+    await registry.register("admin.v1.agents.terminal.start", start_agent_terminal)
+    await registry.register("client_manager.start_agent_terminal", start_agent_terminal)
+
+    # WS /admin/v1/agents/terminal/ws/{session_id}
+    async def agent_terminal_ws(websocket: Any, session_id: str, **kwargs) -> None:
+        """WebSocket attach к терминалу агента (тонкий транспорт, логика на backend)."""
+        if not plugin.handler:
+            try:
+                await websocket.close(code=1011, reason="Handler not initialized")
+            except Exception:
+                pass
+            return
+
+        await websocket.accept()
+        attached = await plugin.handler.attach_frontend_to_session(session_id, websocket)
+        if not attached:
+            await websocket.send_text('{"type":"error","message":"Unknown session or agent disconnected"}')
+            await websocket.close(code=1008)
+            return
+
+        try:
+            while True:
+                msg = await websocket.receive()
+                if msg.get("type") != "websocket.receive":
+                    continue
+
+                if "text" in msg and msg["text"] is not None:
+                    try:
+                        payload = json.loads(msg["text"])
+                    except Exception:
+                        continue
+                    if payload.get("type") != "resize":
+                        continue
+
+                    cols = int(payload.get("cols", 80))
+                    rows = int(payload.get("rows", 24))
+                    sess = plugin.handler.terminal_sessions.get(session_id)
+                    if not sess:
+                        await websocket.send_text('{"type":"error","message":"Session not found"}')
+                        await websocket.close(code=1008)
+                        return
+                    agent_id = sess.get("agent_id")
+                    control = {
+                        "type": "terminal.resize",
+                        "data": {"session_id": session_id, "cols": cols, "rows": rows},
+                    }
+                    try:
+                        enc = await plugin.handler.encryption_service.encrypt_message(control, agent_id)
+                        await plugin.handler.websocket_manager.send_message(agent_id, enc)
+                    except Exception:
+                        continue
+
+                elif "bytes" in msg and msg["bytes"] is not None:
+                    b64 = base64.b64encode(msg["bytes"]).decode("ascii")
+                    ok = await plugin.handler.send_input_to_agent(session_id, b64)
+                    if not ok:
+                        await websocket.send_text('{"type":"error","message":"Failed to forward input to agent"}')
+                        await websocket.close(code=1011)
+                        return
+        except Exception:
+            try:
+                await plugin.handler.detach_session(session_id)
+            except Exception:
+                pass
+
+    await registry.register("admin.v1.agents.terminal.ws", agent_terminal_ws)
+    await registry.register("client_manager.agent_terminal_ws", agent_terminal_ws)
     
     # POST /client-manager/universal/{client_id}/execute
     async def execute_universal_command(

@@ -206,6 +206,20 @@ class ClientManagerPlugin(BasePlugin):
                 tags=["client_manager", "files"]
             ),
             HttpEndpoint(
+                path="/admin/v1/agents/{agent_id}/terminal/start",
+                method="POST",
+                service="admin.v1.agents.terminal.start",
+                description="Запустить терминальную сессию на агенте",
+                tags=["client_manager", "terminal", "admin", "agents"]
+            ),
+            HttpEndpoint(
+                path="/admin/v1/agents/terminal/ws/{session_id}",
+                service="admin.v1.agents.terminal.ws",
+                websocket=True,
+                description="WebSocket attach к терминальной сессии агента",
+                tags=["client_manager", "terminal", "admin", "agents", "websocket"]
+            ),
+            HttpEndpoint(
                 path="/client-manager/universal/{client_id}/execute",
                 method="POST",
                 service="client_manager.execute_universal_command",

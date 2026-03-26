@@ -9,9 +9,10 @@ import asyncio
 import os
 from pathlib import Path
 
-from app.bootstrap import APP_MODULES, build_runtime, parse_module_specs
+from app.bootstrap import build_runtime, parse_module_specs
 from core.config import Config
 from core.state_engine import StateEngine
+from core.security import check_security_env
 from modules.storage.factory import build_storage_stack
 
 
@@ -41,7 +42,24 @@ def _load_dotenv() -> None:
 _load_dotenv()
 
 
+def _validate_security_configuration() -> None:
+    """Fail-fast проверка обязательной security-конфигурации перед стартом runtime."""
+    result = check_security_env()
+    warnings = result.get("warnings", [])
+    for warning in warnings:
+        print(f"[Runtime][Security Warning] {warning}")
+
+
+def _resolve_secret_store_passphrase() -> str:
+    """Получить passphrase для SecretStore без insecure fallback значения."""
+    passphrase = (os.getenv("AGENT_SECRET_STORE_PASSPHRASE") or "").strip()
+    if not passphrase:
+        raise RuntimeError("AGENT_SECRET_STORE_PASSPHRASE is required")
+    return passphrase
+
+
 async def main() -> None:
+    _validate_security_configuration()
     config = Config.from_env()
     if config.storage_type == "sqlite":
         Path(config.db_path).parent.mkdir(parents=True, exist_ok=True)
@@ -74,9 +92,7 @@ async def main() -> None:
         )
         wrapper = SecretStoreStorageAdapter(backend)
         secret_store = SecretStore(wrapper)
-        passphrase = os.getenv(
-            "AGENT_SECRET_STORE_PASSPHRASE", "default-dev-passphrase"
-        )
+        passphrase = _resolve_secret_store_passphrase()
         # Сначала открыть существующий store (salt уже в vault), иначе — новая инициализация.
         # Раньше вызывали initialize() первым — он перезаписывал salt, после перезапуска секреты не расшифровывались.
         try:
@@ -88,6 +104,8 @@ async def main() -> None:
                 raise
         runtime.secret_store = secret_store
     except Exception as e:
+        if getattr(config, "env", "production") == "production":
+            raise
         print(f"[Runtime] SecretStore not available: {e}")
 
     print(f"[Runtime] Storage mode: {config.storage_mode} ({config.storage_type})")

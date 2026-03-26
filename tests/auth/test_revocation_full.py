@@ -192,12 +192,12 @@ class TestIsRevoked:
         assert await is_revoked(rt, "bad-entry", "api_key") is False
 
     @pytest.mark.asyncio
-    async def test_returns_false_on_storage_exception(self):
+    async def test_returns_true_on_storage_exception_fail_closed(self):
         bad_storage = SimpleNamespace(
             get=AsyncMock_ify(Exception("broken"))
         )
         rt = SimpleNamespace(storage=bad_storage, service_registry=FakeServiceRegistry())
-        assert await is_revoked(rt, "x", "api_key") is False
+        assert await is_revoked(rt, "x", "api_key") is True
 
     @pytest.mark.asyncio
     async def test_session_revoked_true(self, rt):
