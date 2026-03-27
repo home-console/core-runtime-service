@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from core.messaging.event_bus import EventBus
+from core.messaging.event_bus import EventBus, EventBusMiddleware
 
 
 @pytest.mark.asyncio
@@ -21,7 +21,8 @@ async def test_subscribe_and_publish():
     await asyncio.sleep(0)
 
     assert received['type'] == 'test.event'
-    assert received['data'] == {'x': 1}
+    assert received['data']['x'] == 1
+    assert 'id' in received['data']
 
 
 @pytest.mark.asyncio
@@ -96,7 +97,10 @@ async def test_event_bus_middleware_receives_publish_lifecycle():
     await bus.subscribe("evt", handler)
     await bus.publish("evt", {"v": 1})
 
-    assert ("before", "evt", {"v": 1}) in mw.events
+    before = [e for e in mw.events if e[0] == "before" and e[1] == "evt"]
+    assert len(before) == 1
+    assert before[0][2]["v"] == 1
+    assert "id" in before[0][2]
     assert ("after", "evt", 1) in mw.events
     assert " _TrackingEventMiddleware".strip() in await bus.list_middleware()
 

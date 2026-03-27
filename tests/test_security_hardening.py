@@ -28,7 +28,7 @@ from core.plugins import PluginManager
 from core.base_plugin import BasePlugin, PluginMetadata
 from core.errors import ForbiddenError
 from core.operations import Operation, OperationInitiator, OperationInitiatorKind, OperationManager
-from core.execution_router import ExecutionRouter
+from modules.execution.router import ExecutionRouter
 from core.exceptions.errors import ForbiddenError
 from modules.plugins.isolation import StorageProxy
 

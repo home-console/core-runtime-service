@@ -17,7 +17,7 @@ from typing import Any, AsyncIterator, Dict, Optional
 import pytest
 
 from core.adapters.storage_adapter import StorageAdapter
-from core.security.secret_store import SecretStore
+from modules.security.secret_store import SecretStore
 from modules.credentials import (
     Credential,
     CredentialAlreadyExists,
@@ -761,7 +761,7 @@ class TestCredentialRepositoryPolicies:
     @pytest.mark.asyncio
     async def test_create_and_update_policy(self, repository):
         """Policy CRUD works with StorageManager compatibility methods."""
-        from core.security.rbac_models import CredentialPolicy, Role
+        from modules.security.rbac_models import CredentialPolicy, Role
 
         policy = CredentialPolicy(
             credential_id="cred-1",

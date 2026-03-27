@@ -237,6 +237,10 @@ class CoreRuntime:
         await self.start()
         await info(self, "RUNTIME: start() finished", component="runtime")
 
+        await info(self, "RUNTIME: about to run transport runners", component="runtime")
+        await self._run_transports()
+        await info(self, "RUNTIME: transport runners finished", component="runtime")
+
         await info(self, "RUNTIME: about to run HTTP", component="runtime")
         api_module = self.module_manager.get_module("api")
         run_http = (
@@ -742,12 +746,11 @@ class CoreRuntime:
 
         # Проверка плагинов
         try:
-            plugins = self.plugin_manager.list_plugins()
-            error_plugins = [
-                p
-                for p in plugins
-                if self.plugin_manager.get_plugin_state(p) == PluginState.ERROR
-            ]
+            plugins = await self.plugin_manager.list_plugins()
+            error_plugins = []
+            for p in plugins:
+                if await self.plugin_manager.get_plugin_state(p) == PluginState.ERROR:
+                    error_plugins.append(p)
             if error_plugins:
                 checks["plugins"] = HealthStatus.DEGRADED.value
                 checks["plugins_error"] = f"Plugins in error state: {error_plugins}"

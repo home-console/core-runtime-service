@@ -18,7 +18,7 @@ from core.operations import (
     Operation, OperationStatus, OperationError, 
     OperationInitiator, OperationInitiatorKind
 )
-from core.execution_router import ExecutionRouter
+from modules.execution.router import ExecutionRouter
 from core.capability_protocol import ProviderMetadata
 from modules.capability.registry import CapabilityRegistry
 
@@ -108,8 +108,8 @@ class TestExecutionRouter:
         """Test process execution routing через ExecutionController."""
         # NOTE: ExecutionRouter теперь использует ExecutionController если доступен
         # Этот тест проверяет, что routing работает через ExecutionController
-        from core.execution.controller import ExecutionControllerImpl
-        from core.execution.backend import OperationResult
+        from modules.execution.controller import ExecutionControllerImpl
+        from modules.execution.backend import OperationResult
         
         # Создаём mock ExecutionController
         controller_mock = AsyncMock(spec=ExecutionControllerImpl)
@@ -138,8 +138,8 @@ class TestExecutionRouter:
     async def test_container_execution_routing(self, router, operation):
         """Test container execution routing через ExecutionController."""
         # NOTE: ExecutionRouter теперь использует ExecutionController если доступен
-        from core.execution.controller import ExecutionControllerImpl
-        from core.execution.backend import OperationResult
+        from modules.execution.controller import ExecutionControllerImpl
+        from modules.execution.backend import OperationResult
         
         # Создаём mock ExecutionController
         controller_mock = AsyncMock(spec=ExecutionControllerImpl)
@@ -177,7 +177,7 @@ class TestExecutionRouter:
         )
         
         # Should raise ExecutionRouterError for unknown mode
-        from core.execution_router import ExecutionRouterError
+        from modules.execution.router import ExecutionRouterError
         with pytest.raises(ExecutionRouterError):
             await router.execute(operation, metadata)
 
@@ -330,7 +330,7 @@ class TestExecutionErrors:
         )
         
         # Handler error should be wrapped in ExecutionRouterError
-        from core.execution_router import ExecutionRouterError
+        from modules.execution.router import ExecutionRouterError
         with pytest.raises(ExecutionRouterError):
             await executor.execute(operation, metadata)
     
@@ -344,7 +344,7 @@ class TestExecutionErrors:
         )
         
         # No handler registered for this operation type
-        from core.execution_router import ExecutionRouterError
+        from modules.execution.router import ExecutionRouterError
         with pytest.raises(ExecutionRouterError):
             await executor.execute(operation, metadata)
 

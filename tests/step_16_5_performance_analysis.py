@@ -28,7 +28,7 @@ except ImportError:
 
 if sys.platform == "linux":
     try:
-        from core.security import (
+        from modules.security import (
             SecureBuffer,
             VaultHardening,
             VaultSession,

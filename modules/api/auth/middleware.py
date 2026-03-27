@@ -128,7 +128,8 @@ async def require_auth_middleware(request: Request, call_next):
     
     # Приоритет 0: JWT из query param ?token= (только для WebSocket — браузер не может слать header)
     jwt_token = None
-    if request.scope.get("type") == "websocket":
+    request_scope = getattr(request, "scope", {}) if request is not None else {}
+    if request_scope.get("type") == "websocket":
         jwt_token = request.query_params.get("token")
 
     # Приоритет 1: JWT access token из Authorization header или Cookie

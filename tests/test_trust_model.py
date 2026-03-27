@@ -18,7 +18,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch, AsyncMock, call
 
-from core.security.trust.legacy_crypto import (
+from modules.security.trust.legacy_crypto import (
     generate_keypair,
     sign_message,
     verify_signature,
@@ -31,7 +31,7 @@ from core.security.trust.legacy_crypto import (
     PluginTrustVerifier,
     PluginTrustError,
 )
-from core.capability import (
+from modules.capability import (
     CapabilityRegistry,
     CapabilitySecurityError,
     _check_capability_namespace_permission

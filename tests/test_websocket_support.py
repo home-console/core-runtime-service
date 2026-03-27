@@ -10,7 +10,7 @@
 
 import pytest
 from core.runtime.runtime import CoreRuntime
-from core.http_registry import HttpEndpoint
+from core.http import HttpEndpoint
 
 
 @pytest.mark.asyncio

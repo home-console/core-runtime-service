@@ -357,7 +357,7 @@ class TestRotationExecutor:
         trust_engine = AsyncMock()
         
         # Mock frozen state with proper TrustLevel enum
-        from core.security.trust.trust_state import TrustLevel
+        from modules.security.trust.trust_state import TrustLevel
         frozen_state = MagicMock()
         frozen_state.level = TrustLevel.FROZEN
         trust_engine.get_state.return_value = frozen_state

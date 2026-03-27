@@ -7,13 +7,13 @@ Comprehensive test suite for credential access control.
 import pytest
 from datetime import datetime, UTC
 
-from core.security.rbac_models import (
+from modules.security.rbac_models import (
     Role,
     CredentialAccessLevel,
     CredentialPolicy,
     AccessDecision,
 )
-from core.security.policy_engine import CredentialPolicyEngine
+from modules.security.policy_engine import CredentialPolicyEngine
 from modules.credentials.policy_enforcer import CredentialRBACEnforcer
 from modules.credentials import CredentialAccessDenied
 

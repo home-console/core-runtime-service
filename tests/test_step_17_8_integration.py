@@ -18,16 +18,16 @@ import time
 import asyncio
 from typing import Optional
 
-from core.security.risk.models import (
+from modules.security.risk.models import (
     RiskEvent,
     RiskAssessment,
     RiskAction,
     EventType,
     RiskConfig,
 )
-from core.security.risk.engine import RiskEngine
-from core.security.risk.memory import RiskMemory
-from core.security.risk.policy import RiskPolicy
+from modules.security.risk.engine import RiskEngine
+from modules.security.risk.memory import RiskMemory
+from modules.security.risk.policy import RiskPolicy
 from modules.credentials.abuse_detection import CredentialAbuseDetector
 
 

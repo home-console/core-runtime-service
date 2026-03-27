@@ -20,7 +20,7 @@ from modules.credentials.security_orchestrator import (
     SecurityDecision,
     SecurityDecisionReason,
 )
-from core.security.trust.trust_state import TrustLevel, TrustAction
+from modules.security.trust.trust_state import TrustLevel, TrustAction
 
 
 class TestSecurityDecisionModel:

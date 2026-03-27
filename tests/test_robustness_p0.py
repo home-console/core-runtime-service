@@ -10,6 +10,7 @@ Tests for:
 
 import json
 import zipfile
+import asyncio
 from unittest.mock import Mock
 
 import pytest
@@ -264,7 +265,7 @@ def test_circular_dependency_detection():
 @pytest.mark.asyncio
 async def test_concurrent_handler_safety():
     """P0: Verify ExecutionRouter asyncio.Lock protects handler dictionary under async concurrency."""
-    from core.execution_router import ExecutionRouter
+    from modules.execution.router import ExecutionRouter
     from unittest.mock import Mock
     import asyncio
     

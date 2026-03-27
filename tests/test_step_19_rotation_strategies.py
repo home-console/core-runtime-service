@@ -215,7 +215,7 @@ class TestGenerateNewSecretStrategy:
         
         # Mock frozen state
         frozen_state = MagicMock()
-        from core.security.trust.trust_state import TrustLevel
+        from modules.security.trust.trust_state import TrustLevel
         frozen_state.level = TrustLevel.FROZEN
         trust.get_state.return_value = frozen_state
         

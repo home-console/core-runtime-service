@@ -176,9 +176,14 @@ class CredentialRepository:
                 f"Policy already exists for credential {policy.credential_id}"
             )
 
-        await self._storage.create(
-            POLICY_NAMESPACE, policy.credential_id, policy.to_dict(), target="core"
-        )
+        if hasattr(self._storage, "create"):
+            await self._storage.create(
+                POLICY_NAMESPACE, policy.credential_id, policy.to_dict(), target="core"
+            )
+        else:
+            await self._storage.set(
+                POLICY_NAMESPACE, policy.credential_id, policy.to_dict(), target="core"
+            )
         return policy
 
     async def get_policy(self, credential_id: str) -> Optional[CredentialPolicy]:
@@ -199,9 +204,14 @@ class CredentialRepository:
                 f"Policy not found for credential {policy.credential_id}"
             )
 
-        await self._storage.update(
-            POLICY_NAMESPACE, policy.credential_id, policy.to_dict(), target="core"
-        )
+        if hasattr(self._storage, "update"):
+            await self._storage.update(
+                POLICY_NAMESPACE, policy.credential_id, policy.to_dict(), target="core"
+            )
+        else:
+            await self._storage.set(
+                POLICY_NAMESPACE, policy.credential_id, policy.to_dict(), target="core"
+            )
         return policy
 
     async def delete_policy(self, credential_id: str) -> None:

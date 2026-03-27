@@ -42,7 +42,15 @@ async def rate_limit_check(
     
     if window_seconds is None:
         window_seconds = RATE_LIMIT_AUTH_WINDOW if limit_type == "auth" else RATE_LIMIT_API_WINDOW
-    services = runtime.kernel_context.get_service("service_registry")
+    services = None
+    try:
+        kernel_context = getattr(runtime, "kernel_context", None)
+        if kernel_context is not None:
+            services = kernel_context.get_service("service_registry")
+    except Exception:
+        services = None
+    if services is None:
+        services = getattr(runtime, "service_registry", None)
 
     try:
         # Проверяем, что identifier не None и является строкой
@@ -102,12 +110,13 @@ async def rate_limit_check(
     except Exception as e:
         # При ошибке разрешаем запрос (fail-open для доступности)
         try:
-            await services.call(
-                "logger.log",
-                level="error",
-                message=f"Rate limit check error: {e}",
-                module="api"
-            )
+            if services is not None:
+                await services.call(
+                    "logger.log",
+                    level="error",
+                    message=f"Rate limit check error: {e}",
+                    module="api"
+                )
         except Exception:
             pass
         return True  # Fail-open

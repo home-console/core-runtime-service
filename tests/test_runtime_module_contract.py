@@ -132,9 +132,8 @@ async def test_required_module_fails_register_runtime_not_starts(memory_adapter)
     with pytest.raises(RuntimeError, match="register failed"):
         await manager.register(failing_module)
     
-    # Модуль должен быть в _modules (добавлен до вызова register())
-    # Но register() модуля упал, так что модуль в неконсистентном состоянии
-    assert "failing_required" in manager.list_modules()
+    # После ошибки register() модуль не должен считаться зарегистрированным.
+    assert "failing_required" not in manager.list_modules()
     assert failing_module.register_called is True
 
 

@@ -25,7 +25,7 @@ from ..backend import OperationResult
 @dataclass(frozen=True)
 class ProcessBackendConfig:
     python_executable: str = sys.executable
-    module_path: str = "core.execution.runner.homeconsole_runner"
+    module_path: str = "modules.execution.runner.homeconsole_runner"
 
 
 class ProcessBackend:

@@ -28,8 +28,8 @@ from core.audit.events import (
 )
 from core.audit.binder import AuditBinder
 from modules.credentials.policy_enforcer import CredentialRBACEnforcer
-from core.security.rbac_models import Role, CredentialAccessLevel
-from core.security.policy_engine import CredentialPolicyEngine
+from modules.security.rbac_models import Role, CredentialAccessLevel
+from modules.security.policy_engine import CredentialPolicyEngine
 from modules.credentials import CredentialAccessDenied
 
 

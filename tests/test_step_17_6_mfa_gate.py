@@ -17,11 +17,11 @@ import asyncio
 from datetime import datetime
 from unittest.mock import Mock, AsyncMock, MagicMock
 
-from core.security.mfa.totp import generate_totp, verify_totp
-from core.security.mfa.methods import TOTPMethod, MFAVerificationResult
-from core.security.mfa.elevation_session import ElevationSession, ElevationSessionManager
-from core.security.mfa.service import MFAService
-from core.security.mfa.exceptions import (
+from modules.security.mfa.totp import generate_totp, verify_totp
+from modules.security.mfa.methods import TOTPMethod, MFAVerificationResult
+from modules.security.mfa.elevation_session import ElevationSession, ElevationSessionManager
+from modules.security.mfa.service import MFAService
+from modules.security.mfa.exceptions import (
     MFARequired,
     MFAFailed,
     MFANotConfigured,

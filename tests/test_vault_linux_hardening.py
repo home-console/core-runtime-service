@@ -21,10 +21,10 @@ pytestmark = pytest.mark.skipif(
     reason="Tests require Linux"
 )
 
-from core.security.secure_memory import SecureBuffer, SecureBytes, wipe_memory
-from core.security.vault_hardening import VaultHardening, HardeningStatus
-from core.security.vault_session import VaultSession, VaultLockedError, SessionExpiredError
-from core.security.secret_policy import SecretAccessPolicy, SecretAccessDenied, create_default_policy
+from modules.security.secure_memory import SecureBuffer, SecureBytes, wipe_memory
+from modules.security.vault_hardening import VaultHardening, HardeningStatus
+from modules.security.vault_session import VaultSession, VaultLockedError, SessionExpiredError
+from modules.security.secret_policy import SecretAccessPolicy, SecretAccessDenied, create_default_policy
 
 
 # ──────────────────────────────────────────────────────────────────────────────

@@ -146,6 +146,9 @@ class OperationExecutor(IOperationExecutor):
         elif result.status == OperationStatus.CANCELLED:
             attempt.status = AttemptStatus.CANCELLED
             attempt.error = result.error.to_dict() if result.error else None
+        elif result.error is not None and result.error.code == AttemptStatus.TIMEOUT.value:
+            attempt.status = AttemptStatus.TIMEOUT
+            attempt.error = result.error.to_dict()
         else:
             attempt.status = AttemptStatus.FAILED
             attempt.error = result.error.to_dict() if result.error else None

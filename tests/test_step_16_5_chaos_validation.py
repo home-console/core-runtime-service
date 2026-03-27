@@ -544,7 +544,7 @@ class TestMemorySecurityValidation:
         
         # Check if VaultHardening exists
         try:
-            from core.security import VaultHardening
+            from modules.security import VaultHardening
         except ImportError:
             pytest.skip("VaultHardening not available")
         
@@ -573,7 +573,7 @@ class TestMemorySecurityValidation:
         """Verify core dump limit is set to 0."""
         
         try:
-            from core.security import VaultHardening
+            from modules.security import VaultHardening
         except ImportError:
             pytest.skip("VaultHardening not available")
         
@@ -593,7 +593,7 @@ class TestMemorySecurityValidation:
         """Verify SecureBuffer actually clears memory."""
         
         try:
-            from core.security import SecureBuffer
+            from modules.security import SecureBuffer
         except ImportError:
             pytest.skip("SecureBuffer not available")
         
@@ -642,7 +642,7 @@ class TestSessionTTLValidation:
         """Verify session expires after TTL."""
         
         try:
-            from core.security import VaultSession, SessionExpiredError
+            from modules.security import VaultSession, SessionExpiredError
         except ImportError:
             pytest.skip("VaultSession not available")
         
@@ -676,7 +676,7 @@ class TestSessionTTLValidation:
         """Verify explicit lock() clears session."""
         
         try:
-            from core.security import VaultSession
+            from modules.security import VaultSession
         except ImportError:
             pytest.skip("VaultSession not available")
         

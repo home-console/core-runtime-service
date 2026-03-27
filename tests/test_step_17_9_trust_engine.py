@@ -20,7 +20,7 @@ import time
 import asyncio
 from datetime import datetime, timedelta, UTC
 
-from core.security.trust.trust_state import (
+from modules.security.trust.trust_state import (
     TrustLevel,
     TrustAction,
     TrustState,
@@ -28,8 +28,8 @@ from core.security.trust.trust_state import (
     TrustConfig,
     TrustConfigs,
 )
-from core.security.trust.trust_policy import TrustPolicy
-from core.security.trust.trust_engine import TrustEngine
+from modules.security.trust.trust_policy import TrustPolicy
+from modules.security.trust.trust_engine import TrustEngine
 
 
 class TestTrustStateModel:

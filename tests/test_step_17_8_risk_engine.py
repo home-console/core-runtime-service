@@ -22,7 +22,7 @@ import asyncio
 import time
 from unittest import mock
 
-from core.security.risk import (
+from modules.security.risk import (
     RiskEvent,
     RiskAssessment,
     RiskAction,

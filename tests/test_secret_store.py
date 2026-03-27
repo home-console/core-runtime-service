@@ -13,7 +13,7 @@ import pytest
 import json
 from datetime import datetime, timezone
 
-from core.security.crypto import (
+from modules.security.crypto import (
     generate_master_key,
     generate_salt,
     generate_nonce,
@@ -27,7 +27,7 @@ from core.security.crypto import (
     NONCE_SIZE,
     SALT_SIZE,
 )
-from core.security.secret_store import (
+from modules.security.secret_store import (
     SecretStore,
     EncryptedSecret,
 )

@@ -66,6 +66,8 @@ class DeploymentTracker:
 
     def __init__(self, db_service=None):
         self._in_memory: Dict[str, DeploymentInfo] = {}
+        self._sorted_cache: List[DeploymentInfo] = []
+        self._cache_dirty = True
         self._db = db_service
         self._lock_on_disk = False
 
@@ -86,6 +88,7 @@ class DeploymentTracker:
         )
 
         self._in_memory[deployment_id] = deployment
+        self._cache_dirty = True
 
         if self._db:
             try:
@@ -138,6 +141,8 @@ class DeploymentTracker:
             except ValueError:
                 pass
 
+        self._cache_dirty = True
+
         if deployment.status in [
             DeploymentStatus.READY,
             DeploymentStatus.FAILED,
@@ -167,7 +172,13 @@ class DeploymentTracker:
         status: Optional[str] = None,
         limit: int = 100,
     ) -> List[DeploymentInfo]:
-        results = list(self._in_memory.values())
+        if self._cache_dirty:
+            self._sorted_cache = sorted(
+                self._in_memory.values(), key=lambda d: d.created_at, reverse=True
+            )
+            self._cache_dirty = False
+
+        results = self._sorted_cache
 
         if agent_name:
             results = [d for d in results if d.agent_name == agent_name]
@@ -175,7 +186,6 @@ class DeploymentTracker:
         if status:
             results = [d for d in results if d.status.value == status]
 
-        results.sort(key=lambda d: d.created_at, reverse=True)
         return results[:limit]
 
     async def cleanup_old_deployments(self, older_than_hours: int = 24):
@@ -189,6 +199,9 @@ class DeploymentTracker:
 
         for deployment_id in to_delete:
             del self._in_memory[deployment_id]
+
+        if to_delete:
+            self._cache_dirty = True
 
         return len(to_delete)
 

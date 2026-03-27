@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from core.execution.backends.container import ContainerBackend, ContainerBackendConfig
+from modules.execution.backends.container import ContainerBackend, ContainerBackendConfig
 
 
 class DummyProc:

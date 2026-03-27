@@ -1,7 +1,11 @@
 """
-Интерактивный и неинтерактивный CLI-адаптер для Core Runtime.
+Интерактивный и неинтерактивный CLI-адаптер для Home Console.
 
-Перенесён в `core/` — обновлены пути к плагинам относительно корня проекта.
+Это прикладной entrypoint, а не ядро. Здесь допускается composition:
+- сборка storage stack
+- создание runtime
+- загрузка плагинов
+- CLI-обработка команд
 """
 
 from __future__ import annotations
@@ -10,19 +14,21 @@ import asyncio
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from app.storage_factory import build_storage_stack
 from core.config import Config
+from core.http import HttpEndpoint
 from core.runtime.runtime import CoreRuntime
 from core.state_engine import StateEngine
-from core.http import HttpEndpoint
+from modules.storage.factory import build_storage_stack
 
 
 async def _auto_load_plugins(runtime: CoreRuntime) -> None:
-    """Авто сканирование каталога `plugins/` в корне проекта и загрузка классов-наследников BasePlugin."""
+    """Авто сканирование каталога `plugins/` в корне проекта."""
     await runtime.plugin_manager.auto_load_plugins()
 
 
-def _match_endpoint(path: str, endpoints: List[HttpEndpoint]) -> Optional[Tuple[HttpEndpoint, Dict[str, str]]]:
+def _match_endpoint(
+    path: str, endpoints: List[HttpEndpoint]
+) -> Optional[Tuple[HttpEndpoint, Dict[str, str]]]:
     if not path.startswith("/"):
         path = "/" + path
 
@@ -46,7 +52,9 @@ def _match_endpoint(path: str, endpoints: List[HttpEndpoint]) -> Optional[Tuple[
     return None
 
 
-async def _call_service(runtime: CoreRuntime, endpoint: HttpEndpoint, path_params: Dict[str, str]) -> Any:
+async def _call_service(
+    runtime: CoreRuntime, endpoint: HttpEndpoint, path_params: Dict[str, str]
+) -> Any:
     parts = [p for p in endpoint.path.split("/") if p != ""]
     ordered_values: List[Any] = []
     for p in parts:
@@ -73,19 +81,23 @@ async def _call_service(runtime: CoreRuntime, endpoint: HttpEndpoint, path_param
             else:
                 extra_kwargs[part] = ""
 
-    return await runtime.service_registry.call(service_name, *ordered_values, **extra_kwargs)
+    return await runtime.service_registry.call(
+        service_name, *ordered_values, **extra_kwargs
+    )
 
 
-async def run_cli(argv: Optional[List[str]] = None, input_func: Callable[[str], str] = input, shutdown_on_exit: bool = True) -> CoreRuntime:
+async def run_cli(
+    argv: Optional[List[str]] = None,
+    input_func: Callable[[str], str] = input,
+    shutdown_on_exit: bool = True,
+) -> CoreRuntime:
     config = Config.from_env()
-    # Создать директорию для БД, если нужно (только для SQLite)
     if config.storage_type == "sqlite":
         Path(config.db_path).parent.mkdir(parents=True, exist_ok=True)
-    
-    # Create StateEngine and build storage stack
+
     state_engine = StateEngine()
     storage_stack = await build_storage_stack(config, state_engine)
-    
+
     runtime = CoreRuntime(
         storage_port=storage_stack.core_port,
         config=config,
@@ -94,7 +106,6 @@ async def run_cli(argv: Optional[List[str]] = None, input_func: Callable[[str], 
     )
 
     await _auto_load_plugins(runtime)
-
     await runtime.start()
 
     endpoints = runtime.http.list()
@@ -108,7 +119,7 @@ async def run_cli(argv: Optional[List[str]] = None, input_func: Callable[[str], 
                     "logger.log",
                     level="warning",
                     message=f"Не найден endpoint для пути: {requested}",
-                    component="console"
+                    component="console",
                 )
             except Exception:
                 print(f"Не найден endpoint для пути: {requested}")
@@ -118,11 +129,12 @@ async def run_cli(argv: Optional[List[str]] = None, input_func: Callable[[str], 
         endpoint, params = match
         try:
             result = await _call_service(runtime, endpoint, params)
-            # Для CLI выводим результат пользователю
             print("Результат:", result)
         except Exception as exc:
             try:
-                await runtime.service_registry.call("logger.log", level="error", message=f"CLI call error: {exc}")
+                await runtime.service_registry.call(
+                    "logger.log", level="error", message=f"CLI call error: {exc}"
+                )
             except Exception:
                 pass
         if shutdown_on_exit:
@@ -131,7 +143,9 @@ async def run_cli(argv: Optional[List[str]] = None, input_func: Callable[[str], 
 
     print("Интерактивный режим CLI. Доступные действия:")
     for idx, ep in enumerate(endpoints):
-        print(f"[{idx}] {ep.method} {ep.path} -> {ep.service}{(' - ' + ep.description) if ep.description else ''}")
+        print(
+            f"[{idx}] {ep.method} {ep.path} -> {ep.service}{(' - ' + ep.description) if ep.description else ''}"
+        )
 
     choice = input_func("Выберите действие (номер, путь или service): ").strip()
     selected: Optional[Tuple[HttpEndpoint, Dict[str, str]]] = None
@@ -155,7 +169,7 @@ async def run_cli(argv: Optional[List[str]] = None, input_func: Callable[[str], 
                 level="warning",
                 message="Не удалось распознать выбор",
                 component="console",
-                choice=choice
+                choice=choice,
             )
         except Exception:
             print("Не удалось распознать выбор")
@@ -174,9 +188,10 @@ async def run_cli(argv: Optional[List[str]] = None, input_func: Callable[[str], 
             val = input_func(f"Введите значение для '{name}': ").strip()
             params[name] = val
 
-    confirm = input_func(f"Подтвердить вызов {endpoint.service} (y/N)? ").strip().lower()
+    confirm = (
+        input_func(f"Подтвердить вызов {endpoint.service} (y/N)? ").strip().lower()
+    )
     if confirm not in ("y", "yes"):
-        # Для CLI выводим сообщение пользователю
         print("Отменено")
         if shutdown_on_exit:
             await runtime.shutdown()
@@ -184,7 +199,6 @@ async def run_cli(argv: Optional[List[str]] = None, input_func: Callable[[str], 
 
     try:
         result = await _call_service(runtime, endpoint, params)
-        # Для CLI выводим результат пользователю
         print("Результат:", result)
     except Exception as exc:
         try:
@@ -193,11 +207,10 @@ async def run_cli(argv: Optional[List[str]] = None, input_func: Callable[[str], 
                 level="error",
                 message=f"CLI call error: {exc}",
                 component="console",
-                endpoint=endpoint.service
+                endpoint=endpoint.service,
             )
         except Exception:
             pass
-        # Для CLI выводим ошибку пользователю
         print("Ошибка при вызове сервиса:", exc)
 
     if shutdown_on_exit:

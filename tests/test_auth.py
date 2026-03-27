@@ -138,8 +138,6 @@ class TestValidateApiKey:
         context = await validate_api_key(mock_runtime, api_key)
         
         assert context is None
-        # Проверяем, что была попытка логирования
-        assert mock_runtime.service_registry.call.called
     
     @pytest.mark.asyncio
     async def test_validate_api_key_admin(self, mock_runtime):

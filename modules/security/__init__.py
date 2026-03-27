@@ -82,6 +82,7 @@ if _legacy_security is not None:
     sanitize_headers = _legacy_security.sanitize_headers
     TokenEncryption = _legacy_security.TokenEncryption
     CSRFProtection = _legacy_security.CSRFProtection
+    check_security_env = _legacy_security.check_security_env
 else:
     def sanitize_for_logging(data, mask="***REDACTED***"):
         if isinstance(data, dict):
@@ -95,6 +96,9 @@ else:
 
     TokenEncryption = None
     CSRFProtection = None
+
+    def check_security_env():
+        return {"ok": True, "warnings": []}
 
 
 __all__ = [
@@ -114,6 +118,7 @@ __all__ = [
     "sanitize_headers",
     "TokenEncryption",
     "CSRFProtection",
+    "check_security_env",
     "generate_master_key",
     "generate_nonce",
     "generate_salt",

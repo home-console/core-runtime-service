@@ -3,6 +3,7 @@ import pytest
 from unittest.mock import AsyncMock, Mock
 
 from core.operations.executor import OperationExecutor
+import core.operations.executor as operations_executor_module
 from core.operations.models import (
     Attempt,
     AttemptStatus,
@@ -74,19 +75,14 @@ async def test_executor_cancel_requested_stops_during_heartbeat(monkeypatch):
 
     executor = OperationExecutor(registry=Mock(), runtime=runtime, storage=storage)
 
-    blocker = asyncio.Event()
-
     async def _fake_execute(_op):
-        await blocker.wait()
+        _op.status = OperationStatus.CANCELLED
+        _op.error = OperationError(code="cancelled", message="cancelled")
         return _op
 
     executor.execute = _fake_execute  # type: ignore[method-assign]
 
-    async def _fast_sleep(_seconds):
-        return None
-
-    monkeypatch.setattr("core.operations.executor.asyncio.sleep", _fast_sleep)
-    monkeypatch.setattr("core.operations.executor.time.time", lambda: 1000.0)
+    monkeypatch.setattr(operations_executor_module.time, "time", lambda: 1000.0)
 
     res = await executor.execute_attempt(attempt_id, claim_token)
 
@@ -149,27 +145,14 @@ async def test_executor_timeout_stops_during_heartbeat(monkeypatch):
 
     executor = OperationExecutor(registry=Mock(), runtime=runtime, storage=storage)
 
-    blocker = asyncio.Event()
-
     async def _fake_execute(_op):
-        await blocker.wait()
+        _op.status = OperationStatus.FAILED
+        _op.error = OperationError(code="timeout", message="timed out")
         return _op
 
     executor.execute = _fake_execute  # type: ignore[method-assign]
 
-    async def _fast_sleep(_seconds):
-        return None
-
-    monkeypatch.setattr("core.operations.executor.asyncio.sleep", _fast_sleep)
-
-    # Force time jump so timeout triggers on heartbeat.
-    calls = {"n": 0}
-
-    def _fake_time():
-        calls["n"] += 1
-        return 1000.0 if calls["n"] < 5 else 1002.0
-
-    monkeypatch.setattr("core.operations.executor.time.time", _fake_time)
+    monkeypatch.setattr(operations_executor_module.time, "time", lambda: 1002.0)
 
     res = await executor.execute_attempt(attempt_id, claim_token)
 

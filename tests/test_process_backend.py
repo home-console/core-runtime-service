@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from core.execution.backends.process import ProcessBackend, ProcessBackendConfig
+from modules.execution.backends.process import ProcessBackend, ProcessBackendConfig
 
 
 class DummyProc:

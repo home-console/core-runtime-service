@@ -27,6 +27,16 @@ async def audit_log_auth_event(
         success: успешность операции
     """
     try:
+        services = None
+        try:
+            kernel_context = getattr(runtime, "kernel_context", None)
+            if kernel_context is not None:
+                services = kernel_context.get_service("service_registry")
+        except Exception:
+            services = None
+        if services is None:
+            services = getattr(runtime, "service_registry", None)
+
         # Проверяем и нормализуем subject
         safe_subject = "unknown"
         if subject:
@@ -51,8 +61,6 @@ async def audit_log_auth_event(
             "details": safe_details
         }
 
-        services = runtime.kernel_context.get_service("service_registry")
-
         # Сохраняем в audit log (key: timestamp + hash of subject)
         try:
             subject_bytes = safe_subject.encode() if isinstance(safe_subject, str) else str(safe_subject).encode()
@@ -61,31 +69,33 @@ async def audit_log_auth_event(
         except Exception:
             # Best-effort: if storage is not available, fallback to logger
             try:
-                await services.call(
-                    "logger.log",
-                    level="warning",
-                    message="Failed to write audit entry to storage",
-                    module="auth",
-                    context={"event_type": event_type, "subject": safe_subject}
-                )
+                if services is not None:
+                    await services.call(
+                        "logger.log",
+                        level="warning",
+                        message="Failed to write audit entry to storage",
+                        module="auth",
+                        context={"event_type": event_type, "subject": safe_subject}
+                    )
             except Exception:
                 pass
     
     except Exception as e:
         # Не падаем при ошибке audit logging
         try:
-            await services.call(
-                "logger.log",
-                level="error",
-                message=f"Audit logging error: {e}",
-                module="api",
-                context={
-                    "event_type": event_type,
-                    "subject_type": type(subject).__name__ if subject else "None",
-                    "subject_value": str(subject)[:100] if subject else "None",
-                    "error_type": type(e).__name__,
-                    "error_message": str(e)
-                }
-            )
+            if services is not None:
+                await services.call(
+                    "logger.log",
+                    level="error",
+                    message=f"Audit logging error: {e}",
+                    module="api",
+                    context={
+                        "event_type": event_type,
+                        "subject_type": type(subject).__name__ if subject else "None",
+                        "subject_value": str(subject)[:100] if subject else "None",
+                        "error_type": type(e).__name__,
+                        "error_message": str(e)
+                    }
+                )
         except Exception:
             pass
