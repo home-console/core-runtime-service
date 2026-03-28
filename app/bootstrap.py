@@ -3,8 +3,9 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from core.config import Config
+from core.module import ModuleSpec
 from core.runtime import CoreRuntime
-from core.runtime.module_manager import ModuleSpec
+from modules.policy.engine import PolicyEngine as ModulePolicyEngine
 from modules.events.validation import EventValidationMiddleware
 from modules.plugins.isolation import (
     DEFAULT_ALLOWED_SERVICES,
@@ -71,6 +72,7 @@ async def build_runtime(
         config=config,
         vault_port=vault_port,
         state_engine=state_engine,
+        policy_engine=ModulePolicyEngine(),
     )
     runtime.storage_manager = storage_manager
     runtime.event_validation_middleware_factory = EventValidationMiddleware

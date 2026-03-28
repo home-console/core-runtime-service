@@ -1,4 +1,4 @@
-"""Step 13: Observability & Resource Guardrails module."""
+"""Observability and resource guardrails module."""
 
 from core.observability.metrics import (
     MetricsRegistry,

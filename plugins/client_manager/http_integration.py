@@ -7,6 +7,9 @@ HTTP-интеграция Client Manager Service в основной FastAPI‑�
 
 from __future__ import annotations
 
+import importlib
+import sys
+from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional
 
 from fastapi import WebSocket, WebSocketDisconnect
@@ -14,6 +17,22 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 LogFunc = Callable[[str, str], Awaitable[None]]
 ConfigFunc = Callable[[str, Optional[str]], Awaitable[Optional[str]]]
+
+
+def _ensure_client_manager_app_imports() -> None:
+    plugin_dir = Path(__file__).resolve().parent
+    plugins_root = plugin_dir.parent
+    cm_plugin_dir = plugins_root / "client-manager-service"
+    cm_app_dir = cm_plugin_dir / "app"
+    if cm_plugin_dir.is_dir() and str(cm_plugin_dir) not in sys.path:
+        sys.path.insert(0, str(cm_plugin_dir))
+    try:
+        app_pkg = importlib.import_module("app")
+        app_path = getattr(app_pkg, "__path__", None)
+        if app_path is not None and cm_app_dir.is_dir() and str(cm_app_dir) not in app_path:
+            app_path.append(str(cm_app_dir))
+    except Exception:
+        pass
 
 
 async def integrate_into_main_app(
@@ -29,9 +48,11 @@ async def integrate_into_main_app(
     Возвращает созданный WebSocketHandler, чтобы вызывающий код
     мог управлять его жизненным циклом (cleanup и т.п.).
     """
+    _ensure_client_manager_app_imports()
+
     # Импортируем зависимости client-manager-service
-    from modules.api.websocket_handler import WebSocketHandler
-    from modules.security.auth_service import AuthService
+    from app.core.websocket_handler import WebSocketHandler
+    from app.core.security.auth_service import AuthService
     from app.dependencies import set_websocket_handler, get_websocket_handler
     from app.routes import (
         clients,
@@ -217,4 +238,3 @@ async def integrate_into_main_app(
     await log("info", "Client Manager интегрирован в основной API (integrated режим)")
 
     return handler
-

@@ -60,7 +60,7 @@ class AutomationStubPlugin(BasePlugin):
 
                 if isinstance(params, dict) and params.get("on") is True:
                     try:
-                        await self.runtime.service_registry.call(
+                        await self.call_service(
                             "logger.log",
                             level="info",
                             message="Автоматизация: устройство включено",
@@ -71,7 +71,7 @@ class AutomationStubPlugin(BasePlugin):
 
             except Exception as e:
                 try:
-                    await self.runtime.service_registry.call(
+                    await self.call_service(
                         "logger.log",
                         level="error",
                         message=f"Ошибка в автоматизации: {str(e)}",
@@ -82,7 +82,7 @@ class AutomationStubPlugin(BasePlugin):
 
         self._event_handler = _on_device_command_requested
         try:
-            await self.runtime.event_bus.subscribe("internal.device_command_requested", self._event_handler)
+            await self.subscribe_event("internal.device_command_requested", self._event_handler)
         except Exception:
             pass
 
@@ -91,7 +91,7 @@ class AutomationStubPlugin(BasePlugin):
         await super().on_start()
         # Логируем запуск автоматизации
         try:
-            await self.runtime.service_registry.call(
+            await self.call_service(
                 "logger.log",
                 level="info",
                 message="Автоматизация запущена",
@@ -108,13 +108,13 @@ class AutomationStubPlugin(BasePlugin):
         try:
             if self._event_handler is not None:
                 # unsubscribe from the same event we subscribed to in on_load
-                await self.runtime.event_bus.unsubscribe("internal.device_command_requested", self._event_handler)
+                await self.unsubscribe_event("internal.device_command_requested", self._event_handler)
         except Exception:
             pass
 
         # Логируем остановку
         try:
-            await self.runtime.service_registry.call(
+            await self.call_service(
                 "logger.log",
                 level="info",
                 message="Автоматизация остановлена",

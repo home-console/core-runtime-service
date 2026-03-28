@@ -1,5 +1,5 @@
 """
-Step 13: Metrics Registry — production-grade observability.
+Metrics Registry — production-grade observability.
 
 Thread-safe metrics collection in-memory.
 No external dependencies (Prometheus optional future extension).
@@ -147,7 +147,7 @@ class MetricsRegistry:
         self._declare_counter("provider_success_total")
         self._declare_gauge("provider_health_degraded")
         
-        # Transactions (Step 12.5)
+        # Marketplace transaction metrics
         self._declare_counter("marketplace_transactions_committed")
         self._declare_counter("marketplace_transactions_rolled_back")
         self._declare_counter("marketplace_transactions_failed")

@@ -25,7 +25,11 @@ from typing import Any, Dict, Optional
 from pathlib import PurePosixPath
 from typing import Tuple
 
-from core.trust import PluginTrustError, PluginTrustVerifier, TrustStore
+from modules.security.trust.legacy_crypto import (
+    PluginTrustError,
+    PluginTrustVerifier,
+    TrustStore,
+)
 from modules.plugins.schema import ValidationError as SchemaValidationError
 from modules.plugins.schema import validate_plugin_json
 

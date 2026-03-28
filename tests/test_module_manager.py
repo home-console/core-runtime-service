@@ -5,7 +5,7 @@
 import pytest
 from unittest.mock import MagicMock
 
-from core.runtime.module_manager import ModuleManager
+from core.module import ModuleManager
 from core.runtime_module import RuntimeModule
 
 

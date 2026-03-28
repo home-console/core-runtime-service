@@ -5,12 +5,11 @@ Core Runtime - минимальное ядро для plugin-first платфо�
 from .config import Config
 from core.messaging.event_bus import EventBus
 # from .http_registry import HttpRegistry
-from core.runtime.module_manager import ModuleManager
 from core.runtime.runtime import CoreRuntime
 from .runtime_module import RuntimeModule
 from .service import ServiceRegistry
 from .state_engine import StateEngine
-from modules.integrations.registry import IntegrationRegistry
+from core.integration_registry import IntegrationRegistry
 from .logger_helper import info, warning, error
 from core.kernel.base_plugin import BasePlugin
 
@@ -59,3 +58,12 @@ __all__ = [
     "ModuleManager",
     "RuntimeModule",
 ]
+
+
+def __getattr__(name: str):
+    # Lazy import avoids init-time cycle and suppresses deprecated wrapper warnings.
+    if name == "ModuleManager":
+        from core.module import ModuleManager as _ModuleManager
+
+        return _ModuleManager
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

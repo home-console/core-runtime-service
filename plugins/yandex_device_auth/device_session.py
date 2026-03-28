@@ -52,7 +52,7 @@ class AccountSessionStore:
     
     async def save(self, account_data: Dict[str, Any]):
         """Сохранить account session."""
-        await self.runtime.storage.set(
+        await self.runtime.storage_set(
             "yandex", "device_auth/session",
             {**account_data, "saved_at": time.time()}
         )
@@ -60,13 +60,13 @@ class AccountSessionStore:
     async def load(self) -> Optional[Dict[str, Any]]:
         """Загрузить account session."""
         try:
-            return await self.runtime.storage.get("yandex", "device_auth/session")
+            return await self.runtime.storage_get("yandex", "device_auth/session")
         except Exception:
             return None
     
     async def clear(self):
         """Удалить account session."""
         try:
-            await self.runtime.storage.delete("yandex", "device_auth/session")
+            await self.runtime.storage_delete("yandex", "device_auth/session")
         except Exception:
             pass

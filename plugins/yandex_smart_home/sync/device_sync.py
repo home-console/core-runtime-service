@@ -51,7 +51,7 @@ class DeviceSync:
         """Реализация синхронизации устройств."""
         # Feature flag: check storage key `yandex.use_real_api`
         try:
-            use_real_data = await self.runtime.storage.get("yandex", "use_real_api")
+            use_real_data = await self.runtime.storage_get("yandex", "use_real_api")
             # Storage returns dict, check if it's truthy or has "enabled" key
             if isinstance(use_real_data, dict):
                 use_real = use_real_data.get("enabled", False) if use_real_data else False
@@ -91,7 +91,7 @@ class DeviceSync:
                 
                 # Логируем успех
                 try:
-                    await self.runtime.service_registry.call(
+                    await self.runtime.call_service(
                         "logger.log",
                         level="info",
                         message=f"Loaded {len(yandex_devices)} devices from Quasar API ({len(households)} households)",
@@ -102,7 +102,7 @@ class DeviceSync:
         except Exception as e:
             # Quasar API не доступен (нет cookies или ошибка) - fallback на OAuth API
             try:
-                await self.runtime.service_registry.call(
+                await self.runtime.call_service(
                     "logger.log",
                     level="warning",
                     message=f"Quasar API unavailable, falling back to OAuth API: {e}",
@@ -127,7 +127,7 @@ class DeviceSync:
         # DEBUG: Save full households hierarchy
         try:
             if households:
-                await self.runtime.storage.set(
+                await self.runtime.storage_set(
                     "yandex_debug_households",
                     f"hierarchy_{int(sync_timestamp * 1000)}",
                     {
@@ -144,7 +144,7 @@ class DeviceSync:
                 rooms = house.get("rooms", [])
                 
                 if house_id:
-                    await self.runtime.storage.set(
+                    await self.runtime.storage_set(
                         "yandex_debug_houses",
                         f"{house_id}_{int(sync_timestamp * 1000)}",
                         {
@@ -163,7 +163,7 @@ class DeviceSync:
                     room_name = room.get("name")
                     
                     if room_id:
-                        await self.runtime.storage.set(
+                        await self.runtime.storage_set(
                             "yandex_debug_rooms",
                             f"{house_id}_{room_id}_{int(sync_timestamp * 1000)}",
                             {
@@ -196,7 +196,7 @@ class DeviceSync:
                     device_name = yandex_device.get("name")
                     
                     if internal_id and external_id:
-                        await self.runtime.storage.set(
+                        await self.runtime.storage_set(
                             "yandex_debug_external_mapping",
                             f"{internal_id}_{int(sync_timestamp * 1000)}",
                             {
@@ -230,7 +230,7 @@ class DeviceSync:
                             properties_with_state = sum(1 for prop in yandex_device.get("properties", []) 
                                                        if prop.get("state", {}).get("value") is not None)
                             
-                            await self.runtime.storage.set(
+                            await self.runtime.storage_set(
                                 "yandex_debug_state_extraction",
                                 f"{internal_id}_{int(sync_timestamp * 1000)}",
                                 {
@@ -264,7 +264,7 @@ class DeviceSync:
                 # DEBUG 1: Log raw REST snapshot
                 try:
                     ext_id = device.get("external_id")
-                    await self.runtime.service_registry.call(
+                    await self.runtime.call_service(
                         "logger.log",
                         level="debug",
                         message=f"[REST_SNAPSHOT] Device from API",
@@ -277,7 +277,7 @@ class DeviceSync:
                     )
                     
                     # Save raw snapshot to debug namespace
-                    await self.runtime.storage.set(
+                    await self.runtime.storage_set(
                         "yandex_debug_rest",
                         f"{ext_id}_{int(sync_timestamp * 1000)}",
                         {
@@ -291,7 +291,7 @@ class DeviceSync:
 
                 # Публикуем событие обнаружения (КРИТИЧЕСКИ: именно это событие)
                 try:
-                    await self.runtime.event_bus.publish(
+                    await self.runtime.publish_event(
                         "external.device_discovered",
                         device
                     )
@@ -305,10 +305,10 @@ class DeviceSync:
                         # Проверяем, не приходили ли недавние WS-обновления для этого устройства
                         should_publish_state = True
                         try:
-                            mapping = await self.runtime.storage.get("devices_mappings", ext_id)
+                            mapping = await self.runtime.storage_get("devices_mappings", ext_id)
                             internal_id = mapping.get("internal_id") if isinstance(mapping, dict) else None
                             if internal_id:
-                                internal_device = await self.runtime.storage.get("devices", internal_id)
+                                internal_device = await self.runtime.storage_get("devices", internal_id)
                                 if isinstance(internal_device, dict):
                                     last_ws_update = internal_device.get("last_ws_update")
                                     if isinstance(last_ws_update, (int, float)):
@@ -325,7 +325,7 @@ class DeviceSync:
                         if should_publish_state:
                             # DEBUG: log parsed state before publishing
                             try:
-                                await self.runtime.service_registry.call(
+                                await self.runtime.call_service(
                                     "logger.log",
                                     level="debug",
                                     message=f"[device_sync] Publishing initial state snapshot",
@@ -337,7 +337,7 @@ class DeviceSync:
                                 )
                             except Exception:
                                 pass
-                            await self.runtime.event_bus.publish(
+                            await self.runtime.publish_event(
                                 "external.device_state_reported",
                                 {
                                     "external_id": ext_id,
@@ -349,7 +349,7 @@ class DeviceSync:
                     # Ошибка публикации одного устройства не должна блокировать остальные
                     # Логируем и продолжаем
                     try:
-                        await self.runtime.service_registry.call(
+                        await self.runtime.call_service(
                             "logger.log",
                             level="warning",
                             message=f"Ошибка публикации события для устройства {device.get('external_id')}: {e}",
@@ -361,7 +361,7 @@ class DeviceSync:
         # DEBUG 1B: Save full REST snapshot
         try:
             if devices:
-                await self.runtime.storage.set(
+                await self.runtime.storage_set(
                     "yandex_debug_rest_full",
                     f"sync_{int(sync_timestamp * 1000)}",
                     {
@@ -422,7 +422,7 @@ class DeviceSync:
                         provider_summary["properties_summary"][prop_type] = 0
                     provider_summary["properties_summary"][prop_type] += 1
             
-            await self.runtime.storage.set(
+            await self.runtime.storage_set(
                 "yandex_debug_provider_meta",
                 f"summary_{int(sync_timestamp * 1000)}",
                 provider_summary,

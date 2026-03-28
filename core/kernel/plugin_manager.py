@@ -23,7 +23,7 @@ from core.logger_helper import warning
 from core.kernel.plugin_registry import PluginRegistry, PluginState
 from core.kernel.plugin_lifecycle import PluginLifecycleManager
 from core.kernel.plugin_loader import PluginManifestLoader
-from modules.integrations.registry import IntegrationFlag
+from core.integration_registry import IntegrationFlag
 
 if TYPE_CHECKING:
     from core.runtime.runtime import CoreRuntime

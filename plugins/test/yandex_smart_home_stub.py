@@ -72,7 +72,7 @@ class YandexSmartHomeStubPlugin(BasePlugin):
 
             # Для каждого устройства публикуем событие обнаружения
             for device in devices:
-                await self.runtime.event_bus.publish("external.device_discovered", {
+                await self.publish_event("external.device_discovered", {
                     "provider": "yandex",
                     "external_id": device["external_id"],
                     "type": device["type"],
@@ -89,7 +89,7 @@ class YandexSmartHomeStubPlugin(BasePlugin):
             Публикует событие об изменении состояния для подписчиков.
             """
             # Публикуем событие об изменении состояния
-            await self.runtime.event_bus.publish("external.device_state_reported", {
+            await self.publish_event("external.device_state_reported", {
                 "provider": "yandex",
                 "external_id": external_id,
                 "type": "unknown",  # заглушка не знает точный тип
@@ -99,10 +99,10 @@ class YandexSmartHomeStubPlugin(BasePlugin):
 
         # Регистрируем сервисы
         # Primary service name kept for backwards-compatibility
-        await self.runtime.service_registry.register_with_acl("yandex.sync_devices", _sync_devices, admin_only=True)
+        await self.register_service("yandex.sync_devices", _sync_devices, admin_only=True)
         # New explicit sync entry requested by admin UI
-        await self.runtime.service_registry.register("yandex.sync", _sync_devices)
-        await self.runtime.service_registry.register("yandex.set_device_state", _set_device_state)
+        await self.register_service("yandex.sync", _sync_devices)
+        await self.register_service("yandex.set_device_state", _set_device_state)
 
     async def on_start(self) -> None:
         """Запуск: логируем инициализацию."""
@@ -110,7 +110,7 @@ class YandexSmartHomeStubPlugin(BasePlugin):
         
         # Пишем лог о запуске, если logger доступен
         try:
-            await self.runtime.service_registry.call(
+            await self.call_service(
                 "logger.log",
                 level="info",
                 message="yandex_smart_home_stub запущен",
@@ -129,7 +129,7 @@ class YandexSmartHomeStubPlugin(BasePlugin):
             Удалите этот код после завершения smoke-теста.
             """
             try:
-                await self.runtime.service_registry.call(
+                await self.call_service(
                     "logger.log",
                     level="info",
                     message=f"SMOKE: {event_type} received",
@@ -143,7 +143,7 @@ class YandexSmartHomeStubPlugin(BasePlugin):
         # Сохраняем ссылку, чтобы можно было отписаться позже
         self._smoke_device_discovered_handler = _smoke_on_device_discovered
         try:
-            await self.runtime.event_bus.subscribe("external.device_discovered", self._smoke_device_discovered_handler)
+            await self.subscribe_event("external.device_discovered", self._smoke_device_discovered_handler)
         except Exception:
             # Подписка не критична для работы плагина
             pass
@@ -155,7 +155,7 @@ class YandexSmartHomeStubPlugin(BasePlugin):
         try:
             handler = getattr(self, "_smoke_device_discovered_handler", None)
             if handler:
-                await self.runtime.event_bus.unsubscribe("external.device_discovered", handler)
+                await self.unsubscribe_event("external.device_discovered", handler)
         except Exception:
             pass
 
@@ -165,12 +165,12 @@ class YandexSmartHomeStubPlugin(BasePlugin):
         
         # Удаляем зарегистрированные сервисы
         try:
-            await self.runtime.service_registry.unregister("yandex.sync_devices")
+            await self.unregister_service("yandex.sync_devices")
             # unregister alias if present
             try:
-                await self.runtime.service_registry.unregister("yandex.sync")
+                await self.unregister_service("yandex.sync")
             except Exception:
                 pass
-            await self.runtime.service_registry.unregister("yandex.set_device_state")
+            await self.unregister_service("yandex.set_device_state")
         except Exception:
             pass

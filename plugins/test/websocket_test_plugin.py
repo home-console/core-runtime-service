@@ -5,7 +5,7 @@ WebSocket Test Plugin для демонстрации поддержки WebSock
 """
 
 from core.kernel.base_plugin import BasePlugin, PluginMetadata
-from modules.api.registry import HttpEndpoint
+from core.http import HttpEndpoint
 from fastapi import WebSocket
 from datetime import datetime, UTC
 
@@ -42,10 +42,10 @@ class WebSocketTestPlugin(BasePlugin):
             description="Echo WebSocket endpoint для тестирования",
             tags=["test", "websocket"]
         )
-        self.runtime.http.register(ws_endpoint)
+        self.register_http_endpoint(ws_endpoint)
         
         # Регистрируем сервис для обработки WebSocket соединений
-        await self.runtime.service_registry.register(
+        await self.register_service(
             "websocket_test.echo",
             self._websocket_echo_handler
         )
@@ -55,7 +55,7 @@ class WebSocketTestPlugin(BasePlugin):
         await super().on_start()
         
         # Сохраняем статус в storage
-        await self.runtime.storage.set(
+        await self.storage_set(
             "websocket_test",
             "status",
             {"state": "started", "message": "WebSocket test плагин запущен"}
@@ -66,7 +66,7 @@ class WebSocketTestPlugin(BasePlugin):
         await super().on_stop()
         
         # Обновляем статус
-        await self.runtime.storage.set(
+        await self.storage_set(
             "websocket_test",
             "status",
             {"state": "stopped", "message": "WebSocket test плагин остановлен"}
@@ -77,7 +77,7 @@ class WebSocketTestPlugin(BasePlugin):
         await super().on_unload()
         
         # Удаляем сервис
-        await self.runtime.service_registry.unregister("websocket_test.echo")
+        await self.unregister_service("websocket_test.echo")
 
     async def _websocket_echo_handler(self, websocket: WebSocket) -> None:
         """

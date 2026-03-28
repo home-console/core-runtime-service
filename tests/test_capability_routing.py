@@ -12,8 +12,8 @@ Verifies that:
 import pytest
 import os
 from typing import Any, Dict
+from core.module import ModuleSpec
 from core.runtime.runtime import CoreRuntime
-from core.runtime.module_manager import ModuleSpec
 from core.kernel.base_plugin import BasePlugin, PluginMetadata
 from core.operations import OperationInitiator, OperationInitiatorKind, OperationStatus
 

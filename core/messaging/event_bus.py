@@ -1,8 +1,8 @@
-from modules.event_bus.inmemory import (
+from core.messaging.inmemory import (
     EventBusMiddleware,
     InMemoryEventBus,
 )
-from modules.event_bus.inmemory import (
+from core.messaging.inmemory import (
     TypedEventHandler as EventHandler,
 )
 

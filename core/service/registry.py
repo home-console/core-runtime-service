@@ -7,13 +7,13 @@ Service Registry — registry for service-based inter-plugin communication (D2).
 import asyncio
 from typing import Any, List, Optional
 
-from modules.execution.service_executor import ServiceExecutor
-from modules.policy.service_policy import (
+from core.service.service_executor import ServiceExecutor
+from core.service.service_policy import (
     PreloadResourceFunc,
     build_service_acl_wrapper,
     create_default_policy_engine,
 )
-from modules.routing.service_router import ServiceRouter
+from core.service.service_router import ServiceRouter
 
 from core.service.models import ServiceFunc, ServiceMiddleware
 

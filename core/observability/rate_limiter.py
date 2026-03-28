@@ -1,5 +1,5 @@
 """
-Step 13: Rate Limiter — per-plugin rate enforcement.
+Rate Limiter — per-plugin rate enforcement.
 
 Token bucket algorithm for distributed rate limiting.
 Thread-safe with automatic token refill.

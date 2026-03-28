@@ -52,7 +52,7 @@ class YandexAPIClient:
             access_token = await oauth_get_access_token(self.runtime)
             if not access_token or not isinstance(access_token, str):
                 try:
-                    await self.runtime.service_registry.call(
+                    await self.runtime.call_service(
                         "logger.log",
                         level="error",
                         message="Получен пустой или невалидный access_token от oauth:yandex",
@@ -64,7 +64,7 @@ class YandexAPIClient:
                 raise RuntimeError("yandex_not_authorized")
             # Логируем успешное получение токена (первые 10 символов для безопасности)
             try:
-                await self.runtime.service_registry.call(
+                await self.runtime.call_service(
                     "logger.log",
                     level="debug",
                     message=f"Получен access_token: {access_token[:10]}...",
@@ -77,7 +77,7 @@ class YandexAPIClient:
         except RuntimeError as e:
             # Логируем ошибку получения токена
             try:
-                await self.runtime.service_registry.call(
+                await self.runtime.call_service(
                     "logger.log",
                     level="error",
                     message=f"Ошибка получения access_token: {str(e)}",
@@ -99,7 +99,7 @@ class YandexAPIClient:
             # ValueError от service_registry (сервис не найден) или от oauth_yandex (не настроен)
             error_msg = str(e)
             try:
-                await self.runtime.service_registry.call(
+                await self.runtime.call_service(
                     "logger.log",
                     level="error",
                     message=f"ValueError при получении access_token: {error_msg}",
@@ -116,7 +116,7 @@ class YandexAPIClient:
             error_msg = str(e)
             error_type = type(e).__name__
             try:
-                await self.runtime.service_registry.call(
+                await self.runtime.call_service(
                     "logger.log",
                     level="error",
                     message=f"Исключение при получении access_token: {error_type}: {error_msg}",
@@ -215,7 +215,7 @@ class YandexAPIClient:
         # Пытаемся использовать обёрнутый session для логирования, если доступен
         use_logged_session = False
         try:
-            if await self.runtime.service_registry.has_service("request_logger.create_http_session"):
+            if await self.runtime.has_service("request_logger.create_http_session"):
                 use_logged_session = True
         except Exception:
             pass
@@ -223,7 +223,7 @@ class YandexAPIClient:
         for attempt in range(1, self.MAX_ATTEMPTS + 1):
             # Логируем каждый запрос
             try:
-                await self.runtime.service_registry.call(
+                await self.runtime.call_service(
                     "logger.log",
                     level="info",
                     message=f"Yandex API request: {method} {url}",
@@ -236,7 +236,7 @@ class YandexAPIClient:
             try:
                 # Используем обёрнутый session для логирования, если доступен
                 if use_logged_session:
-                    session = await self.runtime.service_registry.call(
+                    session = await self.runtime.call_service(
                         "request_logger.create_http_session",
                         source=self.plugin_name,
                         timeout=timeout
@@ -256,7 +256,7 @@ class YandexAPIClient:
                                     pass
                                 
                                 if resp.status == 200:
-                                    await self.runtime.service_registry.call(
+                                    await self.runtime.call_service(
                                         "logger.log",
                                         level="info",
                                         message=f"Yandex API response: {method} {url} -> HTTP {resp.status}",
@@ -266,7 +266,7 @@ class YandexAPIClient:
                                 else:
                                     # Для ошибок логируем детали
                                     error_detail = response_text[:500] if response_text else "no response body"
-                                    await self.runtime.service_registry.call(
+                                    await self.runtime.call_service(
                                         "logger.log",
                                         level="error",
                                         message=f"Yandex API error: {method} {url} -> HTTP {resp.status}: {error_detail}",
@@ -291,7 +291,7 @@ class YandexAPIClient:
                                         error_text = await resp.text()
                                     except Exception:
                                         pass
-                                    await self.runtime.service_registry.call(
+                                    await self.runtime.call_service(
                                         "logger.log",
                                         level="error",
                                         message=f"Yandex API 401 Unauthorized: {method} {url} - пытаемся обновить токен. Ответ: {error_text[:200]}",
@@ -304,7 +304,7 @@ class YandexAPIClient:
                                 try:
                                     # Обновляем токен
                                     try:
-                                        await self.runtime.service_registry.call(
+                                        await self.runtime.call_service(
                                             "logger.log",
                                             level="info",
                                             message="Обновление access_token после 401 ошибки",
@@ -325,7 +325,7 @@ class YandexAPIClient:
                                             except Exception:
                                                 pass
                                             if retry_resp.status == 200:
-                                                await self.runtime.service_registry.call(
+                                                await self.runtime.call_service(
                                                     "logger.log",
                                                     level="info",
                                                     message=f"Yandex API retry success: {method} {url} -> HTTP {retry_resp.status}",
@@ -333,7 +333,7 @@ class YandexAPIClient:
                                                     context={"status_code": retry_resp.status}
                                                 )
                                             else:
-                                                await self.runtime.service_registry.call(
+                                                await self.runtime.call_service(
                                                     "logger.log",
                                                     level="error",
                                                     message=f"Yandex API retry failed: {method} {url} -> HTTP {retry_resp.status}: {retry_text[:200]}",
@@ -425,7 +425,7 @@ class YandexAPIClient:
                                     pass
                                 
                                 if 200 <= resp.status < 300:
-                                    await self.runtime.service_registry.call(
+                                    await self.runtime.call_service(
                                         "logger.log",
                                         level="info",
                                         message=f"Yandex API response: {method} {url} -> HTTP {resp.status}",
@@ -434,7 +434,7 @@ class YandexAPIClient:
                                     )
                                 else:
                                     error_detail = response_text[:500] if response_text else "no response body"
-                                    await self.runtime.service_registry.call(
+                                    await self.runtime.call_service(
                                         "logger.log",
                                         level="error",
                                         message=f"Yandex API error: {method} {url} -> HTTP {resp.status}: {error_detail}",
@@ -458,7 +458,7 @@ class YandexAPIClient:
                                         error_text = await resp.text()
                                     except Exception:
                                         pass
-                                    await self.runtime.service_registry.call(
+                                    await self.runtime.call_service(
                                         "logger.log",
                                         level="error",
                                         message=f"Yandex API 401 Unauthorized: {method} {url} - пытаемся обновить токен. Ответ: {error_text[:200]}",
@@ -551,7 +551,7 @@ class YandexAPIClient:
                 last_error = e
                 # Логируем сетевую ошибку
                 try:
-                    await self.runtime.service_registry.call(
+                    await self.runtime.call_service(
                         "logger.log",
                         level="warning",
                         message=f"Yandex API network error: {method} {url} - {e}",
@@ -575,7 +575,7 @@ class YandexAPIClient:
                     last_error = e
                     # Логируем сетевую ошибку
                     try:
-                        await self.runtime.service_registry.call(
+                        await self.runtime.call_service(
                             "logger.log",
                             level="warning",
                             message=f"Yandex API network error: {method} {url} - {e}",
@@ -595,7 +595,7 @@ class YandexAPIClient:
                 else:
                     # Не сетевые ошибки - не retry, но логируем
                     try:
-                        await self.runtime.service_registry.call(
+                        await self.runtime.call_service(
                             "logger.log",
                             level="error",
                             message=f"Yandex API error: {method} {url} - {e}",
@@ -615,7 +615,7 @@ class YandexAPIClient:
             # Логируем попытку retry
             if attempt < self.MAX_ATTEMPTS:
                 try:
-                    await self.runtime.service_registry.call(
+                    await self.runtime.call_service(
                         "logger.log",
                         level="warning",
                         message=f"Retry attempt {attempt}/{self.MAX_ATTEMPTS} для {method} {url}",
@@ -639,7 +639,7 @@ class YandexAPIClient:
         
         # Исчерпаны все попытки
         try:
-            await self.runtime.service_registry.call(
+            await self.runtime.call_service(
                 "logger.log",
                 level="error",
                 message=f"Исчерпаны все попытки ({self.MAX_ATTEMPTS}) для {method} {url}",
@@ -852,7 +852,7 @@ class YandexAPIClient:
                         last_error = (resp.status, text)
                         # Логируем тело 403 чтобы понять причину (CSRF, permission, etc.)
                         try:
-                            await self.runtime.service_registry.call(
+                            await self.runtime.call_service(
                                 "logger.log",
                                 level="warning",
                                 message=f"Quasar actions {resp.status} for {url}: {text[:500]}",

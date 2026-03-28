@@ -4,7 +4,6 @@ from typing import Any, Dict
 import asyncio
 
 from .operations import poll_and_publish
-from ..transformers.device_transformer import DeviceTransformer
 
 
 async def resolve_external_id(runtime: Any, internal_id: str | None, provided_external_id: str | None) -> str | None:
@@ -13,7 +12,7 @@ async def resolve_external_id(runtime: Any, internal_id: str | None, provided_ex
     if not internal_id:
         return None
     try:
-        mappings = await runtime.service_registry.call("devices.list_mappings")
+        mappings = await runtime.call_service("devices.list_mappings")
         if isinstance(mappings, list):
             for mapping in mappings:
                 if isinstance(mapping, dict) and mapping.get("internal_id") == internal_id:
@@ -46,9 +45,6 @@ async def ensure_authorization(runtime: Any) -> tuple[bool, bool]:
 async def handle_post_send(
     runtime: Any,
     tasks: set,
-    event_bus: Any,
-    service_registry: Any,
-    device_transformer: DeviceTransformer,
     api_client: Any,
     plugin_name: str,
     external_id: str,
@@ -62,8 +58,8 @@ async def handle_post_send(
         if isinstance(params, dict) and "on" in params:
             optimistic_reported = {"external_id": external_id, "state": {"on": params["on"]}}
             try:
-                await event_bus.publish("external.device_state_reported", optimistic_reported)
-                await service_registry.call(
+                await runtime.publish_event("external.device_state_reported", optimistic_reported)
+                await runtime.call_service(
                     "logger.log",
                     level="info",
                     message=f"Optimistic state update published for {external_id}: on={params['on']}",
@@ -72,7 +68,7 @@ async def handle_post_send(
                 )
             except Exception as pub_err:
                 try:
-                    await service_registry.call(
+                    await runtime.call_service(
                         "logger.log",
                         level="error",
                         message=f"Failed to publish optimistic state update: {pub_err}",
@@ -83,7 +79,7 @@ async def handle_post_send(
                     pass
         else:
             try:
-                await service_registry.call(
+                await runtime.call_service(
                     "logger.log",
                     level="debug",
                     message="Optimistic update skipped: params does not contain 'on'",
@@ -94,7 +90,7 @@ async def handle_post_send(
                 pass
     except Exception as e:
         try:
-            await service_registry.call(
+            await runtime.call_service(
                 "logger.log",
                 level="error",
                 message=f"Exception in optimistic update logic: {e}",
@@ -115,7 +111,7 @@ async def handle_post_send(
 
     if ws_active:
         try:
-            await service_registry.call(
+            await runtime.call_service(
                 "logger.log",
                 level="info",
                 message=f"Command sent successfully to Yandex device {external_id}. WebSocket active, state will be updated via WebSocket.",
@@ -128,7 +124,7 @@ async def handle_post_send(
 
     # Schedule polling fallback
     try:
-        await service_registry.call(
+        await runtime.call_service(
             "logger.log",
             level="info",
             message=f"Command sent successfully to Yandex device {external_id}. WebSocket not active, using OAuth API polling.",
@@ -140,7 +136,7 @@ async def handle_post_send(
 
     try:
         task = asyncio.create_task(
-            poll_and_publish(runtime, api_client, event_bus, service_registry, device_transformer, external_id, internal_id, params, plugin_name)
+            poll_and_publish(runtime, api_client, external_id, internal_id, params, plugin_name)
         )
         tasks.add(task)
         task.add_done_callback(lambda t, tasks=tasks: tasks.discard(t))

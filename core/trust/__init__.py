@@ -1,26 +1,15 @@
-"""Legacy compatibility wrapper for trust package exports."""
+"""Cryptographic trust helpers."""
 
-import warnings
-
-warnings.warn(
-    "core.trust is deprecated; use core.security.trust.legacy_crypto instead",
-    DeprecationWarning,
-    stacklevel=2,
-)
-
-from modules.security.trust.legacy_crypto import (
-    PluginTrustError,
-    PluginTrustVerifier,
+from core.trust.signature import (
     SignatureError,
-    TrustError,
-    TrustLevel,
-    TrustStore,
     compute_archive_sha256,
     compute_payload_hash,
     generate_keypair,
     sign_message,
     verify_signature,
 )
+from core.trust.trust_store import TrustError, TrustLevel, TrustStore
+from core.trust.verifier import PluginTrustError, PluginTrustVerifier
 
 __all__ = [
     "generate_keypair",

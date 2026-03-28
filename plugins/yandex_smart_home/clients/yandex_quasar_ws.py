@@ -360,7 +360,7 @@ class YandexQuasarWS:
         # DEBUG 2B: Log raw device payload
         try:
             ws_timestamp = time.time()
-            await self.runtime.storage.set(
+            await self.runtime.storage_set(
                 "yandex_debug_ws_raw",
                 f"{device_id}_{int(ws_timestamp * 1000)}",
                 {
@@ -395,7 +395,7 @@ class YandexQuasarWS:
         
         # DEBUG 2C: Log extracted state
         try:
-            await self.runtime.storage.set(
+            await self.runtime.storage_set(
                 "yandex_debug_ws_parsed",
                 f"{device_id}_{int(ws_timestamp * 1000)}",
                 {
@@ -456,7 +456,7 @@ class YandexQuasarWS:
             state=state,
         )
         try:
-            await self.runtime.event_bus.publish("external.device_state_reported", payload)
+            await self.runtime.publish_event("external.device_state_reported", payload)
             await self._log(
                 "debug",
                 f"State update published successfully",
@@ -500,7 +500,7 @@ class YandexQuasarWS:
 
     async def _log(self, level: str, message: str, **context: Any) -> None:
         with contextlib.suppress(Exception):
-            await self.runtime.service_registry.call(
+            await self.runtime.call_service(
                 "logger.log",
                 level=level,
                 message=message,

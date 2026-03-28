@@ -74,7 +74,7 @@ class SecurityEventType(str, Enum):
     CREDENTIAL_RISK_EVENT = "credential.risk.event"
     """Activity contributing to user's risk score"""
     
-    # Trust management (Step 17.9)
+    # Trust management
     TRUST_STATE_CHANGED = "trust.state.changed"
     """User's trust state transitioned"""
     

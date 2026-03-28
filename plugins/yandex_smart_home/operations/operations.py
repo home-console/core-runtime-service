@@ -16,7 +16,7 @@ async def handle_yandex_sync(params: Dict[str, Any], context: Any) -> Dict[str, 
     if not runtime:
         raise RuntimeError("Runtime not available in context")
 
-    result = await runtime.service_registry.call("yandex.sync_devices")
+    result = await runtime.call_service("yandex.sync_devices")
 
     # Сервис возвращает список устройств; оборачиваем в dict для operation result
     if isinstance(result, list):
@@ -33,7 +33,7 @@ async def handle_yandex_check_devices_online(params: Dict[str, Any], context: An
     if not runtime:
         raise RuntimeError("Runtime not available in context")
 
-    result = await runtime.service_registry.call("yandex.check_devices_online")
+    result = await runtime.call_service("yandex.check_devices_online")
 
     if isinstance(result, dict):
         return {"success": True, **result}

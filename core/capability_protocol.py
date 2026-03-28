@@ -151,7 +151,7 @@ class ProviderMetadata:
     remote_config: Optional[Dict[str, Any]] = None
     timeouts: Dict[str, float] = None  # capability -> timeout_seconds
     capabilities: List[str] = None     # Manifest: capabilities this provider supports
-    execution_mode: str = "in_process"  # Step 9: in_process | process | container | remote
+    execution_mode: str = "in_process"  # in_process | process | container | remote
     process_config: Optional[Dict[str, Any]] = None  # Process execution config
     container_config: Optional[Dict[str, Any]] = None  # Container execution config
     

@@ -232,20 +232,35 @@ class YandexDeviceAuthPlugin(BasePlugin):
             return await self.auth_service.get_account_status()
 
         # Register services (ACL в ядре: операции с куками/сессией — admin_only при наличии ctx)
-        reg = self.runtime.service_registry
-        await reg.register_with_acl("yandex_device_auth.start", start_device_auth, admin_only=True)
-        await reg.register_with_acl("yandex_device_auth.status", check_qr_status, admin_only=True)
-        await reg.register_with_acl("yandex_device_auth.cookies", save_cookies, admin_only=True)
-        await reg.register_with_acl("yandex_device_auth.get_account_status", get_account_status, admin_only=True)
-        await reg.register_with_acl("yandex_device_auth.cancel", cancel_auth, admin_only=True)
-        await reg.register_with_acl("yandex_device_auth.unlink", unlink_account, admin_only=True)
-        await reg.register_with_acl("yandex_device_auth.get_session", get_account_session, admin_only=True)
+        await self.register_service(
+            "yandex_device_auth.start", start_device_auth, admin_only=True
+        )
+        await self.register_service(
+            "yandex_device_auth.status", check_qr_status, admin_only=True
+        )
+        await self.register_service(
+            "yandex_device_auth.cookies", save_cookies, admin_only=True
+        )
+        await self.register_service(
+            "yandex_device_auth.get_account_status",
+            get_account_status,
+            admin_only=True,
+        )
+        await self.register_service(
+            "yandex_device_auth.cancel", cancel_auth, admin_only=True
+        )
+        await self.register_service(
+            "yandex_device_auth.unlink", unlink_account, admin_only=True
+        )
+        await self.register_service(
+            "yandex_device_auth.get_session", get_account_session, admin_only=True
+        )
 
         # Register HTTP endpoints
         from core.http import HttpEndpoint
 
         try:
-            self.runtime.http.register(
+            self.register_http_endpoint(
                 HttpEndpoint(
                     method="POST",
                     path="/yandex/auth/device/start",
@@ -254,7 +269,7 @@ class YandexDeviceAuthPlugin(BasePlugin):
                 )
             )
 
-            self.runtime.http.register(
+            self.register_http_endpoint(
                 HttpEndpoint(
                     method="GET",
                     path="/yandex/auth/device/status",
@@ -263,7 +278,7 @@ class YandexDeviceAuthPlugin(BasePlugin):
                 )
             )
 
-            self.runtime.http.register(
+            self.register_http_endpoint(
                 HttpEndpoint(
                     method="POST",
                     path="/yandex/auth/device/cookies",
@@ -272,7 +287,7 @@ class YandexDeviceAuthPlugin(BasePlugin):
                 )
             )
 
-            self.runtime.http.register(
+            self.register_http_endpoint(
                 HttpEndpoint(
                     method="GET",
                     path="/yandex/auth/device/session",
@@ -281,7 +296,7 @@ class YandexDeviceAuthPlugin(BasePlugin):
                 )
             )
 
-            self.runtime.http.register(
+            self.register_http_endpoint(
                 HttpEndpoint(
                     method="POST",
                     path="/yandex/auth/device/cancel",
@@ -290,7 +305,7 @@ class YandexDeviceAuthPlugin(BasePlugin):
                 )
             )
 
-            self.runtime.http.register(
+            self.register_http_endpoint(
                 HttpEndpoint(
                     method="POST",
                     path="/yandex/auth/device/unlink",
@@ -307,25 +322,25 @@ class YandexDeviceAuthPlugin(BasePlugin):
         if ops and hasattr(ops, "register_handler"):
 
             async def _op_start(params: Any, context: Any) -> Dict[str, Any]:
-                result = await self.runtime.service_registry.call(
+                result = await self.call_service(
                     "yandex_device_auth.start", body=params if isinstance(params, dict) else {}
                 )
                 return result if isinstance(result, dict) else {"value": result}
 
             async def _op_status(params: Any, context: Any) -> Dict[str, Any]:
-                result = await self.runtime.service_registry.call(
+                result = await self.call_service(
                     "yandex_device_auth.status", body=params if isinstance(params, dict) else {}
                 )
                 return result if isinstance(result, dict) else {"value": result}
 
             async def _op_cancel(params: Any, context: Any) -> Dict[str, Any]:
-                result = await self.runtime.service_registry.call(
+                result = await self.call_service(
                     "yandex_device_auth.cancel", body=params if isinstance(params, dict) else {}
                 )
                 return result if isinstance(result, dict) else {"value": result}
 
             async def _op_unlink(params: Any, context: Any) -> Dict[str, Any]:
-                result = await self.runtime.service_registry.call(
+                result = await self.call_service(
                     "yandex_device_auth.unlink", body=params if isinstance(params, dict) else {}
                 )
                 return result if isinstance(result, dict) else {"value": result}
@@ -353,12 +368,12 @@ class YandexDeviceAuthPlugin(BasePlugin):
             pass
 
         try:
-            await self.runtime.service_registry.unregister("yandex_device_auth.start")
-            await self.runtime.service_registry.unregister("yandex_device_auth.status")
-            await self.runtime.service_registry.unregister("yandex_device_auth.cookies")
-            await self.runtime.service_registry.unregister("yandex_device_auth.get_account_status")
-            await self.runtime.service_registry.unregister("yandex_device_auth.cancel")
-            await self.runtime.service_registry.unregister("yandex_device_auth.unlink")
-            await self.runtime.service_registry.unregister("yandex_device_auth.get_session")
+            await self.unregister_service("yandex_device_auth.start")
+            await self.unregister_service("yandex_device_auth.status")
+            await self.unregister_service("yandex_device_auth.cookies")
+            await self.unregister_service("yandex_device_auth.get_account_status")
+            await self.unregister_service("yandex_device_auth.cancel")
+            await self.unregister_service("yandex_device_auth.unlink")
+            await self.unregister_service("yandex_device_auth.get_session")
         except Exception:
             pass

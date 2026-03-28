@@ -10,7 +10,6 @@ from typing import Any, Dict
 async def send_command(
     runtime: Any,
     api_client: Any,
-    service_registry: Any,
     plugin_name: str,
     external_id: str,
     actions: Dict[str, Any],
@@ -23,7 +22,7 @@ async def send_command(
     try:
         if use_quasar:
             try:
-                await service_registry.call(
+                await runtime.call_service(
                     "logger.log",
                     level="info",
                     message=f"Sending command via Quasar (cookies) for {external_id}",
@@ -39,7 +38,7 @@ async def send_command(
         raise
     except Exception as e:
         try:
-            await service_registry.call(
+            await runtime.call_service(
                 "logger.log",
                 level="error",
                 message=f"Failed to send command to {external_id}: {e}",

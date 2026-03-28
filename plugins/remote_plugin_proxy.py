@@ -90,7 +90,7 @@ class RemotePluginProxy(BasePlugin):
 				return await asyncio.get_event_loop().run_in_executor(None, _sync_call)
 			except Exception as exc:
 				try:
-					await self.runtime.service_registry.call(
+					await self.call_service(
 						"logger.log",
 						level="error",
 						message=f"RemotePluginProxy: {endpoint} failed: {str(exc)}",
@@ -116,7 +116,7 @@ class RemotePluginProxy(BasePlugin):
 					raise ValueError(f"Unsupported method: {method}")
 		except Exception as exc:
 			try:
-				await self.runtime.service_registry.call(
+				await self.call_service(
 					"logger.log",
 					level="error",
 					message=f"RemotePluginProxy: {endpoint} failed: {str(exc)}",
@@ -163,7 +163,7 @@ class RemotePluginProxy(BasePlugin):
 			self._metadata = await self._fetch_metadata()
 		except Exception as exc:
 			try:
-				await self.runtime.service_registry.call(
+				await self.call_service(
 					"logger.log",
 					level="warning",
 					message=f"RemotePluginProxy: failed to fetch metadata: {exc}",
@@ -178,7 +178,7 @@ class RemotePluginProxy(BasePlugin):
 			await self._http_call("/plugin/load", method="POST")
 		except Exception as exc:
 			try:
-				await self.runtime.service_registry.call(
+				await self.call_service(
 					"logger.log",
 					level="warning",
 					message=f"RemotePluginProxy: /plugin/load failed: {exc}",
@@ -208,7 +208,7 @@ class RemotePluginProxy(BasePlugin):
 					except Exception as exc:
 						# Normalize network errors and log
 						try:
-							await self.runtime.service_registry.call(
+							await self.call_service(
 								"logger.log",
 								level="error",
 								message=f"RemotePluginProxy forwarder error for {_endpoint}: {exc}",
@@ -221,12 +221,12 @@ class RemotePluginProxy(BasePlugin):
 			forwarder = await _make_forwarder()
 			try:
 				# Регистрируем сервис в runtime
-				await self.runtime.service_registry.register(svc_name, forwarder)
+				await self.register_service(svc_name, forwarder)
 				self._registered_services.append(svc_name)
 			except Exception:
 				# Не ломаем загрузку, логируем и продолжаем
 				try:
-					await self.runtime.service_registry.call(
+					await self.call_service(
 						"logger.log",
 						level="warning",
 						message=f"RemotePluginProxy: не удалось зарегистрировать сервис {svc_name}",
@@ -239,7 +239,7 @@ class RemotePluginProxy(BasePlugin):
 
 		# Log successful load
 		try:
-			await self.runtime.service_registry.call(
+			await self.call_service(
 				"logger.log",
 				level="info",
 				message=f"Remote plugin '{self.metadata.name}' loaded (ready={self._ready})",
@@ -255,7 +255,7 @@ class RemotePluginProxy(BasePlugin):
 		try:
 			await self._http_call("/plugin/start", method="POST")
 			try:
-				await self.runtime.service_registry.call(
+				await self.call_service(
 					"logger.log",
 					level="info",
 					message=f"Remote plugin '{self.metadata.name}' started",
@@ -265,7 +265,7 @@ class RemotePluginProxy(BasePlugin):
 				pass
 		except Exception as exc:
 			try:
-				await self.runtime.service_registry.call(
+				await self.call_service(
 					"logger.log",
 					level="error",
 					message=f"Failed to start remote plugin: {str(exc)}",
@@ -281,7 +281,7 @@ class RemotePluginProxy(BasePlugin):
 		try:
 			await self._http_call("/plugin/stop", method="POST")
 			try:
-				await self.runtime.service_registry.call(
+				await self.call_service(
 					"logger.log",
 					level="info",
 					message=f"Remote plugin '{self.metadata.name}' stopped",
@@ -291,7 +291,7 @@ class RemotePluginProxy(BasePlugin):
 				pass
 		except Exception as exc:
 			try:
-				await self.runtime.service_registry.call(
+				await self.call_service(
 					"logger.log",
 					level="error",
 					message=f"Failed to stop remote plugin: {str(exc)}",
@@ -308,7 +308,7 @@ class RemotePluginProxy(BasePlugin):
 			await self._http_call("/plugin/unload", method="POST")
 		except Exception as exc:
 			try:
-				await self.runtime.service_registry.call(
+				await self.call_service(
 					"logger.log",
 					level="warning",
 					message=f"Failed to unload remote plugin: {str(exc)}",
@@ -320,7 +320,7 @@ class RemotePluginProxy(BasePlugin):
 		# Отрегистировать сервисы, которые мы регистрировали при загрузке (гарантированно)
 		for svc_name in list(self._registered_services):
 			try:
-				await self.runtime.service_registry.unregister(svc_name)
+				await self.unregister_service(svc_name)
 			except Exception:
 				pass
 		self._registered_services.clear()

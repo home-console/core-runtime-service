@@ -292,7 +292,6 @@ class OperationWorker:
             lease_ttl_s = 30
 
         hook_context: dict[str, Any] = {
-            "stage": "before_claim",
             "runtime": self.runtime,
             "worker_id": self.worker_id,
             "now": now,
@@ -344,7 +343,6 @@ class OperationWorker:
 
         hook_context.update(
             {
-                "stage": "before_execute",
                 "claim_token": claim_token,
                 "execution_token": claim_token,
                 "attempt": attempt,
@@ -369,7 +367,6 @@ class OperationWorker:
         result: Operation = await executor.execute_attempt(attempt_id, claim_token)
         hook_context.update(
             {
-                "stage": "on_failure",
                 "result": result,
                 "operation": result,
                 "error": result.error,
@@ -386,7 +383,6 @@ class OperationWorker:
 
         hook_context.update(
             {
-                "stage": "after_execute",
                 "result": result,
                 "operation": result,
             }

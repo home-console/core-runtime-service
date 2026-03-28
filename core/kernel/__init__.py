@@ -7,6 +7,8 @@ Kernel components - низкоуровневые компоненты ядра.
 from core.kernel.plugin_registry import PluginState, PluginRegistry
 from core.kernel.plugin_lifecycle import PluginLifecycleManager
 from core.kernel.plugin_loader import PluginManifestLoader
+from core.kernel.plugin_api import PluginAPI
+from core.kernel.plugin_runtime_facade import PluginRuntimeFacade
 from core.kernel.plugin_sandbox import PluginSandbox
 from core.kernel.context import KernelContext
 
@@ -15,6 +17,8 @@ __all__ = [
     'PluginRegistry',
     'PluginLifecycleManager',
     'PluginManifestLoader',
+    'PluginAPI',
+    'PluginRuntimeFacade',
     'PluginSandbox',
     'KernelContext',
 ]

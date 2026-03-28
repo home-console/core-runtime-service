@@ -1,7 +1,7 @@
 import pytest
 
+from core.module import ModuleSpec
 from core.runtime.runtime import CoreRuntime
-from core.runtime.module_manager import ModuleSpec
 from modules.execution.module import ExecutionModule
 from core.operations import OperationInitiator, OperationInitiatorKind
 from modules.execution.controller import ExecutionControllerImpl

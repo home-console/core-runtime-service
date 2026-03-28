@@ -94,14 +94,14 @@ class YandexSmartHomeRealPlugin(BasePlugin):
             """Синхронизировать устройства из реального API Яндекса."""
             return await self._sync_devices_internal()
 
-        await self.runtime.service_registry.register_with_acl("yandex.sync_devices", _sync_devices, admin_only=True)
+        await self.register_service("yandex.sync_devices", _sync_devices, admin_only=True)
         
         # Perform initial sync on load
         try:
             await self._sync_devices_internal()
         except Exception as e:
             try:
-                await self.runtime.service_registry.call(
+                await self.call_service(
                     "logger.log",
                     level="warning",
                     message=f"Initial device sync failed: {e}",
@@ -115,13 +115,13 @@ class YandexSmartHomeRealPlugin(BasePlugin):
             """Проверить онлайн статус всех устройств через Яндекс API."""
             return await self.device_status_checker.check_devices_online()
 
-        await self.runtime.service_registry.register_with_acl("yandex.check_devices_online", _check_devices_online, admin_only=True)
+        await self.register_service("yandex.check_devices_online", _check_devices_online, admin_only=True)
 
         async def _subscribe_device_updates(device_id: str, callback):
             """Подписка на обновления состояния конкретного устройства (ws)."""
             return self.quasar_ws.subscribe(device_id, callback)
 
-        await self.runtime.service_registry.register_with_acl("yandex.subscribe_device_updates", _subscribe_device_updates, admin_only=True)
+        await self.register_service("yandex.subscribe_device_updates", _subscribe_device_updates, admin_only=True)
 
         # Start background periodic reconciliation task
         sync_task = asyncio.create_task(self._periodic_sync_loop())
@@ -136,7 +136,7 @@ class YandexSmartHomeRealPlugin(BasePlugin):
         register_yandex_operations(self.runtime)
 
         try:
-            await self.runtime.service_registry.call(
+            await self.call_service(
                 "logger.log",
                 level="info",
                 message="yandex_smart_home запущен",
@@ -153,7 +153,7 @@ class YandexSmartHomeRealPlugin(BasePlugin):
         # Сохранить хендлер и подписаться
         self._internal_command_handler = _internal_command_handler
         try:
-            await self.runtime.event_bus.subscribe("internal.device_command_requested", self._internal_command_handler)
+            await self.subscribe_event("internal.device_command_requested", self._internal_command_handler)
         except Exception:
             pass
 
@@ -163,26 +163,26 @@ class YandexSmartHomeRealPlugin(BasePlugin):
             try:
                 if not data.get("quasar_ready"):
                     return
-                await self.runtime.service_registry.call(
+                await self.call_service(
                     "logger.log",
                     level="info",
                     message="Device auth linked, syncing devices and starting Quasar WS",
                     plugin=self.metadata.name,
                 )
                 # Включаем реальный API после успешного device auth (нужно для sync_devices)
-                await self.runtime.storage.set("yandex", "use_real_api", {"enabled": True})
+                await self.storage_set("yandex", "use_real_api", {"enabled": True})
                 
                 # Синхронизация устройств и автомаппинг
                 try:
                     result = await self._sync_devices_internal()
-                    await self.runtime.service_registry.call(
+                    await self.call_service(
                         "logger.log",
                         level="info",
                         message=f"Device auth linked: synced {result.get('synced', 0)} devices, mapped {result.get('mapped', 0)}",
                         plugin=self.metadata.name,
                     )
                 except Exception as sync_err:
-                    await self.runtime.service_registry.call(
+                    await self.call_service(
                         "logger.log",
                         level="warning",
                         message=f"Device sync after auth failed (Quasar WS will still run): {sync_err}",
@@ -195,7 +195,7 @@ class YandexSmartHomeRealPlugin(BasePlugin):
                     self._tasks.add(runner)
                     runner.add_done_callback(lambda t, tasks=self._tasks: tasks.discard(t))
             except Exception as e:
-                await self.runtime.service_registry.call(
+                await self.call_service(
                     "logger.log",
                     level="error",
                     message=f"Failed after device auth (sync/Quasar WS): {e}",
@@ -204,7 +204,7 @@ class YandexSmartHomeRealPlugin(BasePlugin):
 
         self._device_auth_handler = _on_device_auth_linked
         try:
-            await self.runtime.event_bus.subscribe("yandex.device_auth.linked", self._device_auth_handler)
+            await self.subscribe_event("yandex.device_auth.linked", self._device_auth_handler)
         except Exception:
             pass
 
@@ -220,7 +220,7 @@ class YandexSmartHomeRealPlugin(BasePlugin):
                         self._tasks.add(runner)
                         runner.add_done_callback(lambda t, tasks=self._tasks: tasks.discard(t))
                 else:
-                    await self.runtime.service_registry.call(
+                    await self.call_service(
                         "logger.log",
                         level="warning",
                         message="Quasar WS not started: cookies not found. Use device auth or OAuth with cookies.",
@@ -238,7 +238,7 @@ class YandexSmartHomeRealPlugin(BasePlugin):
         await super().on_stop()
 
         try:
-            await self.runtime.service_registry.call(
+            await self.call_service(
                 "logger.log",
                 level="info",
                 message="yandex_smart_home остановлен",
@@ -259,7 +259,7 @@ class YandexSmartHomeRealPlugin(BasePlugin):
         # Отписываемся от событий
         try:
             if hasattr(self, '_device_auth_handler'):
-                await self.runtime.event_bus.unsubscribe("yandex.device_auth.linked", self._device_auth_handler)
+                await self.unsubscribe_event("yandex.device_auth.linked", self._device_auth_handler)
         except Exception:
             pass
 
@@ -300,17 +300,17 @@ class YandexSmartHomeRealPlugin(BasePlugin):
             pass
 
         try:
-            await self.runtime.service_registry.unregister("yandex.sync_devices")
+            await self.unregister_service("yandex.sync_devices")
         except Exception:
             pass
 
         try:
-            await self.runtime.service_registry.unregister("yandex.check_devices_online")
+            await self.unregister_service("yandex.check_devices_online")
         except Exception:
             pass
 
         try:
-            await self.runtime.service_registry.unregister("yandex.subscribe_device_updates")
+            await self.unregister_service("yandex.subscribe_device_updates")
         except Exception:
             pass
 
@@ -327,11 +327,9 @@ class YandexSmartHomeRealPlugin(BasePlugin):
         }
         
         try:
-            # Step 1: Sync devices from API
             devices = await self.device_sync.sync_devices()
             result["synced"] = len(devices) if devices else 0
             
-            # Step 2: Auto-map external devices to internal
             try:
                 from core.system_context import create_system_context
                 from core.auth_contextvars import set_current_auth_context, get_current_auth_context
@@ -340,7 +338,7 @@ class YandexSmartHomeRealPlugin(BasePlugin):
                 prev = get_current_auth_context()
                 set_current_auth_context(ctx)
                 try:
-                    map_result = await self.runtime.service_registry.call(
+                    map_result = await self.call_service(
                         "devices.auto_map_external",
                         provider="yandex",
                     )
@@ -351,7 +349,7 @@ class YandexSmartHomeRealPlugin(BasePlugin):
             except Exception as map_err:
                 # Log mapping error but don't fail entire sync
                 try:
-                    await self.runtime.service_registry.call(
+                    await self.call_service(
                         "logger.log",
                         level="warning",
                         message=f"Device auto-mapping failed: {map_err}",
@@ -364,7 +362,7 @@ class YandexSmartHomeRealPlugin(BasePlugin):
         except Exception as e:
             # Log sync error but don't re-raise
             try:
-                await self.runtime.service_registry.call(
+                await self.call_service(
                     "logger.log",
                     level="error",
                     message=f"Device sync failed: {e}",
@@ -385,7 +383,7 @@ class YandexSmartHomeRealPlugin(BasePlugin):
                 except Exception as e:
                     # Log reconciliation error but don't crash the loop
                     try:
-                        await self.runtime.service_registry.call(
+                        await self.call_service(
                             "logger.log",
                             level="warning",
                             message=f"Periodic reconciliation failed: {e}",
@@ -406,7 +404,7 @@ class YandexSmartHomeRealPlugin(BasePlugin):
     async def _is_real_api_enabled(self) -> bool:
         """Проверка feature-флага использования реального API."""
         try:
-            use_real_data = await self.runtime.storage.get("yandex", "use_real_api")
+            use_real_data = await self.storage_get("yandex", "use_real_api")
             if isinstance(use_real_data, dict):
                 return bool(use_real_data.get("enabled", False))
             return bool(use_real_data)

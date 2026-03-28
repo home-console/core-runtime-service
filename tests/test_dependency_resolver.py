@@ -11,7 +11,7 @@ Tests system integrity validation:
 
 import pytest
 from unittest.mock import Mock
-from core.dependency_resolver import DependencyResolver, RuntimeIntegrityError
+from core.dependency import DependencyResolver, RuntimeIntegrityError
 from core.kernel.base_plugin import PluginMetadata
 
 

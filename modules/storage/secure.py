@@ -108,14 +108,10 @@ class SecureStorageWrapper:
                 "global_epoch",
                 {
                     "epoch": 0,
-                    "updated_at": datetime.utcnow().isoformat(),
+                    "updated_at": datetime.now(UTC).isoformat(),
                 },
             )
-            await self._adapter.set("_system.meta", "global_epoch", {
-                "epoch": 0,
-                "updated_at": datetime.now(UTC).isoformat(),
-            })
-        
+
  
         # Проверяем и рассчитываем root hash при старте
         await self._verify_storage_integrity()

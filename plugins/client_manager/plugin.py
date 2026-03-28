@@ -8,13 +8,14 @@ Client Manager Plugin - управление удаленными клиента
 """
 
 import asyncio
+import importlib
 import logging
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 from core.kernel.base_plugin import BasePlugin, PluginMetadata
-from modules.api.registry import HttpEndpoint
+from core.http import HttpEndpoint
 
 if TYPE_CHECKING:
     from core.runtime.runtime import CoreRuntime
@@ -23,12 +24,20 @@ logger = logging.getLogger(__name__)
 
 
 def _ensure_client_manager_plugin_on_path() -> None:
-    """Добавляет каталог client-manager-plugin в sys.path для импорта app."""
+    """Добавляет каталог client-manager-plugin в sys.path и app.__path__."""
     plugin_dir = Path(__file__).resolve().parent
     plugins_root = plugin_dir.parent
     cm_plugin_dir = plugins_root / "client-manager-service"
+    cm_app_dir = cm_plugin_dir / "app"
     if cm_plugin_dir.is_dir() and str(cm_plugin_dir) not in sys.path:
         sys.path.insert(0, str(cm_plugin_dir))
+    try:
+        app_pkg = importlib.import_module("app")
+        app_path = getattr(app_pkg, "__path__", None)
+        if app_path is not None and cm_app_dir.is_dir() and str(cm_app_dir) not in app_path:
+            app_path.append(str(cm_app_dir))
+    except Exception:
+        pass
 
 
 class ClientManagerPlugin(BasePlugin):
@@ -84,28 +93,28 @@ class ClientManagerPlugin(BasePlugin):
 
             # Register operation handlers (capability-first model)
             try:
-                self.runtime.operations.register_handler(
+                self.register_operation_handler(
                     "client.command.execute",
                     self._op_execute_command,
                 )
-                self.runtime.operations.register_handler(
+                self.register_operation_handler(
                     "client.list",
                     self._op_list_clients,
                 )
-                self.runtime.operations.register_handler(
+                self.register_operation_handler(
                     "client.delete",
                     self._op_delete_client,
                 )
 
-                self.runtime.operations.register_handler(
+                self.register_operation_handler(
                     "client_manager.execute_command",
                     self._op_execute_command,
                 )
-                self.runtime.operations.register_handler(
+                self.register_operation_handler(
                     "client_manager.delete_client",
                     self._op_delete_client,
                 )
-                self.runtime.operations.register_handler(
+                self.register_operation_handler(
                     "client_manager.execute_universal_command",
                     self._op_execute_universal_command,
                 )
@@ -113,7 +122,7 @@ class ClientManagerPlugin(BasePlugin):
                 pass
 
             try:
-                await self.runtime.service_registry.call(
+                await self.call_service(
                     "logger.log",
                     level="info",
                     message="Client Manager endpoints и сервисы зарегистрированы через HttpRegistry",
@@ -125,7 +134,7 @@ class ClientManagerPlugin(BasePlugin):
         except Exception as e:
             logger.error(f"Ошибка регистрации Client Manager: {e}")
             try:
-                await self.runtime.service_registry.call(
+                await self.call_service(
                     "logger.log",
                     level="error",
                     message=f"Ошибка регистрации Client Manager: {e}",
@@ -229,7 +238,7 @@ class ClientManagerPlugin(BasePlugin):
         ]
 
         for ep in ws_endpoints + rest_endpoints:
-            self.runtime.http.register(ep)
+            self.register_http_endpoint(ep)
 
     async def on_start(self) -> None:
         """Запуск плагина - инициализация WebSocketHandler."""
@@ -238,8 +247,8 @@ class ClientManagerPlugin(BasePlugin):
         _ensure_client_manager_plugin_on_path()
 
         try:
-            from modules.api.websocket_handler import WebSocketHandler
-            from modules.security.auth_service import AuthService
+            from app.core.websocket_handler import WebSocketHandler
+            from app.core.security.auth_service import AuthService
 
             self.handler = WebSocketHandler()
             
@@ -273,7 +282,7 @@ class ClientManagerPlugin(BasePlugin):
             logger.info("Client Manager WebSocket handler инициализирован")
 
             try:
-                await self.runtime.service_registry.call(
+                await self.call_service(
                     "logger.log",
                     level="info",
                     message="Client Manager WebSocket handler инициализирован",
@@ -285,7 +294,7 @@ class ClientManagerPlugin(BasePlugin):
         except Exception as e:
             logger.error(f"Ошибка запуска Client Manager: {e}")
             try:
-                await self.runtime.service_registry.call(
+                await self.call_service(
                     "logger.log",
                     level="error",
                     message=f"Ошибка запуска Client Manager: {e}",
@@ -311,7 +320,7 @@ class ClientManagerPlugin(BasePlugin):
             logger.info("Client Manager остановлен")
 
             try:
-                await self.runtime.service_registry.call(
+                await self.call_service(
                     "logger.log",
                     level="info",
                     message="Client Manager остановлен",
@@ -323,7 +332,7 @@ class ClientManagerPlugin(BasePlugin):
         except Exception as e:
             logger.error(f"Ошибка при остановке Client Manager: {e}")
             try:
-                await self.runtime.service_registry.call(
+                await self.call_service(
                     "logger.log",
                     level="error",
                     message=f"Ошибка при остановке Client Manager: {e}",
@@ -342,7 +351,7 @@ class ClientManagerPlugin(BasePlugin):
         logger.info("Client Manager выгружен")
 
         try:
-            await self.runtime.service_registry.call(
+            await self.call_service(
                 "logger.log",
                 level="info",
                 message="Client Manager выгружен",
@@ -359,20 +368,20 @@ class ClientManagerPlugin(BasePlugin):
         body = params.get("body", {})
         if not client_id:
             raise ValueError("client_id is required")
-        return await self.runtime.service_registry.call("client_manager._impl.execute_command", client_id, body)
+        return await self.call_service("client_manager._impl.execute_command", client_id, body)
 
     async def _op_list_clients(self, params: dict, context: dict) -> dict:
-        return await self.runtime.service_registry.call("client_manager._impl.list_clients")
+        return await self.call_service("client_manager._impl.list_clients")
 
     async def _op_delete_client(self, params: dict, context: dict) -> dict:
         client_id = params.get("client_id")
         if not client_id:
             raise ValueError("client_id is required")
-        return await self.runtime.service_registry.call("client_manager._impl.delete_client", client_id)
+        return await self.call_service("client_manager._impl.delete_client", client_id)
 
     async def _op_execute_universal_command(self, params: dict, context: dict) -> dict:
         client_id = params.get("client_id")
         body = params.get("body", {})
         if not client_id:
             raise ValueError("client_id is required")
-        return await self.runtime.service_registry.call("client_manager._impl.execute_universal_command", client_id, body)
+        return await self.call_service("client_manager._impl.execute_universal_command", client_id, body)

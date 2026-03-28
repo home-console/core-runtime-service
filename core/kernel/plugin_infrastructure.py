@@ -16,9 +16,9 @@ from __future__ import annotations
 
 from typing import Optional
 from core.kernel.base_plugin import BasePlugin, PluginMetadata
-from modules.capability.registry import CapabilityRegistry
+from core.capability.registry import CapabilityRegistry
+from core.integration_registry import IntegrationRegistry
 from core.operations.manager import OperationManager
-from modules.integrations.registry import IntegrationRegistry
 
 
 class PluginInfrastructureCoordinator:
@@ -104,4 +104,3 @@ class PluginInfrastructureCoordinator:
             # IntegrationRegistry хранит mapping integration_id -> info(plugin_name=...)
             for info in list(self._integrations.list_by_plugin(plugin_name)):
                 self._integrations.unregister(info.id)
-

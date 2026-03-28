@@ -1,13 +1,4 @@
-"""Shared command-related operations extracted from CommandHandler.
-
-Contains:
-- poll_and_publish: polling fallback after sending command
-- reset_pending_on_error: reset pending flag on device on error
-
-These functions are intentionally plain and use runtime/service_registry
-objects passed as parameters to minimize coupling with the CommandHandler
-instance while we gradually split responsibilities.
-"""
+"""Shared command-related operations extracted from CommandHandler."""
 from __future__ import annotations
 
 from typing import Any, Dict
@@ -19,9 +10,6 @@ from ..transformers.device_transformer import DeviceTransformer
 async def poll_and_publish(
     runtime: Any,
     api_client: Any,
-    event_bus: Any,
-    service_registry: Any,
-    device_transformer: DeviceTransformer,
     external_id: str,
     internal_id: str | None,
     params: Dict[str, Any],
@@ -66,11 +54,11 @@ async def poll_and_publish(
 
             if reported["state"]:
                 try:
-                    await event_bus.publish("external.device_state_reported", reported)
+                    await runtime.publish_event("external.device_state_reported", reported)
                     state_updated = True
                 except Exception:
                     try:
-                        await service_registry.call(
+                        await runtime.call_service(
                             "logger.log",
                             level="warning",
                             message=f"Failed to publish external.device_state_reported after poll for {external_id}",
@@ -80,7 +68,7 @@ async def poll_and_publish(
                         pass
     except Exception:
         try:
-            await service_registry.call(
+            await runtime.call_service(
                 "logger.log",
                 level="error",
                 message=f"Unexpected error in poll task for {external_id}",
@@ -91,7 +79,7 @@ async def poll_and_publish(
 
     if not state_updated:
         try:
-            device = await service_registry.call("devices.get", internal_id)
+            device = await runtime.call_service("devices.get", internal_id)
             if isinstance(device, dict):
                 device_state = device.get("state", {})
                 if isinstance(device_state, dict) and device_state.get("pending") is True:
@@ -99,8 +87,8 @@ async def poll_and_publish(
                     if isinstance(desired, dict) and "on" in desired:
                         optimistic_reported = {"external_id": external_id, "state": {"on": desired["on"]}}
                         try:
-                            await event_bus.publish("external.device_state_reported", optimistic_reported)
-                            await service_registry.call(
+                            await runtime.publish_event("external.device_state_reported", optimistic_reported)
+                            await runtime.call_service(
                                 "logger.log",
                                 level="info",
                                 message=f"Optimistic state update for {external_id} (polling did not return device state)",
@@ -114,8 +102,6 @@ async def poll_and_publish(
 
 async def reset_pending_on_error(
     runtime: Any,
-    storage: Any,
-    service_registry: Any,
     internal_id: str | None,
     external_id: str | None,
     error_reason: str,
@@ -127,7 +113,7 @@ async def reset_pending_on_error(
     """
     if not internal_id:
         try:
-            await service_registry.call(
+            await runtime.call_service(
                 "logger.log",
                 level="debug",
                 message=f"_reset_pending_on_error: no internal_id provided",
@@ -140,10 +126,10 @@ async def reset_pending_on_error(
     try:
         import time
 
-        device = await service_registry.call("devices.get", internal_id)
+        device = await runtime.call_service("devices.get", internal_id)
         if not isinstance(device, dict):
             try:
-                await service_registry.call(
+                await runtime.call_service(
                     "logger.log",
                     level="debug",
                     message=f"_reset_pending_on_error: device {internal_id} not found or invalid",
@@ -156,7 +142,7 @@ async def reset_pending_on_error(
         device_state = device.get("state", {})
         if not isinstance(device_state, dict) or device_state.get("pending") is not True:
             try:
-                await service_registry.call(
+                await runtime.call_service(
                     "logger.log",
                     level="debug",
                     message=f"_reset_pending_on_error: device {internal_id} not in pending state",
@@ -171,7 +157,7 @@ async def reset_pending_on_error(
         device["state"] = device_state
         device["updated_at"] = time.time()
 
-        await service_registry.call(
+        await runtime.call_service(
             "devices.update_device_fields",
             internal_id,
             {
@@ -181,7 +167,7 @@ async def reset_pending_on_error(
         )
 
         try:
-            await service_registry.call(
+            await runtime.call_service(
                 "logger.log",
                 level="info",
                 message=f"Reset pending state for device {internal_id} ({external_id}): {error_reason}",
@@ -192,7 +178,7 @@ async def reset_pending_on_error(
             pass
     except Exception as e:
         try:
-            await service_registry.call(
+            await runtime.call_service(
                 "logger.log",
                 level="error",
                 message=f"_reset_pending_on_error failed for {internal_id}: {e}",

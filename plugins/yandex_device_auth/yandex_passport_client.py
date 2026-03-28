@@ -306,7 +306,7 @@ class YandexPassportClient:
                     
                     x_token = response_data.get("access_token")
                     if not x_token:
-                        from modules.security import sanitize_for_logging
+                        from core.security import sanitize_for_logging
                         logger.error(f"[Yandex] No access_token in response: {sanitize_for_logging(response_data)}")
                         return None
                     

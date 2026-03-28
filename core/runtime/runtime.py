@@ -21,11 +21,11 @@ import asyncio
 import time
 from typing import Any, Awaitable, Callable, Dict, Optional, cast
 
-from modules.capability.registry import CapabilityRegistry
-from modules.event_bus.inmemory import InMemoryEventBus
-from modules.policy.engine import PolicyEngine
+from core.capability.registry import CapabilityRegistry
+from core.messaging.inmemory import InMemoryEventBus
+from core.policy.engine import PolicyEngine
 
-from core.dependency_resolver import (  # Step 10
+from core.dependency import (
     DependencyResolver,
     RuntimeIntegrityError,
 )
@@ -41,11 +41,11 @@ from core.orchestration import (
     OrchestrationService,
 )
 from core.plugins import PluginState
-from core.runtime.module_manager import ModuleManager
+from core.module import ModuleManager
 from core.runtime.runtime_context import RuntimeContext
 from core.service import ServiceRegistry
 from core.state_engine import StateEngine
-from modules.integrations.registry import IntegrationRegistry
+from core.integration_registry import IntegrationRegistry
 
 
 class CoreRuntime:
@@ -86,7 +86,10 @@ class CoreRuntime:
 
         # ServiceRegistry с timeout из конфига (защита от зависших вызовов)
         default_timeout = config.service_call_timeout if config else None
-        self.service_registry = ServiceRegistry(default_timeout=default_timeout)
+        self.service_registry = ServiceRegistry(
+            default_timeout=default_timeout,
+            policy_engine=self.policy_engine,
+        )
 
         # StateEngine (используем переданный или создаём новый)
         self.state_engine = state_engine if state_engine is not None else StateEngine()
@@ -117,8 +120,8 @@ class CoreRuntime:
             self.capability_registry, self.plugin_manager, self.storage
         )
 
-        # Step 15: Agent Control Plane components
-        # Will be initialized in start() when SecretStore is ready
+        # Agent control plane components.
+        # Initialized in start() when SecretStore is ready.
         self.agent_manager: Optional[Any] = None
         self.agent_registry: Optional[Any] = None
         self.deployment_tracker: Optional[Any] = None  # DeploymentTracker instance
@@ -278,12 +281,7 @@ class CoreRuntime:
         Returns:
             RuntimeContext с storage, services, http, capabilities, operations
         """
-        # TODO: migrate to KernelContext
-        self.kernel_context = KernelContext(
-            {"service_registry": self.service_registry},
-            self.state_engine,
-            event_bus=self.event_bus,
-        )
+        # Context creation is pure: no hidden runtime mutation.
         return RuntimeContext(
             storage=self.storage,
             vault=self.vault,
@@ -293,6 +291,41 @@ class CoreRuntime:
             operations=self.operations,
             state=self.state_engine,
         )
+
+    async def call_service(self, name: str, *args: Any, **kwargs: Any) -> Any:
+        return await self.service_registry.call(name, *args, **kwargs)
+
+    async def has_service(self, name: str) -> bool:
+        return await self.service_registry.has_service(name)
+
+    async def publish_event(self, event_type: str, payload: dict[str, Any]) -> None:
+        await self.event_bus.publish(event_type, payload)
+
+    async def subscribe_event(
+        self,
+        event_type: str,
+        handler: Callable[[dict[str, Any]], Awaitable[None]],
+    ) -> None:
+        await self.event_bus.subscribe(event_type, handler)
+
+    async def unsubscribe_event(
+        self,
+        event_type: str,
+        handler: Callable[[dict[str, Any]], Awaitable[None]],
+    ) -> None:
+        await self.event_bus.unsubscribe(event_type, handler)
+
+    async def storage_get(self, namespace: str, key: str) -> Any:
+        return await self.storage.get(namespace, key)
+
+    async def storage_set(self, namespace: str, key: str, value: Any) -> None:
+        await self.storage.set(namespace, key, value)
+
+    async def storage_delete(self, namespace: str, key: str) -> bool:
+        return bool(await self.storage.delete(namespace, key))
+
+    async def storage_list_keys(self, namespace: str) -> list[str]:
+        return list(await self.storage.list_keys(namespace))
 
     @property
     def state(self):
@@ -449,7 +482,15 @@ class CoreRuntime:
             # P0: Автозагрузка плагинов из папки plugins/ (один раз после модулей)
             # Сканируем папку, в каждой подпапке ищем manifest/plugin.json — если валидный, грузим плагин
             plugins = await self.plugin_manager.list_plugins()
-            if not plugins and not os.getenv("TEST_MODE"):
+            should_auto_load_plugins = bool(
+                getattr(self._config, "auto_load_plugins", self._config is not None)
+            )
+            if (
+                not plugins
+                and should_auto_load_plugins
+                and not os.getenv("TEST_MODE")
+                and not os.getenv("PYTEST_CURRENT_TEST")
+            ):
                 try:
                     if debug_mode:
                         await info(

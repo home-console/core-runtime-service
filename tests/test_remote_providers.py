@@ -16,8 +16,8 @@ from typing import Any, Dict
 
 os.environ['TEST_MODE'] = '1'
 
+from core.module import ModuleSpec
 from core.runtime.runtime import CoreRuntime
-from core.runtime.module_manager import ModuleSpec
 from core.kernel.base_plugin import BasePlugin, PluginMetadata
 from core.remote_provider import RemoteCapabilityProvider
 from core.operations import OperationInitiator, OperationInitiatorKind, OperationStatus

@@ -18,7 +18,7 @@ from core.runtime.runtime_context import LegacyRuntimeContext
 from sdk.plugin import BasePlugin as SDKBasePlugin
 
 if TYPE_CHECKING:
-    from core.runtime.runtime import CoreRuntime
+    from core.kernel.plugin_runtime_facade import PluginRuntimeFacade
 
 
 @dataclass
@@ -45,14 +45,14 @@ class PluginMetadata:
     # Remote configuration для remote capability providers
     # Если не None, то этот плагин является remote provider
     remote_config: dict | None = None  # {"base_url": "http://...", "timeout": 10}
-    # Plugin execution mode (Step 9: Plugin Isolation)
+    # Plugin execution mode
     execution_mode: Literal["in_process", "process", "container", "remote"] = (
         "in_process"
     )
     # Optional configuration for process/container execution
     process_config: dict | None = None  # {"timeout": 30, "max_memory": "256M"}
     container_config: dict | None = None  # {"image": "...", "timeout": 30}
-    # Resource limits (Step 13: Observability & Resource Guardrails)
+    # Resource limits
     resource_limits: dict | None = (
         None  # {"max_execution_seconds": 30, "max_memory_mb": 512, "max_calls_per_minute": 100}
     )
@@ -82,9 +82,11 @@ class BasePlugin(SDKBasePlugin):
 
     def __init__(
         self,
-        runtime_or_context: Optional[Union["CoreRuntime", LegacyRuntimeContext]] = None,
+        runtime_or_context: Optional[
+            Union["PluginRuntimeFacade", LegacyRuntimeContext, Any]
+        ] = None,
         *,
-        runtime: Optional[Union["CoreRuntime", RuntimeContext]] = None,
+        runtime: Optional[Union["PluginRuntimeFacade", LegacyRuntimeContext, Any]] = None,
     ) -> None:
         """
         Инициализация плагина.
@@ -156,18 +158,10 @@ class BasePlugin(SDKBasePlugin):
             # В сомнительных случаях не ужесточаем, оставляем на усмотрение конвенций в ServiceRegistry
             effective_admin_only = admin_only
 
-        # Используем context.services если доступен, иначе runtime.service_registry
-        if hasattr(self, "context") and self.context:
-            reg = self.context.services
-        elif self.runtime:
-            reg = self.runtime.service_registry
-        else:
-            raise RuntimeError(
-                "Plugin not initialized: no runtime or context available"
-            )
-
-        if hasattr(reg, "register_with_acl"):
-            await reg.register_with_acl(
+        runtime_obj = getattr(self, "_runtime", None)
+        runtime_api = getattr(runtime_obj, "api", None)
+        if runtime_api is not None and hasattr(runtime_api, "register_service"):
+            await runtime_api.register_service(
                 name,
                 func,
                 resource=resource,
@@ -178,8 +172,159 @@ class BasePlugin(SDKBasePlugin):
                 inject_owner_param=inject_owner_param,
                 version=version,
             )
+            return
+
+        # Backward compatibility path for older runtime objects.
+        if hasattr(self, "context") and self.context:
+            reg = self.context.services
+        elif runtime_obj is not None:
+            reg = runtime_obj.service_registry
         else:
-            await reg.register(name, func, version=version)
+            raise RuntimeError("Plugin not initialized: no runtime or context available")
+
+        register_with_acl = getattr(reg, "register_with_acl", None)
+        if callable(register_with_acl):
+            await register_with_acl(
+                name,
+                func,
+                resource=resource,
+                admin_only=effective_admin_only,
+                filter_result=filter_result,
+                enforce_result=enforce_result,
+                preload_resource=preload_resource,
+                inject_owner_param=inject_owner_param,
+                version=version,
+            )
+            return
+        await reg.register(name, func, version=version)
+
+    async def unregister_service(self, name: str) -> None:
+        runtime_obj = getattr(self, "_runtime", None)
+        runtime_api = getattr(runtime_obj, "api", None)
+        if runtime_api is not None and hasattr(runtime_api, "unregister_service"):
+            await runtime_api.unregister_service(name)
+            return
+        if runtime_obj is None:
+            raise RuntimeError("Plugin runtime not set")
+        await runtime_obj.service_registry.unregister(name)
+
+    async def has_service(self, name: str) -> bool:
+        runtime_obj = getattr(self, "_runtime", None)
+        runtime_api = getattr(runtime_obj, "api", None)
+        if runtime_api is not None and hasattr(runtime_api, "has_service"):
+            return bool(await runtime_api.has_service(name))
+        if runtime_obj is None:
+            return False
+        return bool(await runtime_obj.service_registry.has_service(name))
+
+    async def call_service(self, name: str, *args: Any, **kwargs: Any) -> Any:
+        """SDK-friendly helper for service calls."""
+        runtime_obj = getattr(self, "_runtime", None)
+        runtime_api = getattr(runtime_obj, "api", None)
+        if runtime_api is not None and hasattr(runtime_api, "call_service"):
+            return await runtime_api.call_service(name, *args, **kwargs)
+        if runtime_obj is None:
+            raise RuntimeError("Plugin runtime not set")
+        return await runtime_obj.service_registry.call(name, *args, **kwargs)
+
+    async def publish_event(self, event_type: str, payload: dict[str, Any]) -> None:
+        """SDK-friendly helper for event publishing."""
+        runtime_obj = getattr(self, "_runtime", None)
+        runtime_api = getattr(runtime_obj, "api", None)
+        if runtime_api is not None and hasattr(runtime_api, "publish_event"):
+            await runtime_api.publish_event(event_type, payload)
+            return
+        if runtime_obj is None:
+            raise RuntimeError("Plugin runtime not set")
+        await runtime_obj.event_bus.publish(event_type, payload)
+
+    async def subscribe_event(
+        self,
+        event_type: str,
+        handler: Callable[[dict[str, Any]], Awaitable[None]],
+    ) -> None:
+        runtime_obj = getattr(self, "_runtime", None)
+        runtime_api = getattr(runtime_obj, "api", None)
+        if runtime_api is not None and hasattr(runtime_api, "subscribe_event"):
+            await runtime_api.subscribe_event(event_type, handler)
+            return
+        if runtime_obj is None:
+            raise RuntimeError("Plugin runtime not set")
+        await runtime_obj.event_bus.subscribe(event_type, handler)
+
+    async def unsubscribe_event(
+        self,
+        event_type: str,
+        handler: Callable[[dict[str, Any]], Awaitable[None]],
+    ) -> None:
+        runtime_obj = getattr(self, "_runtime", None)
+        runtime_api = getattr(runtime_obj, "api", None)
+        if runtime_api is not None and hasattr(runtime_api, "unsubscribe_event"):
+            await runtime_api.unsubscribe_event(event_type, handler)
+            return
+        if runtime_obj is None:
+            raise RuntimeError("Plugin runtime not set")
+        await runtime_obj.event_bus.unsubscribe(event_type, handler)
+
+    async def storage_get(self, namespace: str, key: str) -> Any:
+        """SDK-friendly helper for storage read."""
+        runtime_obj = getattr(self, "_runtime", None)
+        runtime_api = getattr(runtime_obj, "api", None)
+        if runtime_api is not None and hasattr(runtime_api, "storage_get"):
+            return await runtime_api.storage_get(namespace, key)
+        if runtime_obj is None:
+            raise RuntimeError("Plugin runtime not set")
+        return await runtime_obj.storage.get(namespace, key)
+
+    async def storage_set(self, namespace: str, key: str, value: Any) -> None:
+        """SDK-friendly helper for storage write."""
+        runtime_obj = getattr(self, "_runtime", None)
+        runtime_api = getattr(runtime_obj, "api", None)
+        if runtime_api is not None and hasattr(runtime_api, "storage_set"):
+            await runtime_api.storage_set(namespace, key, value)
+            return
+        if runtime_obj is None:
+            raise RuntimeError("Plugin runtime not set")
+        await runtime_obj.storage.set(namespace, key, value)
+
+    async def storage_delete(self, namespace: str, key: str) -> bool:
+        runtime_obj = getattr(self, "_runtime", None)
+        runtime_api = getattr(runtime_obj, "api", None)
+        if runtime_api is not None and hasattr(runtime_api, "storage_delete"):
+            return bool(await runtime_api.storage_delete(namespace, key))
+        if runtime_obj is None:
+            raise RuntimeError("Plugin runtime not set")
+        return bool(await runtime_obj.storage.delete(namespace, key))
+
+    async def storage_list_keys(self, namespace: str) -> list[str]:
+        runtime_obj = getattr(self, "_runtime", None)
+        runtime_api = getattr(runtime_obj, "api", None)
+        if runtime_api is not None and hasattr(runtime_api, "storage_list_keys"):
+            keys = await runtime_api.storage_list_keys(namespace)
+            return list(keys) if isinstance(keys, list) else []
+        if runtime_obj is None:
+            raise RuntimeError("Plugin runtime not set")
+        return list(await runtime_obj.storage.list_keys(namespace))
+
+    def register_http_endpoint(self, endpoint: Any) -> None:
+        runtime_obj = getattr(self, "_runtime", None)
+        runtime_api = getattr(runtime_obj, "api", None)
+        if runtime_api is not None and hasattr(runtime_api, "register_http"):
+            runtime_api.register_http(endpoint)
+            return
+        if runtime_obj is None:
+            raise RuntimeError("Plugin runtime not set")
+        runtime_obj.http.register(endpoint)
+
+    def register_operation_handler(self, op_type: str, handler: Any) -> None:
+        runtime_obj = getattr(self, "_runtime", None)
+        runtime_api = getattr(runtime_obj, "api", None)
+        if runtime_api is not None and hasattr(runtime_api, "register_operation_handler"):
+            runtime_api.register_operation_handler(op_type, handler)
+            return
+        if runtime_obj is None:
+            raise RuntimeError("Plugin runtime not set")
+        runtime_obj.operations.register_handler(op_type, handler)
 
     def get_env_config(
         self, key: str, default: Optional[str] = None, prefix: Optional[str] = None

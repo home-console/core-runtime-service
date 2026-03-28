@@ -89,7 +89,7 @@ async def register_services(plugin: "ClientManagerPlugin") -> None:
                 "type": "client_manager.delete_client",
                 "params": {"client_id": client_id},
             }
-            return await plugin.runtime.service_registry.call("admin.operations.create", op_body)
+            return await plugin.call_service("admin.operations.create", op_body)
         except Exception as e:
             return {"error": str(e)}
 
@@ -152,7 +152,7 @@ async def register_services(plugin: "ClientManagerPlugin") -> None:
                 "type": "client_manager.execute_command",
                 "params": {"client_id": client_id, "body": body or {}},
             }
-            return await plugin.runtime.service_registry.call("admin.operations.create", op_body)
+            return await plugin.call_service("admin.operations.create", op_body)
         except Exception as e:
             return {"error": str(e)}
 
@@ -236,9 +236,9 @@ async def register_services(plugin: "ClientManagerPlugin") -> None:
 
         initiator = {"type": "unknown"}
         try:
-            from modules.api.auth.contextvars import get_current_request_context
+            from core.auth_contextvars import get_current_auth_context
 
-            ctx = get_current_request_context()
+            ctx = get_current_auth_context()
             if ctx is not None:
                 initiator = {
                     "type": "user",
@@ -400,7 +400,7 @@ async def register_services(plugin: "ClientManagerPlugin") -> None:
                 "type": "client_manager.execute_universal_command",
                 "params": {"client_id": client_id, "body": body or {}},
             }
-            return await plugin.runtime.service_registry.call("admin.operations.create", op_body)
+            return await plugin.call_service("admin.operations.create", op_body)
         except Exception as e:
             return {"error": str(e)}
 

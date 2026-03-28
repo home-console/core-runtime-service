@@ -66,13 +66,12 @@ class OperationStorage:
         """
         operation_id = f"op-{uuid.uuid4().hex[:12]}"
 
-        # Causality/observability metadata may be injected by event->operation bridges
-        # (e.g. automation handlers). Execution flow MUST NOT depend on these fields.
+        # Causality/observability metadata is passed through as-is.
+        # Core does not infer these values.
         correlation_id = params.get("correlation_id")
         causation_id = params.get("causation_id")
-        # If event_id is provided, prefer it. Otherwise keep legacy "source_event" value.
-        source_event = params.get("event_id") or params.get("source_event")
-        triggered_by = params.get("triggered_by", "manual")
+        source_event = params.get("source_event")
+        triggered_by = params.get("triggered_by")
 
         idempotency_key = params.get("idempotency_key")
         

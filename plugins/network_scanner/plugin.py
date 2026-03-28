@@ -101,7 +101,7 @@ class NetworkScannerPlugin(BasePlugin):
                     "services": host.services,
                 }
                 try:
-                    await self.runtime.event_bus.publish(
+                    await self.publish_event(
                         "external.device_discovered",
                         device_event
                     )
@@ -151,32 +151,32 @@ class NetworkScannerPlugin(BasePlugin):
         
         # Регистрируем сервисы
         try:
-            await self.runtime.service_registry.register_with_acl(
+            await self.register_service(
                 "network_scanner.scan",
                 scan_network_service,
                 admin_only=True
             )
-            await self.runtime.service_registry.register_with_acl(
+            await self.register_service(
                 "network_scanner.get_local_networks",
                 get_local_networks_service,
                 admin_only=False
             )
-            await self.runtime.service_registry.register_with_acl(
+            await self.register_service(
                 "network_scanner.get_discovered_hosts",
                 get_discovered_hosts_service,
                 admin_only=False
             )
-            await self.runtime.service_registry.register_with_acl(
+            await self.register_service(
                 "network_scanner.enable_auto_scan",
                 enable_auto_scan_service,
                 admin_only=True
             )
-            await self.runtime.service_registry.register_with_acl(
+            await self.register_service(
                 "network_scanner.disable_auto_scan",
                 disable_auto_scan_service,
                 admin_only=True
             )
-            await self.runtime.service_registry.register_with_acl(
+            await self.register_service(
                 "network_scanner.get_auto_scan_status",
                 get_auto_scan_status_service,
                 admin_only=False

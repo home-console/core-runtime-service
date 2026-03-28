@@ -303,16 +303,16 @@ class YandexDeviceAuthService:
                 self._yandex_session = None
                 self._auth_method = None
             
-            await self.runtime.storage.delete("yandex", "device_auth/session")
+            await self.runtime.storage_delete("yandex", "device_auth/session")
             # Также удаляем cookies для совместимости
             try:
-                await self.runtime.storage.delete("yandex", "cookies")
+                await self.runtime.storage_delete("yandex", "cookies")
             except Exception:
                 pass
         except Exception:
             pass
         try:
-            await self.runtime.event_bus.publish(
+            await self.runtime.publish_event(
                 "yandex.device_auth.unlinked", {"quasar_ready": False}
             )
         except Exception:
@@ -322,23 +322,23 @@ class YandexDeviceAuthService:
 
     async def _save_account_session(self, account_data: Dict[str, Any]):
         """Save account session to storage."""
-        await self.runtime.storage.set("yandex", "device_auth/session", account_data)
+        await self.runtime.storage_set("yandex", "device_auth/session", account_data)
         
         # Также сохраняем cookies для совместимости с Quasar
         if "cookies" in account_data:
-            await self.runtime.storage.set("yandex", "cookies", account_data["cookies"])
+            await self.runtime.storage_set("yandex", "cookies", account_data["cookies"])
 
     async def _load_account_session(self) -> Optional[Dict[str, Any]]:
         """Load account session from storage."""
         try:
-            return await self.runtime.storage.get("yandex", "device_auth/session")
+            return await self.runtime.storage_get("yandex", "device_auth/session")
         except Exception:
             return None
 
     async def _publish_linked_event(self, method: str):
         """Publish account linked event."""
         try:
-            await self.runtime.event_bus.publish(
+            await self.runtime.publish_event(
                 "yandex.device_auth.linked",
                 {
                     "method": method,
@@ -352,7 +352,7 @@ class YandexDeviceAuthService:
     async def _log(self, level: str, message: str, **context):
         """Log message via logger service."""
         try:
-            await self.runtime.service_registry.call(
+            await self.runtime.call_service(
                 "logger.log",
                 level=level,
                 message=message,

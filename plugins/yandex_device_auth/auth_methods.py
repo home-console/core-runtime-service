@@ -87,7 +87,7 @@ class QRAuthMethod(AuthMethod):
     
     async def _log(self, level: str, message: str, **ctx):
         try:
-            await self.runtime.service_registry.call("logger.log", level=level, message=message, plugin="yandex_device_auth", context=ctx or None)
+            await self.runtime.call_service("logger.log", level=level, message=message, plugin="yandex_device_auth", context=ctx or None)
         except:
             pass
 

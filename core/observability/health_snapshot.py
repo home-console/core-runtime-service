@@ -1,5 +1,5 @@
 """
-Step 13: Health Snapshot — system health summary.
+Health Snapshot — system health summary.
 
 Provides comprehensive view of system state:
 - plugin counts (total, active, degraded)

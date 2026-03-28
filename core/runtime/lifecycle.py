@@ -142,7 +142,15 @@ async def start_runtime(runtime: "CoreRuntime") -> None:
         
         # P0: Автозагрузка плагинов из папки plugins/ (один раз после модулей)
         # Сканируем папку, в каждой подпапке ищем manifest/plugin.json — если валидный, грузим плагин
-        if not await runtime.plugin_manager.list_plugins() and not os.getenv('TEST_MODE'):
+        should_auto_load_plugins = bool(
+            getattr(runtime._config, "auto_load_plugins", runtime._config is not None)
+        )
+        if (
+            not await runtime.plugin_manager.list_plugins()
+            and should_auto_load_plugins
+            and not os.getenv("TEST_MODE")
+            and not os.getenv("PYTEST_CURRENT_TEST")
+        ):
             try:
                 if debug_mode:
                     await info(runtime, "🔧 KERNEL DEBUG: Auto-loading plugins from plugins/ directory", component="runtime")

@@ -109,7 +109,7 @@ class OAuthYandexPlugin(BasePlugin):
         # Check if encrypted
         if isinstance(tokens_raw, dict) and "encrypted" in tokens_raw:
             try:
-                from modules.security import TokenEncryption
+                from core.security import TokenEncryption
                 encryptor = TokenEncryption.from_env()
                 return encryptor.decrypt(tokens_raw["encrypted"])
             except Exception:
@@ -127,22 +127,22 @@ class OAuthYandexPlugin(BasePlugin):
         Args:
             tokens: Tokens dict to encrypt and save
         """
-        from modules.security import TokenEncryption
+        from core.security import TokenEncryption
         try:
             encryptor = TokenEncryption.from_env()
             encrypted_blob = encryptor.encrypt(tokens)
-            await self.runtime.storage.set(self.TOKEN_NAMESPACE, self.TOKEN_KEY, {"encrypted": encrypted_blob})
+            await self.storage_set(self.TOKEN_NAMESPACE, self.TOKEN_KEY, {"encrypted": encrypted_blob})
         except RuntimeError:
             # Encryption not configured - fallback to plaintext (log warning)
             import logging
             logging.warning("SECURITY: OAuth tokens stored in plaintext (OAUTH_ENCRYPTION_KEY not set)")
-            await self.runtime.storage.set(self.TOKEN_NAMESPACE, self.TOKEN_KEY, tokens)
+            await self.storage_set(self.TOKEN_NAMESPACE, self.TOKEN_KEY, tokens)
     
     async def _get_http_session(self):
         """Получить HTTP session (обёрнутый для логирования, если доступен)."""
         try:
-            if await self.runtime.service_registry.has_service("request_logger.create_http_session"):
-                return await self.runtime.service_registry.call(
+            if await self.has_service("request_logger.create_http_session"):
+                return await self.call_service(
                     "request_logger.create_http_session",
                     source=self.metadata.name
                 )
@@ -189,7 +189,7 @@ class OAuthYandexPlugin(BasePlugin):
                 "scope": scope,
             }
             
-            await self.runtime.storage.set(self.TOKEN_NAMESPACE, self.CONFIG_KEY, config)
+            await self.storage_set(self.TOKEN_NAMESPACE, self.CONFIG_KEY, config)
             # Do not return client_secret in responses — mask it
             safe = dict(config)
             if "client_secret" in safe:
@@ -208,15 +208,15 @@ class OAuthYandexPlugin(BasePlugin):
             
             UI использует этот сервис для отображения состояния.
             """
-            config = await self.runtime.storage.get(self.TOKEN_NAMESPACE, self.CONFIG_KEY)
-            tokens_raw = await self.runtime.storage.get(self.TOKEN_NAMESPACE, self.TOKEN_KEY)
+            config = await self.storage_get(self.TOKEN_NAMESPACE, self.CONFIG_KEY)
+            tokens_raw = await self.storage_get(self.TOKEN_NAMESPACE, self.TOKEN_KEY)
             
             # SECURITY P0: Decrypt tokens if encrypted
             tokens = None
             if tokens_raw:
                 if isinstance(tokens_raw, dict) and "encrypted" in tokens_raw:
                     try:
-                        from modules.security import TokenEncryption
+                        from core.security import TokenEncryption
                         encryptor = TokenEncryption.from_env()
                         tokens = encryptor.decrypt(tokens_raw["encrypted"])
                     except Exception:
@@ -268,11 +268,11 @@ class OAuthYandexPlugin(BasePlugin):
                 ValueError: если конфигурация не установлена
                 ValueError: если уже авторизован
             """
-            config = await self.runtime.storage.get(self.TOKEN_NAMESPACE, self.CONFIG_KEY)
+            config = await self.storage_get(self.TOKEN_NAMESPACE, self.CONFIG_KEY)
             if not config:
                 raise ValueError("OAuth не настроен. Вызовите oauth_yandex.configure сначала.")
             
-            tokens_raw = await self.runtime.storage.get(self.TOKEN_NAMESPACE, self.TOKEN_KEY)
+            tokens_raw = await self.storage_get(self.TOKEN_NAMESPACE, self.TOKEN_KEY)
             tokens = await self._decrypt_tokens(tokens_raw)
             if tokens and "access_token" in tokens:
                 raise ValueError("Уже авторизован. Удалите токены перед повторной авторизацией.")
@@ -311,7 +311,7 @@ class OAuthYandexPlugin(BasePlugin):
                 if not code:
                     raise ValueError("code обязателен")
                 
-                config = await self.runtime.storage.get(self.TOKEN_NAMESPACE, self.CONFIG_KEY)
+                config = await self.storage_get(self.TOKEN_NAMESPACE, self.CONFIG_KEY)
                 if not config:
                     raise ValueError("OAuth не настроен. Вызовите oauth_yandex.configure сначала.")
                 
@@ -330,7 +330,7 @@ class OAuthYandexPlugin(BasePlugin):
                 }
                 
                 # Логируем запрос на обмен кода
-                await self.runtime.service_registry.call(
+                await self.call_service(
                     "logger.log",
                     level="info",
                     message=f"OAuth exchange_code request: POST {self.TOKEN_ENDPOINT}",
@@ -343,7 +343,7 @@ class OAuthYandexPlugin(BasePlugin):
                     async with await session.post(self.TOKEN_ENDPOINT, data=data) as resp:
                         text = await resp.text()
                         # Логируем ответ
-                        await self.runtime.service_registry.call(
+                        await self.call_service(
                             "logger.log",
                             level="info" if resp.status == 200 else "error",
                             message=f"OAuth exchange_code response: POST {self.TOKEN_ENDPOINT} -> HTTP {resp.status}",
@@ -353,7 +353,7 @@ class OAuthYandexPlugin(BasePlugin):
                         try:
                             json_data = await resp.json()
                         except Exception:
-                            await self.runtime.service_registry.call(
+                            await self.call_service(
                                 "logger.log",
                                 level="error",
                                 message=f"OAuth exchange_code failed to parse JSON: {text[:200]}",
@@ -377,21 +377,21 @@ class OAuthYandexPlugin(BasePlugin):
                             pass
 
                 # SECURITY P0: Encrypt tokens before storing
-                from modules.security import TokenEncryption
+                from core.security import TokenEncryption
                 try:
                     encryptor = TokenEncryption.from_env()
                     encrypted_blob = encryptor.encrypt(tokens_to_save)
                     # Store encrypted blob instead of plaintext tokens
-                    await self.runtime.storage.set(self.TOKEN_NAMESPACE, self.TOKEN_KEY, {"encrypted": encrypted_blob})
+                    await self.storage_set(self.TOKEN_NAMESPACE, self.TOKEN_KEY, {"encrypted": encrypted_blob})
                 except RuntimeError:
                     # Encryption not configured - fallback to plaintext (log warning)
                     import logging
                     logging.warning("SECURITY: OAuth tokens stored in plaintext (OAUTH_ENCRYPTION_KEY not set)")
-                    await self.runtime.storage.set(self.TOKEN_NAMESPACE, self.TOKEN_KEY, tokens_to_save)
+                    await self.storage_set(self.TOKEN_NAMESPACE, self.TOKEN_KEY, tokens_to_save)
 
                 # Публикуем событие линковки аккаунта (для UI/расширений)
                 try:
-                    await self.runtime.event_bus.publish(
+                    await self.publish_event(
                         "oauth_yandex.linked",
                         {
                             "authorized": True,
@@ -404,7 +404,7 @@ class OAuthYandexPlugin(BasePlugin):
 
                 # Лог: подсказка про cookies для Quasar
                 try:
-                    await self.runtime.service_registry.call(
+                    await self.call_service(
                         "logger.log",
                         level="info",
                         message=(
@@ -438,11 +438,11 @@ class OAuthYandexPlugin(BasePlugin):
                 asyncio.TimeoutError: timeout (TEMPORARY)
                 RuntimeError: for 429, 5xx, parse errors (TEMPORARY)
             """
-            config = await self.runtime.storage.get(self.TOKEN_NAMESPACE, self.CONFIG_KEY)
+            config = await self.storage_get(self.TOKEN_NAMESPACE, self.CONFIG_KEY)
             if not config:
                 raise OAuthReauthRequired("OAuth не настроен")
             
-            tokens_raw = await self.runtime.storage.get(self.TOKEN_NAMESPACE, self.TOKEN_KEY)
+            tokens_raw = await self.storage_get(self.TOKEN_NAMESPACE, self.TOKEN_KEY)
             tokens = await self._decrypt_tokens(tokens_raw)
             if not tokens or not isinstance(tokens, dict):
                 raise OAuthReauthRequired("Токены не найдены")
@@ -489,7 +489,7 @@ class OAuthYandexPlugin(BasePlugin):
                             # If FATAL: clear tokens and raise OAuthReauthRequired
                             if is_fatal:
                                 if should_clear_tokens:
-                                    await self.runtime.storage.delete(self.TOKEN_NAMESPACE, self.TOKEN_KEY)
+                                    await self.storage_delete(self.TOKEN_NAMESPACE, self.TOKEN_KEY)
                                 raise OAuthReauthRequired(f"Ошибка обновления токена: HTTP {resp.status} (invalid_grant)")
                             
                             # If TEMPORARY (429, 5xx, etc): DO NOT clear tokens, raise RuntimeError
@@ -527,7 +527,7 @@ class OAuthYandexPlugin(BasePlugin):
                         if not access_token:
                             # Response was 200 but no access_token - FATAL (server returned broken response)
                             # Clear tokens and raise OAuthReauthRequired
-                            await self.runtime.storage.delete(self.TOKEN_NAMESPACE, self.TOKEN_KEY)
+                            await self.storage_delete(self.TOKEN_NAMESPACE, self.TOKEN_KEY)
                             raise OAuthReauthRequired("Access token не получен после refresh (FATAL)")
                         
                         return access_token
@@ -568,12 +568,12 @@ class OAuthYandexPlugin(BasePlugin):
                 OAuthReauthRequired: если требуется повторная авторизация (FATAL)
                 RuntimeError: для временных ошибок (TEMPORARY)
             """
-            tokens_raw = await self.runtime.storage.get(self.TOKEN_NAMESPACE, self.TOKEN_KEY)
+            tokens_raw = await self.storage_get(self.TOKEN_NAMESPACE, self.TOKEN_KEY)
             tokens = await self._decrypt_tokens(tokens_raw)
             if not tokens or not isinstance(tokens, dict):
                 # Если токены невалидны (например, невалидный JSON в storage),
                 # пытаемся очистить их явно
-                await self.runtime.service_registry.call(
+                await self.call_service(
                     "logger.log",
                     level="error",
                     message="Токены не найдены в storage или невалидны - требуется повторная авторизация",
@@ -581,14 +581,14 @@ class OAuthYandexPlugin(BasePlugin):
                     context={"tokens": str(tokens)[:100] if tokens else "None", "tokens_type": type(tokens).__name__}
                 )
                 try:
-                    await self.runtime.storage.delete(self.TOKEN_NAMESPACE, self.TOKEN_KEY)
+                    await self.storage_delete(self.TOKEN_NAMESPACE, self.TOKEN_KEY)
                 except Exception:
                     pass  # Игнорируем ошибки при очистке
                 raise OAuthReauthRequired("Токены не найдены или невалидны. Требуется повторная авторизация.")
             
             access_token = tokens.get("access_token")
             if not access_token:
-                await self.runtime.service_registry.call(
+                await self.call_service(
                     "logger.log",
                     level="error",
                     message="Access token отсутствует в сохранённых токенах - требуется повторная авторизация",
@@ -614,7 +614,7 @@ class OAuthYandexPlugin(BasePlugin):
                     async with self._refresh_lock:
                         # ВСЕГДА читаем токен из storage заново после получения блокировки
                         # (возможно, другой запрос уже обновил токен)
-                        tokens = await self.runtime.storage.get(self.TOKEN_NAMESPACE, self.TOKEN_KEY)
+                        tokens = await self.storage_get(self.TOKEN_NAMESPACE, self.TOKEN_KEY)
                         if not tokens or not isinstance(tokens, dict):
                             # Если токены отсутствуют после получения блокировки,
                             # это означает что другой запрос попытался сделать refresh и не удался
@@ -671,7 +671,7 @@ class OAuthYandexPlugin(BasePlugin):
                             raise RuntimeError(f"Неожиданная ошибка при refresh: {str(e)}")
             
             # Токен валиден (expires_at проверен или отсутствует) - логируем для отладки
-            await self.runtime.service_registry.call(
+            await self.call_service(
                 "logger.log",
                 level="debug",
                 message=f"Access token валиден, expires_at={expires_at}, осталось {expires_at - now:.0f} секунд" if expires_at else "Access token валиден (expires_at не установлен)",
@@ -692,7 +692,7 @@ class OAuthYandexPlugin(BasePlugin):
             """
             # Для обратной совместимости возвращаем токены как есть
             # Но рекомендуется использовать get_access_token()
-            return await self.runtime.storage.get(self.TOKEN_NAMESPACE, self.TOKEN_KEY)
+            return await self.storage_get(self.TOKEN_NAMESPACE, self.TOKEN_KEY)
 
         async def validate_token(token: Optional[str] = None) -> Dict[str, Any]:
             """Проверить валидность access_token у Яндекса.
@@ -703,7 +703,7 @@ class OAuthYandexPlugin(BasePlugin):
             """
             # Получить токен из хранилища, если не передан
             if not token:
-                tokens = await self.runtime.storage.get(self.TOKEN_NAMESPACE, self.TOKEN_KEY)
+                tokens = await self.storage_get(self.TOKEN_NAMESPACE, self.TOKEN_KEY)
                 if not tokens or 'access_token' not in tokens:
                     return {'valid': False, 'reason': 'no_token'}
                 token = tokens['access_token']
@@ -717,7 +717,7 @@ class OAuthYandexPlugin(BasePlugin):
             headers = {'Authorization': f'OAuth {token}'}
 
             # Логируем запрос на валидацию токена
-            await self.runtime.service_registry.call(
+            await self.call_service(
                 "logger.log",
                 level="info",
                 message=f"OAuth validate_token request: GET {url}",
@@ -731,7 +731,7 @@ class OAuthYandexPlugin(BasePlugin):
                     async with await session.get(url, headers=headers) as resp:
                         text = await resp.text()
                         # Логируем ответ
-                        await self.runtime.service_registry.call(
+                        await self.call_service(
                             "logger.log",
                             level="info" if resp.status == 200 else "warning",
                             message=f"OAuth validate_token response: GET {url} -> HTTP {resp.status}",
@@ -745,7 +745,7 @@ class OAuthYandexPlugin(BasePlugin):
                                 data = {'raw': text}
                             return {'valid': True, 'status': 200, 'info': data}
                         else:
-                            await self.runtime.service_registry.call(
+                            await self.call_service(
                                 "logger.log",
                                 level="warning",
                                 message=f"OAuth validate_token failed: HTTP {resp.status}, body: {text[:200]}",
@@ -754,7 +754,7 @@ class OAuthYandexPlugin(BasePlugin):
                             )
                             return {'valid': False, 'status': resp.status, 'body': text}
             except Exception as e:
-                await self.runtime.service_registry.call(
+                await self.call_service(
                     "logger.log",
                     level="error",
                     message=f"OAuth validate_token exception: {type(e).__name__}: {str(e)}",
@@ -773,8 +773,8 @@ class OAuthYandexPlugin(BasePlugin):
                 {'status': 'success', 'message': 'Tokens cleared'}
             """
             try:
-                await self.runtime.storage.delete(self.TOKEN_NAMESPACE, self.TOKEN_KEY)
-                await self.runtime.service_registry.call(
+                await self.storage_delete(self.TOKEN_NAMESPACE, self.TOKEN_KEY)
+                await self.call_service(
                     "logger.log",
                     level="info",
                     message="OAuth tokens cleared (account unlinked)",
@@ -782,7 +782,7 @@ class OAuthYandexPlugin(BasePlugin):
                 )
                 return {'status': 'success', 'message': 'Tokens cleared'}
             except Exception as e:
-                await self.runtime.service_registry.call(
+                await self.call_service(
                     "logger.log",
                     level="error",
                     message=f"OAuth clear_tokens exception: {type(e).__name__}: {str(e)}",
@@ -826,16 +826,16 @@ class OAuthYandexPlugin(BasePlugin):
         #   использоваться новыми плагинами напрямую.
 
         # Публичные capability-сервисы (используются другими плагинами/модулями):
-        await self.runtime.service_registry.register("oauth_yandex.get_status", get_status)
-        await self.runtime.service_registry.register("oauth_yandex.get_access_token", get_access_token)
+        await self.register_service("oauth_yandex.get_status", get_status)
+        await self.register_service("oauth_yandex.get_access_token", get_access_token)
 
         # INTERNAL / admin / legacy surface — только для админов (явно admin_only):
-        await self.runtime.service_registry.register_with_acl("oauth_yandex.configure", configure, admin_only=True)
-        await self.runtime.service_registry.register_with_acl("oauth_yandex.get_authorize_url", get_authorize_url, admin_only=True)
-        await self.runtime.service_registry.register_with_acl("oauth_yandex.exchange_code", exchange_code, admin_only=True)
-        await self.runtime.service_registry.register_with_acl("oauth_yandex.get_tokens", get_tokens, admin_only=True)
-        await self.runtime.service_registry.register_with_acl("oauth_yandex.validate_token", validate_token, admin_only=True)
-        await self.runtime.service_registry.register_with_acl("oauth_yandex.set_tokens", set_tokens, admin_only=True)
+        await self.register_service("oauth_yandex.configure", configure, admin_only=True)
+        await self.register_service("oauth_yandex.get_authorize_url", get_authorize_url, admin_only=True)
+        await self.register_service("oauth_yandex.exchange_code", exchange_code, admin_only=True)
+        await self.register_service("oauth_yandex.get_tokens", get_tokens, admin_only=True)
+        await self.register_service("oauth_yandex.validate_token", validate_token, admin_only=True)
+        await self.register_service("oauth_yandex.set_tokens", set_tokens, admin_only=True)
 
         async def set_cookies(cookies: Dict[str, str]) -> Dict[str, Any]:
             """Сохранить cookies сессии Яндекса для Quasar API.
@@ -852,7 +852,7 @@ class OAuthYandexPlugin(BasePlugin):
             if not cookies or not isinstance(cookies, dict):
                 raise ValueError("cookies должен быть словарём")
             
-            await self.runtime.storage.set("yandex", "cookies", cookies)
+            await self.storage_set("yandex", "cookies", cookies)
             return {"ok": True}
 
         async def get_cookies() -> Optional[Dict[str, str]]:
@@ -862,23 +862,23 @@ class OAuthYandexPlugin(BasePlugin):
                 Словарь cookies или None если не установлены
             """
             try:
-                cookies = await self.runtime.storage.get("yandex", "cookies")
+                cookies = await self.storage_get("yandex", "cookies")
                 if isinstance(cookies, dict):
                     return cookies
             except Exception:
                 pass
             return None
 
-        await self.runtime.service_registry.register_with_acl("oauth_yandex.clear_tokens", clear_tokens, admin_only=True)
-        await self.runtime.service_registry.register_with_acl("oauth_yandex.set_cookies", set_cookies, admin_only=True)
-        await self.runtime.service_registry.register_with_acl("oauth_yandex.get_cookies", get_cookies, admin_only=True)
+        await self.register_service("oauth_yandex.clear_tokens", clear_tokens, admin_only=True)
+        await self.register_service("oauth_yandex.set_cookies", set_cookies, admin_only=True)
+        await self.register_service("oauth_yandex.get_cookies", get_cookies, admin_only=True)
 
         # Register operation handler for oauth.refresh_token so operations API can invoke refresh
         try:
             async def handle_oauth_refresh(params: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 service = params.get("service", "yandex")
                 service_name = f"{service}.refresh_tokens"
-                result = await self.runtime.service_registry.call(service_name)
+                result = await self.call_service(service_name)
                 return {
                     "success": True,
                     "service": service,
@@ -905,8 +905,8 @@ class OAuthYandexPlugin(BasePlugin):
         async def yandex_login_status() -> Dict[str, Any]:
             return await self._login_service.status()
 
-        await self.runtime.service_registry.register_with_acl("yandex.login.start", yandex_login_start, admin_only=True)
-        await self.runtime.service_registry.register_with_acl("yandex.login.status", yandex_login_status, admin_only=True)
+        await self.register_service("yandex.login.start", yandex_login_start, admin_only=True)
+        await self.register_service("yandex.login.status", yandex_login_status, admin_only=True)
 
         # Регистрируем HTTP-контракты через runtime.http.register().
         #
@@ -921,14 +921,14 @@ class OAuthYandexPlugin(BasePlugin):
         from core.http import HttpEndpoint
         try:
             # POST /oauth/yandex/configure — сохранить конфигурацию OAuth
-            self.runtime.http.register(HttpEndpoint(
+            self.register_http_endpoint(HttpEndpoint(
                 method="POST",
                 path="/oauth/yandex/configure",
                 service="oauth_yandex.configure",
                 description="Настроить OAuth параметры (client_id, client_secret, redirect_uri)"
             ))
             # GET /oauth/yandex/status — получить статус авторизации (не возвращает токены)
-            self.runtime.http.register(HttpEndpoint(
+            self.register_http_endpoint(HttpEndpoint(
                 method="GET",
                 path="/oauth/yandex/status",
                 service="oauth_yandex.get_status",
@@ -938,35 +938,35 @@ class OAuthYandexPlugin(BasePlugin):
             # Метод остаётся доступен как внутренний сервис для обратной совместимости.
             # POST /oauth/yandex/exchange-code — обменять код на токены
             # Этот HTTP-эндпоинт сохраняет токены в storage, но не возвращает их клиенту.
-            self.runtime.http.register(HttpEndpoint(
+            self.register_http_endpoint(HttpEndpoint(
                 method="POST",
                 path="/oauth/yandex/exchange-code",
                 service="oauth_yandex.exchange_code",
                 description="Обменять code на токены (использует сохранённую конфигурацию)"
             ))
             # GET /oauth/yandex/validate — проверить access_token (optional query param `token`)
-            self.runtime.http.register(HttpEndpoint(
+            self.register_http_endpoint(HttpEndpoint(
                 method="GET",
                 path="/oauth/yandex/validate",
                 service="oauth_yandex.validate_token",
                 description="Проверить валидность access_token (если не указан, используется сохранённый)"
             ))
             # POST /oauth/yandex/unlink — очистить токены и разлинковать аккаунт
-            self.runtime.http.register(HttpEndpoint(
+            self.register_http_endpoint(HttpEndpoint(
                 method="POST",
                 path="/oauth/yandex/unlink",
                 service="oauth_yandex.clear_tokens",
                 description="Очистить сохранённые токены (разлинковка аккаунта)"
             ))
             # POST /oauth/yandex/cookies — сохранить cookies для Quasar API
-            self.runtime.http.register(HttpEndpoint(
+            self.register_http_endpoint(HttpEndpoint(
                 method="POST",
                 path="/oauth/yandex/cookies",
                 service="oauth_yandex.set_cookies",
                 description="Сохранить Yandex session cookies для Quasar API"
             ))
             # GET /oauth/yandex/cookies — получить cookies
-            self.runtime.http.register(HttpEndpoint(
+            self.register_http_endpoint(HttpEndpoint(
                 method="GET",
                 path="/oauth/yandex/cookies",
                 service="oauth_yandex.get_cookies",
@@ -974,13 +974,13 @@ class OAuthYandexPlugin(BasePlugin):
             ))
 
             # Новые единые login-эндпоинты для контролируемого UI
-            self.runtime.http.register(HttpEndpoint(
+            self.register_http_endpoint(HttpEndpoint(
                 method="POST",
                 path="/yandex/login/start",
                 service="yandex.login.start",
                 description="Запустить единый login flow (Embedded WebView)"
             ))
-            self.runtime.http.register(HttpEndpoint(
+            self.register_http_endpoint(HttpEndpoint(
                 method="POST",
                 path="/yandex/login/status",
                 service="yandex.login.status",
@@ -994,19 +994,19 @@ class OAuthYandexPlugin(BasePlugin):
         """Удаляем сервисы и очищаем ссылку на runtime при выгрузке."""
         await super().on_unload()
         try:
-            await self.runtime.service_registry.unregister("oauth_yandex.configure")
-            await self.runtime.service_registry.unregister("oauth_yandex.get_status")
-            await self.runtime.service_registry.unregister("oauth_yandex.get_authorize_url")
-            await self.runtime.service_registry.unregister("oauth_yandex.exchange_code")
-            await self.runtime.service_registry.unregister("oauth_yandex.get_access_token")
-            await self.runtime.service_registry.unregister("oauth_yandex.get_tokens")
-            await self.runtime.service_registry.unregister("oauth_yandex.validate_token")
-            await self.runtime.service_registry.unregister("oauth_yandex.clear_tokens")
-            await self.runtime.service_registry.unregister("oauth_yandex.set_tokens")
-            await self.runtime.service_registry.unregister("oauth_yandex.set_cookies")
-            await self.runtime.service_registry.unregister("oauth_yandex.get_cookies")
-            await self.runtime.service_registry.unregister("yandex.login.start")
-            await self.runtime.service_registry.unregister("yandex.login.status")
+            await self.unregister_service("oauth_yandex.configure")
+            await self.unregister_service("oauth_yandex.get_status")
+            await self.unregister_service("oauth_yandex.get_authorize_url")
+            await self.unregister_service("oauth_yandex.exchange_code")
+            await self.unregister_service("oauth_yandex.get_access_token")
+            await self.unregister_service("oauth_yandex.get_tokens")
+            await self.unregister_service("oauth_yandex.validate_token")
+            await self.unregister_service("oauth_yandex.clear_tokens")
+            await self.unregister_service("oauth_yandex.set_tokens")
+            await self.unregister_service("oauth_yandex.set_cookies")
+            await self.unregister_service("oauth_yandex.get_cookies")
+            await self.unregister_service("yandex.login.start")
+            await self.unregister_service("yandex.login.status")
         except Exception:
             pass
 

@@ -4,12 +4,13 @@ from core.runtime.runtime import CoreRuntime
 from core.errors import NotFoundError
 from modules.api.auth.context import RequestContext
 from modules.api.auth.contextvars import set_current_request_context
+from modules.policy.engine import PolicyEngine as ModulePolicyEngine
 from main import APP_MODULES
 
 
 @pytest.mark.asyncio
 async def test_devices_acl_enforced_on_services(memory_adapter):
-    runtime = CoreRuntime(memory_adapter)
+    runtime = CoreRuntime(memory_adapter, policy_engine=ModulePolicyEngine())
     await runtime.module_manager.register_module_specs(runtime, APP_MODULES)
     await runtime.start()
 

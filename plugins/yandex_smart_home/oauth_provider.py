@@ -20,7 +20,7 @@ async def get_access_token(runtime: Any) -> str:
     Сейчас делегирует в oauth_yandex.get_access_token.
     При отсутствии провайдера вызов упадёт предсказуемо.
     """
-    return await runtime.service_registry.call("oauth_yandex.get_access_token")
+    return await runtime.call_service("oauth_yandex.get_access_token")
 
 
 async def get_status(runtime: Any) -> Dict[str, Any]:
@@ -29,7 +29,7 @@ async def get_status(runtime: Any) -> Dict[str, Any]:
 
     Сейчас делегирует в oauth_yandex.get_status.
     """
-    return await runtime.service_registry.call("oauth_yandex.get_status")
+    return await runtime.call_service("oauth_yandex.get_status")
 
 
 async def get_cookies(runtime: Any) -> Optional[Dict[str, str]]:
@@ -41,10 +41,10 @@ async def get_cookies(runtime: Any) -> Optional[Dict[str, str]]:
     """
     # 1. device_auth: сессия + storage
     try:
-        if await runtime.service_registry.has_service("yandex_device_auth.get_session"):
-            session = await runtime.service_registry.call("yandex_device_auth.get_session")
+        if await runtime.has_service("yandex_device_auth.get_session"):
+            session = await runtime.call_service("yandex_device_auth.get_session")
             if isinstance(session, dict) and session.get("linked"):
-                stored = await runtime.storage.get("yandex", "cookies")
+                stored = await runtime.storage_get("yandex", "cookies")
                 if isinstance(stored, dict) and stored:
                     return stored
     except Exception:
@@ -52,8 +52,8 @@ async def get_cookies(runtime: Any) -> Optional[Dict[str, str]]:
 
     # 2. oauth_yandex.get_cookies
     try:
-        if await runtime.service_registry.has_service("oauth_yandex.get_cookies"):
-            cookies = await runtime.service_registry.call("oauth_yandex.get_cookies")
+        if await runtime.has_service("oauth_yandex.get_cookies"):
+            cookies = await runtime.call_service("oauth_yandex.get_cookies")
             if isinstance(cookies, dict) and cookies:
                 return cookies
     except Exception:
@@ -61,7 +61,7 @@ async def get_cookies(runtime: Any) -> Optional[Dict[str, str]]:
 
     # 3. storage fallback
     try:
-        stored = await runtime.storage.get("yandex", "cookies")
+        stored = await runtime.storage_get("yandex", "cookies")
         if isinstance(stored, dict) and stored:
             return stored
     except Exception:

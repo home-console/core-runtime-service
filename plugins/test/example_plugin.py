@@ -32,13 +32,13 @@ class ExamplePlugin(BasePlugin):
         await super().on_load()
         
         # Регистрируем сервис
-        await self.runtime.service_registry.register(
+        await self.register_service(
             "example.hello",
             self._hello_service
         )
         
         # Подписываемся на событие
-        await self.runtime.event_bus.subscribe(
+        await self.subscribe_event(
             "example.test",
             self._on_test_event
         )
@@ -48,7 +48,7 @@ class ExamplePlugin(BasePlugin):
         await super().on_start()
         
         # Сохраняем что-то в storage
-        await self.runtime.storage.set(
+        await self.storage_set(
             "example",
             "status",
             {"state": "started", "message": "Плагин запущен"}
@@ -59,7 +59,7 @@ class ExamplePlugin(BasePlugin):
         await super().on_stop()
         
         # Обновляем статус
-        await self.runtime.storage.set(
+        await self.storage_set(
             "example",
             "status",
             {"state": "stopped", "message": "Плагин остановлен"}
@@ -70,10 +70,10 @@ class ExamplePlugin(BasePlugin):
         await super().on_unload()
         
         # Удаляем сервис
-        await self.runtime.service_registry.unregister("example.hello")
+        await self.unregister_service("example.hello")
         
         # Отписываемся от событий
-        await self.runtime.event_bus.unsubscribe(
+        await self.unsubscribe_event(
             "example.test",
             self._on_test_event
         )
@@ -99,7 +99,7 @@ class ExamplePlugin(BasePlugin):
             data: данные события
         """
         try:
-            await self.runtime.service_registry.call(
+            await self.call_service(
                 "logger.log",
                 level="info",
                 message=f"Получено событие {event_type}",

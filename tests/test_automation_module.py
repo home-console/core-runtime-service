@@ -11,7 +11,7 @@ import pytest
 
 from core.operations import OperationInitiator, OperationInitiatorKind
 from core.operations.registry import get_operation_handler
-from core.runtime.module_manager import ModuleSpec
+from core.module import ModuleSpec
 from core.runtime.runtime import CoreRuntime
 
 

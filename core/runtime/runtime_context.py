@@ -8,7 +8,7 @@ RuntimeContext - ограниченный контекст для модулей
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from modules.capability.registry import CapabilityRegistry
+from core.capability.registry import CapabilityRegistry
 from core.http import HttpRegistry
 from core.operations.manager import OperationManager
 from core.service import ServiceRegistry

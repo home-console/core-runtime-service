@@ -42,12 +42,12 @@ class YandexAccountSession:
         запись считается неуспешной. Публикует событие `yandex.login.linked`.
         """
         # Сохраняем токены
-        await runtime.storage.set("oauth_yandex", "tokens", tokens)
+        await runtime.storage_set("oauth_yandex", "tokens", tokens)
         # Сохраняем cookies
-        await runtime.storage.set("yandex", "cookies", cookies)
+        await runtime.storage_set("yandex", "cookies", cookies)
         # Публикуем событие
         with _suppress():
-            await runtime.event_bus.publish("yandex.login.linked", {
+            await runtime.publish_event("yandex.login.linked", {
                 "authorized": True,
                 "expires_at": tokens.get("expires_at"),
                 "cookies_present": True,
@@ -120,9 +120,9 @@ class OAuthTokenManager:
 
     async def exchange_code(self, code: str) -> Dict[str, Any]:
         # Используем уже существующий сервис плагина
-        result = await self.runtime.service_registry.call("oauth_yandex.exchange_code", code=code)
+        result = await self.runtime.call_service("oauth_yandex.exchange_code", code=code)
         # Загружаем сохранённые токены для агрегирования
-        tokens = await self.runtime.storage.get("oauth_yandex", "tokens")
+        tokens = await self.runtime.storage_get("oauth_yandex", "tokens")
         if isinstance(tokens, dict):
             return tokens
         return {}
@@ -135,10 +135,10 @@ class SessionCookieManager:
         self.runtime = runtime
 
     async def save_cookies(self, cookies: Dict[str, str]) -> None:
-        await self.runtime.storage.set("yandex", "cookies", cookies)
+        await self.runtime.storage_set("yandex", "cookies", cookies)
 
     async def get_cookies(self) -> Optional[Dict[str, str]]:
-        data = await self.runtime.storage.get("yandex", "cookies")
+        data = await self.runtime.storage_get("yandex", "cookies")
         return data if isinstance(data, dict) else None
 
 
@@ -158,7 +158,7 @@ class YandexLoginService:
 
         Возвращает быстрый ответ со статусом. Детали можно получать через `status()`.
         """
-        config = await self.runtime.storage.get("oauth_yandex", "config")
+        config = await self.runtime.storage_get("oauth_yandex", "config")
         if not config:
             raise ValueError("OAuth не настроен. Вызовите oauth_yandex.configure сначала.")
 
@@ -195,10 +195,10 @@ class YandexLoginService:
     async def status(self) -> Dict[str, Any]:
         """Текущий статус логина/аккаунта."""
         # Проверяем сохранённые токены
-        tokens = await self.runtime.storage.get("oauth_yandex", "tokens")
-        cookies = await self.runtime.storage.get("yandex", "cookies")
+        tokens = await self.runtime.storage_get("oauth_yandex", "tokens")
+        cookies = await self.runtime.storage_get("yandex", "cookies")
 
-        configured = await self.runtime.storage.get("oauth_yandex", "config") is not None
+        configured = await self.runtime.storage_get("oauth_yandex", "config") is not None
         authorized = isinstance(tokens, dict) and "access_token" in tokens
         cookies_ok = isinstance(cookies, dict) and "Session_id" in cookies and "yandexuid" in cookies
 

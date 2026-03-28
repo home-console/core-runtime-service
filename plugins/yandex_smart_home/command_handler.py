@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 from typing import Any, Dict
-import asyncio
 
 from core.utils.operation import operation
 from .clients import YandexAPIClient
@@ -32,12 +31,12 @@ class CommandHandler:
         self.quasar_ws = quasar_ws  # WebSocket клиент для проверки активности
 
     async def _log(self, level: str, message: str, context: dict | None = None) -> None:
-        """Helper to log via runtime.service_registry, swallowing errors.
+        """Helper to log via runtime.call_service, swallowing errors.
 
         Use this to reduce repetitive try/except around logger calls.
         """
         try:
-            await self.runtime.service_registry.call(
+            await self.runtime.call_service(
                 "logger.log",
                 level=level,
                 message=message,
@@ -53,7 +52,7 @@ class CommandHandler:
         if not internal_id:
             return None
         try:
-            mappings = await self.runtime.service_registry.call("devices.list_mappings")
+            mappings = await self.runtime.call_service("devices.list_mappings")
             if isinstance(mappings, list):
                 for mapping in mappings:
                     if isinstance(mapping, dict) and mapping.get("internal_id") == internal_id:
@@ -149,7 +148,6 @@ class CommandHandler:
                 await send_command(
                     self.runtime,
                     self.api_client,
-                    self.runtime.service_registry,
                     self.plugin_name,
                     external_id,
                     actions,
@@ -162,9 +160,6 @@ class CommandHandler:
                 await handle_post_send(
                     self.runtime,
                     self.tasks,
-                    self.runtime.event_bus,
-                    self.runtime.service_registry,
-                    DeviceTransformer,
                     self.api_client,
                     self.plugin_name,
                     external_id,
@@ -202,9 +197,6 @@ class CommandHandler:
         await poll_and_publish(
             self.runtime,
             self.api_client,
-            self.runtime.event_bus,
-            self.runtime.service_registry,
-            DeviceTransformer,
             external_id,
             internal_id,
             params,
@@ -226,8 +218,6 @@ class CommandHandler:
 
         await reset_pending_on_error(
             self.runtime,
-            self.runtime.storage,
-            self.runtime.service_registry,
             internal_id,
             external_id,
             error_reason,

@@ -1,8 +1,6 @@
 """
 core.audit — Tamper-evident security audit subsystem.
 
-Step 17.5: Global Audit Integration for Credential Subsystem
-
 Module exports:
 - SecurityEventType: Enum of event types (created, updated, deleted, etc.)
 - SecurityEvent: Immutable audit event dataclass
