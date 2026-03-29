@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional, Tuple
 import asyncio
 import time
 
-from core.utils.operation import operation
+from core.runtime.operation_context import operation
 from ..clients.api_client import YandexAPIClient
 
 

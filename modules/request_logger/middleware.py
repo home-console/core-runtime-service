@@ -94,7 +94,7 @@ async def _log_request_to_console(
 class RequestLoggerOperationContext:
     """
     Адаптер для Core: реализует OperationContextProvider, делегируя в ContextVar.
-    Регистрируется в core.operation_context при старте RequestLoggerModule.
+    Регистрируется в core.runtime.operation_context при старте RequestLoggerModule.
     """
 
     def get_operation_id(self) -> Optional[str]:

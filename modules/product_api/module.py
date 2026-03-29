@@ -13,7 +13,7 @@ ProductApiModule — BFF (Backend for Frontend) для пользователь�
 
 from typing import Any
 
-from core.runtime_module import RuntimeModule
+from core.runtime.runtime_module import RuntimeModule
 from core.http.models import HttpEndpoint, EndpointAuthConfig
 
 

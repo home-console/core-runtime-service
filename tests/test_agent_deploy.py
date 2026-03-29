@@ -488,7 +488,7 @@ class TestHTTPEndpointRegistration:
     @pytest.mark.asyncio
     async def test_deployment_endpoints_registered(self, memory_adapter):
         """All deployment HTTP endpoints should be present after agent module starts."""
-        from core.module.models import ModuleSpec
+        from core.module import ModuleSpec
         runtime = CoreRuntime(memory_adapter)
         await runtime.module_manager.register_module_specs(
             runtime,
@@ -513,7 +513,7 @@ class TestHTTPEndpointRegistration:
 
     @pytest.mark.asyncio
     async def test_heartbeat_endpoint_registered(self, memory_adapter):
-        from core.module.models import ModuleSpec
+        from core.module import ModuleSpec
         runtime = CoreRuntime(memory_adapter)
         await runtime.module_manager.register_module_specs(
             runtime,
@@ -528,7 +528,7 @@ class TestHTTPEndpointRegistration:
 
     @pytest.mark.asyncio
     async def test_download_endpoints_registered(self, memory_adapter):
-        from core.module.models import ModuleSpec
+        from core.module import ModuleSpec
         runtime = CoreRuntime(memory_adapter)
         await runtime.module_manager.register_module_specs(
             runtime,
@@ -544,7 +544,7 @@ class TestHTTPEndpointRegistration:
 
     @pytest.mark.asyncio
     async def test_deploy_endpoint_uses_post_method(self, memory_adapter):
-        from core.module.models import ModuleSpec
+        from core.module import ModuleSpec
         runtime = CoreRuntime(memory_adapter)
         await runtime.module_manager.register_module_specs(
             runtime,
@@ -562,7 +562,7 @@ class TestHTTPEndpointRegistration:
 
     @pytest.mark.asyncio
     async def test_deployment_status_endpoint_uses_get(self, memory_adapter):
-        from core.module.models import ModuleSpec
+        from core.module import ModuleSpec
         runtime = CoreRuntime(memory_adapter)
         await runtime.module_manager.register_module_specs(
             runtime,

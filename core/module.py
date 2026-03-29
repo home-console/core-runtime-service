@@ -12,9 +12,17 @@ import sys
 import importlib
 import importlib.util
 
-from core.runtime_module import RuntimeModule
-from core.logger_helper import error as log_error
-from core.module.models import ModuleSpec
+from dataclasses import dataclass
+
+from core.runtime.runtime_module import RuntimeModule
+from core.observability.logger_helper import error as log_error
+
+
+@dataclass
+class ModuleSpec:
+    """Спецификация модуля с флагом обязательности. Используется на уровне приложения (bootstrap)."""
+    name: str
+    required: bool = True
 
 
 class ModuleManager:

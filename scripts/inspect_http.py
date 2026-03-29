@@ -5,7 +5,7 @@ import importlib
 import inspect
 from pathlib import Path
 
-from core.config import Config
+from core.runtime.config import Config
 from core.runtime.runtime import CoreRuntime
 from core.adapters.sqlite_adapter import SQLiteAdapter
 from core.kernel.base_plugin import BasePlugin

@@ -331,8 +331,8 @@ class YandexSmartHomeRealPlugin(BasePlugin):
             result["synced"] = len(devices) if devices else 0
             
             try:
-                from core.system_context import create_system_context
-                from core.auth_contextvars import set_current_auth_context, get_current_auth_context
+                from core.runtime.system_context import create_system_context
+                from core.runtime.auth_contextvars import set_current_auth_context, get_current_auth_context
                 
                 ctx = create_system_context(self.metadata.name, "devices.auto_map_external")
                 prev = get_current_auth_context()

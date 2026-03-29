@@ -18,7 +18,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
-from core.runtime_module import RuntimeModule
+from core.runtime.runtime_module import RuntimeModule
 from modules.api.auth.middleware import require_auth_middleware
 from modules.api.admin_access_middleware import admin_access_middleware
 from modules.monitoring import MonitoringModule

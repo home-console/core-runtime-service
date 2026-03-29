@@ -137,7 +137,7 @@ async def test_list_keys_validates_namespace(memory_adapter):
 @pytest.mark.asyncio
 async def test_storage_mirror_validates_types(memory_adapter):
     """Проверка, что StorageWithStateMirror также валидирует типы."""
-    from core.state_engine import StateEngine
+    from core.runtime.state_engine import StateEngine
     from modules.storage.mirror import StorageWithStateMirror
 
     storage = Storage(memory_adapter)

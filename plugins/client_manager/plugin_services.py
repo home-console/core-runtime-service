@@ -236,7 +236,7 @@ async def register_services(plugin: "ClientManagerPlugin") -> None:
 
         initiator = {"type": "unknown"}
         try:
-            from core.auth_contextvars import get_current_auth_context
+            from core.runtime.auth_contextvars import get_current_auth_context
 
             ctx = get_current_auth_context()
             if ctx is not None:

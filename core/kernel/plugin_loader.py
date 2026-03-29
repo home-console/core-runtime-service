@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional, Callable, Awaitable
 import importlib
 
-from core.logger_helper import warning, info
+from core.observability.logger_helper import warning, info
 from sdk.plugin import BasePlugin as SDKBasePlugin
 from core.kernel.base_plugin import BasePlugin
 from dataclasses import replace

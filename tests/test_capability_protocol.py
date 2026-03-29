@@ -18,13 +18,13 @@ from typing import Any, Dict
 
 from core.operations import Operation, OperationInitiator, OperationInitiatorKind, OperationStatus
 from modules.execution.remote_executor import RemoteOperationExecutor
-from core.capability_protocol import (
+from core.capability.protocol import (
     PROTOCOL_VERSION,
     ProtocolCompatibilityError,
     RemoteErrorCode,
     DEFAULT_CAPABILITY_TIMEOUT,
 )
-from core.health_monitor import ProviderHealthMonitor
+from core.observability.health_monitor import ProviderHealthMonitor
 
 
 @pytest.mark.asyncio

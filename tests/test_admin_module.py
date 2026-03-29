@@ -9,7 +9,7 @@
 
 import pytest
 from core.runtime.runtime import CoreRuntime
-from core.module.models import ModuleSpec
+from core.module import ModuleSpec
 from modules.admin.services.introspection import _is_debug
 
 # Минимальный набор модулей для тестов admin

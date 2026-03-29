@@ -10,7 +10,7 @@
 import pytest
 
 from core.operations import OperationInitiator, OperationInitiatorKind
-from core.module.models import ModuleSpec
+from core.module import ModuleSpec
 from core.runtime.runtime import CoreRuntime
 
 

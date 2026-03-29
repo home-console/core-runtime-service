@@ -10,7 +10,7 @@ Tracks:
 
 import time
 from typing import Dict, Optional
-from core.capability_protocol import (
+from core.capability.protocol import (
     ProviderHealthStatus,
     HEALTH_CHECK_FAILURE_THRESHOLD,
     HEALTH_CHECK_RETRY_INTERVAL,

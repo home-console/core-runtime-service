@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from core.runtime_module import RuntimeModule
+from core.runtime.runtime_module import RuntimeModule
 from modules.hooks.system import (
     CompleteOperation,
     SystemHookResult,

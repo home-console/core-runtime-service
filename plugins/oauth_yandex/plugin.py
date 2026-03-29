@@ -305,7 +305,7 @@ class OAuthYandexPlugin(BasePlugin):
                 ValueError: если code не указан
                 RuntimeError: если обмен не удался
             """
-            from core.utils.operation import operation
+            from core.runtime.operation_context import operation
             
             async with operation("oauth.exchange_code", self.metadata.name, self.runtime):
                 if not code:
@@ -638,7 +638,7 @@ class OAuthYandexPlugin(BasePlugin):
                                 # Если новый токен тоже истек, продолжаем обновление
                         
                         # Пытаемся обновить (только если токен не был обновлен другим запросом)
-                        from core.utils.operation import operation
+                        from core.runtime.operation_context import operation
                         try:
                             async with operation("oauth.refresh_token", self.metadata.name, self.runtime):
                                 new_token = await _refresh_access_token()

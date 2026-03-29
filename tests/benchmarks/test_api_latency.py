@@ -16,7 +16,7 @@ from typing import List
 # (если не получится, закомментируем)
 try:
     from core.runtime.runtime import CoreRuntime
-    from core.config import Config
+    from core.runtime.config import Config
     from main import APP_MODULES
     HAS_RUNTIME = True
 except ImportError:

@@ -5,7 +5,7 @@ AutomationModule — встроенный модуль автоматизаци�
 через bootstrap и может быть отключён/удалён без влияния на Core.
 """
 
-from core.runtime_module import RuntimeModule
+from core.runtime.runtime_module import RuntimeModule
 
 from . import handlers
 from .events import device_state_to_operation

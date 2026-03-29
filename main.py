@@ -15,8 +15,8 @@ from app.bootstrap import (
     build_runtime,
     parse_module_specs,
 )
-from core.config import Config
-from core.state_engine import StateEngine
+from core.runtime.config import Config
+from core.runtime.state_engine import StateEngine
 from modules.security import check_security_env
 from modules.storage.factory import build_storage_stack
 

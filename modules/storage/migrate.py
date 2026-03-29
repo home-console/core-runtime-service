@@ -11,7 +11,7 @@ This script:
 Usage:
     python -c "
     import asyncio
-    from core.config import Config
+    from core.runtime.config import Config
     from modules.storage.migrate import migrate_to_dual_mode
 
     config = Config.from_env()
@@ -24,7 +24,7 @@ import logging
 import sys
 from typing import Dict, Tuple
 
-from core.config import Config
+from core.runtime.config import Config
 from modules.storage.factory import create_storage_manager
 from modules.storage.manager import CRITICAL_VAULT_NAMESPACES
 

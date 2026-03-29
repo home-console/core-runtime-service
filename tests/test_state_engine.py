@@ -1,7 +1,7 @@
 import asyncio
 import pytest
 
-from core.state_engine import StateEngine
+from core.runtime.state_engine import StateEngine
 
 
 @pytest.mark.asyncio

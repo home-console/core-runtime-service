@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional
 import time
 
 from modules.plugins import PluginState
-from core.logger_helper import debug
+from core.observability.logger_helper import debug
 from core.kernel.plugin_loader import PluginManifestLoader
 
 

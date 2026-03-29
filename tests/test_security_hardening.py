@@ -22,13 +22,13 @@ from pathlib import Path
 from unittest.mock import Mock, AsyncMock, patch, MagicMock
 
 from modules.capability.registry import CapabilityRegistry
-from core.capability_protocol import PROTOCOL_VERSION
+from core.capability.protocol import PROTOCOL_VERSION
 from core.kernel.plugin_registry import PluginRegistry
 from core.kernel.plugin_manager import PluginManager
 from core.kernel.base_plugin import BasePlugin, PluginMetadata
 from core.operations import Operation, OperationInitiator, OperationInitiatorKind, OperationManager
 from modules.execution.router import ExecutionRouter
-from core.exceptions.errors import ForbiddenError
+from core.exceptions import ForbiddenError
 from modules.plugins.isolation import StorageProxy
 
 

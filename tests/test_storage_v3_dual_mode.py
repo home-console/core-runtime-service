@@ -19,7 +19,7 @@ import pytest
 
 from core.adapters.sqlite_adapter import SQLiteAdapter
 from modules.storage.factory import create_storage_manager
-from core.config import Config
+from core.runtime.config import Config
 from modules.storage.errors import (
     NamespaceViolationError,
     StorageConfigurationError,

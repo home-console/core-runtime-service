@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from core.messaging.inmemory import InMemoryEventBus as EventBus, EventBusMiddleware
+from core.messaging import InMemoryEventBus as EventBus, EventBusMiddleware
 
 
 @pytest.mark.asyncio

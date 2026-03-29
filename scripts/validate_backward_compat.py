@@ -206,7 +206,7 @@ async def test_config_backward_compat():
     print("\n[TEST 4] Config Backward Compatibility")
     print("-" * 60)
 
-    from core.config import Config
+    from core.runtime.config import Config
 
     try:
         # Old code: Config without storage_mode (should default to single)
@@ -245,7 +245,7 @@ async def test_factory_backward_compat():
         create_storage_adapter,
         create_storage_manager,
     )
-    from core.config import Config
+    from core.runtime.config import Config
 
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
         db_path = f.name
@@ -288,7 +288,7 @@ async def test_single_to_dual_migration():
     print("-" * 60)
 
     from modules.storage.factory import create_storage_manager
-    from core.config import Config
+    from core.runtime.config import Config
     from modules.storage.migrate import migrate_to_dual_mode
 
     with tempfile.TemporaryDirectory() as tmpdir:

@@ -86,6 +86,6 @@ class PluginSandbox:
             
         except Exception as e:
             # Isolation setup failed - still continue but log
-            from core.logger_helper import warning
+            from core.observability.logger_helper import warning
 
             warning(f"Plugin isolation setup failed for {plugin_name}: {e}")

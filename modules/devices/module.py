@@ -5,7 +5,7 @@ DevicesModule — встроенный модуль управления уст�
 при создании CoreRuntime через ModuleManager.
 """
 
-from core.runtime_module import RuntimeModule
+from core.runtime.runtime_module import RuntimeModule
 
 from . import handlers, services
 

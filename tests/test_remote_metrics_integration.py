@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from core.runtime.runtime import CoreRuntime
-from core.state_engine import StateEngine
+from core.runtime.state_engine import StateEngine
 from modules.storage.port import CoreStoragePort
 from plugins.remote_plugin_proxy import RemotePluginProxy
 from tests.conftest import InMemoryStorageAdapter

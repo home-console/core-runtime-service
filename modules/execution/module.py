@@ -16,8 +16,8 @@ import time
 import asyncio
 from typing import Any, Optional, Callable, Awaitable
 
-from core import capability_protocol
-from core.runtime_module import RuntimeModule
+from core.capability import protocol as capability_protocol
+from core.runtime.runtime_module import RuntimeModule
 from core.operations.models import Operation, OperationStatus
 
 from modules.execution.controller import ExecutionControllerImpl

@@ -20,7 +20,7 @@ from core.kernel.base_plugin import BasePlugin, PluginMetadata
 from core.kernel.plugin_manager import PluginManager
 from core.kernel.plugin_registry import PluginState
 from core.runtime.runtime import CoreRuntime
-from core.state_engine import StateEngine
+from core.runtime.state_engine import StateEngine
 from modules.marketplace.installer import MarketplaceInstaller
 from modules.storage.port import CoreStoragePort
 from tests.conftest import InMemoryStorageAdapter

@@ -6,8 +6,8 @@ Mutating operations (set_state, mappings) go through operations subsystem;
 AdminModule does not contain plugin-specific or mutating device logic.
 """
 from typing import Any, Optional
-from core.system_context import create_system_context
-from core.auth_contextvars import set_current_auth_context, get_current_auth_context
+from core.runtime.system_context import create_system_context
+from core.runtime.auth_contextvars import set_current_auth_context, get_current_auth_context
 
 
 async def admin_devices_list(runtime: Any):

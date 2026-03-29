@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 from collections import deque
 from datetime import datetime, UTC
 
-from core.runtime_module import RuntimeModule
+from core.runtime.runtime_module import RuntimeModule
 
 
 class RequestLoggerModule(RuntimeModule):
@@ -60,7 +60,7 @@ class RequestLoggerModule(RuntimeModule):
 
     async def start(self) -> None:
         """Запуск модуля."""
-        from core.operation_context import set_operation_context_provider
+        from core.runtime.operation_context import set_operation_context_provider
         from modules.request_logger.middleware import RequestLoggerOperationContext
         set_operation_context_provider(RequestLoggerOperationContext())
         try:
@@ -76,7 +76,7 @@ class RequestLoggerModule(RuntimeModule):
 
     async def stop(self) -> None:
         """Остановка модуля."""
-        from core.operation_context import set_operation_context_provider
+        from core.runtime.operation_context import set_operation_context_provider
         set_operation_context_provider(None)
         try:
             services = self.runtime.kernel_context.get_service("service_registry")

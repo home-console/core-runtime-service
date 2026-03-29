@@ -5,7 +5,7 @@ IntegrationModule — модуль для HTTP endpoints интеграций.
 AdminModule не знает про integrations; список интеграций предоставляет этот модуль.
 """
 
-from core.runtime_module import RuntimeModule
+from core.runtime.runtime_module import RuntimeModule
 from core.http.models import HttpEndpoint
 
 

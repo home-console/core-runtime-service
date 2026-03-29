@@ -6,7 +6,7 @@ Services (admin.operations.*) остаются в AdminModule.
 Это разделение: HTTP ownership vs Service ownership.
 """
 
-from core.runtime_module import RuntimeModule
+from core.runtime.runtime_module import RuntimeModule
 from core.http.models import HttpEndpoint
 
 

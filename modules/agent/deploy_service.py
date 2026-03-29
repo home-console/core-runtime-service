@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Tuple
 
-from core.logger_helper import info as log_info
+from core.observability.logger_helper import info as log_info
 
 from modules.credentials import CredentialRepository
 from modules.ssh.ssh_execution_service import SSHExecutionService

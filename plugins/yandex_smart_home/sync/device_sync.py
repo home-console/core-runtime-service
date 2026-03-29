@@ -8,7 +8,7 @@ from __future__ import annotations
 import time
 from typing import Any, Dict, List
 
-from core.utils.operation import operation
+from core.runtime.operation_context import operation
 from ..clients.api_client import YandexAPIClient
 from ..transformers.device_transformer import DeviceTransformer
 

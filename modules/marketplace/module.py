@@ -11,7 +11,7 @@ Implements operations:
 """
 
 from typing import Dict, Any, List, Optional
-from core.runtime_module import RuntimeModule
+from core.runtime.runtime_module import RuntimeModule
 from modules.marketplace.services import MarketplaceService
 
 

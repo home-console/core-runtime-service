@@ -15,7 +15,7 @@ import time
 from typing import Any, Awaitable, Callable, Dict, Optional, cast
 
 from core.dependency.models import RuntimeIntegrityError
-from core.logger_helper import info, warning
+from core.observability.logger_helper import info, warning
 
 
 class RuntimeLifecycleMixin:

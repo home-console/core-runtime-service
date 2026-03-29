@@ -25,7 +25,7 @@ def test_scan_architecture_ignores_type_checking_imports(tmp_path: Path) -> None
         "from core.credentials.domain import CredentialType\nfrom plugins.demo.plugin import DemoPlugin\n",
         encoding="utf-8",
     )
-    (plugins_dir / "plugin.py").write_text("from core.config import Config\n", encoding="utf-8")
+    (plugins_dir / "plugin.py").write_text("from core.runtime.config import Config\n", encoding="utf-8")
 
     report = architecture_rules.scan_architecture(tmp_path)
 

@@ -12,8 +12,8 @@ import threading
 import time
 from typing import Any, Dict
 
-from core.auth_contextvars import get_current_auth_context, set_current_auth_context
-from core.system_context import create_system_context
+from core.runtime.auth_contextvars import get_current_auth_context, set_current_auth_context
+from core.runtime.system_context import create_system_context
 from modules.credentials import CredentialType
 
 # SystemContext не имеет user_id; для credential.* передаём явно admin

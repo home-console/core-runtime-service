@@ -6,7 +6,7 @@ import asyncio
 import threading
 from typing import Any, Dict, List, Optional, Tuple
 
-from core.capability_protocol import (
+from core.capability.protocol import (
     PROTOCOL_VERSION,
     ProviderMetadata,
 )

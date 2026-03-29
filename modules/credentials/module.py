@@ -15,7 +15,7 @@ Unified security decision orchestrator
 
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
-from core.runtime_module import RuntimeModule
+from core.runtime.runtime_module import RuntimeModule
 from modules.security import (
     MFAService,
     CredentialPolicyEngine,

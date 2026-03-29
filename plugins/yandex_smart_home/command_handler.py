@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from core.utils.operation import operation
+from core.runtime.operation_context import operation
 from .clients import YandexAPIClient
 from .transformers.device_transformer import DeviceTransformer
 from .oauth_provider import get_status as oauth_get_status, get_cookies as oauth_get_cookies

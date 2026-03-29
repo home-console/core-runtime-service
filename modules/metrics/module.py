@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from core.observability.metrics import get_metrics_registry
-from core.runtime_module import RuntimeModule
+from core.runtime.runtime_module import RuntimeModule
 from modules.hooks.system import register_system_hook, unregister_system_hook
 from modules.hooks.runtime_contract import ensure_runtime_execution_contract
 

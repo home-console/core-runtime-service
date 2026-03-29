@@ -291,7 +291,7 @@ async def auth_login(runtime: Any, body: Any = None) -> Dict[str, Any]:
     Returns:
         {"access_token": "jwt...", "expires_in": 900, "token_type": "Bearer"}
     """
-    from core.auth_contextvars import set_response_cookie
+    from core.runtime.auth_contextvars import set_response_cookie
     
     if not isinstance(body, dict):
         return {"ok": False, "error": "invalid_body"}
@@ -393,7 +393,7 @@ async def auth_refresh(runtime: Any, body: Any = None) -> Dict[str, Any]:
         {"access_token": "jwt...", "expires_in": 900, "token_type": "Bearer"}
         + Set-Cookie applied by route_binding from get_response_cookies()
     """
-    from core.auth_contextvars import get_current_auth_context, set_response_cookie
+    from core.runtime.auth_contextvars import get_current_auth_context, set_response_cookie
     
     try:
         # Get current auth context with refresh token from middleware
@@ -484,7 +484,7 @@ async def auth_logout(runtime: Any, body: Any = None) -> Dict[str, Any]:
         {"ok": true}
         + Set-Cookie: refresh_token=; Max-Age=0; (deletes cookie)
     """
-    from core.auth_contextvars import clear_response_cookies
+    from core.runtime.auth_contextvars import clear_response_cookies
     
     # Request that refresh_token cookie be deleted
     # route_binding will apply this via response.set_cookie(key, value="", max_age=0)
@@ -630,7 +630,7 @@ async def auth_me(runtime: Any) -> Dict[str, Any]:
     Returns:
         AuthUser object or error
     """
-    from core.auth_contextvars import get_current_auth_context
+    from core.runtime.auth_contextvars import get_current_auth_context
     
     context = get_current_auth_context()
     

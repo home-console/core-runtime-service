@@ -11,6 +11,7 @@ from core.kernel.plugin_api import PluginAPI
 from core.kernel.plugin_runtime_facade import PluginRuntimeFacade
 from core.kernel.plugin_sandbox import PluginSandbox
 from core.kernel.context import KernelContext
+from core.kernel.integration_registry import IntegrationRegistry, IntegrationFlag
 
 __all__ = [
     'PluginState',
@@ -21,4 +22,6 @@ __all__ = [
     'PluginRuntimeFacade',
     'PluginSandbox',
     'KernelContext',
+    'IntegrationRegistry',
+    'IntegrationFlag',
 ]

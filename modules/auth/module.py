@@ -17,7 +17,7 @@ Identity is not mixed with Control Plane (admin UI).
 """
 
 from typing import Any
-from core.runtime_module import RuntimeModule
+from core.runtime.runtime_module import RuntimeModule
 from core.http.models import HttpEndpoint, EndpointAuthConfig
 from .handlers import (
     auth_create_api_key,

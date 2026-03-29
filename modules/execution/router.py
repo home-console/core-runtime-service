@@ -16,7 +16,7 @@ import logging
 from typing import Any, Callable, Awaitable, Optional, Dict
 
 from core.operations.models import Operation
-from core.capability_protocol import ProviderMetadata
+from core.capability.protocol import ProviderMetadata
 
 logger = logging.getLogger(__name__)
 

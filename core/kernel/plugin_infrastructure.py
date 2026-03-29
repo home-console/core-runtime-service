@@ -17,7 +17,7 @@ from __future__ import annotations
 from typing import Optional
 from core.kernel.base_plugin import BasePlugin, PluginMetadata
 from core.capability.registry import CapabilityRegistry
-from core.integration_registry import IntegrationRegistry
+from core.kernel.integration_registry import IntegrationRegistry
 from core.operations.manager import OperationManager
 
 

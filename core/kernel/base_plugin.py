@@ -12,49 +12,98 @@ from __future__ import annotations
 import os
 from abc import abstractmethod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Literal, Optional, Union
+from typing import Any, Awaitable, Callable, Literal, Optional, Protocol, cast, runtime_checkable
 
-from core.kernel.plugin_api import PluginAPI
-from core.runtime.runtime_context import RuntimeContext
+from sdk.metadata import PluginMetadata as SDKPluginMetadata
 from sdk.plugin import BasePlugin as SDKBasePlugin
 
-if TYPE_CHECKING:
-    from core.kernel.plugin_runtime_facade import PluginRuntimeFacade
+from core.runtime.runtime_context import RuntimeContext
+from core.service._acl import PreloadResourceFunc
 
 
-@dataclass
-class PluginMetadata:
+@runtime_checkable
+class SupportsContext(Protocol):
+    def create_context(self) -> RuntimeContext: ...
+
+
+@runtime_checkable
+class SupportsPluginRuntimeAPI(Protocol):
+    async def register_service(
+        self,
+        name: str,
+        func: Callable[..., Awaitable[Any]],
+        *,
+        resource: Optional[str] = None,
+        admin_only: Optional[bool] = None,
+        filter_result: bool = False,
+        enforce_result: bool = False,
+        preload_resource: Optional[PreloadResourceFunc] = None,
+        inject_owner_param: Optional[str] = None,
+        version: Optional[str] = None,
+    ) -> None: ...
+
+    async def unregister_service(self, name: str) -> None: ...
+
+    async def has_service(self, name: str) -> bool: ...
+
+    async def call_service(self, name: str, *args: Any, **kwargs: Any) -> Any: ...
+
+    async def publish_event(self, event_type: str, payload: dict[str, Any]) -> None: ...
+
+    async def subscribe_event(
+        self,
+        event_type: str,
+        handler: Callable[[dict[str, Any]], Awaitable[None]],
+    ) -> None: ...
+
+    async def unsubscribe_event(
+        self,
+        event_type: str,
+        handler: Callable[[dict[str, Any]], Awaitable[None]],
+    ) -> None: ...
+
+    async def storage_get(self, namespace: str, key: str) -> Any: ...
+
+    async def storage_set(self, namespace: str, key: str, value: Any) -> None: ...
+
+    async def storage_delete(self, namespace: str, key: str) -> bool: ...
+
+    async def storage_list_keys(self, namespace: str) -> list[str]: ...
+
+    def register_http(self, endpoint: Any) -> None: ...
+
+    def register_operation_handler(
+        self, op_type: str, handler: Callable[..., Any]
+    ) -> None: ...
+
+
+@dataclass(frozen=True)
+class PluginMetadata(SDKPluginMetadata):
     """Метаданные плагина."""
 
     name: str
     version: str
     description: str = ""
     author: str = ""
-    dependencies: list[str] | None = field(
-        default_factory=list
-    )  # Список имён плагинов-зависимостей
+    dependencies: list[str] = field(default_factory=lambda: cast(list[str], []))  # Список имён плагинов-зависимостей
     # По умолчанию все сервисы плагина доступны не только админам.
     # Можно включить default_admin_only=True для "админских" плагинов.
     default_admin_only: bool = False
     # Capability: плагин объявляет, какие capabilities предоставляет и какие требует.
-    capabilities_provided: list[str] | None = field(
-        default_factory=list
-    )  # ["oauth:yandex"]
-    capabilities_required: list[str] | None = field(
-        default_factory=list
-    )  # ["oauth:yandex", "yandex:session_cookies"]
+    capabilities_provided: list[str] = field(default_factory=lambda: cast(list[str], []))  # ["oauth:yandex"]
+    capabilities_required: list[str] = field(default_factory=lambda: cast(list[str], []))  # ["oauth:yandex", "yandex:session_cookies"]
     # Remote configuration для remote capability providers
     # Если не None, то этот плагин является remote provider
-    remote_config: dict | None = None  # {"base_url": "http://...", "timeout": 10}
+    remote_config: dict[str, Any] | None = None  # {"base_url": "http://...", "timeout": 10}
     # Plugin execution mode
     execution_mode: Literal["in_process", "process", "container", "remote"] = (
         "in_process"
     )
     # Optional configuration for process/container execution
-    process_config: dict | None = None  # {"timeout": 30, "max_memory": "256M"}
-    container_config: dict | None = None  # {"image": "...", "timeout": 30}
+    process_config: dict[str, Any] | None = None  # {"timeout": 30, "max_memory": "256M"}
+    container_config: dict[str, Any] | None = None  # {"image": "...", "timeout": 30}
     # Resource limits
-    resource_limits: dict | None = (
+    resource_limits: dict[str, Any] | None = (
         None  # {"max_execution_seconds": 30, "max_memory_mb": 512, "max_calls_per_minute": 100}
     )
 
@@ -83,74 +132,30 @@ class BasePlugin(SDKBasePlugin):
 
     def __init__(
         self,
-        runtime_or_context: Optional[
-            Union["PluginRuntimeFacade", RuntimeContext, Any]
-        ] = None,
+        runtime_or_context: RuntimeContext | SupportsContext,
     ) -> None:
         """
         Инициализация плагина.
 
         Args:
-            runtime_or_context: экземпляр RuntimeContext или runtime facade с create_context()
-                Если None, context будет установлен позже через PluginManager
+            runtime_or_context: экземпляр RuntimeContext или runtime с create_context()
         """
-        runtime = (
-            runtime_or_context
-            if not isinstance(runtime_or_context, RuntimeContext)
-            else None
-        )
-        super().__init__(runtime)
-
-        # Сохраняем context если передан
-        if isinstance(runtime_or_context, RuntimeContext):
-            self.context = runtime_or_context
-            self.runtime = None
-        elif runtime_or_context is not None:
-            self.runtime = runtime_or_context
-            create_context = getattr(runtime_or_context, "create_context", None)
-            if not callable(create_context):
-                raise TypeError(
-                    "BasePlugin requires RuntimeContext or runtime with create_context()"
-                )
-            self.context = create_context()
-        else:
-            self.runtime = None
-            self.context = None
-
         self._loaded = False
         self._started = False
+        self.runtime: SupportsPluginRuntimeAPI | None = None
+        super().__init__(None)
+
+        if isinstance(runtime_or_context, RuntimeContext):
+            self.context = runtime_or_context
+            return
+
+        self.context = runtime_or_context.create_context()
 
     def _runtime_api(self) -> Any:
         runtime_obj = self.runtime
-        runtime_api = getattr(runtime_obj, "api", None)
-        if runtime_api is not None:
-            return runtime_api
-
-        # Backward compatibility: allow direct CoreRuntime usage in tests/legacy code
-        # where PluginRuntimeFacade is not injected and runtime.api is absent.
-        service_registry = getattr(runtime_obj, "service_registry", None)
-        event_bus = getattr(runtime_obj, "event_bus", None)
-        storage = getattr(runtime_obj, "storage", None)
-        operations = getattr(runtime_obj, "operations", None)
-        http = getattr(runtime_obj, "http", None)
-
-        if None in (service_registry, event_bus, storage, operations, http):
+        if runtime_obj is None:
             raise RuntimeError("Plugin runtime API not available")
-
-        runtime_api = PluginAPI(
-            service_registry=service_registry,
-            event_bus=event_bus,
-            storage=storage,
-            operations=operations,
-            http=http,
-        )
-
-        try:
-            setattr(runtime_obj, "api", runtime_api)
-        except Exception:
-            pass
-
-        return runtime_api
+        return runtime_obj
 
     async def register_service(
         self,
@@ -161,7 +166,7 @@ class BasePlugin(SDKBasePlugin):
         admin_only: Optional[bool] = None,
         filter_result: bool = False,
         enforce_result: bool = False,
-        preload_resource: Optional[Callable[[tuple, dict], Awaitable[Any]]] = None,
+        preload_resource: Optional[PreloadResourceFunc] = None,
         inject_owner_param: Optional[str] = None,
         version: Optional[str] = None,
     ) -> None:
@@ -246,8 +251,8 @@ class BasePlugin(SDKBasePlugin):
 
     async def storage_list_keys(self, namespace: str) -> list[str]:
         runtime_api = self._runtime_api()
-        keys = await runtime_api.storage_list_keys(namespace)
-        return list(keys) if isinstance(keys, list) else []
+        keys: list[str] = await runtime_api.storage_list_keys(namespace)
+        return keys
 
     def register_http_endpoint(self, endpoint: Any) -> None:
         runtime_api = self._runtime_api()

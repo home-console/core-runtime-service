@@ -25,8 +25,8 @@ async def register_device_admin_bindings(context: Any) -> list[str]:
             context.http.register(endpoint)
 
         async def _admin_set_state(device_id: str, body: dict = None, **kw):
-            from core.auth_contextvars import get_current_auth_context, set_current_auth_context
-            from core.system_context import create_system_context
+            from core.runtime.auth_contextvars import get_current_auth_context, set_current_auth_context
+            from core.runtime.system_context import create_system_context
 
             ctx = create_system_context("admin", "devices.set_state")
             prev = get_current_auth_context()

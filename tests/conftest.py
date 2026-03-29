@@ -14,7 +14,7 @@ import pytest
 collect_ignore_glob = [] if sys.platform == "linux" else ["test_vault_linux_hardening.py"]
 
 from core.adapters.storage_adapter import StorageAdapter
-from core.state_engine import StateEngine
+from core.runtime.state_engine import StateEngine
 from modules.storage.port import CoreStoragePort
 
 class InMemoryStorageAdapter(StorageAdapter):

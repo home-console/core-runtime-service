@@ -6,8 +6,8 @@ This module lives in modules layer because it wires storage policies
 """
 
 from core.adapters.storage_adapter import StorageAdapter
-from core.config import Config
-from core.state_engine import StateEngine
+from core.runtime.config import Config
+from core.runtime.state_engine import StateEngine
 from modules.storage.errors import StorageConfigurationError
 from modules.storage.manager import StorageManager
 from modules.storage.port import CoreStoragePort, StorageStack, VaultStoragePort

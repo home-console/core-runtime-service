@@ -4,7 +4,7 @@ import time
 from typing import Any
 
 from core.operations.models import Operation, OperationStatus
-from core.runtime_module import RuntimeModule
+from core.runtime.runtime_module import RuntimeModule
 
 from modules.hooks.system import (
     ScheduleRetry,

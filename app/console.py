@@ -15,10 +15,10 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from app.bootstrap import auto_load_plugins_if_enabled, DEFAULT_CRITICAL_STATE_PREFIXES
-from core.config import Config
+from core.runtime.config import Config
 from core.http.models import HttpEndpoint
 from core.runtime.runtime import CoreRuntime
-from core.state_engine import StateEngine
+from core.runtime.state_engine import StateEngine
 from modules.storage.factory import build_storage_stack
 
 

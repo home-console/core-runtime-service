@@ -26,12 +26,27 @@ RuntimeModule — это обязательные домены системы, �
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Awaitable, Callable, Optional, Union
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Optional,
+    Protocol,
+    runtime_checkable,
+)
 
 from core.runtime.runtime_context import RuntimeContext
+from core.service._acl import PreloadResourceFunc
 
 # Тип для сервисной функции: async (*args, **kwargs) -> Any
 ServiceFunc = Callable[..., Awaitable[Any]]
+
+
+@runtime_checkable
+class SupportsContext(Protocol):
+    def create_context(self) -> RuntimeContext:
+        """Создать ограниченный runtime-контекст."""
+        ...
 
 
 class RuntimeModule(ABC):
@@ -59,34 +74,27 @@ class RuntimeModule(ABC):
         - Один экземпляр модуля может быть зарегистрирован только один раз
     """
 
-    def __init__(self, runtime_or_context: Union[Any, RuntimeContext]):
+    def __init__(
+        self,
+        runtime_or_context: RuntimeContext | SupportsContext,
+    ):
         """
         Инициализация модуля.
 
         Args:
             runtime_or_context: экземпляр RuntimeContext или runtime с create_context()
         """
+        self.runtime: SupportsContext | None
+        self.context: RuntimeContext
+
         if isinstance(runtime_or_context, RuntimeContext):
             self.context = runtime_or_context
             self.runtime = None
-        else:
-            self.runtime = runtime_or_context
-            create_context = getattr(runtime_or_context, "create_context", None)
-            if callable(create_context):
-                self.context = create_context()
-            else:
-                # Backward compatibility for tests and legacy runtime stubs.
-                self.context = RuntimeContext(
-                    storage=getattr(runtime_or_context, "storage", None),
-                    services=getattr(runtime_or_context, "service_registry", None),
-                    http=getattr(runtime_or_context, "http", None),
-                    capabilities=getattr(
-                        runtime_or_context, "capability_registry", None
-                    ),
-                    operations=getattr(runtime_or_context, "operations", None),
-                    vault=getattr(runtime_or_context, "vault", None),
-                    state=getattr(runtime_or_context, "state_engine", None),
-                )
+            return
+
+        self.runtime = runtime_or_context
+
+        self.context = runtime_or_context.create_context()
 
     async def register_service(
         self,
@@ -97,7 +105,7 @@ class RuntimeModule(ABC):
         admin_only: bool = False,
         filter_result: bool = False,
         enforce_result: bool = False,
-        preload_resource: Optional[Callable[[tuple, dict], Awaitable[Any]]] = None,
+        preload_resource: Optional[PreloadResourceFunc] = None,
         inject_owner_param: Optional[str] = None,
         version: Optional[str] = None,
     ) -> None:
@@ -109,12 +117,14 @@ class RuntimeModule(ABC):
         - вешает ACL-метаданные через ServiceRegistry.register_with_acl
         """
 
-        async def _wrapper(*args, **kwargs):
+        async def _wrapper(*args: object, **kwargs: object) -> Any:
             return await func(self.context, *args, **kwargs)
 
         reg = self.context.services
-        register_with_acl = getattr(reg, "register_with_acl", None)
-        if callable(register_with_acl):
+        register_with_acl: Callable[..., Awaitable[Any]] | None = getattr(
+            reg, "register_with_acl", None
+        )
+        if register_with_acl is not None:
             await register_with_acl(
                 name,
                 _wrapper,

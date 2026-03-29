@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Awaitable, Callable, Optional
 
-from core.exceptions.errors import ForbiddenError
+from core.exceptions import ForbiddenError
 from core.service.models import ServiceFunc
 
 PreloadResourceFunc = Callable[[tuple[Any, ...], dict[str, Any]], Awaitable[Any]]

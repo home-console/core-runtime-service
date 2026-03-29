@@ -19,11 +19,11 @@ from typing import Any, Awaitable, Callable, Optional
 from core.capability.registry import CapabilityRegistry
 from core.dependency.resolver import DependencyResolver
 from core.http.registry import HttpRegistry
-from core.integration_registry import IntegrationRegistry
+from core.kernel.integration_registry import IntegrationRegistry
 from core.kernel.context import KernelContext
 from core.kernel.plugin_manager import PluginManager
-from core.messaging.inmemory import InMemoryEventBus
-from core.module.manager import ModuleManager
+from core.messaging import InMemoryEventBus
+from core.module import ModuleManager
 from core.operations.manager import OperationManager
 from core.operations.worker import OperationWorker
 from core.orchestration import (
@@ -34,7 +34,7 @@ from core.orchestration import (
 from core.runtime._lifecycle import RuntimeLifecycleMixin
 from core.runtime.runtime_context import RuntimeContext
 from core.service.registry import ServiceRegistry
-from core.state_engine import StateEngine
+from core.runtime.state_engine import StateEngine
 
 
 class CoreRuntime(RuntimeLifecycleMixin):

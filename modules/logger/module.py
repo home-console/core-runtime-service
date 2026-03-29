@@ -15,7 +15,7 @@ import json
 import logging
 from typing import Any
 
-from core.runtime_module import RuntimeModule
+from core.runtime.runtime_module import RuntimeModule
 from modules.hooks.system import register_system_hook, unregister_system_hook
 from modules.hooks.runtime_contract import ensure_runtime_execution_contract
 
@@ -227,7 +227,7 @@ class LoggerModule(RuntimeModule):
                 if has_request_logger:
                     # Используем operation_id из параметров или из контекста выполнения
                     if not operation_id:
-                        from core.operation_context import get_operation_id
+                        from core.runtime.operation_context import get_operation_id
                         operation_id = get_operation_id()
                     
                     if operation_id:

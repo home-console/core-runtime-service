@@ -11,8 +11,8 @@ Module-owned remote execution logic:
 
 from typing import Any, Dict, Optional
 
-from core import capability_protocol
-from core.remote_executor_interface import IRemoteExecutor
+from core.capability import protocol as capability_protocol
+from core.operations.remote_executor_interface import IRemoteExecutor
 
 
 class RemoteOperationExecutor(IRemoteExecutor):

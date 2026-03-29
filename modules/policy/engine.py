@@ -3,8 +3,8 @@
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Iterable, List, Optional
 
-from core.auth_contextvars import get_current_auth_context
-from core.exceptions.errors import ForbiddenError, NotFoundError
+from core.runtime.auth_contextvars import get_current_auth_context
+from core.exceptions import ForbiddenError, NotFoundError
 
 
 class Policy(ABC):
@@ -56,7 +56,7 @@ class DevicePolicy(Policy):
         if not ctx:
             return False
 
-        from core.system_context import is_system_context
+        from core.runtime.system_context import is_system_context
 
         if is_system_context(ctx):
             return True
@@ -93,7 +93,7 @@ class AdminOnlyPolicy(Policy):
         if not ctx:
             return False
 
-        from core.system_context import is_system_context
+        from core.runtime.system_context import is_system_context
 
         if is_system_context(ctx):
             return True
@@ -161,7 +161,7 @@ class PolicyEngine:
         if not ctx:
             return False
 
-        from core.system_context import is_system_context
+        from core.runtime.system_context import is_system_context
 
         if is_system_context(ctx):
             return True

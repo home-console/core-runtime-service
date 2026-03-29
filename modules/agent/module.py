@@ -5,7 +5,7 @@ import logging
 import os
 
 from core.http.models import EndpointAuthConfig, HttpEndpoint
-from core.runtime_module import RuntimeModule
+from core.runtime.runtime_module import RuntimeModule
 
 try:
     from modules.security import SecretStore

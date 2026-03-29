@@ -1,28 +1,31 @@
 """
 Core Runtime - минимальное ядро для plugin-first платформы умного дома.
+
+Импорты здесь намеренно ленивые, чтобы не создавать циклы при загрузке
+подмодулей вроде core.runtime.runtime_context и core.module.
 """
 
-from core.integration_registry import IntegrationRegistry
-from core.messaging.inmemory import InMemoryEventBus as EventBus
-from core.module.manager import ModuleManager
-from core.runtime.runtime import CoreRuntime
-from core.service.registry import ServiceRegistry
+from importlib import import_module
 
-from .config import Config
-from .logger_helper import error, info, warning
-from .runtime_module import RuntimeModule
-from .state_engine import StateEngine
 
-__all__ = [
-    "Config",
-    "CoreRuntime",
-    "EventBus",
-    "ServiceRegistry",
-    "StateEngine",
-    "IntegrationRegistry",
-    "info",
-    "warning",
-    "error",
-    "ModuleManager",
-    "RuntimeModule",
-]
+def __getattr__(name: str):
+    if name == "Config":
+        return import_module("core.runtime.config").Config
+    if name == "CoreRuntime":
+        return import_module("core.runtime.runtime").CoreRuntime
+    if name == "EventBus":
+        return import_module("core.messaging").InMemoryEventBus
+    if name == "ServiceRegistry":
+        return import_module("core.service.registry").ServiceRegistry
+    if name == "StateEngine":
+        return import_module("core.runtime.state_engine").StateEngine
+    if name == "IntegrationRegistry":
+        return import_module("core.kernel.integration_registry").IntegrationRegistry
+    if name == "ModuleManager":
+        return import_module("core.module").ModuleManager
+    if name == "RuntimeModule":
+        return import_module("core.runtime.runtime_module").RuntimeModule
+    if name in {"info", "warning", "error"}:
+        logger_module = import_module("core.observability.logger_helper")
+        return getattr(logger_module, name)
+    raise AttributeError(f"module 'core' has no attribute {name!r}")

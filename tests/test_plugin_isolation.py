@@ -19,7 +19,7 @@ from core.operations import (
     OperationInitiator, OperationInitiatorKind
 )
 from modules.execution.router import ExecutionRouter
-from core.capability_protocol import ProviderMetadata
+from core.capability.protocol import ProviderMetadata
 from modules.capability.registry import CapabilityRegistry
 
 

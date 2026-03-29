@@ -7,7 +7,7 @@ StorageWithStateMirror - обёртка для синхронизации Storag
 
 from typing import Any, AsyncIterator
 
-from core.state_engine import StateEngine
+from core.runtime.state_engine import StateEngine
 from modules.storage.storage import Storage
 
 

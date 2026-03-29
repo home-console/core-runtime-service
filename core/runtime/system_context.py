@@ -11,7 +11,7 @@ SystemContext:
 - Логируется для audit trail
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Set
 
 
@@ -36,7 +36,7 @@ class SystemContext:
     component: str
     operation: str
     is_admin: bool = True
-    scopes: Set[str] = {"admin.*"}
+    scopes: Set[str] = field(default_factory=lambda: {"admin.*"})
 
     def __repr__(self) -> str:
         """String representation for logging."""

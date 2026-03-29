@@ -7,7 +7,7 @@
 import asyncio
 from pathlib import Path
 
-from core.config import Config
+from core.runtime.config import Config
 from core.runtime.runtime import CoreRuntime
 from core.adapters.sqlite_adapter import SQLiteAdapter
 from plugins.test import ExamplePlugin

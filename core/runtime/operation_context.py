@@ -1,59 +1,95 @@
 """
-Helper для system-level операций с четкими границами (operation boundaries).
+Operation context — точка расширения для observability/correlation (operation_id).
 
-Использует operation_id из request_logger для группировки логов.
+Core не реализует хранение operation_id и не импортирует modules.
+Модуль request_logger (или другой) регистрирует провайдер при старте;
+Core только вызывает провайдер, если он установлен.
+Если провайдер не установлен — get_operation_id() возвращает None, set_operation_id() не делает ничего.
 """
 
 import uuid
 from contextlib import asynccontextmanager
-from typing import Optional, Any
+from typing import Any, Optional, Protocol
 
-from core.operation_context import get_operation_id, set_operation_id
+
+class OperationContextProvider(Protocol):
+    """Минимальный интерфейс для получения/установки operation_id в текущем контексте."""
+
+    def get_operation_id(self) -> Optional[str]: ...
+    def set_operation_id(self, value: str) -> None: ...
+
+
+_provider: Optional[OperationContextProvider] = None
+
+
+def set_operation_context_provider(
+    provider: Optional[OperationContextProvider],
+) -> None:
+    """Установить провайдер контекста операций (вызывается модулем при start/stop)."""
+    global _provider
+    _provider = provider
+
+
+def get_operation_context_provider() -> Optional[OperationContextProvider]:
+    """Получить текущий провайдер (для тестов или диагностики)."""
+    return _provider
+
+
+def get_operation_id() -> Optional[str]:
+    """
+    Получить operation_id из текущего контекста выполнения.
+    Если провайдер не установлен — возвращает None.
+    """
+    if _provider is None:
+        return None
+    return _provider.get_operation_id()
+
+
+def set_operation_id(value: str) -> None:
+    """
+    Установить operation_id в текущий контекст выполнения.
+    Если провайдер не установлен — ничего не делает.
+    """
+    if _provider is not None:
+        _provider.set_operation_id(value)
 
 
 @asynccontextmanager
 async def operation(name: str, source: str, runtime: Optional[Any] = None):
     """
     Async context manager для system-level операций.
-    
+
     При входе:
-    - Если operation_id не установлен → создает новый UUID и set_operation_id()
+    - Создаёт новый UUID operation_id и устанавливает его через set_operation_id()
     - Записывает лог "operation.start"
-    
+
     При успешном выходе:
     - Записывает лог "operation.ok"
-    
+
     При ошибке:
     - Записывает лог "operation.error" с exception message
     - Пробрасывает исключение дальше
-    
+
     Args:
         name: имя операции (например, "example.op")
         source: источник операции (имя плагина/модуля)
         runtime: экземпляр CoreRuntime (опционально, для логирования)
-    
+
     Example:
         async with operation("example.op", "example_plugin", runtime):
             await do_work()
     """
-    # ВСЕГДА создаем новый operation_id для system операций
-    # Даже если operation() вызывается внутри HTTP запроса,
-    # system операция должна иметь свой собственный operation_id с origin="system"
     new_operation_id = str(uuid.uuid4())
-    
-    # Сохраняем текущий operation_id (может быть от HTTP запроса)
     previous_operation_id = get_operation_id()
-    
-    # Устанавливаем новый operation_id для этой system операции
     set_operation_id(new_operation_id)
     operation_id = new_operation_id
-    
-    # Логируем начало операции
+
     if runtime:
         try:
-            # Создаем request_metadata для system операций (чтобы origin был доступен в метаданных)
             try:
-                has_request_logger = await runtime.service_registry.has_service("request_logger.set_request_metadata")
+                has_request_logger = await runtime.service_registry.has_service(
+                    "request_logger.set_request_metadata"
+                )
                 if has_request_logger:
                     await runtime.service_registry.call(
                         "request_logger.set_request_metadata",
@@ -63,67 +99,58 @@ async def operation(name: str, source: str, runtime: Optional[Any] = None):
                             "url": f"system://{source}/{name}",
                             "path": f"/system/{source}/{name}",
                             "direction": "outgoing",
-                            "origin": "system",  # Явно помечаем как system операцию
-                        }
+                            "origin": "system",
+                        },
                     )
             except Exception:
-                pass  # Игнорируем ошибки создания метаданных
-            
-            message = "operation.start"
+                pass
             await runtime.service_registry.call(
                 "logger.log",
                 level="info",
-                message=message,
+                message="operation.start",
                 plugin=source,
-                operation_id=operation_id,  # Явно передаем operation_id как отдельный параметр
+                operation_id=operation_id,
                 operation_name=name,
                 source=source,
-                origin="system",  # Явно помечаем как system операцию
+                origin="system",
             )
         except Exception:
             pass
-    
+
     try:
         yield operation_id
-        # Успешное завершение
         if runtime:
             try:
-                message = "operation.ok"
                 await runtime.service_registry.call(
                     "logger.log",
                     level="info",
-                    message=message,
+                    message="operation.ok",
                     plugin=source,
-                    operation_id=operation_id,  # Явно передаем operation_id как отдельный параметр
+                    operation_id=operation_id,
                     operation_name=name,
                     source=source,
-                    origin="system",  # Явно помечаем как system операцию
+                    origin="system",
                 )
             except Exception:
                 pass
     except Exception as e:
-        # Ошибка при выполнении операции
         if runtime:
             try:
-                message = "operation.error"
                 await runtime.service_registry.call(
                     "logger.log",
                     level="error",
-                    message=message,
+                    message="operation.error",
                     plugin=source,
-                    operation_id=operation_id,  # Явно передаем operation_id как отдельный параметр
+                    operation_id=operation_id,
                     operation_name=name,
                     source=source,
                     error=str(e),
                     error_type=type(e).__name__,
-                    origin="system",  # Явно помечаем как system операцию
+                    origin="system",
                 )
             except Exception:
                 pass
-        # Пробрасываем исключение дальше
         raise
     finally:
-        # Восстанавливаем предыдущий operation_id (например, от HTTP запроса)
-        # Это важно, чтобы логи после operation() снова группировались с HTTP запросом
         if previous_operation_id:
             set_operation_id(previous_operation_id)

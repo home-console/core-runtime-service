@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Optional, Any
 
-from core.auth_contextvars import get_current_auth_context, set_current_auth_context
+from core.runtime.auth_contextvars import get_current_auth_context, set_current_auth_context
 
 from .context import RequestContext
 

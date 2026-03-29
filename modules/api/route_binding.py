@@ -413,7 +413,7 @@ def _make_api_handler(runtime: Any, endpoint: Any):
             )
         except Exception as e:
             try:
-                from core.exceptions.errors import (
+                from core.exceptions import (
                     BadRequestError,
                     ForbiddenError,
                     NotFoundError,
@@ -450,7 +450,7 @@ def _make_api_handler(runtime: Any, endpoint: Any):
 
         # Apply cookies from contextvars (set by service layer)
         try:
-            from core.auth_contextvars import get_response_cookies
+            from core.runtime.auth_contextvars import get_response_cookies
 
             cookies = get_response_cookies()
             if cookies:

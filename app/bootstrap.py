@@ -4,8 +4,8 @@ import os
 from typing import Any, Optional
 
 from app.runtime_monitoring import collect_runtime_health, collect_runtime_metrics
-from core.config import Config
-from core.module.models import ModuleSpec
+from core.runtime.config import Config
+from core.module import ModuleSpec
 from core.runtime import CoreRuntime
 from modules.capability.security import (
     check_capability_namespace_permission as check_module_capability_namespace_permission,

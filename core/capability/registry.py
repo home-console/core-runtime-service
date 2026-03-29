@@ -6,7 +6,7 @@ import asyncio
 import threading
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from core.capability_protocol import PROTOCOL_VERSION, ProviderMetadata
+from core.capability.protocol import PROTOCOL_VERSION, ProviderMetadata
 
 CapabilityNamespacePermissionChecker = Callable[[str, str, str], None]
 TrustLevelToPrivilegeMapper = Callable[[object | None], str]

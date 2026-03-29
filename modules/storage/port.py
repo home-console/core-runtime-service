@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Optional
 
-from core.state_engine import StateEngine
+from core.runtime.state_engine import StateEngine
 from modules.storage.abstraction import IStorageBackend
 from modules.storage.manager import StorageManager
 from modules.storage.mirror import StorageWithStateMirror
