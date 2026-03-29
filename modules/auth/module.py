@@ -103,8 +103,7 @@ class AuthModule(RuntimeModule):
         
         for service_name, handler, admin_only in services_config:
             try:
-                services = self.runtime.kernel_context.get_service("service_registry")
-                await services.register_with_acl(
+                await self.context.services.register_with_acl(
                     service_name, handler, admin_only=admin_only
                 )
             except ValueError:

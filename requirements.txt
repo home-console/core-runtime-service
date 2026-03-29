@@ -31,6 +31,9 @@ prometheus-client
 # QR code generation (для yandex_device_auth plugin)
 qrcode[pil]>=7.4.0
 
+# Network scanner (для network_scanner plugin)
+netifaces>=0.11.0
+
 # SSH connect (подключение к хосту по креду из БД)
 paramiko>=3.4.0
 

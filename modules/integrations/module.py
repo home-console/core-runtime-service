@@ -32,11 +32,10 @@ class IntegrationsModule(RuntimeModule):
             return await user_v1_integrations(self.runtime)
 
         try:
-            services = self.runtime.kernel_context.get_service("service_registry")
-            await services.register_with_acl(
+            await self.context.services.register_with_acl(
                 "admin.v1.integrations", _admin_wrap, admin_only=True
             )
-            await services.register_with_acl(
+            await self.context.services.register_with_acl(
                 "user.v1.integrations", _user_wrap, admin_only=False
             )
         except ValueError:

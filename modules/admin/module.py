@@ -118,8 +118,7 @@ class AdminModule(RuntimeModule):
                 "payload_sample": str(payload)[:100] if payload else None,
             }
 
-        services = self.runtime.kernel_context.get_service("service_registry")
-        await services.register("system.webhook_test", webhook_test_service)
+        await self.context.services.register("system.webhook_test", webhook_test_service)
 
         # --- Register admin services (glue: pass runtime via lambda) ---
         def wrap_introspection(fn, with_started_at: bool = False):
@@ -306,12 +305,11 @@ class AdminModule(RuntimeModule):
             async def handler(agent_id=None, body=None, **kw):
                 aid = agent_id or kw.get("agent_id")
                 b = body if body is not None else kw.get("body")
-                services = self.runtime.kernel_context.get_service("service_registry")
-                if not await services.has_service(
+                if not await self.context.services.has_service(
                     "client_manager.start_agent_terminal"
                 ):
                     raise RuntimeError("Agent terminal service not available")
-                return await services.call(
+                return await self.context.services.call(
                     "client_manager.start_agent_terminal", aid, b
                 )
 
@@ -321,10 +319,9 @@ class AdminModule(RuntimeModule):
             async def handler(websocket=None, session_id=None, **kw):
                 ws = websocket or kw.get("websocket")
                 sid = session_id or kw.get("session_id")
-                services = self.runtime.kernel_context.get_service("service_registry")
-                if not await services.has_service("client_manager.agent_terminal_ws"):
+                if not await self.context.services.has_service("client_manager.agent_terminal_ws"):
                     raise RuntimeError("Agent terminal websocket service not available")
-                return await services.call(
+                return await self.context.services.call(
                     "client_manager.agent_terminal_ws", websocket=ws, session_id=sid
                 )
 
@@ -474,8 +471,7 @@ class AdminModule(RuntimeModule):
                 else:
                     # Non-inspector admin services require admin auth (auth services in AuthModule)
                     admin_only = True
-                services = self.runtime.kernel_context.get_service("service_registry")
-                await services.register_with_acl(name, handler, admin_only=admin_only)
+                await self.context.services.register_with_acl(name, handler, admin_only=admin_only)
                 self._registered_services.append(name)
             except ValueError:
                 continue
@@ -502,9 +498,7 @@ class AdminModule(RuntimeModule):
     async def stop(self) -> None:
         for service_name in self._registered_services:
             try:
-                await self.runtime.kernel_context.get_service(
-                    "service_registry"
-                ).unregister(service_name)
+                await self.context.services.unregister(service_name)
             except Exception:
                 pass
         self._registered_services.clear()

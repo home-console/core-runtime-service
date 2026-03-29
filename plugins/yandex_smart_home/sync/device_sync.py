@@ -44,15 +44,10 @@ class DeviceSync:
         Raises:
             RuntimeError: если токены недоступны или запрос к API не удался
         """
-        async with operation("yandex.sync_devices", self.plugin_name, self.runtime):
-            return await self._sync_devices_impl()
-    
-    async def _sync_devices_impl(self) -> List[Dict[str, Any]]:
-        """Реализация синхронизации устройств."""
-        # Feature flag: check storage key `yandex.use_real_api`
+        # Проверяем feature-флаг ДО открытия operation-записи, чтобы не порождать
+        # ERROR-операции которые OperationsWorker будет бесконечно ретраить.
         try:
             use_real_data = await self.runtime.storage_get("yandex", "use_real_api")
-            # Storage returns dict, check if it's truthy or has "enabled" key
             if isinstance(use_real_data, dict):
                 use_real = use_real_data.get("enabled", False) if use_real_data else False
             else:
@@ -61,8 +56,14 @@ class DeviceSync:
             use_real = False
 
         if not use_real:
-            # Not enabled — signal to caller that real API is disabled
-            raise RuntimeError("use_real_api_disabled")
+            # Real API не настроен — тихий ранний выход без создания operation-записи.
+            return []
+
+        async with operation("yandex.sync_devices", self.plugin_name, self.runtime):
+            return await self._sync_devices_impl()
+
+    async def _sync_devices_impl(self) -> List[Dict[str, Any]]:
+        """Реализация синхронизации устройств (вызывается только когда real API включён)."""
 
         # Пытаемся получить устройства через Quasar API (с домами/комнатами)
         # Если не получается, fallback на OAuth API

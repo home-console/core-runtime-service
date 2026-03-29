@@ -73,12 +73,12 @@ class CredentialMetadata:
     username: Optional[str]
     host: Optional[str]
     port: Optional[int]
-    metadata: Dict[str, Any]
-    tags: list[str]
     version: int
     created_at: str
     updated_at: str
     fingerprint: str
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    tags: list[str] = field(default_factory=list)
 
     @classmethod
     def from_domain(cls, credential) -> "CredentialMetadata":

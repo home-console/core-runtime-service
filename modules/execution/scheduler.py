@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, Dict, Literal, Optional
 from uuid import uuid4
@@ -26,26 +26,25 @@ class ExecutionSchedule:
 
     schedule_id: str
     operation_type: str
-    params: Dict[str, Any]
-    context: Dict[str, Any]
-
     trigger_type: ScheduleTriggerType
     trigger_at: Optional[datetime] = None  # delay
     trigger_every_seconds: Optional[int] = None  # interval
-    trigger_cron: Optional[str] = None  # legacy cron field 
+    trigger_cron: Optional[str] = None  # legacy cron field
 
-    # Cron trigger metadata 
+    # Cron trigger metadata
     cron_expr: Optional[str] = None
     cron_timezone: Optional[str] = "UTC"
 
     enabled: bool = True
     max_runs: Optional[int] = None
     run_count: int = 0
-
     last_run_at: Optional[datetime] = None
     next_run_at: datetime | None = None
-
     created_at: datetime = datetime.now(UTC)
+
+    # Mutable fields with default_factory (must be at the end)
+    params: Dict[str, Any] = field(default_factory=dict)
+    context: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -76,8 +75,6 @@ class ExecutionSchedule:
         return cls(
             schedule_id=str(data["schedule_id"]),
             operation_type=str(data["operation_type"]),
-            params=data.get("params") or {},
-            context=data.get("context") or {},
             trigger_type=str(trigger.get("type") or "interval"),  # default interval
             trigger_at=_parse_datetime_optional(trigger.get("at")),
             trigger_every_seconds=_parse_int_optional(trigger.get("every_seconds")),
@@ -90,6 +87,8 @@ class ExecutionSchedule:
             last_run_at=_parse_datetime_optional(data.get("last_run_at")),
             next_run_at=_parse_datetime_optional(data.get("next_run_at")),
             created_at=_parse_datetime(data.get("created_at")),
+            params=data.get("params") or {},
+            context=data.get("context") or {},
         )
 
     def ensure_next_run_at(self, now: datetime) -> None:

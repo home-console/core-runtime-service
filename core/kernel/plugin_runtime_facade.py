@@ -77,6 +77,32 @@ class PluginRuntimeFacade:
     async def storage_list_keys(self, namespace: str) -> list[str]:
         return list(await self.storage.list_keys(namespace))
 
+    async def register_service(
+        self, name: str, func: Callable[..., Awaitable[Any]], **kwargs: Any
+    ) -> None:
+        """Register a service via PluginAPI."""
+        if self.api is None:
+            raise RuntimeError("PluginAPI not initialized")
+        await self.api.register_service(name, func, **kwargs)
+
+    async def unregister_service(self, name: str) -> None:
+        """Unregister a service via PluginAPI."""
+        if self.api is None:
+            raise RuntimeError("PluginAPI not initialized")
+        await self.api.unregister_service(name)
+
+    def register_http(self, endpoint: Any) -> None:
+        """Register an HTTP endpoint via PluginAPI."""
+        if self.api is None:
+            raise RuntimeError("PluginAPI not initialized")
+        self.api.register_http(endpoint)
+
+    def register_operation_handler(self, op_type: str, handler: Any) -> None:
+        """Register an operation handler via PluginAPI."""
+        if self.api is None:
+            raise RuntimeError("PluginAPI not initialized")
+        self.api.register_operation_handler(op_type, handler)
+
     def create_context(self) -> RuntimeContext:
         return RuntimeContext(
             storage=self.storage,

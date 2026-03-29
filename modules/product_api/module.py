@@ -39,11 +39,11 @@ class ProductApiModule(RuntimeModule):
     async def register(self) -> None:
         async def _devices_list(**kwargs: Any) -> Any:
             """BFF: GET /api/v1/devices → devices.list()."""
-            return await services.call("devices.list")
+            return await self.context.services.call("devices.list")
 
         async def _devices_get(id: str, **kwargs: Any) -> Any:
             """BFF: GET /api/v1/devices/{id} → devices.get(id)."""
-            return await services.call("devices.get", id)
+            return await self.context.services.call("devices.get", id)
 
         async def _devices_set_state(id: str, body: Any = None, **kwargs: Any) -> Any:
             """BFF: POST /api/v1/devices/{id}/state → devices.set_state(id, state)."""
@@ -54,22 +54,21 @@ class ProductApiModule(RuntimeModule):
                 and isinstance(body["state"], dict)
             ):
                 state = body["state"]
-            return await services.call("devices.set_state", id, state)
+            return await self.context.services.call("devices.set_state", id, state)
 
         async def _devices_get_external(id: str, **kwargs: Any) -> Any:
             """BFF: GET /api/v1/devices/{id}/external → devices.get(id) затем devices.get_external_for_device(id)."""
-            await services.call("devices.get", id)  # проверка доступа (ACL)
-            return await services.call("devices.get_external_for_device", id)
+            await self.context.services.call("devices.get", id)  # проверка доступа (ACL)
+            return await self.context.services.call("devices.get_external_for_device", id)
 
-        reg_services = self.runtime.kernel_context.get_service("service_registry")
-        await reg_services.register(
+        await self.context.services.register(
             "product_api.v1.devices.list", _devices_list
         )
-        await reg_services.register("product_api.v1.devices.get", _devices_get)
-        await reg_services.register(
+        await self.context.services.register("product_api.v1.devices.get", _devices_get)
+        await self.context.services.register(
             "product_api.v1.devices.set_state", _devices_set_state
         )
-        await reg_services.register(
+        await self.context.services.register(
             "product_api.v1.devices.get_external", _devices_get_external
         )
 
@@ -333,6 +332,6 @@ class ProductApiModule(RuntimeModule):
             "user.v1.credentials.connect",
         ):
             try:
-                await self.runtime.kernel_context.get_service("service_registry").unregister(name)
+                await self.context.services.unregister(name)
             except Exception:
                 pass

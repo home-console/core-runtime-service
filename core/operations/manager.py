@@ -7,7 +7,7 @@ OperationManager - Facade для управления операциями.
 - OperationStorage: персистентность операций
 """
 
-from typing import Any, Optional
+from typing import Any, Optional, List
 
 from core.operations.models import (
     Operation,
@@ -158,7 +158,7 @@ class OperationManager:
 
     # ========== ATTEMPT HISTORY ==========
 
-    async def get_attempts(self, operation_id: str) -> list[Attempt]:
+    async def get_attempts(self, operation_id: str) -> Optional[List[Attempt]]:
         """
         Read API: return ordered attempt history for an operation.
         """

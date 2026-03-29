@@ -1,7 +1,7 @@
 """Rotation strategy abstraction layer (plugin system)."""
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Optional, Dict
 from enum import Enum
 
@@ -19,7 +19,7 @@ class RotationStrategyType(Enum):
 @dataclass
 class RotationStrategyContext:
     """Context for strategy execution."""
-    
+
     credential_id: str
     current_version: int
     vault_store: Any  # SecretStore
@@ -28,13 +28,9 @@ class RotationStrategyContext:
     trust_engine: Any  # TrustEngine
     risk_engine: Any  # RiskEngine (optional)
     security_orchestrator: Any  # SecurityOrchestrator
-    
+
     # Strategy-specific context
-    extra_params: Dict[str, Any] = None
-    
-    def __post_init__(self):
-        if self.extra_params is None:
-            self.extra_params = {}
+    extra_params: Optional[Dict[str, Any]] = field(default_factory=dict)
 
 
 @dataclass

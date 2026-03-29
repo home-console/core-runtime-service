@@ -149,8 +149,8 @@ class ProviderMetadata:
     provider_version: Optional[str] = None  # e.g., "1.2.0"
     health: Optional[ProviderHealthStatus] = None
     remote_config: Optional[Dict[str, Any]] = None
-    timeouts: Dict[str, float] = None  # capability -> timeout_seconds
-    capabilities: List[str] = None     # Manifest: capabilities this provider supports
+    timeouts: Optional[Dict[str, float]] = None  # capability -> timeout_seconds
+    capabilities: Optional[List[str]] = None     # Manifest: capabilities this provider supports
     execution_mode: str = "in_process"  # in_process | process | container | remote
     process_config: Optional[Dict[str, Any]] = None  # Process execution config
     container_config: Optional[Dict[str, Any]] = None  # Container execution config

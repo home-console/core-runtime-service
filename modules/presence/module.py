@@ -31,8 +31,7 @@ class PresenceModule(RuntimeModule):
         Регистрирует сервис presence.set и HTTP endpoints.
         """
         # Регистрация сервиса
-        services = self.runtime.kernel_context.get_service("service_registry")
-        await services.register("presence.set", self._set_service)
+        await self.context.services.register("presence.set", self._set_service)
 
         # Регистрация HTTP контрактов
         try:
@@ -77,8 +76,7 @@ class PresenceModule(RuntimeModule):
         """
         # Отмена регистрации сервиса
         try:
-            services = self.runtime.kernel_context.get_service("service_registry")
-            await services.unregister("presence.set")
+            await self.context.services.unregister("presence.set")
         except Exception:
             pass
 
@@ -132,8 +130,7 @@ class PresenceModule(RuntimeModule):
         except Exception as exc:
             # Логируем ошибки, но не ломаем Core
             try:
-                services = self.runtime.kernel_context.get_service("service_registry")
-                await services.call(
+                await self.context.services.call(
                     "logger.log",
                     level="error",
                     message=f"presence.set error: {str(exc)}",

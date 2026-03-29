@@ -9,7 +9,7 @@ Validates:
 """
 
 from typing import Any, Dict, List, Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import logging
 
 from modules.marketplace.semver import Version
@@ -27,14 +27,8 @@ class UpdateCheck:
     """Result of update check."""
     can_update: bool
     reason: str = ""
-    blocking_issues: Optional[List[str]] = None
-    warnings: Optional[List[str]] = None
-    
-    def __init__(self, can_update: bool, **kwargs):
-        self.can_update = can_update
-        self.reason = kwargs.get("reason", "")
-        self.blocking_issues = kwargs.get("blocking_issues", [])
-        self.warnings = kwargs.get("warnings", [])
+    blocking_issues: Optional[List[str]] = field(default_factory=list)
+    warnings: Optional[List[str]] = field(default_factory=list)
 
 
 class PluginUpdateValidator:

@@ -5,7 +5,7 @@ OperationHandlerRegistry - реестр обработчиков операци�
 """
 
 import threading
-from typing import Any, Awaitable, Callable, Dict, List
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from core.operations.models import Operation
 

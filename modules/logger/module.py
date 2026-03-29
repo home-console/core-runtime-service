@@ -221,23 +221,21 @@ class LoggerModule(RuntimeModule):
         
         # Если доступен RequestLoggerModule, записываем лог туда тоже
         try:
-            services = self.runtime.kernel_context.get_service("service_registry")
-            if services:
-                has_request_logger = await services.has_service("request_logger.log")
-                if has_request_logger:
-                    # Используем operation_id из параметров или из контекста выполнения
-                    if not operation_id:
-                        from core.runtime.operation_context import get_operation_id
-                        operation_id = get_operation_id()
-                    
-                    if operation_id:
-                        await services.call(
-                            "request_logger.log",
-                            request_id=operation_id,  # Используем operation_id как request_id для обратной совместимости API
-                            level=lvl,
-                            message=message,
-                            **{k: v for k, v in context.items() if k not in ("request_id", "operation_id")}
-                        )
+            has_request_logger = await self.context.services.has_service("request_logger.log")
+            if has_request_logger:
+                # Используем operation_id из параметров или из контекста выполнения
+                if not operation_id:
+                    from core.runtime.operation_context import get_operation_id
+                    operation_id = get_operation_id()
+
+                if operation_id:
+                    await self.context.services.call(
+                        "request_logger.log",
+                        request_id=operation_id,  # Используем operation_id как request_id для обратной совместимости API
+                        level=lvl,
+                        message=message,
+                        **{k: v for k, v in context.items() if k not in ("request_id", "operation_id")}
+                    )
         except Exception:
             # Игнорируем ошибки при записи в RequestLoggerModule
             # Это не должно влиять на основное логирование

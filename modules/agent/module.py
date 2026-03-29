@@ -154,88 +154,87 @@ class AgentControlPlaneModule(RuntimeModule):
             return lambda *args, **kw: fn(self.runtime, *args, **kw)
 
         # Register services with service registry
-        services = self.runtime.kernel_context.get_service("service_registry")
-        await services.register(
+        await self.context.services.register(
             "admin.agent.create_enrollment_token",
             wrap_agent(admin_agent_create_enrollment_token),
         )
-        await services.register(
+        await self.context.services.register(
             "admin.agent.generate_bootstrap_token",
             wrap_agent(admin_agent_generate_bootstrap_token),
         )
-        await services.register(
+        await self.context.services.register(
             "admin.agent.enroll_agent",
             wrap_agent(admin_agent_enroll_agent),
         )
-        await services.register(
+        await self.context.services.register(
             "admin.agent.list_agents",
             wrap_agent(admin_agent_list_agents),
         )
-        await services.register(
+        await self.context.services.register(
             "admin.agent.get_agent",
             wrap_agent(admin_agent_get_agent),
         )
-        await services.register(
+        await self.context.services.register(
             "admin.agent.deregister_agent",
             wrap_agent(admin_agent_deregister_agent),
         )
-        await services.register(
+        await self.context.services.register(
             "admin.agent.list_agents_providing_capability",
             wrap_agent(admin_agent_list_agents_providing_capability),
         )
 
         # ==== Deployment Services (TASK 1.1) ====
-        await services.register(
+        await self.context.services.register(
             "admin.agent.deploy",
             wrap_agent(admin_agent_deploy),
         )
-        await services.register(
+        await self.context.services.register(
             "admin.agent.get_deployment_status",
             wrap_agent(admin_agent_get_deployment_status),
         )
-        await services.register(
+        await self.context.services.register(
             "admin.agent.get_deployment_metrics",
             wrap_agent(admin_agent_get_deployment_metrics),
         )
-        await services.register(
+        await self.context.services.register(
             "admin.agent.heartbeat",
             wrap_agent(admin_agent_heartbeat),
         )
 
         # ==== Heartbeat Monitoring Services (TASK 1.3) ====
-        await services.register(
+        await self.context.services.register(
             "admin.agent.get_heartbeat_status",
             wrap_agent(admin_agent_get_heartbeat_status),
         )
-        await services.register(
+        await self.context.services.register(
             "admin.agent.check_agents_health",
             wrap_agent(admin_agent_check_agents_health),
         )
-        await services.register(
+        await self.context.services.register(
             "admin.agent.list_online_agents",
             wrap_agent(admin_agent_list_online_agents),
         )
 
         # ==== Download Services (TASK 2.2) ====
-        await services.register(
+        await self.context.services.register(
             "admin.agent.download_checksum",
             wrap_agent(admin_agent_download_checksum),
         )
-        await services.register(
+        await self.context.services.register(
             "admin.agent.download_binary",
             wrap_agent(admin_agent_download_binary),
         )
 
         # ==== Logs + Status Services (TASK 3.1 / 3.2) ====
-        await services.register(
+        await self.context.services.register(
             "admin.agent.submit_logs",
             wrap_agent(admin_agent_submit_logs),
         )
-        await services.register(
+        await self.context.services.register(
             "admin.agent.get_logs",
             wrap_agent(admin_agent_get_logs),
         )
-        await services.register(
+        await self.context.services.register(
             "admin.agent.get_status",
             wrap_agent(admin_agent_get_status),
         )
