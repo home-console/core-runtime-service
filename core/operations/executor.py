@@ -10,7 +10,7 @@ from typing import Any
 
 from core.operations.interface import IOperationExecutor
 from core.operations.models import AttemptStatus, Operation, OperationError, OperationStatus
-from core.operations.registry import OperationHandlerRegistry, get_operation_handler
+from core.operations.registry import OperationHandlerRegistry
 
 
 class OperationExecutor(IOperationExecutor):
@@ -25,10 +25,7 @@ class OperationExecutor(IOperationExecutor):
         self.storage = storage
 
     def resolve_handler(self, operation: Operation):
-        handler = self.registry.find_handler(operation.type, self.runtime)
-        if handler is not None:
-            return handler
-        return get_operation_handler(operation.type)
+        return self.registry.find_handler(operation.type)
 
     def _build_handler_context(self, operation: Operation) -> dict[str, Any]:
         return {

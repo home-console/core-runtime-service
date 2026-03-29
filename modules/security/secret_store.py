@@ -1,5 +1,5 @@
 """
-Step 14: Secure Secret Store — encrypted vault for credentials.
+Secure Secret Store — encrypted vault for credentials.
 
 Features:
 - AES-256-GCM encryption at rest

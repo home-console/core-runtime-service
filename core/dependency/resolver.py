@@ -1,5 +1,5 @@
 """
-Dependency Resolver — system-level integrity checking (D2).
+Dependency Resolver — system-level integrity checking .
 
 Валидирует что систему нельзя сломать через различные операции.
 """

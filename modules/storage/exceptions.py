@@ -1,6 +1,6 @@
 """Storage integrity exceptions shared with core primitives."""
 
-from core.storage_exceptions import (
+from core.storage_errors import (
     StorageCorruptionError,
     StorageRollbackDetected,
     StorageTamperDetected,

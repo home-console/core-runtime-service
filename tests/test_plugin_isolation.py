@@ -1,5 +1,5 @@
 """
-Test suite for Step 9: Plugin Execution Isolation.
+Test suite for flow: Plugin Execution Isolation.
 
 Tests execution modes: in_process, process, container, remote.
 Validates execution routing, error handling, timeouts.

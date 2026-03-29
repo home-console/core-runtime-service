@@ -57,16 +57,16 @@
   - `core/trust/signature.py` facade (if needed)
   - `core/trust/trust_store.py` facade (if needed)
   - `core/trust/verifier.py` facade (if needed)
-- Stage 1 (done): migrated first production call sites to security namespace bridge (`modules/marketplace/installer.py`, `core/capability/security.py`).
-- Stage 2 (done): migrated trust model tests to security namespace bridge (`tests/test_trust_model.py`).
-- Stage 3 (done): direct production/test imports migrated; `core/trust/*` now compatibility wrappers over security-domain implementation.
-- Stage 4 (in progress): keep compatibility wrappers through transition window, then remove per release plan.
+- Wave 1 (done): migrated first production call sites to security namespace bridge (`modules/marketplace/installer.py`, `core/capability/security.py`).
+- Wave 2 (done): migrated trust model tests to security namespace bridge (`tests/test_trust_model.py`).
+- Wave 3 (done): direct production/test imports migrated; `core/trust/*` now compatibility wrappers over security-domain implementation.
+- Wave 4 (in progress): keep compatibility wrappers through transition window, then remove per release plan.
 
 ### Storage consolidation
 - Primary constraint: `core/storage.py` file name conflicts with `core/storage/` package in Python import resolution.
 - Canonical migration path uses `core/storage_layer/__init__.py` as stable API surface.
-- Stage 1 (done): moved production + runtime/context/exceptions + tests/scripts imports to `core.storage_layer`.
-- Stage 2 (in progress): keep `core/storage*.py` internals on direct imports to avoid cycles while `storage_layer` remains the canonical external surface.
+- Wave 1 (done): moved production + runtime/context/exceptions + tests/scripts imports to `core.storage_layer`.
+- Wave 2 (in progress): keep `core/storage*.py` internals on direct imports to avoid cycles while `storage_layer` remains the canonical external surface.
 
 ### Policy/Authz
 - `core/policy_engine.py` -> `core/policy/engine.py`

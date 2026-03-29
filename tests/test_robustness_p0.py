@@ -15,9 +15,10 @@ from unittest.mock import Mock
 
 import pytest
 
-from core.dependency import DependencyResolver
+from core.dependency.resolver import DependencyResolver
 from core.kernel.base_plugin import BasePlugin, PluginMetadata
-from core.plugins import PluginManager, PluginState
+from core.kernel.plugin_manager import PluginManager
+from core.kernel.plugin_registry import PluginState
 from core.runtime.runtime import CoreRuntime
 from core.state_engine import StateEngine
 from modules.marketplace.installer import MarketplaceInstaller

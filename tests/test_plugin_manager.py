@@ -1,7 +1,8 @@
 import pytest
 
 from core.kernel.base_plugin import BasePlugin, PluginMetadata
-from core.plugins import PluginManager, PluginState
+from core.kernel.plugin_manager import PluginManager
+from core.kernel.plugin_registry import PluginState
 
 
 class DummyPlugin(BasePlugin):

@@ -16,7 +16,7 @@ _current_auth_context: ContextVar[Optional[Any]] = ContextVar("current_auth_cont
 
 # Cookies that need to be set by the HTTP layer
 # Default to empty dict if not set
-_response_cookies: ContextVar[Dict[str, Dict[str, Any]]] = ContextVar("response_cookies", default=None)
+_response_cookies: ContextVar[Optional[Dict[str, Dict[str, Any]]]] = ContextVar("response_cookies", default=None)
 
 
 def set_current_auth_context(ctx: Optional[Any]) -> None:

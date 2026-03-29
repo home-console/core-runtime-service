@@ -1,5 +1,5 @@
 """
-Unit tests for Credential Runtime Module (Step 17.3)
+Unit tests for Credential Runtime Module (flow)
 
 Tests cover:
 - Module registration

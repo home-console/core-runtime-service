@@ -5,21 +5,9 @@ OperationHandlerRegistry - реестр обработчиков операци�
 """
 
 import threading
-from typing import Any, Dict, Optional, List, Callable, Awaitable
+from typing import Any, Awaitable, Callable, Dict, List
 
 from core.operations.models import Operation
-
-OperationHandler = Callable[[dict[str, Any]], Awaitable[Any]]
-
-_operation_registry: Dict[str, OperationHandler] = {}
-
-
-def register_operation_handler(op_type: str, handler: OperationHandler) -> None:
-    _operation_registry[op_type] = handler
-
-
-def get_operation_handler(op_type: str) -> OperationHandler | None:
-    return _operation_registry.get(op_type)
 
 
 class OperationHandlerRegistry:
@@ -30,18 +18,14 @@ class OperationHandlerRegistry:
     Thread-safe для параллельного доступа.
     """
     
-    def __init__(self, execution_router: Optional[Any] = None):
+    def __init__(self):
         """
         Инициализация реестра.
-        
-        Args:
-            execution_router: опциональный ExecutionRouter для обратной совместимости
         """
         # Type name -> handler (async callable)
         self._handlers: Dict[str, Callable[[Any, Operation], Awaitable[Dict[str, Any]]]] = {}
         # P0 Hardening: Lock for thread-safe access to _handlers
         self._handlers_lock = threading.RLock()
-        self._execution_router = execution_router
     
     def register(
         self,
@@ -85,23 +69,15 @@ class OperationHandlerRegistry:
     def find_handler(
         self,
         operation_type: str,
-        runtime: Optional[Any] = None
     ) -> Optional[Callable[[Any, Operation], Awaitable[Dict[str, Any]]]]:
         """
         Find handler for operation type.
-        
-        Routing strategy:
-        1. Try direct lookup in _handlers (backward compatibility)
-        2. Try capability-based lookup via CapabilityRegistry
-        3. Return None if not found
-        
+
         Args:
-            operation_type: Operation type (can be plugin name or capability)
-            runtime: опциональный runtime для capability lookup
-            
+            operation_type: Operation type name
+
         Returns:
             Handler callable or None
         """
-        del runtime
         with self._handlers_lock:
             return self._handlers.get(operation_type)

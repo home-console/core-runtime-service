@@ -1,5 +1,5 @@
 """
-Module Manager — runtime built-in modules manager (D2).
+Module Manager — runtime built-in modules manager .
 
 Управляет жизненным циклом RuntimeModule:
 - обнаружение и регистрация модулей

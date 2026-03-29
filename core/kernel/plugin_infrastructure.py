@@ -87,13 +87,10 @@ class PluginInfrastructureCoordinator:
         metadata: PluginMetadata = plugin.metadata
         plugin_name = metadata.name
 
-        # 1. Очистка operation handler'ов (legacy привязка по capability / имени плагина)
+        # 1. Очистка operation handler'ов, связанных с capabilities плагина
         if self._ops is not None:
-            for cap_id in metadata.capabilities_provided:
-                # Unregister direct handler (backward compatibility)
+            for cap_id in (metadata.capabilities_provided or []):
                 self._ops.unregister_handler(cap_id)
-                # Unregister plugin name as handler (if it was used)
-                self._ops.unregister_handler(plugin_name)
 
         # 2. Удаление capabilities из CapabilityRegistry
         if self._cap_reg is not None:

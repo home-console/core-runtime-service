@@ -40,7 +40,7 @@ CRITICAL_NAMESPACES = {
     "agent_registry",
     "secrets.store",
     "marketplace.transactions",
-    "_audit.security",  # Step 17.5: Credential security audit trail (tamper-evident)
+    "_audit.security",  # Credential security audit trail (tamper-evident)
 }
 
 # NAMESPACES с системной информацией (не должны быть напрямую доступны)
@@ -206,7 +206,7 @@ class SecureStorageWrapper:
         root_data = {
             "root_hash": current_root,
             "epoch": self._current_epoch,
-            "signed_by": "core_key",  # Placeholder; real Ed25519/ECDSA signing in Step 17+
+            "signed_by": "core_key",  # Placeholder; real Ed25519/ECDSA signing added in hardened profile
             "calculated_at": datetime.now(UTC).isoformat(),
         }
 
@@ -449,7 +449,7 @@ class SecureStorageWrapper:
 
     async def append(self, namespace: str, event: dict[str, Any]) -> str:
         """
-        Append-only write for security events (Step 17.5).
+        Append-only write for security events.
 
         Используется для неизменяемых событий аудита, которые:
         - Никогда не переписываются

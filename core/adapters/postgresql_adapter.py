@@ -24,7 +24,7 @@ except ImportError:
     ASYNCPG_AVAILABLE = False
 
 from .storage_adapter import StorageAdapter
-from core.storage_exceptions import StorageCorruptionError
+from core.storage_errors import StorageCorruptionError
 
 
 class PostgreSQLAdapter(StorageAdapter):

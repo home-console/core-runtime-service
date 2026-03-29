@@ -1,7 +1,7 @@
 """
 Plugin Update Validator — check update safety and validity.
 
-Step 12: Validates:
+Validates:
 - Version constraints (no downgrade without force)
 - Dependency compatibility
 - Capability availability after update

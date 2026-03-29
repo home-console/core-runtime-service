@@ -9,13 +9,13 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from core.capability.registry import CapabilityRegistry
-from core.http import HttpRegistry
+from core.http.registry import HttpRegistry
 from core.operations.manager import OperationManager
-from core.service import ServiceRegistry
+from core.service.registry import ServiceRegistry
 
 
 @dataclass
-class LegacyRuntimeContext:
+class RuntimeContext:
     """
     Ограниченный контекст для модулей и плагинов.
 
@@ -56,7 +56,3 @@ class LegacyRuntimeContext:
             raise ValueError("capabilities is required")
         if self.operations is None:
             raise ValueError("operations is required")
-
-
-# Backward compatibility layer
-RuntimeContext = LegacyRuntimeContext

@@ -1,5 +1,5 @@
 """
-Step 13: Resource Limits Tests — rate limiting and resource enforcement.
+flow: Resource Limits Tests — rate limiting and resource enforcement.
 
 Tests for:
 - PluginRateLimiter (token bucket algorithm)

@@ -1,11 +1,21 @@
 from __future__ import annotations
 
+import os
 from typing import Any, Optional
 
+from app.runtime_monitoring import collect_runtime_health, collect_runtime_metrics
 from core.config import Config
-from core.module import ModuleSpec
+from core.module.models import ModuleSpec
 from core.runtime import CoreRuntime
+from modules.capability.security import (
+    check_capability_namespace_permission as check_module_capability_namespace_permission,
+    trust_level_to_privilege as module_trust_level_to_privilege,
+)
 from modules.policy.engine import PolicyEngine as ModulePolicyEngine
+from modules.policy.service_policy import (
+    build_service_acl_wrapper as build_module_service_acl_wrapper,
+    create_default_policy_engine as create_module_service_policy_engine,
+)
 from modules.events.validation import EventValidationMiddleware
 from modules.plugins.isolation import (
     DEFAULT_ALLOWED_SERVICES,
@@ -31,6 +41,13 @@ APP_MODULES: list[ModuleSpec] = [
     ModuleSpec("automation", required=False),
     ModuleSpec("presence", required=True),
     ModuleSpec("product_api", required=False),
+]
+
+DEFAULT_CRITICAL_STATE_PREFIXES: list[str] = [
+    "plugins.",
+    "agent.",
+    "ca.",
+    "runtime.snapshots",
 ]
 
 
@@ -73,13 +90,41 @@ async def build_runtime(
         vault_port=vault_port,
         state_engine=state_engine,
         policy_engine=ModulePolicyEngine(),
+        service_policy_engine_factory=create_module_service_policy_engine,
+        service_acl_wrapper_builder=build_module_service_acl_wrapper,
+        capability_namespace_permission_checker=check_module_capability_namespace_permission,
+        trust_level_to_privilege_mapper=module_trust_level_to_privilege,
+        critical_state_prefixes=list(DEFAULT_CRITICAL_STATE_PREFIXES),
     )
     runtime.storage_manager = storage_manager
     runtime.event_validation_middleware_factory = EventValidationMiddleware
     runtime.plugin_storage_proxy_cls = StorageProxy
     runtime.plugin_service_proxy_cls = ServiceProxy
     runtime.plugin_default_allowed_services = list(DEFAULT_ALLOWED_SERVICES)
+    runtime.runtime_health_check = collect_runtime_health
+    runtime.runtime_metrics_collector = collect_runtime_metrics
 
     specs = module_specs or parse_module_specs(config)
     await runtime.module_manager.register_module_specs(runtime, specs)
     return runtime
+
+
+async def auto_load_plugins_if_enabled(runtime: CoreRuntime, config: Config) -> None:
+    """
+    App-level policy for plugin auto-discovery.
+
+    Core runtime does not decide plugin discovery strategy.
+    """
+    should_auto_load_plugins = bool(
+        getattr(config, "auto_load_plugins", config is not None)
+    )
+    if not should_auto_load_plugins:
+        return
+    if os.getenv("TEST_MODE") or os.getenv("PYTEST_CURRENT_TEST"):
+        return
+
+    loaded_plugins = await runtime.plugin_manager.list_plugins()
+    if loaded_plugins:
+        return
+
+    await runtime.plugin_manager.auto_load_plugins()

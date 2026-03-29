@@ -1,5 +1,5 @@
 """
-Comprehensive tests for Step 17.9 — Trust Restoration & Cooldown Engine.
+Comprehensive tests for flow — Trust Restoration & Cooldown Engine.
 
 Test coverage:
 ✅ Trust state transitions
@@ -258,12 +258,12 @@ class TestTrustEngineStateManagement:
         engine = TrustEngine(config=config)
         user_id = "charlie"
         
-        # Step 1: Freeze account
+        # flow: Freeze account
         now = time.time()
         decision1 = await engine.evaluate(user_id, 90.0, now)
         assert decision1.new_state.level == TrustLevel.FROZEN
         
-        # Step 2: Wait for freeze to expire
+        # flow: Wait for freeze to expire
         await asyncio.sleep(3)
         now2 = time.time()
         decision2 = await engine.evaluate(user_id, 20.0, now2)

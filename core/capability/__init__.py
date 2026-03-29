@@ -1,7 +1,9 @@
 """Core capability registry exports."""
 
 from core.capability.registry import CapabilityRegistry
-from core.capability.security import CapabilitySecurityError
+
+
+class CapabilitySecurityError(Exception):
+    """Compatibility exception for legacy imports."""
 
 __all__ = ["CapabilityRegistry", "CapabilitySecurityError"]
-

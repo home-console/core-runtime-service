@@ -88,7 +88,7 @@ class RotationExecutor:
             RotationFailedError: if rotation execution fails
         """
         try:
-            # Step 1: Check if rotation allowed (pre-flight check)
+            # Check if rotation allowed (pre-flight check)
             if self.trust_engine:
                 trust_state = await self.trust_engine.get_state(credential_id)
 
@@ -104,13 +104,13 @@ class RotationExecutor:
                         f"Cannot rotate {credential_id}: account frozen"
                     )
 
-            # Step 2: Map policy strategy to strategy type
+            # Map policy strategy to strategy type
             strategy_type = self._map_policy_to_strategy(rotation_policy.strategy)
 
-            # Step 3: Get strategy from registry
+            # Get strategy from registry
             strategy = await self.strategy_registry.get_or_fail(strategy_type)
 
-            # Step 4: Create execution context
+            # Create execution context
             context = RotationStrategyContext(
                 credential_id=credential_id,
                 current_version=current_version,
@@ -123,7 +123,7 @@ class RotationExecutor:
                 extra_params=extra_context or {},
             )
 
-            # Step 5: Validate strategy can execute
+            # Validate strategy can execute
             if not await strategy.validate(context):
                 await self.audit_binder.append_event(
                     event_type="credential_rotation_validation_failed",
@@ -136,7 +136,7 @@ class RotationExecutor:
                     f"Strategy validation failed for {credential_id}"
                 )
 
-            # Step 6: Execute rotation through strategy
+            # Execute rotation through strategy
             await self.audit_binder.append_event(
                 event_type="credential_rotation_started",
                 metadata={
@@ -148,7 +148,7 @@ class RotationExecutor:
 
             result = await strategy.execute(context)
 
-            # Step 7: Check result
+            # Check result
             if not result.success:
                 await self.audit_binder.append_event(
                     event_type="credential_rotation_failed",
@@ -173,7 +173,7 @@ class RotationExecutor:
                     "Strategy returned success but missing secret_ref or version"
                 )
 
-            # Step 8: Update credential with new version
+            # Update credential with new version
             credential = await self.repository.get(credential_id)
             updated_credential = credential.mutate(
                 version=result.new_version,
@@ -181,7 +181,7 @@ class RotationExecutor:
             )
             await self.repository.update(updated_credential)
 
-            # Step 9: Log success
+            # Log success
             await self.audit_binder.append_event(
                 event_type=result.audit_event_type or "credential_rotated",
                 metadata={

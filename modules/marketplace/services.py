@@ -79,7 +79,7 @@ class MarketplaceService:
             # Store installation info
             self._store_installed_plugin(result)
 
-            # Log to audit trail (Step 12.5: Audit logging)
+            # Log to audit trail
             plugin_name = result.get("name")
             plugin_version = result.get("version")
             audit_entry = {
@@ -213,7 +213,7 @@ class MarketplaceService:
             self._store_installed_plugin(result)
             new_version = result["version"]
 
-            # Log to audit trail (Step 12.5: Audit logging)
+            # Log to audit trail
             audit_entry = {
                 "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
                 "action": "update",
@@ -404,7 +404,7 @@ class MarketplaceService:
         """Get all installed plugins from storage."""
         return self.storage.get("marketplace.installed") or {}
 
-    # ========== Step 12: Registry-based operations ==========
+    # ========== Registry-based operations ==========
 
     async def handle_install_from_registry(
         self, operation: Operation
@@ -460,7 +460,7 @@ class MarketplaceService:
                 plugin_name, release.version, registry_url, channel
             )
 
-            # Log to audit trail (Step 12.5: Audit logging)
+            # Log to audit trail
             audit_entry = {
                 "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
                 "action": "install_from_registry",
@@ -693,7 +693,7 @@ class MarketplaceService:
             return {"status": "failure", "error": str(e)}
 
     def _add_audit_log(self, audit_entry: Dict[str, Any]) -> None:
-        """Add entry to marketplace audit log (Step 12.5)."""
+        """Add entry to marketplace audit log."""
         try:
             audit_log = self.storage.get("marketplace.audit", {})
 

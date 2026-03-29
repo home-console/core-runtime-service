@@ -3,7 +3,7 @@
 import logging
 from typing import Any
 
-from core.messaging.event_bus import EventBusMiddleware
+from core.messaging.inmemory import EventBusMiddleware
 from modules.events.registry import get_event_validator
 
 logger = logging.getLogger(__name__)

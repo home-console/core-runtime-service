@@ -1,4 +1,4 @@
-"""Step 15: Agent Control Plane Services."""
+"""Agent Control Plane Services."""
 
 import asyncio
 import logging
@@ -479,7 +479,7 @@ async def _execute_deployment(
             logger.error(f"[ExecuteDeployment] Deployment {deployment_id} not found")
             return
 
-        # ========== STEP 1: SSH DEPLOYMENT ==========
+        # ========== SSH DEPLOYMENT ==========
         logger.info(f"[ExecuteDeployment] Starting SSH deployment: {deployment_id}")
 
         await runtime.deployment_tracker.update_status(
@@ -524,7 +524,7 @@ async def _execute_deployment(
             install_stderr=deploy_result.get("install_stderr", ""),
         )
 
-        # ========== STEP 2: WAIT FOR ENROLLMENT ==========
+        # ========== WAIT FOR ENROLLMENT ==========
         logger.info(f"[ExecuteDeployment] Waiting for enrollment: {agent_name}")
 
         await runtime.deployment_tracker.update_status(
@@ -605,7 +605,7 @@ async def _execute_deployment(
             deployment_id, status="registering", agent_id=enrolled_agent_id, progress=75
         )
 
-        # ========== STEP 3: WAIT FOR HEARTBEAT ==========
+        # ========== WAIT FOR HEARTBEAT ==========
         logger.info(
             f"[ExecuteDeployment] Waiting for agent heartbeat: {enrolled_agent_id}"
         )

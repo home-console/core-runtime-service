@@ -1,21 +1,24 @@
 """
-Service Registry — registry for service-based inter-plugin communication (D2).
+Service Registry — registry for service-based inter-plugin communication.
 
 Реестр сервисов для между плагинов взаимодействия.
+
+ACL builder и типы — см. core/service/_acl.py.
 """
 
 import asyncio
 from typing import Any, List, Optional
 
-from core.service.service_executor import ServiceExecutor
-from core.service.service_policy import (
+from core.service._acl import (
+    PolicyEngineFactory,
     PreloadResourceFunc,
-    build_service_acl_wrapper,
-    create_default_policy_engine,
+    ServiceAclWrapperBuilder,
+    _default_acl_wrapper_builder,
+    _default_policy_engine_factory,
 )
-from core.service.service_router import ServiceRouter
-
 from core.service.models import ServiceFunc, ServiceMiddleware
+from core.service.service_executor import ServiceExecutor
+from core.service.service_router import ServiceRouter
 
 
 class ServiceRegistry:
@@ -34,6 +37,8 @@ class ServiceRegistry:
         default_timeout: Optional[float] = None,
         *,
         policy_engine: Optional[Any] = None,
+        policy_engine_factory: Optional[PolicyEngineFactory] = None,
+        acl_wrapper_builder: Optional[ServiceAclWrapperBuilder] = None,
     ):
         """
         Инициализация ServiceRegistry.
@@ -55,8 +60,11 @@ class ServiceRegistry:
         self._default_timeout: Optional[float] = default_timeout
         self._executor = ServiceExecutor(default_timeout=default_timeout)
         self._router = ServiceRouter(self._services)
-        # Policy engine for service ACL wrappers.
-        self._policy_engine = create_default_policy_engine(policy_engine)
+        self._policy_engine_factory = (
+            policy_engine_factory or _default_policy_engine_factory
+        )
+        self._acl_wrapper_builder = acl_wrapper_builder or _default_acl_wrapper_builder
+        self._policy_engine = self._policy_engine_factory(policy_engine)
 
     async def add_middleware(self, middleware: ServiceMiddleware) -> None:
         """Добавить глобальный middleware для всех вызовов."""
@@ -150,7 +158,7 @@ class ServiceRegistry:
             filter_result: если True и результат — iterable[dict], отфильтрует через политику
             version: версия сервиса (опционально)
         """
-        wrapped, effective_admin_only = build_service_acl_wrapper(
+        wrapped, effective_admin_only = self._acl_wrapper_builder(
             policy_engine=self._policy_engine,
             service_name=service_name,
             func=func,

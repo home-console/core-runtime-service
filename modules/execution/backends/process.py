@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 """
-Process execution backend (D3.2).
+Process execution backend .
 
 Использует тот же execution-протокол и runner, что и ContainerBackend, но
 запускает runner как локальный subprocess (без Docker / container runtime).

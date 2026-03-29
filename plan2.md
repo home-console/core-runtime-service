@@ -45,9 +45,9 @@
 
 ---
 
-## 4) План 2: поэтапно и максимально подробно
+## 4) План 2: поразделно и максимально подробно
 
-## Этап 0. Baseline и защита от регрессий
+## раздел 0. Baseline и защита от регрессий
 
 Цель:
 - Зафиксировать рабочую точку перед крупным переносом.
@@ -70,7 +70,7 @@ Done:
 
 ---
 
-## Этап 1. Архитектурные гейты (без перемещения файлов)
+## раздел 1. Архитектурные гейты (без перемещения файлов)
 
 Цель:
 - Включить «сигнализацию» перед переносом.
@@ -83,7 +83,7 @@ Done:
    - Количество `from core.agent` в `modules`.
    - Количество `from core.credentials` в `modules`.
    - Количество `from core.marketplace` в `modules`.
-3. Зафиксировать целевые нули для этих счетчиков к концу Этапа 6.
+3. Зафиксировать целевые нули для этих счетчиков к концу раздела 6.
 
 Done:
 - Есть автоматический отчет по нарушающим импортам.
@@ -91,7 +91,7 @@ Done:
 
 ---
 
-## Этап 2. Runtime decoupling от Agent (блокер всего рефакторинга)
+## раздел 2. Runtime decoupling от Agent (блокер всего рефакторинга)
 
 Цель:
 - Убрать прямую зависимость `core/runtime` от agent-домена.
@@ -106,7 +106,7 @@ Done:
 4. Runtime должен работать при отсутствии agent-модуля (already optional).
 5. Проверить запуск bootstrap с `ModuleSpec("agent", required=False)`.
 
-Тесты после этапа:
+Тесты после раздела:
 - `pytest -v tests/test_runtime_module_contract.py`
 - `pytest -v tests/test_agent_enrollment.py tests/test_agent_deploy.py`
 
@@ -116,7 +116,7 @@ Done:
 
 ---
 
-## Этап 3. Совместимость-слой для доменных пакетов (alias-first)
+## раздел 3. Совместимость-слой для доменных пакетов (alias-first)
 
 Цель:
 - Подготовить безопасный перенос `core/agent`, `core/credentials`, `core/marketplace` без массовой поломки.
@@ -128,15 +128,15 @@ Done:
    - `modules/marketplace/`
 2. Создать внутри них публичные API-файлы (`api.py`/`__init__.py`) и реэкспортировать текущие реализации.
 3. Переключать импорты в `modules/*` на новые canonical imports по одному домену за раз.
-4. В `core/*` временно оставить тонкие re-export shim-файлы (до Этапа 7).
+4. В `core/*` временно оставить тонкие re-export shim-файлы (до раздела 7).
 
-Правило этапа:
+Правило раздела:
 - Сначала меняются импорты потребителей, затем физический перенос файлов.
 
-Тесты после этапа:
+Тесты после раздела:
 - `pytest -v tests/test_agent*.py`
 - `pytest -v tests/test_credential*.py`
-- `pytest -v tests/test_marketplace*.py tests/test_step12_integration.py`
+- `pytest -v tests/test_marketplace*.py tests/test_marketplace_flow_integration.py`
 
 Done:
 - Основные потребители в `modules` импортируют домены из `modules`, а не из `core`.
@@ -144,7 +144,7 @@ Done:
 
 ---
 
-## Этап 4. Перенос Agent-домена в modules/agents
+## раздел 4. Перенос Agent-домена в modules/agents
 
 Цель:
 - Сделать единый source of truth по агентам в `modules/agents`.
@@ -157,7 +157,7 @@ Done:
    - `modules/agents` как доменная реализация.
 4. Оставить в `core/agent/*` только временные compatibility re-exports.
 
-Тесты после этапа:
+Тесты после раздела:
 - `pytest -v tests/test_agent_enrollment.py tests/test_agent_deploy.py tests/test_agent_logs_status.py`
 
 Done:
@@ -166,7 +166,7 @@ Done:
 
 ---
 
-## Этап 5. Перенос Credentials и Marketplace в modules
+## раздел 5. Перенос Credentials и Marketplace в modules
 
 Цель:
 - Убрать бизнес-домен из `core` для credentials/marketplace.
@@ -178,23 +178,23 @@ Done:
    - `modules/admin/credentials_handlers.py`
    - `modules/ssh/ssh_execution_service.py`
    - `modules/agents/agent_deploy_service.py`
-3. Оставить `core/credentials/*` как shim до Этапа 7.
+3. Оставить `core/credentials/*` как shim до раздела 7.
 
 Шаги (marketplace):
 1. Перенести `core/marketplace/*` в `modules/marketplace/domain/`.
 2. Обновить `modules/marketplace/services.py`.
-3. Оставить `core/marketplace/*` как shim до Этапа 7.
+3. Оставить `core/marketplace/*` как shim до раздела 7.
 
-Тесты после этапа:
+Тесты после раздела:
 - `pytest -v tests/test_credential*.py`
-- `pytest -v tests/test_marketplace*.py tests/test_step12_integration.py`
+- `pytest -v tests/test_marketplace*.py tests/test_marketplace_flow_integration.py`
 
 Done:
 - В `modules` нет импорта `core.credentials` и `core.marketplace` (кроме временно допустимых точек, задокументированных в debt-list).
 
 ---
 
-## Этап 6. Execution consolidation (SSH + remote)
+## раздел 6. Execution consolidation (SSH + remote)
 
 Цель:
 - Сделать execution единой точкой выполнения.
@@ -208,7 +208,7 @@ Done:
    - Либо через единый адаптер из `core/operations/executor.py`.
 4. Убрать прямые вызовы устаревших маршрутизаторов из прикладных модулей.
 
-Тесты после этапа:
+Тесты после раздела:
 - `pytest -v tests/test_plugin_isolation.py tests/test_remote_providers.py tests/test_capability_protocol.py`
 - `pytest -v tests/test_robustness_p0.py`
 
@@ -218,7 +218,7 @@ Done:
 
 ---
 
-## Этап 7. Cleanup core структуры + удаление legacy (после green)
+## раздел 7. Cleanup core структуры + удаление legacy (после green)
 
 Цель:
 - Удалить legacy-дубли только после полной совместимости и green tests.
@@ -237,7 +237,7 @@ Done:
    - `core/security.py` (если все переходят на `core/security/*` package exports)
 3. Обновить `core/__init__.py` и публичные экспорты.
 
-Тесты после этапа:
+Тесты после раздела:
 - полный `pytest -v`
 - при возможности интеграционные из `docs/test_*.py`
 
@@ -247,7 +247,7 @@ Done:
 
 ---
 
-## Этап 8. Enforce архитектурных правил (строго)
+## раздел 8. Enforce архитектурных правил (строго)
 
 Цель:
 - Зафиксировать новое состояние правилами, чтобы не было отката.
@@ -265,7 +265,7 @@ Done:
 
 ---
 
-## Этап 9. Финализация и долг
+## раздел 9. Финализация и долг
 
 Цель:
 - Закрыть migration debt и упростить поддержку.
@@ -284,16 +284,16 @@ Done:
 
 ## 5) Практический порядок выполнения (чтобы не сломать runtime)
 
-1. Этап 0
-2. Этап 1
-3. Этап 2 (runtime decoupling)
-4. Этап 3 (alias-first)
-5. Этап 4 (agents)
-6. Этап 5 (credentials + marketplace)
-7. Этап 6 (execution consolidation)
-8. Этап 7 (cleanup core + delete legacy)
-9. Этап 8
-10. Этап 9
+1. раздел 0
+2. раздел 1
+3. раздел 2 (runtime decoupling)
+4. раздел 3 (alias-first)
+5. раздел 4 (agents)
+6. раздел 5 (credentials + marketplace)
+7. раздел 6 (execution consolidation)
+8. раздел 7 (cleanup core + delete legacy)
+9. раздел 8
+10. раздел 9
 
 ---
 
@@ -309,20 +309,20 @@ Done:
 - Митигировать: сначала интегрировать remote в execution-контур и обновить `core/operations/executor.py`.
 
 Риск D: взрыв импортов в тестах
-- Митигировать: массовая миграция импортов отдельным commit после каждого доменного этапа.
+- Митигировать: массовая миграция импортов отдельным commit после каждого доменного раздела.
 
 ---
 
 ## 7) Минимальный трекер прогресса (рекомендуемый)
 
-На каждый этап фиксировать:
+На каждый раздел фиксировать:
 - `import_debt_count`:
   - `core <- modules` runtime imports
   - `modules -> core.agent|core.credentials|core.marketplace`
-- Набор тестов этапа: pass/fail
+- Набор тестов раздела: pass/fail
 - Список временных shim-файлов: добавлено/удалено
 
-Этап считается завершенным только если:
-- Тесты этапа green
+раздел считается завершенным только если:
+- Тесты раздела green
 - Debt-count не вырос
 - Нет новых архитектурных нарушений

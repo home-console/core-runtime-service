@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 """
-Container execution backend (D3.1+).
+Container execution backend (+).
 
 Правила:
 - Core не знает, что такое Docker.

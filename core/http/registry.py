@@ -1,5 +1,5 @@
 """
-HTTP Registry — metadata registry for HTTP contracts (D2).
+HTTP Registry — metadata registry for HTTP contracts .
 
 Хранит декларативные HTTP-контракты плагинов.
 Не выполняет HTTP-запросы и не зависит от фреймворков.

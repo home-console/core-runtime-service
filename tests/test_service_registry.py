@@ -1,6 +1,7 @@
 import pytest
 
-from core.service import ServiceRegistry, ServiceMiddleware
+from core.service.models import ServiceMiddleware
+from core.service.registry import ServiceRegistry
 
 
 @pytest.mark.asyncio

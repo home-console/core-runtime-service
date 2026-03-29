@@ -32,9 +32,9 @@ class ExecutionSchedule:
     trigger_type: ScheduleTriggerType
     trigger_at: Optional[datetime] = None  # delay
     trigger_every_seconds: Optional[int] = None  # interval
-    trigger_cron: Optional[str] = None  # legacy cron field (D3.6)
+    trigger_cron: Optional[str] = None  # legacy cron field 
 
-    # Cron trigger metadata (D3.7)
+    # Cron trigger metadata 
     cron_expr: Optional[str] = None
     cron_timezone: Optional[str] = "UTC"
 
@@ -213,7 +213,7 @@ def compute_next_run(
     """
     Вычисляет следующий cron-tick по выражению вида "*/N * * * *" или "* * * * *".
 
-    Ограничения (MVP D3.7):
+    Ограничения (MVP ):
     - поддерживается только минутное поле:
       - "*"       → каждую минуту
       - "*/N"    → каждые N минут

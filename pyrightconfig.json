@@ -1,8 +1,9 @@
 {
-    "typeCheckingMode": "off",
+    "typeCheckingMode": "basic",
     "reportOptionalMemberAccess": false,
-    "reportMissingImports": false,
+    "reportMissingImports": true,
     "exclude": [
+        ".venv",
         "**/plugins/**",
         "**/tests/**",
         "**/test_*.py"

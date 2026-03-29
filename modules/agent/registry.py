@@ -1,5 +1,5 @@
 """
-Step 15: Agent Registry — Tracking enrolled agents and their capabilities.
+Agent Registry — Tracking enrolled agents and their capabilities.
 
 Agents register as capability providers.
 Registry tracks agent status, version, capabilities.

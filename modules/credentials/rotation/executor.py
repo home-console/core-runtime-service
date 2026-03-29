@@ -75,7 +75,7 @@ class RotationExecutor:
             RotationNotAllowedError: if rotation cannot proceed
             RotationFailedError: if rotation execution fails
         """
-        # Step 1: Check if rotation allowed
+        # Check if rotation allowed
         if self.trust_engine:
             trust_state = await self.trust_engine.get_state(credential_id)
             
@@ -93,7 +93,7 @@ class RotationExecutor:
                 )
         
         try:
-            # Step 2: Generate new secret based on strategy
+            # Generate new secret based on strategy
             if rotation_policy.strategy == RotationStrategy.GENERATE_NEW_SECRET:
                 new_secret = generate_strong_secret(length=32)
             elif rotation_policy.strategy == RotationStrategy.MANUAL:
@@ -110,7 +110,7 @@ class RotationExecutor:
                     f"Unknown rotation strategy: {rotation_policy.strategy}"
                 )
             
-            # Step 3: Save new secret to vault
+            # Save new secret to vault
             new_secret_ref = f"{credential_id}:v{current_version + 1}"
             
             try:
@@ -121,10 +121,10 @@ class RotationExecutor:
             except Exception as e:
                 raise RotationFailedError(f"Failed to store secret: {e}")
             
-            # Step 4: Update repository with new version
+            # Update repository with new version
             # (actual update handled by caller)
             
-            # Step 5: Log audit event
+            # Log audit event
             now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
             await self.audit_binder.append_event(
                 event_type="credential_rotated",

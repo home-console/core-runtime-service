@@ -2,7 +2,7 @@
 ApiModule — HTTP API Gateway (FastAPI + uvicorn).
 
 Вся логика HTTP только здесь. Runtime не знает про FastAPI/uvicorn;
-после start() вызывает api_module.run_http(runtime).
+после start() вызывает transport-контракт api_module.run_transport(runtime).
 Маршруты привязываются в run_http() — после старта модулей и плагинов.
 """
 
@@ -25,7 +25,7 @@ from modules.monitoring import MonitoringModule
 
 
 class ApiModule(RuntimeModule):
-    """Модуль API: владеет FastAPI app и uvicorn. Запуск HTTP через run_http(runtime)."""
+    """Модуль API: владеет FastAPI app и uvicorn. Transport-контракт: run_transport(runtime)."""
 
     @property
     def name(self) -> str:
@@ -37,12 +37,7 @@ class ApiModule(RuntimeModule):
         self._server: uvicorn.Server | None = None
 
     async def register(self) -> None:
-        """Только bootstrap HTTP-контрактов в runtime.http."""
-        try:
-            from core.adapters.http.bootstrap import register_core_http
-            register_core_http(self.runtime)
-        except ImportError:
-            pass
+        pass
 
     async def start(self) -> None:
         """No-op. HTTP стартует в run_http() после start всех модулей и плагинов."""
@@ -130,7 +125,7 @@ class ApiModule(RuntimeModule):
     async def run_http(self, runtime: Any) -> None:
         """
         Запуск HTTP: app + привязка маршрутов (после start) + uvicorn.
-        Вызывается из Runtime.run() после runtime.start().
+        Вызывается из run_transport().
         """
         await self._log(runtime, "info", "API: run_http entered")
         self._build_app(runtime)
@@ -196,3 +191,7 @@ class ApiModule(RuntimeModule):
         await self._log(runtime, "info", "API: about to call serve()")
         await server.serve()
         await self._log(runtime, "info", "API: serve() returned")
+
+    async def run_transport(self, runtime: Any) -> None:
+        """Transport contract for runtime: API transport delegates to HTTP runner."""
+        await self.run_http(runtime)

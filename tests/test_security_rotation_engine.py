@@ -1,5 +1,5 @@
 """
-Tests for Step 18: Credential Rotation Engine
+Tests for flow: Credential Rotation Engine
 
 Comprehensive test suite covering:
 - Manual rotation

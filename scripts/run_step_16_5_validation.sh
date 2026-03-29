@@ -1,7 +1,7 @@
 #!/bin/bash
-# STEP 16.5: Run Chaos & Security Validation Suite
+# FLOW: Run Chaos & Security Validation Suite
 # 
-# This script validates the entire Step 16 security architecture:
+# This script validates the entire flow security architecture:
 # • Crash safety
 # • Rollback resistance
 # • Memory protection
@@ -20,7 +20,7 @@ PROJECT_ROOT="$SCRIPT_DIR"  # Tests are in this directory
 
 echo ""
 echo "=========================================="
-echo "STEP 16.5: CHAOS & SECURITY VALIDATION"
+echo "FLOW: CHAOS & SECURITY VALIDATION"
 echo "=========================================="
 echo ""
 
@@ -62,7 +62,7 @@ if [ "$1" != "--analysis-only" ]; then
     
     cd "$PROJECT_ROOT"
     
-    if python3 -m pytest tests/test_step_16_5_chaos_validation.py -v --tb=short; then
+    if python3 -m pytest tests/test_security_chaos_validation.py -v --tb=short; then
         echo -e "${GREEN}✓ All chaos tests passed${NC}"
     else
         echo -e "${RED}✗ Some chaos tests failed${NC}"
@@ -103,7 +103,7 @@ echo ""
 echo -e "${BLUE}[4/4]${NC} Summary"
 echo "=========================================="
 echo ""
-echo -e "${GREEN}✓ STEP 16.5 VALIDATION COMPLETE${NC}"
+echo -e "${GREEN}✓ FLOW VALIDATION COMPLETE${NC}"
 echo ""
 echo "Generated Reports:"
 echo "  • STEP_16_5_CHAOS_VALIDATION.md — How-to guide"
@@ -117,5 +117,5 @@ echo ""
 echo "Next Steps:"
 echo "  1. Review STEP_16_5_THREAT_ANALYSIS.md"
 echo "  2. Deploy to staging with CAP_IPC_LOCK"
-echo "  3. Plan Step 17 (mTLS & control plane security)"
+echo "  3. Plan flow (mTLS & control plane security)"
 echo ""

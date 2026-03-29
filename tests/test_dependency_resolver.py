@@ -1,5 +1,5 @@
 """
-Test suite for Step 10: DependencyResolver.
+Test suite for flow: DependencyResolver.
 
 Tests system integrity validation:
 - Installation constraints
@@ -11,7 +11,8 @@ Tests system integrity validation:
 
 import pytest
 from unittest.mock import Mock
-from core.dependency import DependencyResolver, RuntimeIntegrityError
+from core.dependency.models import RuntimeIntegrityError
+from core.dependency.resolver import DependencyResolver
 from core.kernel.base_plugin import PluginMetadata
 
 

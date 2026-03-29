@@ -1,7 +1,7 @@
 """
 Registry Client — fetch and resolve plugins from remote registry.
 
-Step 12: Manages:
+Manages:
 - Remote registry index fetching
 - Local caching with TTL
 - Version resolution
@@ -100,7 +100,7 @@ class RegistryClient:
         self._index: Optional[RegistryIndex] = None
         self._index_fetched_at: Optional[float] = None
         
-        # Step 12.5: Registry version downgrade protection
+        # Registry version downgrade protection
         self._cached_registry_version = self._load_cached_registry_version()
         self._registry_version_path = self._cache_dir / "registry-version.txt"
     
@@ -272,7 +272,7 @@ class RegistryClient:
         if registry_version != 1:
             raise RegistryError(f"Unsupported registry version: {registry_version}")
 
-        # Step 12.5: Prevent registry downgrade attacks
+        # Prevent registry downgrade attacks
         if self._cached_registry_version is not None:
             if registry_version < self._cached_registry_version:
                 raise RegistrySecurityError(
@@ -305,7 +305,7 @@ class RegistryClient:
         Each plugin release requires:
         - url (must be HTTPS)
         - sha256
-        - signature (Step 11)
+        - signature
         - public_key
 
         Raises:
@@ -422,7 +422,7 @@ class RegistryClient:
             with open(self._cache_time_path, 'w') as f:
                 f.write(str(time.time()))
             
-            # Step 12.5: Save registry version for downgrade detection
+            # Save registry version for downgrade detection
             registry_version = data.get("registry_version")
             if registry_version:
                 with open(self._registry_version_path, 'w') as f:

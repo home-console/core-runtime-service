@@ -5,14 +5,15 @@
 import pytest
 from unittest.mock import MagicMock
 
-from core.module import ModuleManager
+from core.module.manager import ModuleManager
 from core.runtime_module import RuntimeModule
+from core.runtime.runtime_context import RuntimeContext
 
 
 def _make_mock_runtime():
     """Создать минимальный mock runtime для тестов."""
     from types import SimpleNamespace
-    return SimpleNamespace(
+    runtime = SimpleNamespace(
         storage=MagicMock(),
         service_registry=MagicMock(),
         http=MagicMock(),
@@ -21,6 +22,16 @@ def _make_mock_runtime():
         vault=None,
         state_engine=MagicMock(),
     )
+    runtime.create_context = lambda: RuntimeContext(
+        storage=runtime.storage,
+        services=runtime.service_registry,
+        http=runtime.http,
+        capabilities=runtime.capability_registry,
+        operations=runtime.operations,
+        vault=runtime.vault,
+        state=runtime.state_engine,
+    )
+    return runtime
 
 
 class MockModule(RuntimeModule):
@@ -223,7 +234,7 @@ async def test_register_app_modules_via_bootstrap(memory_adapter):
     assert "devices" in modules
     assert "automation" in modules
     assert "presence" in modules
-    # D2: automation должна быть удаляемой — значит не REQUIRED по умолчанию
+    # domain: automation должна быть удаляемой — значит не REQUIRED по умолчанию
     assert "automation" not in manager.get_required_modules()
 
     assert manager.get_module("devices") is not None

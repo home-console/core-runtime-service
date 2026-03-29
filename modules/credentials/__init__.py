@@ -1,4 +1,4 @@
-"""Credential Management Module — Step 17.3-17.4.
+"""Credential Management Module — -17.4.
 
 Provides capability-driven credential operations through OperationManager.
 This package is now the canonical home for credential domain code.

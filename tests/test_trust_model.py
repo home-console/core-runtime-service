@@ -1,5 +1,5 @@
 """
-Step 11: Plugin Trust & Signature Verification — Comprehensive Test Suite
+flow: Plugin Trust & Signature Verification — Comprehensive Test Suite
 
 Tests cover:
 1. Unsigned plugins are rejected (CapabilitySecurityError)

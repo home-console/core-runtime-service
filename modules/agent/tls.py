@@ -1,5 +1,5 @@
 """
-Step 15: mTLS Support — CA and certificate generation.
+mTLS Support — CA and certificate generation.
 
 Provides:
 - CA certificate generation

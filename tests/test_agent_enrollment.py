@@ -1,5 +1,5 @@
 """
-Step 15: Tests for Secure Agent Enrollment & Control Plane.
+flow: Tests for Secure Agent Enrollment & Control Plane.
 
 Test coverage:
 - Agent identity generation
@@ -300,12 +300,12 @@ class TestAgentEnrollmentManager:
         manager = AgentEnrollmentManager(secret_store)
         now = datetime.now(timezone.utc).isoformat()
         
-        # Step 1: Create token
+        # flow: Create token
         token = await manager.create_enrollment_token("node1", now)
         assert token.agent_name == "node1"
         assert token.status == EnrollmentTokenStatus.ACTIVE
         
-        # Step 2: Enroll agent
+        # flow: Enroll agent
         identity, private_key = await manager.enroll_agent(
             token.token_id,
             token.token_secret,

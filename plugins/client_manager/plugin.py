@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 from core.kernel.base_plugin import BasePlugin, PluginMetadata
-from core.http import HttpEndpoint
+from core.http.models import HttpEndpoint
 
 if TYPE_CHECKING:
     from core.runtime.runtime import CoreRuntime

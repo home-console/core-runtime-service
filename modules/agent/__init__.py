@@ -1,4 +1,4 @@
-"""Step 15: Agent Control Plane Module.
+"""Agent Control Plane Module.
 
 This package is the canonical modules-layer entry point for agent runtime
 control plane and agent domain primitives.

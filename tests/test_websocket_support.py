@@ -10,7 +10,7 @@
 
 import pytest
 from core.runtime.runtime import CoreRuntime
-from core.http import HttpEndpoint
+from core.http.models import HttpEndpoint
 
 
 @pytest.mark.asyncio
@@ -184,7 +184,7 @@ async def test_websocket_plugin_registration(memory_adapter):
     
     # Загружаем плагин
     plugin = WebSocketTestPlugin(runtime)
-    await plugin.on_load()
+    await runtime.plugin_manager.load_plugin(plugin)
     
     # Проверяем что endpoint зарегистрирован
     endpoints = runtime.http.list()

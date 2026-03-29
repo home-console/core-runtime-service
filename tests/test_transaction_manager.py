@@ -1,5 +1,5 @@
 """
-Step 12.5 Transaction Manager Tests — atomic updates, rollback, and crash recovery.
+flow Transaction Manager Tests — atomic updates, rollback, and crash recovery.
 
 Tests:
 - Install transaction (success flow)

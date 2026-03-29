@@ -1,6 +1,6 @@
 import pytest
 
-from core.module import ModuleSpec
+from core.module.models import ModuleSpec
 from core.runtime.runtime import CoreRuntime
 from modules.execution.module import ExecutionModule
 from core.operations import OperationInitiator, OperationInitiatorKind
@@ -14,7 +14,7 @@ import asyncio
 @pytest.mark.asyncio
 async def test_execution_module_wires_operations_execute(memory_adapter):
     """
-    D3: Operations subsystem не знает backend/policy и делегирует через execution layer.
+    domain: Operations subsystem не знает backend/policy и делегирует через execution layer.
 
     Проверка: при наличии ExecutionModule операция исполняется через controller,
     и default policy = in_process сохраняет поведение.
@@ -51,7 +51,7 @@ async def test_execution_module_wires_operations_execute(memory_adapter):
 @pytest.mark.asyncio
 async def test_execution_policy_can_route_to_process_backend_without_core_changes(memory_adapter):
     """
-    D3: policy хранится вне Core (storage) и может меняться без рестарта runtime.
+    domain: policy хранится вне Core (storage) и может меняться без рестарта runtime.
     Здесь просто проверяем, что routing реально влияет на исполнение.
     """
     runtime = CoreRuntime(memory_adapter)
@@ -96,7 +96,7 @@ async def test_execution_policy_can_route_to_process_backend_without_core_change
 @pytest.mark.asyncio
 async def test_execution_trace_created_and_updated_in_storage(memory_adapter):
     """
-    D3.3: trace создаётся при старте и обновляется при завершении исполнения.
+    domain: trace создаётся при старте и обновляется при завершении исполнения.
     Проверяем, что namespace storage/execution содержит запись traces/{execution_id}
     и индекс by_operation/{operation_id}/{execution_id}.
     """
@@ -165,7 +165,7 @@ class _TimeoutBackend(ExecutionBackend):
 @pytest.mark.asyncio
 async def test_execution_trace_status_timeout_and_killed(memory_adapter):
     """
-    D3.3: timeout/killed backend → status в ExecutionTrace = timeout/killed.
+    domain: timeout/killed backend → status в ExecutionTrace = timeout/killed.
     Используем подменённый backend, чтобы не зависеть от реального subprocess.
     """
     runtime = CoreRuntime(memory_adapter)
@@ -212,7 +212,7 @@ async def test_execution_trace_status_timeout_and_killed(memory_adapter):
 @pytest.mark.asyncio
 async def test_cancel_running_execution_marks_trace_cancelled_and_calls_backend(memory_adapter):
     """
-    D3.4: cancel running execution → status=cancelled, backend.cancel вызывается.
+    domain: cancel running execution → status=cancelled, backend.cancel вызывается.
     """
     runtime = CoreRuntime(memory_adapter)
     await runtime.module_manager.register_module_specs(
@@ -297,7 +297,7 @@ async def test_cancel_running_execution_marks_trace_cancelled_and_calls_backend(
 @pytest.mark.asyncio
 async def test_concurrency_limit_prevents_start_and_sets_error_status(memory_adapter):
     """
-    D3.4: при превышении limits.max_running execution не стартует и trace получает error с execution_limit_exceeded.
+    domain: при превышении limits.max_running execution не стартует и trace получает error с execution_limit_exceeded.
     """
     runtime = CoreRuntime(memory_adapter)
     await runtime.module_manager.register_module_specs(
@@ -346,7 +346,7 @@ async def test_concurrency_limit_prevents_start_and_sets_error_status(memory_ada
 @pytest.mark.asyncio
 async def test_scheduler_delay_schedule_runs_once(memory_adapter):
     """
-    D3.6: delay schedule (at=now) → один execution и run_count=1.
+    domain: delay schedule (at=now) → один execution и run_count=1.
     """
     runtime = CoreRuntime(memory_adapter)
     controller = ExecutionControllerImpl(runtime)
@@ -398,7 +398,7 @@ async def test_scheduler_delay_schedule_runs_once(memory_adapter):
 @pytest.mark.asyncio
 async def test_scheduler_interval_schedule_runs_multiple_times(memory_adapter):
     """
-    D3.6: interval schedule → несколько запусков через несколько tick.
+    domain: interval schedule → несколько запусков через несколько tick.
     """
     runtime = CoreRuntime(memory_adapter)
     controller = ExecutionControllerImpl(runtime)
@@ -446,7 +446,7 @@ async def test_scheduler_interval_schedule_runs_multiple_times(memory_adapter):
 @pytest.mark.asyncio
 async def test_scheduler_pause_and_resume(memory_adapter):
     """
-    D3.6: pause → нет запусков; resume → запуски продолжаются.
+    domain: pause → нет запусков; resume → запуски продолжаются.
     """
     runtime = CoreRuntime(memory_adapter)
     controller = ExecutionControllerImpl(runtime)
@@ -507,7 +507,7 @@ async def test_scheduler_pause_and_resume(memory_adapter):
 @pytest.mark.asyncio
 async def test_scheduler_max_runs_disables_schedule(memory_adapter):
     """
-    D3.6: max_runs=2 → третья попытка не выполняется, enabled=False.
+    domain: max_runs=2 → третья попытка не выполняется, enabled=False.
     """
     runtime = CoreRuntime(memory_adapter)
     controller = ExecutionControllerImpl(runtime)
@@ -550,7 +550,7 @@ async def test_scheduler_max_runs_disables_schedule(memory_adapter):
 
 def test_cron_next_run_every_minute():
     """
-    D3.7: compute_next_run для */1 * * * *.
+    domain: compute_next_run для */1 * * * *.
     """
     from datetime import datetime, UTC
 
@@ -567,7 +567,7 @@ def test_cron_next_run_every_minute():
 @pytest.mark.asyncio
 async def test_scheduler_cron_schedule_runs_on_tick(memory_adapter):
     """
-    D3.7: cron */1 * * * * → запуск по tick, без sleep.
+    domain: cron */1 * * * * → запуск по tick, без sleep.
     """
     runtime = CoreRuntime(memory_adapter)
     controller = ExecutionControllerImpl(runtime)
@@ -625,7 +625,7 @@ async def test_scheduler_cron_schedule_runs_on_tick(memory_adapter):
 @pytest.mark.asyncio
 async def test_retry_failed_execution_creates_new_execution_with_parent_and_retry_index(memory_adapter):
     """
-    D3.5: retry failed execution → новый execution с parent_execution_id и увеличенным retry_index.
+    domain: retry failed execution → новый execution с parent_execution_id и увеличенным retry_index.
     """
     runtime = CoreRuntime(memory_adapter)
     await runtime.module_manager.register_module_specs(
@@ -687,7 +687,7 @@ async def test_retry_failed_execution_creates_new_execution_with_parent_and_retr
 @pytest.mark.asyncio
 async def test_retry_running_execution_rejected(memory_adapter):
     """
-    D3.5: retry running execution → rejected, новых traces не появляется.
+    domain: retry running execution → rejected, новых traces не появляется.
     """
     runtime = CoreRuntime(memory_adapter)
     await runtime.module_manager.register_module_specs(
@@ -749,7 +749,7 @@ async def test_retry_running_execution_rejected(memory_adapter):
 @pytest.mark.asyncio
 async def test_retry_limit_exceeded_by_policy(memory_adapter):
     """
-    D3.5: превышение retry policy.max_attempts → error_code=retry_limit_exceeded.
+    domain: превышение retry policy.max_attempts → error_code=retry_limit_exceeded.
     """
     runtime = CoreRuntime(memory_adapter)
     await runtime.module_manager.register_module_specs(
@@ -816,4 +816,3 @@ async def test_retry_limit_exceeded_by_policy(memory_adapter):
     assert len(by_parent_keys) <= 1
 
     await runtime.stop()
-

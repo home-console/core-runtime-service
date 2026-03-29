@@ -1,5 +1,5 @@
 """
-Step 14: Cryptographic primitives for secure secret storage.
+Cryptographic primitives for secure secret storage.
 
 AES-256-GCM encryption with:
 - Argon2id key derivation

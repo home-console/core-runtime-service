@@ -1,4 +1,4 @@
-"""Step 15: Agent Control Plane Module."""
+"""Agent Control Plane Module."""
 
 import asyncio
 import logging
@@ -47,7 +47,7 @@ logger = logging.getLogger(__name__)
 
 class AgentControlPlaneModule(RuntimeModule):
     """
-    Step 15: Agent Control Plane Module.
+    Agent Control Plane Module.
 
     Manages:
     - Agent enrollment with tokens

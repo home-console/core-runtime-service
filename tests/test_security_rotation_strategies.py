@@ -1,5 +1,5 @@
 """
-Tests for Step 19: Agent-Orchestrated Rotation Strategy (Plugin System)
+Tests for flow: Agent-Orchestrated Rotation Strategy (Plugin System)
 
 Comprehensive test suite covering:
 - Strategy registry and plugin system

@@ -1,7 +1,7 @@
 import pytest
 
 from core.runtime.runtime import CoreRuntime
-from core.errors import NotFoundError
+from core.exceptions.errors import NotFoundError
 from modules.api.auth.context import RequestContext
 from modules.api.auth.contextvars import set_current_request_context
 from modules.policy.engine import PolicyEngine as ModulePolicyEngine
@@ -36,4 +36,3 @@ async def test_devices_acl_enforced_on_services(memory_adapter):
 
     set_current_request_context(None)
     await runtime.stop()
-

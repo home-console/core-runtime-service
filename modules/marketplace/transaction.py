@@ -1,5 +1,5 @@
 """
-Step 12.5: Atomic Update Transaction Manager — crash-safe plugin updates.
+Atomic Update Transaction Manager — crash-safe plugin updates.
 
 Responsibilities:
 - Atomic install/update with safe swap
@@ -24,8 +24,8 @@ logger = logging.getLogger(__name__)
 class TransactionState(str, Enum):
     """Transaction lifecycle states."""
 
-    PREPARING = "preparing"  # Download phase
-    VALIDATING = "validating"  # Verification phase
+    PREPARING = "preparing"  # Download stage
+    VALIDATING = "validating"  # Verification stage
     STAGED = "staged"  # Ready for swap
     SWAPPING = "swapping"  # Atomic directory swap
     ACTIVATING = "activating"  # Starting plugin

@@ -7,7 +7,7 @@ HTTP endpoint registrations for AdminModule.
 
 from typing import Any
 
-from core.http import HttpEndpoint
+from core.http.models import HttpEndpoint
 
 
 def register_admin_core_http_endpoints(http_registry: Any) -> None:

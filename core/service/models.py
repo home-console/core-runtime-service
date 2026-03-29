@@ -1,5 +1,5 @@
 """
-Service Registry Models — middleware and type definitions (D2).
+Service Registry Models — middleware and type definitions .
 
 Декларативные модели для middleware и типизация функций-сервисов.
 """

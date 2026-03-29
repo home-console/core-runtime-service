@@ -5,7 +5,7 @@ import shutil
 from pathlib import Path
 from typing import Any, Optional
 
-from core.http import HttpEndpoint
+from core.http.models import HttpEndpoint
 from core.orchestration import OrchestrationService
 
 logger = logging.getLogger(__name__)

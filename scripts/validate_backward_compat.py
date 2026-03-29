@@ -296,7 +296,7 @@ async def test_single_to_dual_migration():
         vault_path = os.path.join(tmpdir, "vault.db")
 
         try:
-            # Step 1: Create single-mode storage and populate with data
+            # flow: Create single-mode storage and populate with data
             single_config = Config(
                 storage_type="sqlite",
                 db_path=core_path,
@@ -311,7 +311,7 @@ async def test_single_to_dual_migration():
 
             await single_manager.close()
 
-            # Step 2: Switch to dual mode config
+            # flow: Switch to dual mode config
             dual_config = Config(
                 storage_type="sqlite",
                 db_path=core_path,
@@ -320,14 +320,14 @@ async def test_single_to_dual_migration():
                 vault_db_path=vault_path,
             )
 
-            # Step 3: Run migration
+            # flow: Run migration
             migrated_count = await migrate_to_dual_mode(dual_config)
 
             assert migrated_count == 2, (
                 f"Expected 2 records migrated (secrets.store + oauth.tokens), got {migrated_count}"
             )
 
-            # Step 4: Verify data is in dual mode
+            # flow: Verify data is in dual mode
             dual_manager = await create_storage_manager(dual_config)
 
             # Vault records should be in vault storage

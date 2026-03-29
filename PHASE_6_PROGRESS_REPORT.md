@@ -1,4 +1,4 @@
-# Phase 6 Completion Report - Large File Splitting
+# Wave 6 Completion Report - Large File Splitting
 
 Date: March 18, 2026
 Status: ✅ IN PROGRESS (2/4 Priority Files Completed)
@@ -92,7 +92,7 @@ core/runtime/lifecycle.py
 core/runtime/__init__.py
 ```
 
-## Remaining Priority Files (Phase 6)
+## Remaining Priority Files (Wave 6)
 
 Based on file size and complexity:
 
@@ -106,15 +106,15 @@ Based on file size and complexity:
 
 ## File Count in core/ Root
 
-Before Phase 5-6: ~50 files (including __pycache__)
-After Phase 5-6: ~45 files (down by 5, but quality improved)
+Before Wave 5-6: ~50 files (including __pycache__)
+After Wave 5-6: ~45 files (down by 5, but quality improved)
 
 **Reduction breakdown:**
 - Moved to core/runtime/: runtime.py
 - Moved to core/secure_storage/: secure_storage.py
-- Moved to packages during Phase 5: (errors.py → moved patterns established)
+- Moved to packages during Wave 5: (errors.py → moved patterns established)
 
-## Next Steps (Phase 6 - Continued)
+## Next Steps (Wave 6 - Continued)
 
 ### Recommended Path
 1. **Consider**: Split capability_registry.py (may improve clarity)
@@ -144,7 +144,7 @@ After Phase 5-6: ~45 files (down by 5, but quality improved)
 - Improved testability: Monitoring logic injectable
 - Better maintainability: Clear separation of concerns
 
-## Conclusion: Phase 6 Progress
+## Conclusion: Wave 6 Progress
 
 ✅ **Status: 50% Complete** (2/4 priority files)
 - Large file splitting strategy validated
@@ -156,5 +156,5 @@ After Phase 5-6: ~45 files (down by 5, but quality improved)
 
 ---
 
-**Phase 6 Status**: ✅ IN PROGRESS - Solid Progress
+**Wave 6 Status**: ✅ IN PROGRESS - Solid Progress
 **Next Review Point**: After service_registry.py analysis or capability_registry.py split

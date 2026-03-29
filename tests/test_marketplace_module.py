@@ -233,7 +233,7 @@ class TestMarketplaceInstaller:
                 "author": "test",
                 "entrypoint": "plugin.py",
             }))
-            zf.writestr("plugin.py", "from core.base_plugin import BasePlugin\nclass TestPlugin(BasePlugin): pass\n")
+            zf.writestr("plugin.py", "from core.kernel.base_plugin import BasePlugin\nclass TestPlugin(BasePlugin): pass\n")
 
         with pytest.raises(InstallerError, match="Unsafe archive path|escapes target directory"):
             await installer.install_from_file(str(archive_path))

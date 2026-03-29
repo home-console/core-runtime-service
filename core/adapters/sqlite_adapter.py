@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, AsyncIterator, Callable, Optional
 
-from core.storage_exceptions import StorageCorruptionError
+from core.storage_errors import StorageCorruptionError
 
 from .storage_adapter import StorageAdapter
 

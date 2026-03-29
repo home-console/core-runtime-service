@@ -31,7 +31,7 @@ require_cmd jq
 
 echo "Smoke test: device flow for $INTERNAL_ID against $BASE_URL"
 
-# Step 1: Read initial state
+# flow: Read initial state
 echo "[1] Read initial state"
 RESP=$(curl -sS -w "\n%{http_code}" "$BASE_URL/admin/state/device.$INTERNAL_ID") || die "Failed to GET initial state"
 HTTP=$(echo "$RESP" | tail -n1)
@@ -47,7 +47,7 @@ echo "$BODY" | jq -e '.desired, .reported, .pending' >/dev/null 2>&1 || die "Sta
 echo "Initial state:"
 echo "$BODY" | jq .
 
-# Step 2: Send command (set desired.on)
+# flow: Send command (set desired.on)
 echo "[2] Send command: set desired.on = $DESIRED_ON"
 CMD_PAYLOAD=$(jq -n --argjson on $DESIRED_ON '{state: {on: $on}}')
 POST_RESP=$(curl -sS -w "\n%{http_code}" -X POST -H "Content-Type: application/json" -d "$CMD_PAYLOAD" "$BASE_URL/admin/v1/devices/$INTERNAL_ID/state") || die "Failed to POST command"
@@ -64,7 +64,7 @@ echo "$POST_BODY" | jq -e '.ok == true and .queued == true' >/dev/null 2>&1 || d
 echo "POST accepted:"
 echo "$POST_BODY" | jq .
 
-# Step 3: Verify pending == true
+# flow: Verify pending == true
 echo "[3] Verify pending == true"
 RESP2=$(curl -sS -w "\n%{http_code}" "$BASE_URL/admin/state/device.$INTERNAL_ID") || die "Failed to GET state after POST"
 HTTP2=$(echo "$RESP2" | tail -n1)
@@ -82,7 +82,7 @@ if [[ "$PENDING_VAL" != "true" ]]; then
 fi
 echo "pending == true as expected"
 
-# Step 4: Poll until reported matches desired and pending == false
+# flow: Poll until reported matches desired and pending == false
 echo "[4] Poll until reported matches desired ($TIMEOUT s timeout)"
 START_TS=$(date +%s)
 END_TS=$((START_TS + TIMEOUT))

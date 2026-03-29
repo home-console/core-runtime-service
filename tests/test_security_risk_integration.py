@@ -1,11 +1,11 @@
 """
-Integration tests for Step 17.8 (Risk Engine) + Step 17.7 (Abuse Detection).
+Integration tests for flow (Risk Engine) + flow (Abuse Detection).
 
 Tests how the adaptive risk scoring engine works with the self-defending vault.
 
-Step 17.8 layers adaptive, weighted risk scoring on top of Step 17.7's hard rules:
-- Step 17.7: Hard rules (spike, burst, brute force) → HARD_BLOCK or FREEZE
-- Step 17.8: Soft scoring (weighted events) → REQUIRE_MFA or TEMP_BLOCK
+flow layers adaptive, weighted risk scoring on top of flow's hard rules:
+- flow: Hard rules (spike, burst, brute force) → HARD_BLOCK or FREEZE
+- flow: Soft scoring (weighted events) → REQUIRE_MFA or TEMP_BLOCK
 
 Key interactions:
 1. Both systems record events to audit trail
@@ -78,7 +78,7 @@ class TestRiskEngineWithAbuseDetector:
     @pytest.mark.asyncio
     async def test_mfa_failure_spike_escalates_risk(self):
         """
-        MFA brute force (Step 17.7) + multiple failures (Step 17.8).
+        MFA brute force (flow) + multiple failures (flow).
         """
         abort_detector = CredentialAbuseDetector()
         risk_engine = RiskEngine()
@@ -321,7 +321,7 @@ class TestRiskEngineWithAbuseDetector:
         user_id = "ivana"
         now = time.time()
         
-        # Step 1: Initial access attempt
+        # flow: Initial access attempt
         await risk_engine.record_event(RiskEvent(
             user_id=user_id,
             event_type=EventType.SECRET_READ,
@@ -332,7 +332,7 @@ class TestRiskEngineWithAbuseDetector:
         assessment = await risk_engine.assess(user_id)
         assert assessment.action == RiskAction.ALLOW  # Low risk
         
-        # Step 2: Access denied (suspicious)
+        # flow: Access denied (suspicious)
         await risk_engine.record_event(RiskEvent(
             user_id=user_id,
             event_type=EventType.ACCESS_DENIED,
@@ -343,7 +343,7 @@ class TestRiskEngineWithAbuseDetector:
         assessment = await risk_engine.assess(user_id)
         assert assessment.action in [RiskAction.ALLOW, RiskAction.REQUIRE_MFA]
         
-        # Step 3: Multiple failures with MFA brute force
+        # flow: Multiple failures with MFA brute force
         for i in range(3):
             await risk_engine.record_event(RiskEvent(
                 user_id=user_id,
@@ -352,7 +352,7 @@ class TestRiskEngineWithAbuseDetector:
                 timestamp=now + 20 + i * 5,
             ))
         
-        # Step 4: Burst pattern detected
+        # flow: Burst pattern detected
         await risk_engine.record_event(RiskEvent(
             user_id=user_id,
             event_type=EventType.SECRET_READ_BURST,

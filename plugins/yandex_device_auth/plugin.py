@@ -257,7 +257,7 @@ class YandexDeviceAuthPlugin(BasePlugin):
         )
 
         # Register HTTP endpoints
-        from core.http import HttpEndpoint
+        from core.http.models import HttpEndpoint
 
         try:
             self.register_http_endpoint(

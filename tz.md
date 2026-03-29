@@ -239,11 +239,11 @@ kernel не содержит business logic
 
 ⸻
 
-🚀 9. ПЛАН РЕФАКТОРИНГА (ПО ЭТАПАМ)
+🚀 9. ПЛАН РЕФАКТОРИНГА (ПО РАЗДЕЛАМ)
 
 ⸻
 
-🔴 ЭТАП 1 — ФИКСАЦИЯ ГРАНИЦ
+🔴 РАЗДЕЛ 1 — ФИКСАЦИЯ ГРАНИЦ
 
 Цель: остановить ухудшение
 
@@ -256,7 +256,7 @@ kernel не содержит business logic
 
 ⸻
 
-🟡 ЭТАП 2 — НОВЫЙ CONTEXT
+🟡 РАЗДЕЛ 2 — НОВЫЙ CONTEXT
 
 Цель: убрать god object
 
@@ -276,7 +276,7 @@ kernel не содержит business logic
 
 ⸻
 
-🟡 ЭТАП 3 — УПРОЩЕНИЕ SERVICE REGISTRY
+🟡 РАЗДЕЛ 3 — УПРОЩЕНИЕ SERVICE REGISTRY
 
 Цель: убрать бизнес-логику из ядра
 
@@ -291,7 +291,7 @@ kernel не содержит business logic
 
 ⸻
 
-🟡 ЭТАП 4 — PLUGIN MANAGER
+🟡 РАЗДЕЛ 4 — PLUGIN MANAGER
 
 Цель: один источник правды
 
@@ -303,7 +303,7 @@ kernel не содержит business logic
 
 ⸻
 
-🟡 ЭТАП 5 — MODULE API
+🟡 РАЗДЕЛ 5 — MODULE API
 
 Цель: перевести модули на context
 
@@ -317,7 +317,7 @@ ctx.storage → ctx.get_service("storage")
 
 ⸻
 
-🟢 ЭТАП 6 — ВЫНОС MODULES
+🟢 РАЗДЕЛ 6 — ВЫНОС MODULES
 
 Цель: очистить ядро
 
@@ -331,7 +331,7 @@ ctx.storage → ctx.get_service("storage")
 
 ⸻
 
-🟢 ЭТАП 7 — УДАЛЕНИЕ LEGACY
+🟢 РАЗДЕЛ 7 — УДАЛЕНИЕ LEGACY
 
 ⸻
 

@@ -39,7 +39,7 @@ async def handle_external_state_reported(runtime, data: Dict[str, Any]) -> None:
     else:
         internal_id = None
 
-    # Если соответствие найдено — создаём operation (D2: automation = orchestration)
+    # Если соответствие найдено — создаём operation (automation = orchestration)
     if internal_id:
         try:
             ops_mgr = getattr(runtime, "operations", None)

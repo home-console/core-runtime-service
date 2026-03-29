@@ -1,5 +1,5 @@
 """
-Step 14: Tests for secure secret store.
+flow: Tests for secure secret store.
 
 Comprehensive security tests for:
 - Encryption/decryption

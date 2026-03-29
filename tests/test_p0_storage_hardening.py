@@ -63,7 +63,7 @@ async def test_crash_safety_data_persists(temp_db):
 
     This tests PRAGMA synchronous=FULL + WAL mode.
     """
-    # Step 1: Write data
+    # flow: Write data
     adapter1 = SQLiteAdapter(temp_db)
     await adapter1.initialize_schema()
 
@@ -72,10 +72,10 @@ async def test_crash_safety_data_persists(temp_db):
     await adapter1.set("devices", "lamp_1", test_data)
     await adapter1.close()
 
-    # Step 2: Simulate crash (just close without graceful shutdown)
+    # flow: Simulate crash (just close without graceful shutdown)
     # In real test, use subprocess.kill(-9)
 
-    # Step 3: Restart and verify
+    # flow: Restart and verify
     adapter2 = SQLiteAdapter(temp_db)
     await adapter2.initialize_schema()
 
@@ -134,7 +134,7 @@ async def test_rollback_attack_epoch_regression(temp_db):
     3. Attacker manually reverts DB file to backup (epoch=3)
     4. System starts → detects epoch regression → StorageRollbackDetected
     """
-    # Step 1: Create secure storage and make changes
+    # flow: Create secure storage and make changes
     adapter = SQLiteAdapter(temp_db)
     await adapter.initialize_schema()
     secure = SecureStorageWrapper(adapter)
@@ -151,7 +151,7 @@ async def test_rollback_attack_epoch_regression(temp_db):
 
     await secure.close()
 
-    # Step 2: Simulate rollback by directly modifying DB
+    # flow: Simulate rollback by directly modifying DB
     # Read the DB, extract metadata, downgrade epoch
     adapter2 = SQLiteAdapter(temp_db)
     await adapter2.initialize_schema()
@@ -165,7 +165,7 @@ async def test_rollback_attack_epoch_regression(temp_db):
 
     await adapter2.close()
 
-    # Step 3: Try to start again - should detect rollback
+    # flow: Try to start again - should detect rollback
     adapter3 = SQLiteAdapter(temp_db)
     await adapter3.initialize_schema()
 
@@ -282,7 +282,7 @@ async def test_root_hash_tampering_detection(temp_db):
     3. On next startup, merkle recalculation doesn't match stored root
     4. System detects → halt startup with StorageCorruptionError
     """
-    # Step 1: Create data
+    # flow: Create data
     adapter = SQLiteAdapter(temp_db)
     await adapter.initialize_schema()
     secure = SecureStorageWrapper(adapter)
@@ -301,7 +301,7 @@ async def test_root_hash_tampering_detection(temp_db):
 
     await secure.close()
 
-    # Step 2: Tamper with root hash
+    # flow: Tamper with root hash
     adapter2 = SQLiteAdapter(temp_db)
     await adapter2.initialize_schema()
 
@@ -319,7 +319,7 @@ async def test_root_hash_tampering_detection(temp_db):
 
     await adapter2.close()
 
-    # Step 3: Try to initialize secure storage again
+    # flow: Try to initialize secure storage again
     # Should detect root hash mismatch
     adapter3 = SQLiteAdapter(temp_db)
     await adapter3.initialize_schema()

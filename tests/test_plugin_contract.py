@@ -11,7 +11,7 @@ import tempfile
 from pathlib import Path
 
 from core.kernel.base_plugin import BasePlugin, PluginMetadata
-from core.plugins import PluginManager
+from core.kernel.plugin_manager import PluginManager
 from core.runtime.runtime import CoreRuntime
 
 
@@ -346,7 +346,7 @@ async def test_plugin_load_error_sets_error_state():
         await manager.load_plugin(failing_plugin)
     
     # Состояние должно быть ERROR
-    from core.plugins import PluginState
+    from core.kernel.plugin_registry import PluginState
     assert await manager.get_plugin_state("failing") == PluginState.ERROR
 
 

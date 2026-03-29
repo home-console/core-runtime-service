@@ -2,14 +2,19 @@
 Точка входа в приложение Home Console.
 
 main.py строит config/storage/runtime, регистрирует модули и вызывает runtime.run().
-HTTP (FastAPI/uvicorn) полностью в модуле api; Runtime только вызывает api.run_http() после start().
+HTTP (FastAPI/uvicorn) полностью в модуле api; Runtime вызывает transport-контракт api.run_transport() после start().
 """
 
 import asyncio
 import os
 from pathlib import Path
 
-from app.bootstrap import APP_MODULES, build_runtime, parse_module_specs
+from app.bootstrap import (
+    APP_MODULES,
+    auto_load_plugins_if_enabled,
+    build_runtime,
+    parse_module_specs,
+)
 from core.config import Config
 from core.state_engine import StateEngine
 from modules.security import check_security_env
@@ -118,6 +123,10 @@ async def main() -> None:
             print(f"[Runtime] Модули: {modules}")
     except Exception:
         pass
+    try:
+        await auto_load_plugins_if_enabled(runtime, config)
+    except Exception as e:
+        print(f"[Runtime] Plugin auto-load skipped: {e}")
 
     await runtime.run()
 

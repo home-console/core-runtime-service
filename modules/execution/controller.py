@@ -1,5 +1,5 @@
 """
-Execution controller (D3).
+Execution controller .
 
 Controller:
 - не знает домены
@@ -54,7 +54,7 @@ class ExecutionControllerImpl:
 
         # Конфигурация observability (можно сделать настраиваемой позднее)
         self._stderr_tail_max_chars: int = 4000
-        # Простой счетчик для ограничений concurrency (D3.4)
+        # Простой счетчик для ограничений concurrency 
         self._running: int = 0
         self._running_lock = asyncio.Lock()
 

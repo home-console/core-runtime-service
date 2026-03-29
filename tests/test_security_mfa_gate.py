@@ -1,5 +1,5 @@
 """
-Test Suite for Step 17.6: MFA Gate + Zero-Trust Secret Access
+Test Suite for flow: MFA Gate + Zero-Trust Secret Access
 
 Covers:
 - RFC 6238 TOTP implementation

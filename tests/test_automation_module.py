@@ -4,14 +4,13 @@
 Проверяют:
 - Регистрация модуля
 - Обработка событий автоматизации
-- Границы D2 (automation не дергает доменные сервисы напрямую)
+- Границы domain (automation не дергает доменные сервисы напрямую)
 """
 
 import pytest
 
 from core.operations import OperationInitiator, OperationInitiatorKind
-from core.operations.registry import get_operation_handler
-from core.module import ModuleSpec
+from core.module.models import ModuleSpec
 from core.runtime.runtime import CoreRuntime
 
 
@@ -104,7 +103,7 @@ async def test_automation_run_executes_via_operation_registry(
     )
     await runtime.start()
 
-    assert get_operation_handler("automation.run") is not None
+    assert "automation.run" in runtime.operations.list_handler_types()
 
     op = await runtime.operations.create(
         op_type="automation.run",

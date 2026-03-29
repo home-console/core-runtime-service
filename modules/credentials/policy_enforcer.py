@@ -85,7 +85,7 @@ class CredentialRBACEnforcer:
 
         # If denied, audit and raise
         if not decision.allowed:
-            # Log to P0 protected audit storage (Step 17.5)
+            # Log to P0 protected audit storage ()
             if self.audit_binder:
                 from core.audit.events import credential_access_denied_event
 

@@ -6,7 +6,6 @@ AutomationModule — встроенный модуль автоматизаци�
 """
 
 from core.runtime_module import RuntimeModule
-from core.operations.registry import get_operation_handler, register_operation_handler
 
 from . import handlers
 from .events import device_state_to_operation
@@ -18,7 +17,7 @@ class AutomationModule(RuntimeModule):
     """
     Модуль автоматизации.
 
-    D2 контракт:
+    Контракт:
     - automation не является частью Core
     - automation не вызывает доменные сервисы напрямую
     - automation использует ТОЛЬКО EventBus + Operations (+ storage/state при необходимости)
@@ -44,9 +43,8 @@ class AutomationModule(RuntimeModule):
                 device_state_to_operation,
             )
 
-        op_handler = get_operation_handler("automation.run")
-        if op_handler is None:
-            register_operation_handler("automation.run", handle_automation_run)
+        if "automation.run" not in self.runtime.operations.list_handler_types():
+            self.runtime.operations.register_handler("automation.run", handle_automation_run)
 
         # Подписываем обработчик события
         await self.runtime.event_bus.subscribe(

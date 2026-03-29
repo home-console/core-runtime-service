@@ -1,7 +1,7 @@
 """
 Semantic Versioning Engine — version resolution and constraint matching.
 
-Step 12: Plugin version resolution with support for:
+Plugin version resolution with support for:
 - Exact: 1.2.3
 - Caret: ^1.2.0 (>=1.2.0, <2.0.0)
 - Tilde: ~1.2.0 (>=1.2.0, <1.3.0)

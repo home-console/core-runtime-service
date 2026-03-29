@@ -1,5 +1,5 @@
 """
-Execution Layer (D3)
+Execution Layer 
 
 Execution — подключаемая подсистема (policy + backend), которая исполняет operations
 в разных режимах (in-process / process / container) без знания доменов, UI, SDK, automation.

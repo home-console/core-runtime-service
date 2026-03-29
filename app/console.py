@@ -14,16 +14,17 @@ import asyncio
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from app.bootstrap import auto_load_plugins_if_enabled, DEFAULT_CRITICAL_STATE_PREFIXES
 from core.config import Config
-from core.http import HttpEndpoint
+from core.http.models import HttpEndpoint
 from core.runtime.runtime import CoreRuntime
 from core.state_engine import StateEngine
 from modules.storage.factory import build_storage_stack
 
 
-async def _auto_load_plugins(runtime: CoreRuntime) -> None:
+async def _auto_load_plugins(runtime: CoreRuntime, config: Config) -> None:
     """Авто сканирование каталога `plugins/` в корне проекта."""
-    await runtime.plugin_manager.auto_load_plugins()
+    await auto_load_plugins_if_enabled(runtime, config)
 
 
 def _match_endpoint(
@@ -103,9 +104,10 @@ async def run_cli(
         config=config,
         vault_port=storage_stack.vault_port,
         state_engine=state_engine,
+        critical_state_prefixes=list(DEFAULT_CRITICAL_STATE_PREFIXES),
     )
 
-    await _auto_load_plugins(runtime)
+    await _auto_load_plugins(runtime, config)
     await runtime.start()
 
     endpoints = runtime.http.list()

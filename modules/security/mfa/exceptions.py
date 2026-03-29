@@ -1,5 +1,5 @@
 """
-MFA-related exceptions for Step 17.6 — Elevated Secret Access.
+MFA-related exceptions for elevated secret access.
 
 All exceptions include context for audit logging.
 """

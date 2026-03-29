@@ -6,7 +6,7 @@
 """
 
 from core.kernel.base_plugin import BasePlugin, PluginMetadata
-from core.http_registry import HttpEndpoint
+from core.http import HttpEndpoint
 from fastapi import WebSocket
 import json
 import logging

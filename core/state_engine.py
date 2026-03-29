@@ -31,7 +31,7 @@ class StateEngine:
         # Lock для безопасности в async коде
         self._lock = asyncio.Lock()
         # Фоновая задача для очистки истёкших ключей
-        self._cleanup_task: Optional[asyncio.Task] = None
+        self._cleanup_task: Optional[asyncio.Task[None]] = None
         self._cleanup_running = False
 
     async def get(self, key: str) -> Optional[Any]:

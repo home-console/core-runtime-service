@@ -106,7 +106,7 @@ class TestFullDeployHappyPath:
         """
         rt = _build_runtime()
 
-        # ── Step 1: POST /admin/v1/agents/deploy ──────────────────────────
+        # ── flow: POST /admin/v1/agents/deploy ──────────────────────────
         deploy_result = await admin_agent_deploy(
             rt, body={"agent_name": "integration-agent", "credential_id": "cred-int"}
         )
@@ -115,15 +115,15 @@ class TestFullDeployHappyPath:
         assert deploy_result["status"] == "started"
         assert deploy_result["heartbeat_timeout"] == 300
 
-        # ── Step 2: Poll — should be PENDING (background task not running) ─
+        # ── flow: Poll — should be PENDING (background task not running) ─
         poll = await admin_agent_get_deployment_status(rt, dep_id)
         assert poll["ok"] is True
         assert poll["status"] in ("pending", "started", "uploading")
 
-        # ── Step 3: Manually advance tracker (SSH succeeded) ──────────────
+        # ── flow: Manually advance tracker (SSH succeeded) ──────────────
         await rt.deployment_tracker.update_status(dep_id, "deployed", progress=50)
 
-        # ── Step 4: Enroll agent (simulates remote-client calling /enroll) ─
+        # ── flow: Enroll agent (simulates remote-client calling /enroll) ─
         # First create a real enrollment token
         from modules.agent import AgentKeyManager
         import json
@@ -147,7 +147,7 @@ class TestFullDeployHappyPath:
         )
         assert age is True
 
-        # ── Step 5: Send heartbeat for that agent ─────────────────────────
+        # ── flow: Send heartbeat for that agent ─────────────────────────
         hb_result = await admin_agent_heartbeat(
             rt, agent_id="agent-int-001",
             body={"status": "ok", "uptime_seconds": 10, "cpu_percent": 5.0}
@@ -155,7 +155,7 @@ class TestFullDeployHappyPath:
         assert hb_result["ok"] is True
         assert hb_result["ack"] is True
 
-        # ── Step 6: Heartbeat handler should advance deployment to READY ───
+        # ── flow: Heartbeat handler should advance deployment to READY ───
         poll_final = await admin_agent_get_deployment_status(rt, dep_id)
         assert poll_final["ok"] is True
         assert poll_final["status"] == "ready"

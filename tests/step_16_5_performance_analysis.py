@@ -1,5 +1,5 @@
 """
-STEP 16.5: Performance Impact & Threat Gap Analysis
+FLOW: Performance Impact & Threat Gap Analysis
 ====================================================
 
 Part 7: Performance measurements
@@ -430,17 +430,17 @@ class ThreatGapAnalysis:
             name="Agent Control Plane Compromise",
             description="Attacker compromises agent control service → can launch command injection",
             attack_vector="Code injection in control service, unencrypted control channel",
-            mitigation="mTLS (Step 17) + request signing + audit logging",
+            mitigation="mTLS (flow) + request signing + audit logging",
             status=ThreatLevel.UNMITIGATED,
-            residual_risk="Not yet addressed. Step 17 required.",
-            notes="Out of scope for Step 16. Hardened vault only protects secrets, not commands.",
+            residual_risk="Not yet addressed. flow required.",
+            notes="Out of scope for flow. Hardened vault only protects secrets, not commands.",
         ))
         
         self.add_scenario(ThreatScenario(
             name="Supply Chain Attack (Malicious Plugin)",
             description="Attacker contributes malicious plugin → installs backdoor at agent init",
             attack_vector="Code review bypass, compromised repository",
-            mitigation="Code signing (Step 18) + artifact scanning + runtime policy checks",
+            mitigation="Code signing (flow) + artifact scanning + runtime policy checks",
             status=ThreatLevel.UNMITIGATED,
             residual_risk="Requires independent verification. Policy check limits damage.",
             notes="Policy whitelist stops unauthorized namespace access, but can't stop plugin logic.",
@@ -492,7 +492,7 @@ class ThreatGapAnalysis:
         
         report = f"""
 # THREAT GAP ANALYSIS REPORT
-## STEP 16: Linux Hardened Vault
+## FLOW: Linux Hardened Vault
 
 **Timestamp**: {datetime.now().isoformat()}
 
@@ -596,12 +596,12 @@ Layer 5: Application-Level (SecretStore)
 - [ ] Implement audit log signing (Hash chain + timestamped commits)
 
 ### Short Term (Next Month)
-- [ ] mTLS pinning for agent control (Step 17)
+- [ ] mTLS pinning for agent control (flow)
 - [ ] Passphrase strength requirements (entropy validator)
 - [ ] Performance optimization (Argon2id tuning for UX)
 
 ### Medium Term (Next Quarter)
-- [ ] Code signing for plugins (Step 18)
+- [ ] Code signing for plugins (flow)
 - [ ] Hardware security module (HSM) integration
 - [ ] Key rotation automation
 - [ ] Threat modeling automation
@@ -624,9 +624,9 @@ Layer 5: Application-Level (SecretStore)
 - [x] Tamper detection working (checksum validation)
 - [ ] Concurrent write serialization (NEEDS: mutex at app level)
 - [ ] Audit logging (CURRENT: basic only)
-- [ ] Key rotation (TODO: Step 17+)
-- [ ] mTLS (TODO: Step 17)
-- [ ] Code signing (TODO: Step 18)
+- [ ] Key rotation (TODO: flow+)
+- [ ] mTLS (TODO: flow)
+- [ ] Code signing (TODO: flow)
 
 ---
 
@@ -661,7 +661,7 @@ The hardened vault provides **strong protection** against memory disclosure, pro
   • Merkle root tampering (need separate commitment)
 
 **Recommendation**: SAFE TO DEPLOY with awareness of limitations.
-Follow Step 17 (mTLS) and Step 18 (code signing) for complete system security.
+Follow flow (mTLS) and flow (code signing) for complete system security.
 
 """
         
@@ -671,7 +671,7 @@ Follow Step 17 (mTLS) and Step 18 (code signing) for complete system security.
 def main():
     """Run full analysis."""
     print("\n" + "="*70)
-    print("STEP 16.5: PERFORMANCE & THREAT ANALYSIS")
+    print("FLOW: PERFORMANCE & THREAT ANALYSIS")
     print("="*70 + "\n")
     
     # Part 7: Performance

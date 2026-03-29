@@ -38,11 +38,11 @@ class ExecutionTrace:
 
     stderr_tail: Optional[str]  # max N chars
 
-    # Lineage metadata (D3.5)
+    # Lineage metadata 
     parent_execution_id: Optional[str] = None
     retry_index: int = 0
 
-    # Cancellation metadata (D3.4)
+    # Cancellation metadata 
     cancelled_at: Optional[datetime] = None
     cancel_reason: Optional[str] = None
 

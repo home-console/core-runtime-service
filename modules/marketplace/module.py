@@ -88,7 +88,7 @@ class MarketplaceModule(RuntimeModule):
             self._wrap_handler(self.service.handle_list_installed)
         )
         
-        # Step 12: Register registry-based operations
+        # Register registry-based operations
         self.runtime.operations.register_handler(
             "marketplace.install_from_registry",
             self._wrap_handler(self.service.handle_install_from_registry)
@@ -228,26 +228,10 @@ class MarketplaceModule(RuntimeModule):
     
     def list_installed_plugins(self) -> Dict[str, Any]:
         """Get installed plugins from storage."""
-        # Legacy: синхронный метод (storage.get асинхронный); при необходимости переделать на async
-        # TODO: remove fallback after full KernelContext migration
-        if hasattr(self, "context") and self.context:
-            storage = (
-                self.context.get_service("storage")
-                if hasattr(self.context, "get_service")
-                else self.context.storage
-            )
-        else:
-            storage = None
-
-        if storage is None and hasattr(self, "runtime"):
-            storage = getattr(self.runtime, "storage", None)
-
-        # Внимание: это синхронный вызов, но storage.get асинхронный
-        # Это legacy код, который нужно будет переделать
+        storage = getattr(self.runtime, "storage", None)
         if hasattr(storage, "get_sync"):
             return (storage.get_sync("marketplace.installed") or {})
-        # Fallback на runtime.storage для синхронного доступа (legacy)
-        return (self.runtime.storage.get("marketplace.installed") or {})
+        return {}
     
     def get_manifest(self, plugin_name: str) -> Optional[Dict[str, Any]]:
         """

@@ -5,12 +5,12 @@ Integrates through OperationManager with capability-driven operations.
 RBAC enforcement happens BEFORE service calls.
 No direct HTTP CRUD — all operations routed through OperationManager.
 
-Step 17.5: Tamper-evident audit binding via AuditBinder
-Step 17.6: Zero-trust secret access with MFA elevation
-Step 17.7: Self-defending vault with abuse detection
-Step 17.8: Adaptive risk scoring engine
-Step 17.9: Trust restoration engine
-Step 17.10: Unified security decision orchestrator
+Tamper-evident audit binding via AuditBinder
+Zero-trust secret access with MFA elevation
+Self-defending vault with abuse detection
+Adaptive risk scoring engine
+Trust restoration engine
+Unified security decision orchestrator
 """
 
 from typing import TYPE_CHECKING, Any, Dict, Optional
@@ -62,13 +62,13 @@ class CredentialModule(RuntimeModule):
     - Enforce rate limiting
     - Use immutable optimistic locking patterns
 
-    Security Stack (Step 17.1-17.10):
-    - Step 17.1-5: RBAC enforcement
-    - Step 17.6: MFA elevation
-    - Step 17.7: Abuse detection
-    - Step 17.8: Risk scoring
-    - Step 17.9: Trust restoration
-    - Step 17.10: Unified orchestrator (all 5 layers)
+    Security Stack (-17.10):
+    - -5: RBAC enforcement
+    - MFA elevation
+    - Abuse detection
+    - Risk scoring
+    - Trust restoration
+    - Unified orchestrator (all 5 layers)
     """
 
     def __init__(self, runtime: Any):
@@ -112,26 +112,15 @@ class CredentialModule(RuntimeModule):
         Each operation checks policies BEFORE calling service layer.
 
         Audit:
-        All operations logged to P0 protected storage (Step 17.5).
+        All operations logged to P0 protected storage ().
 
         Abuse Detection:
-        Secret access validated for behavioral anomalies (Step 17.7).
+        Secret access validated for behavioral anomalies ().
         """
         # Initialize repository (StorageManager для core/vault, иначе только secret_store)
         sm = getattr(self.runtime, "storage_manager", None)
         if sm is None:
-            # TODO: remove fallback after full KernelContext migration
-            if hasattr(self, "context") and self.context:
-                sm = (
-                    self.context.get_service("storage")
-                    if hasattr(self.context, "get_service")
-                    else self.context.storage
-                )
-            else:
-                sm = None
-
-            if sm is None and hasattr(self, "runtime"):
-                sm = getattr(self.runtime, "storage", None)
+            sm = getattr(self.runtime, "storage", None)
 
         self._repository = CredentialRepository(
             storage_manager=sm,
@@ -142,18 +131,18 @@ class CredentialModule(RuntimeModule):
         policy_store = PolicyStoreAdapter(self._repository)
         policy_engine = CredentialPolicyEngine(policy_store=policy_store)
 
-        # Initialize audit binder (Step 17.5)
+        # Initialize audit binder ()
         if hasattr(self.runtime, "secure_storage"):
             from core.audit.binder import AuditBinder
 
             self._audit_binder = AuditBinder(self.runtime.secure_storage)
 
-        # Initialize abuse detector (Step 17.7)
+        # Initialize abuse detector ()
         self._abuse_detector = CredentialAbuseDetector(
             audit_binder=self._audit_binder,
         )
 
-        # Initialize MFA service (Step 17.6)
+        # Initialize MFA service ()
         self._mfa_service = MFAService(
             secret_store=self.runtime.secret_store,
             audit_binder=self._audit_binder,
@@ -170,18 +159,18 @@ class CredentialModule(RuntimeModule):
             elevation_session_manager=self._mfa_service.elevation_session_manager,
         )
 
-        # Initialize risk engine (Step 17.8)
+        # Initialize risk engine ()
         self._risk_engine = RiskEngine(
             audit_binder=self._audit_binder,
         )
 
-        # Initialize trust engine (Step 17.9)
+        # Initialize trust engine ()
         self._trust_engine = TrustEngine(
             config=TrustConfigs.BALANCED,
             audit_binder=self._audit_binder,
         )
 
-        # Initialize security decision orchestrator (Step 17.10)
+        # Initialize security decision orchestrator ()
         # Coordinates all 5 security layers into unified decision path
         self._security_orchestrator = CredentialSecurityOrchestrator(
             rbac_enforcer=self._rbac_enforcer,

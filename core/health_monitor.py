@@ -120,6 +120,3 @@ class ProviderHealthMonitor:
             "unhealthy": unhealthy_count,
         }
 
-
-# Backward-compat alias (class was renamed from HealthMonitor to ProviderHealthMonitor)
-HealthMonitor = ProviderHealthMonitor

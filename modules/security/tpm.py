@@ -1,5 +1,5 @@
 """
-Step 14: Optional TPM support for master key sealing.
+Optional TPM support for master key sealing.
 
 Provides optional TPM 2.0 sealing/unsealing of master keys.
 Falls back to passphrase-only mode if TPM not available.

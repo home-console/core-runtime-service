@@ -30,9 +30,9 @@ async def e2e_test_dual_mode_workflow():
 
         try:
             # ========================================
-            # PHASE 1: Initial Single-Mode Setup
+            # TRACK: Initial Single-Mode Setup
             # ========================================
-            print("\n[PHASE 1] Initial Single-Mode Setup")
+            print("\n[TRACK] Initial Single-Mode Setup")
             print("-" * 70)
 
             from modules.storage.factory import create_storage_manager
@@ -93,9 +93,9 @@ async def e2e_test_dual_mode_workflow():
             print("✓ Single-mode manager closed")
 
             # ========================================
-            # PHASE 2: Configuration Switch to Dual Mode
+            # TRACK: Configuration Switch to Dual Mode
             # ========================================
-            print("\n[PHASE 2] Configuration Switch to Dual Mode")
+            print("\n[TRACK] Configuration Switch to Dual Mode")
             print("-" * 70)
 
             dual_config = Config(
@@ -115,9 +115,9 @@ async def e2e_test_dual_mode_workflow():
             )
 
             # ========================================
-            # PHASE 3: Data Migration
+            # TRACK: Data Migration
             # ========================================
-            print("\n[PHASE 3] Data Migration (Single → Dual)")
+            print("\n[TRACK] Data Migration (Single → Dual)")
             print("-" * 70)
 
             from modules.storage.migrate import (
@@ -146,9 +146,9 @@ async def e2e_test_dual_mode_workflow():
             print(f"✓ Vault storage contains critical secrets ({vault_after} records)")
 
             # ========================================
-            # PHASE 4: Verify Dual-Mode Operation
+            # TRACK: Verify Dual-Mode Operation
             # ========================================
-            print("\n[PHASE 4] Verify Dual-Mode Operations")
+            print("\n[TRACK] Verify Dual-Mode Operations")
             print("-" * 70)
 
             dual_manager = await create_storage_manager(dual_config)
@@ -184,9 +184,9 @@ async def e2e_test_dual_mode_workflow():
                 )
 
             # ========================================
-            # PHASE 5: New Dual-Mode Operations
+            # TRACK: New Dual-Mode Operations
             # ========================================
-            print("\n[PHASE 5] New Operations in Dual Mode")
+            print("\n[TRACK] New Operations in Dual Mode")
             print("-" * 70)
 
             # Write new vault data (should auto-route to vault)
@@ -221,9 +221,9 @@ async def e2e_test_dual_mode_workflow():
             print("✓ New core data retrieved correctly")
 
             # ========================================
-            # PHASE 6: Data Listing and Namespaces
+            # TRACK: Data Listing and Namespaces
             # ========================================
-            print("\n[PHASE 6] Data Listing and Namespace Management")
+            print("\n[TRACK] Data Listing and Namespace Management")
             print("-" * 70)
 
             # List all namespaces

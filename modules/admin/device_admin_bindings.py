@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from core.http import HttpEndpoint
+from core.http.models import HttpEndpoint
 
 logger = logging.getLogger(__name__)
 

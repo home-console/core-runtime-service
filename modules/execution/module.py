@@ -1,5 +1,5 @@
 """
-ExecutionModule (D3) — подключаемый слой исполнения operations.
+ExecutionModule  — подключаемый слой исполнения operations.
 
 Ключевая идея:
 - НЕ меняем Core (core/), SDK, automation, UI
@@ -17,7 +17,6 @@ import asyncio
 from typing import Any, Optional, Callable, Awaitable
 
 from core import capability_protocol
-from core.operations.registry import get_operation_handler
 from core.runtime_module import RuntimeModule
 from core.operations.models import Operation, OperationStatus
 
@@ -57,7 +56,7 @@ class ExecutionModule(RuntimeModule):
         if ops_mgr is None:
             return
 
-        # Operation: execution.cancel (D3.4)
+        # Operation: execution.cancel 
         async def _handle_execution_cancel(params: dict, context: dict) -> dict:
             execution_id = params.get("execution_id")
             if not execution_id:
@@ -75,7 +74,7 @@ class ExecutionModule(RuntimeModule):
 
         ops_mgr.register_handler("execution.cancel", _handle_execution_cancel)
 
-        # Operation: execution.retry (D3.5)
+        # Operation: execution.retry 
         async def _handle_execution_retry(params: dict, context: dict) -> dict:
             execution_id = params.get("execution_id")
             if not execution_id:
@@ -100,7 +99,7 @@ class ExecutionModule(RuntimeModule):
 
         ops_mgr.register_handler("execution.retry", _handle_execution_retry)
 
-        # Operations: execution.schedule.* (D3.6)
+        # Operations: execution.schedule.* 
 
         async def _handle_schedule_create(params: dict, context: dict) -> dict:
             operation_type = params.get("operation_type")
@@ -502,9 +501,7 @@ class ExecutionModule(RuntimeModule):
         ops_mgr = getattr(self.runtime, "operations", None)
         registry = getattr(ops_mgr, "_registry", None)
         if registry is not None and hasattr(registry, "find_handler"):
-            local_handler = registry.find_handler(operation.type, self.runtime)
-        if local_handler is None:
-            local_handler = get_operation_handler(operation.type)
+            local_handler = registry.find_handler(operation.type)
 
         if local_handler is not None:
             payload = await self._execute_with_controller(operation, provider_metadata=None)
@@ -545,7 +542,7 @@ class ExecutionModule(RuntimeModule):
         )
 
     async def start(self) -> None:
-        # Запускаем фоновый scheduler (D3.6).
+        # Запускаем фоновый scheduler .
         if self._controller is None:
             self._controller = ExecutionControllerImpl(self.runtime)
             self.runtime.execution_controller = self._controller

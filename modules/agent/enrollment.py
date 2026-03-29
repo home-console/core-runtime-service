@@ -1,5 +1,5 @@
 """
-Step 15: Agent Enrollment Flow — Token-based enrollment with TTL.
+Agent Enrollment Flow — Token-based enrollment with TTL.
 
 Flow:
 1. Core generates enrollment token (one-time use)

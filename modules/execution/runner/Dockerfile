@@ -1,6 +1,6 @@
 FROM python:3.11-slim
 
-# Minimal runner image for D3.1 MVP.
+# Minimal runner image.
 # No plugin code here yet; only runner + sdk if needed later.
 
 WORKDIR /app

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-STEP 16: Vault Hardening - Practical Examples
+FLOW: Vault Hardening - Practical Examples
 
 Real-world examples of using the secure memory, vault hardening, and session modules.
 
@@ -14,7 +14,7 @@ import os
 # Add project path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core.security import (
+from modules.security import (
     SecureBuffer,
     SecureBytes,
     VaultHardening,
@@ -280,7 +280,7 @@ async def main():
     # Header
     print(f"\n{BLUE}")
     print("=" * 60)
-    print("STEP 16: Linux Hardened Vault - Practical Examples")
+    print("FLOW: Linux Hardened Vault - Practical Examples")
     print("=" * 60)
     print(f"Platform: {platform.system()} {platform.release()}")
     print(f"Python: {sys.version.split()[0]}")

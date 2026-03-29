@@ -1,5 +1,5 @@
 """
-Test Suite for Step 17.5 — Global Audit Integration (Tamper-Evident)
+Test Suite for flow — Global Audit Integration (Tamper-Evident)
 
 Tests credential subsystem integration with P0 storage hardening:
 - SecurityEvent immutability and serialization

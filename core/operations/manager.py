@@ -48,7 +48,7 @@ class OperationManager:
         
         # ExecutionController используется через runtime
         # Создаём компоненты
-        self._registry = OperationHandlerRegistry(execution_router=None)
+        self._registry = OperationHandlerRegistry()
         self._storage = OperationStorage(runtime)
         self._executor: IOperationExecutor = OperationExecutor(self._registry, runtime, self._storage)
     
@@ -240,7 +240,7 @@ class OperationManager:
     
     def _find_handler(self, operation_type: str):
         """Internal method для обратной совместимости."""
-        return self._registry.find_handler(operation_type, self.runtime)
+        return self._registry.find_handler(operation_type)
     
     async def _persist(self, operation: Operation) -> None:
         """Internal method для обратной совместимости."""

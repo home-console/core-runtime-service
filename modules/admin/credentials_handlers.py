@@ -18,7 +18,7 @@ from modules.credentials import CredentialType
 
 # SystemContext не имеет user_id; для credential.* передаём явно admin
 _ADMIN_USER_ID = "admin"
-# RBAC Role values are lowercase (see core.security.rbac_models.Role)
+# RBAC Role values are lowercase (see modules.security.rbac_models.Role)
 _ADMIN_ROLES = ["admin"]
 
 

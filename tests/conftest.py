@@ -10,6 +10,9 @@ if str(ROOT) not in sys.path:
 
 import pytest
 
+# Skip collection of Linux-only test files on non-Linux platforms
+collect_ignore_glob = [] if sys.platform == "linux" else ["test_vault_linux_hardening.py"]
+
 from core.adapters.storage_adapter import StorageAdapter
 from core.state_engine import StateEngine
 from modules.storage.port import CoreStoragePort

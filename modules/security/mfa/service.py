@@ -53,7 +53,7 @@ class MFAService:
             secret_store: SecretStore for retrieving MFA secrets
             audit_binder: Optional AuditBinder for tamper-evident logging
             elevation_session_manager: Optional pre-initialized manager (for testing)
-            abuse_detector: Optional CredentialAbuseDetector for self-defense (Step 17.7)
+            abuse_detector: Optional CredentialAbuseDetector for self-defense
             elevation_ttl_seconds: Session TTL in seconds (default 90)
             max_failed_attempts: Max failed attempts before lockout (default 5)
             lockout_seconds: Lockout duration (default 300s = 5 minutes)
@@ -112,7 +112,7 @@ class MFAService:
         Raises:
             RateLimitExceeded: If user has too many failed attempts
             MFANotConfigured: If MFA method not configured for user
-            CredentialAccessAbuseDetected: If abuse behavior detected (Step 17.7)
+            CredentialAccessAbuseDetected: If abuse behavior detected
         """
         # Abuse detection: check if MFA is available (not locked)
         if self.abuse_detector:

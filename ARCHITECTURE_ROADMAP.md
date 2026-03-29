@@ -8,7 +8,7 @@ CURRENT STATE:
 
 TOP CANDIDATES FOR SPLITTING:
 
-1. ✅ INTERFACES (COMPLETED - Phase 4):
+1. ✅ INTERFACES (COMPLETED - Wave 4):
    - core/operations/interface.py: IOperationExecutor
    - core/remote_executor_interface.py: IRemoteExecutor
    - core/storage_interface.py: IStorageAdapter, IStorageManager
@@ -17,7 +17,7 @@ TOP CANDIDATES FOR SPLITTING:
    
    Status: All 39+ regression tests passing
 
-2. ✅ PACKAGE STRUCTURE (COMPLETED - Phase 5):
+2. ✅ PACKAGE STRUCTURE (COMPLETED - Wave 5):
    - core/exceptions/ - unified error types in errors.py
    - core/contexts/ - RuntimeContext, OperationContext, SystemContext
    - core/foundation/ - core infrastructure (runtime, registries, managers)
@@ -88,7 +88,7 @@ BENEFITS:
 ✓ Легче тестировать и мокировать
 ✓ Меньше циклических зависимостей
 
-NEXT STEPS (Phase 6 - File Splitting):
+NEXT STEPS (Wave 6 - File Splitting):
 1. Split core/plugins/manager.py -> registry.py, loader.py, lifecycle.py
 2. Split core/secure_storage.py -> crypto.py, serialization.py
 3. Split core/service_registry.py -> separate resolver and registry concerns

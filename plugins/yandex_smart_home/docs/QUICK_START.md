@@ -5,7 +5,7 @@
 **ONE login → TWO auth channels (OAuth + Cookies)**
 
 ✅ **Possible?** YES  
-⚡ **Best for web app:** Phase 1 (unified backend) + Phase 2 (wizard UI)  
+⚡ **Best for web app:** track (unified backend) + track (wizard UI)  
 ⏱️ **Implementation time:** 8-12 hours  
 📈 **UX improvement:** 50%  
 
@@ -27,7 +27,7 @@ plugins/yandex_smart_home/
 
 ---
 
-## ⚡ Quick Implementation (Phase 1)
+## ⚡ Quick Implementation (track)
 
 ### 1. Add Files
 
@@ -95,7 +95,7 @@ curl http://localhost:8000/auth/yandex/status
 
 ---
 
-## 🎨 Quick UI Improvement (Phase 2)
+## 🎨 Quick UI Improvement (track)
 
 ### Create Wizard Component
 
@@ -122,7 +122,7 @@ export function YandexSetupWizard() {
 function CookieWizardStep({ onComplete }) {
   return (
     <div>
-      <h3>Step 2: Enable Real-Time Updates</h3>
+      <h3>flow: Enable Real-Time Updates</h3>
       <ol>
         <li>Open <a href="https://yandex.ru">yandex.ru</a></li>
         <li>Press F12 → Application → Cookies</li>
@@ -167,7 +167,7 @@ Errors: Common
 Support needed: Often
 ```
 
-### After (Phase 1 + 2)
+### After (track + 2)
 ```
 1. Click "Connect Yandex"
 2. Login (automatic)
@@ -227,17 +227,17 @@ Solutions:
 
 | If you have... | Choose... | Effort | Result |
 |----------------|-----------|--------|--------|
-| High user demand | + Phase 3 (extension) | +16h | ⭐⭐⭐⭐ Great |
+| High user demand | + track (extension) | +16h | ⭐⭐⭐⭐ Great |
 | Desktop app planned | Electron + WebView | 40h | ⭐⭐⭐⭐⭐ Perfect |
 | CLI/automation | Playwright | 8h | ⭐⭐ OK |
 
-**Recommended: Phase 1 + 2** (best ROI)
+**Recommended: track + 2** (best ROI)
 
 ---
 
 ## ✅ Checklist
 
-### Phase 1: Unified Backend
+### track: Unified Backend
 
 - [ ] Add `unified_auth.py`
 - [ ] Add `unified_auth_endpoints.py`
@@ -249,7 +249,7 @@ Solutions:
 - [ ] Test Quasar WebSocket
 - [ ] Update docs
 
-### Phase 2: Wizard UI
+### track: Wizard UI
 
 - [ ] Design wizard mockup
 - [ ] Create `YandexSetupWizard.tsx`
@@ -312,7 +312,7 @@ Fix: Prompt user to re-login (can't auto-refresh cookies)
 ## 🎯 Next Steps
 
 1. **Read:** UNIFIED_LOGIN_SUMMARY.md (5 min)
-2. **Decide:** Phase 1, 1+2, or 1+2+3?
+2. **Decide:** track, 1+2, or 1+2+3?
 3. **Implement:** Follow checklist above
 4. **Test:** Complete flow end-to-end
 5. **Deploy:** Ship to users
@@ -332,13 +332,13 @@ Fix: Prompt user to re-login (can't auto-refresh cookies)
 → Yes. Existing users unaffected
 
 **"How long to implement?"**
-→ Phase 1: 4h, Phase 2: 8h, Phase 3: 16h
+→ track: 4h, track: 8h, track: 16h
 
 **"Best approach for web app?"**
-→ Phase 1 + 2 (unified backend + wizard UI)
+→ track + 2 (unified backend + wizard UI)
 
 ---
 
 **Status:** ✅ Ready to implement
 
-**Start:** Follow Phase 1 checklist above
+**Start:** Follow track checklist above

@@ -1,5 +1,5 @@
 """
-Execution backends (D3).
+Execution backends .
 
 Backend знает КАК запускать, но не знает ЧТО он запускает (домены/automation/plugins).
 Он получает envelope операции и должен вернуть OperationResult.
@@ -8,10 +8,9 @@ Backend знает КАК запускать, но не знает ЧТО он �
 from __future__ import annotations
 
 import asyncio
+import inspect
 from dataclasses import dataclass
 from typing import Any, Dict, Literal, Optional, Protocol
-
-from core.operations.registry import get_operation_handler
 
 BackendId = Literal["in_process", "process", "container"]
 
@@ -22,7 +21,7 @@ class OperationResult:
     Результат исполнения операции backend'ом.
 
     Помимо бизнес-результата (result/error) содержит минимальные execution-метаданные,
-    необходимые для observability-слоя (D3.3), но не тянет домен.
+    необходимые для observability-слоя , но не тянет домен.
     """
 
     ok: bool
@@ -30,7 +29,7 @@ class OperationResult:
     error: Optional[Dict[str, Any]] = None
     backend: Optional[str] = None  # for debugging/inspector logs if needed
 
-    # Observability metadata (D3.3)
+    # Observability metadata 
     stderr: Optional[str] = None
     killed: bool = False
     timed_out: bool = False
@@ -80,12 +79,7 @@ class InProcessBackend:
             )
 
         # IMPORTANT: не используем ops_mgr.execute(), чтобы не зациклиться на execution layer.
-        # Сначала пробуем декларативный registry, затем legacy OperationManager registry.
-        handler = get_operation_handler(operation_type)
-        use_legacy_handler = False
-        if handler is None:
-            handler = getattr(ops_mgr, "_find_handler", lambda _: None)(operation_type)
-            use_legacy_handler = handler is not None
+        handler = getattr(ops_mgr, "_find_handler", lambda _: None)(operation_type)
         if handler is None:
             return OperationResult(
                 ok=False,
@@ -100,13 +94,13 @@ class InProcessBackend:
 
         async def _run() -> OperationResult:
             try:
-                if use_legacy_handler:
-                    result = await handler(
-                        params,
-                        {"runtime": self._runtime, **(context or {})},
-                    )
-                else:
-                    result = await handler(params)
+                invocation_context = {"runtime": self._runtime, **(context or {})}
+                maybe_result = None
+                try:
+                    maybe_result = handler(params, invocation_context)
+                except TypeError:
+                    maybe_result = handler(params)
+                result = await maybe_result if inspect.isawaitable(maybe_result) else maybe_result
                 if not isinstance(result, Dict):
                     result = {"value": result}
                 return OperationResult(ok=True, result=result, backend="in_process")
@@ -184,7 +178,7 @@ class ContainerBackend:
     """
     Container execution.
 
-    В рамках D3 это backend-контракт + заглушка. Реальная реализация потребует
+    В рамках  это backend-контракт + заглушка. Реальная реализация потребует
     docker/podman/k8s драйвера и протокола передачи operation envelope.
     """
 

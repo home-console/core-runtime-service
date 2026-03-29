@@ -4,7 +4,7 @@ Marketplace plugin installer.
 Handles:
 - ZIP/TAR extraction
 - plugin.json validation
-- Signature verification (Step 11: Trust Layer)
+- Signature verification (Trust Layer)
 - SHA256 verification
 - Conflict detection
 - File placement
@@ -132,7 +132,7 @@ class MarketplaceInstaller:
             except SchemaValidationError as e:
                 raise InstallerError(f"Invalid plugin.json: {str(e)}")
 
-            # Step 11: Verify signature if present (BEFORE installation)
+            # Verify signature if present (BEFORE installation)
             plugin_sig_path = Path(temp_dir) / "plugin.sig"
             trust_level = None  # Will be set if signature verification succeeds
 
@@ -245,7 +245,7 @@ class MarketplaceInstaller:
                         # Instantiate and load
                         plugin_instance = plugin_class(runtime)
 
-                        # Step 11: Store trust level on plugin instance for CapabilityRegistry
+                        # Store trust level on plugin instance for CapabilityRegistry
                         if trust_level is not None:
                             plugin_instance._trust_level = trust_level
 
@@ -450,12 +450,12 @@ class MarketplaceInstaller:
         force_update: bool = False,
     ) -> Dict[str, Any]:
         """
-        Install plugin from remote URL (Step 12: Registry).
+        Install plugin from remote URL (registry flow).
 
         Args:
             url: HTTPS URL to plugin archive
             sha256: Expected SHA256 hash
-            signature: Plugin signature for verification (Step 11)
+            signature: Plugin signature for verification
             public_key: Public key for signature verification
             runtime: Runtime instance for plugin loading
             force_update: Allow downgrade/conflicts
@@ -524,7 +524,7 @@ class MarketplaceInstaller:
             
 
             # If signature provided, it will be verified during install_from_file
-            # (signature validation is Step 11 responsibility)
+            # Signature validation is a trust-layer responsibility.
 
             # Install from downloaded archive
             return await self.install_from_file(

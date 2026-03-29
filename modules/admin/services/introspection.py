@@ -138,12 +138,9 @@ def _get_plugins_dir(runtime: Any) -> Path:
         pd = config.get("plugins_dir")
         if pd:
             return Path(pd)
-    # Тот же default, что в core.plugins.manager
-    try:
-        from modules.plugins import manager as _pm
-        return Path(_pm.__file__).resolve().parent.parent.parent / "plugins"
-    except Exception:
-        return Path(__file__).resolve().parent.parent.parent.parent / "plugins"
+    # Тот же default, что в PluginManager:
+    # <repo_root>/core/kernel/plugin_manager.py -> <repo_root>/plugins
+    return Path(__file__).resolve().parents[4] / "plugins"
 
 
 async def discover_manifests_for_inspector(runtime: Any) -> Dict[str, Any]:
@@ -712,7 +709,7 @@ async def dashboard_inspector_response(runtime: Any) -> Dict[str, Any]:
     }
 
 
-# --- Execution observability (D3.3) ---
+# --- Execution observability ---
 
 async def list_execution_traces(runtime: Any) -> List[Dict[str, Any]]:
     """
@@ -783,7 +780,7 @@ async def list_operation_executions(runtime: Any, operation_id: str) -> List[Dic
     return result
 
 
-# --- Execution schedules (D3.6) ---
+# --- Execution schedules ---
 
 
 async def list_schedules(runtime: Any) -> List[Dict[str, Any]]:
@@ -994,7 +991,7 @@ async def get_system_health(runtime: Any) -> Dict[str, Any]:
     """
     Get system health snapshot including metrics and resource status.
     
-    Step 13: Observability endpoint for monitoring dashboard.
+    Observability endpoint for monitoring dashboard.
     """
     from core.observability.health_snapshot import HealthSnapshotCollector
     

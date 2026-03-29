@@ -1,5 +1,5 @@
 """
-Test suite for SecurityDecisionOrchestrator (Step 17.10).
+Test suite for SecurityDecisionOrchestrator (flow).
 
 Covers unified authorization decision engine coordinating all 5 security layers:
 - Layer 1: RBAC enforcement

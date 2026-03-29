@@ -109,7 +109,7 @@ async def test_base_plugin_helpers_use_runtime_api() -> None:
         event_bus=_DummyEventBus(),
         capabilities={},
     )
-    plugin = _TestPlugin(runtime=runtime)
+    plugin = _TestPlugin(runtime)
 
     async def _handler() -> dict[str, bool]:
         return {"ok": True}
@@ -123,4 +123,3 @@ async def test_base_plugin_helpers_use_runtime_api() -> None:
     assert response["ok"] is True
     assert runtime.event_bus.events[-1] == ("plugin.event", {"p": 1})
     assert await plugin.storage_get("ns", "key") == "value"
-

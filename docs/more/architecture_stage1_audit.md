@@ -1,4 +1,4 @@
-# Stage 1 Architecture Audit
+# Wave 1 Architecture Audit
 
 ## Scope
 
@@ -68,7 +68,7 @@ rg "from modules\.|import modules\." core plugins
 - For runtime agent bootstrap, keep the current wiring isolated behind a thin adapter until `KernelContext` exists.
 - For `core/security/mfa/service.py`, keep the dependency behind `TYPE_CHECKING` or a narrow injected adapter if the runtime path can be removed later.
 
-## TODO for Stage 2
+## TODO for Wave 2
 
 - `core/runtime/runtime.py` -> remove direct agent bootstrap -> move to `KernelContext` and module registration.
 - `core/plugins/__init__.py` / `core/plugins/manager.py` / `core/plugin_schema.py` / `core/plugin_isolation.py` / `core/kernel/plugin_sandbox.py` -> replace compatibility imports with core-owned plugin contracts.

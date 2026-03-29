@@ -8,7 +8,7 @@ Coordinates all 5 security layers into a single authorization path:
 - Layer 4: Risk Engine (adaptive risk scoring)
 - Layer 5: Trust Engine (automatic recovery)
 
-Step 17.10: Full cycle integration — no security bypass possible.
+Full cycle integration — no security bypass possible.
 
 Design:
 - Orchestrator is pure orchestration: no business logic
@@ -161,7 +161,7 @@ class CredentialSecurityOrchestrator:
         trust_level = None
         
         # ════════════════════════════════════════════════════
-        # STEP 1: Check TRUST STATE
+        # Check TRUST STATE
         # ════════════════════════════════════════════════════
         if self.trust:
             trust_state = await self.trust.get_state(user_id)
@@ -186,7 +186,7 @@ class CredentialSecurityOrchestrator:
                 )
         
         # ════════════════════════════════════════════════════
-        # STEP 2: RBAC CHECK
+        # RBAC CHECK
         # ════════════════════════════════════════════════════
         if self.rbac and user_id and user_roles is not None:
             try:
@@ -211,7 +211,7 @@ class CredentialSecurityOrchestrator:
                 )
         
         # ════════════════════════════════════════════════════
-        # STEP 3: ABUSE DETECTION PRE-CHECK
+        # ABUSE DETECTION PRE-CHECK
         # ════════════════════════════════════════════════════
         if self.abuse and user_id:
             try:
@@ -233,7 +233,7 @@ class CredentialSecurityOrchestrator:
                 )
         
         # ════════════════════════════════════════════════════
-        # STEP 4: RISK ASSESSMENT
+        # RISK ASSESSMENT
         # ════════════════════════════════════════════════════
         trust_action = None
         if self.risk and user_id:
@@ -241,7 +241,7 @@ class CredentialSecurityOrchestrator:
             risk_score = assessment.score
             audit_events.append(f"RISK:SCORED:{risk_score:.1f}")
             
-            # Step 5: TRUST ENGINE EVALUATION
+            # TRUST ENGINE EVALUATION
             # ════════════════════════════════════════════════════
             if self.trust:
                 from modules.security import TrustAction as TA
@@ -288,7 +288,7 @@ class CredentialSecurityOrchestrator:
                     # Will check MFA below
         
         # ════════════════════════════════════════════════════
-        # STEP 6: MFA ELEVATION CHECK
+        # MFA ELEVATION CHECK
         # ════════════════════════════════════════════════════
         mfa_required = False
         if trust_action and trust_action.value == "require_mfa":
@@ -325,7 +325,7 @@ class CredentialSecurityOrchestrator:
                 )
         
         # ════════════════════════════════════════════════════
-        # STEP 7: ALL CHECKS PASSED - ALLOW
+        # ALL CHECKS PASSED - ALLOW
         # ════════════════════════════════════════════════════
         audit_events.append("AUTHORIZATION:ALLOWED")
         await self._audit_access_allowed(

@@ -25,7 +25,7 @@ SECURITY P0: Плагины НЕ должны иметь прямой досту
 """
 
 from typing import Any, List, Optional
-from core.errors import ForbiddenError
+from core.exceptions.errors import ForbiddenError
 
 
 DEFAULT_ALLOWED_SERVICES = [

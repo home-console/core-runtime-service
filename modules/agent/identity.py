@@ -1,5 +1,5 @@
 """
-Step 15: Agent Identity Model — Ed25519 keys and Agent IDs.
+Agent Identity Model — Ed25519 keys and Agent IDs.
 
 Each agent gets:
 - Private key (Ed25519, stored in SecretStore)

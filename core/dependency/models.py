@@ -1,5 +1,5 @@
 """
-Dependency Resolution Models — error and exception types (D2).
+Dependency Resolution Models — error and exception types .
 
 Error definitions for dependency validation.
 """

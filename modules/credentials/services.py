@@ -3,8 +3,8 @@ CredentialService — business logic for credential operations.
 
 Integrates repository with audit and RBAC enforcement.
 
-Step 17.5: Tamper-evident audit logging via AuditBinder
-Step 17.6: Zero-trust secret access with MFA elevation
+Tamper-evident audit logging via AuditBinder
+Zero-trust secret access with MFA elevation
 """
 
 from typing import Any, Dict, Optional, List, TYPE_CHECKING
@@ -74,24 +74,24 @@ class CredentialService:
         Args:
             repository: CredentialRepository instance
             rbac_enforcer: RBAC enforcer for access control
-            audit_binder: Optional AuditBinder for P0 tamper-evident audit (Step 17.5)
-            mfa_service: Optional MFAService for zero-trust secret access (Step 17.6)
-            abuse_detector: Optional CredentialAbuseDetector for self-defense (Step 17.7)
-            risk_engine: Optional RiskEngine for adaptive risk scoring (Step 17.8)
-            trust_engine: Optional TrustEngine for automatic trust recovery (Step 17.9)
-            security_orchestrator: Optional SecurityDecisionOrchestrator for unified auth (Step 17.10)
+            audit_binder: Optional AuditBinder for P0 tamper-evident audit ()
+            mfa_service: Optional MFAService for zero-trust secret access ()
+            abuse_detector: Optional CredentialAbuseDetector for self-defense ()
+            risk_engine: Optional RiskEngine for adaptive risk scoring ()
+            trust_engine: Optional TrustEngine for automatic trust recovery ()
+            security_orchestrator: Optional SecurityDecisionOrchestrator for unified auth ()
             audit_logger: Optional legacy audit logger (deprecated, use audit_binder)
         """
         self.repo = repository
-        self.audit_binder = audit_binder  # P0 protected audit (Step 17.5)
+        self.audit_binder = audit_binder  # P0 protected audit ()
         self.audit_legacy = audit_logger  # Legacy audit (deprecated)
         self.rbac = rbac_enforcer
-        self.mfa_service = mfa_service  # MFA service (Step 17.6)
-        self.abuse_detector = abuse_detector  # Abuse detector (Step 17.7)
-        self.risk_engine = risk_engine  # Risk engine (Step 17.8)
-        self.trust_engine = trust_engine  # Trust engine (Step 17.9)
+        self.mfa_service = mfa_service  # MFA service ()
+        self.abuse_detector = abuse_detector  # Abuse detector ()
+        self.risk_engine = risk_engine  # Risk engine ()
+        self.trust_engine = trust_engine  # Trust engine ()
         self.security_orchestrator = (
-            security_orchestrator  # Security orchestrator (Step 17.10)
+            security_orchestrator  # Security orchestrator ()
         )
 
         # Pass audit_binder to enforcer so it logs denials
@@ -230,7 +230,7 @@ class CredentialService:
         """
         Get credential with decrypted secret.
 
-        ORCHESTRATED AUTHORIZATION (Step 17.10):
+        ORCHESTRATED AUTHORIZATION ():
         Unified security decision through SecurityDecisionOrchestrator:
         - Layer 1: Trust state check (frozen = denied)
         - Layer 2: RBAC enforcement (insufficient privilege = denied)
@@ -249,12 +249,12 @@ class CredentialService:
         Raises:
             CredentialNotFound: If credential doesn't exist
             CredentialAccessDenied: If authorization failed (any layer)
-            MFARequired: If MFA elevation required (Step 17.10)
+            MFARequired: If MFA elevation required ()
             TemporaryBlockError: If temporarily blocked
             AccountFrozen: If account frozen
         """
         # ════════════════════════════════════════════════════
-        # UNIFIED AUTHORIZATION DECISION (Step 17.10)
+        # UNIFIED AUTHORIZATION DECISION ()
         # ════════════════════════════════════════════════════
         if self.security_orchestrator and user_id:
             security_decision = (
@@ -625,7 +625,7 @@ class CredentialService:
         old_fingerprint: Optional[str] = None,
     ) -> None:
         """
-        Log successful operation to P0 protected audit trail (Step 17.5).
+        Log successful operation to P0 protected audit trail ().
 
         Events are immutable, tamper-evident, and stored with Merkle root protection.
 
@@ -701,7 +701,7 @@ class CredentialService:
         reason: str,
     ) -> None:
         """
-        Log failed operation to P0 protected audit trail (Step 17.5).
+        Log failed operation to P0 protected audit trail ().
 
         Important: Failures are still logged (e.g., CredentialNotFound).
 

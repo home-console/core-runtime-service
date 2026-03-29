@@ -1,5 +1,5 @@
 """
-Test Step 17.7 — Self-Defending Vault (Abuse Detection & Active Defense)
+Test flow — Self-Defending Vault (Abuse Detection & Active Defense)
 
 Tests for behavioral anomaly detection, user freezing, and self-defense.
 

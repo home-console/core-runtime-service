@@ -1,5 +1,5 @@
 """
-Module Manager Models — specification and configuration types (D2).
+Module Manager Models — specification and configuration types .
 
 Data structures for module specification and bootstrapping.
 """

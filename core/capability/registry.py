@@ -4,21 +4,48 @@ from __future__ import annotations
 
 import asyncio
 import threading
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from core.capability_protocol import PROTOCOL_VERSION, ProviderMetadata
-from core.capability.security import (
-    check_capability_namespace_permission,
-    trust_level_to_privilege,
-)
+
+CapabilityNamespacePermissionChecker = Callable[[str, str, str], None]
+TrustLevelToPrivilegeMapper = Callable[[object | None], str]
+
+
+def _default_check_capability_namespace_permission(
+    capability_id: str,
+    plugin_name: str,
+    plugin_privilege: str = "user",
+) -> None:
+    _ = (capability_id, plugin_name, plugin_privilege)
+    return None
+
+
+def _default_trust_level_to_privilege(trust_level: object = None) -> str:
+    _ = trust_level
+    return "user"
 
 
 class CapabilityRegistry:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        check_capability_namespace_permission: Optional[
+            CapabilityNamespacePermissionChecker
+        ] = None,
+        trust_level_to_privilege_mapper: Optional[TrustLevelToPrivilegeMapper] = None,
+    ) -> None:
         self._providers: Dict[str, List[Dict[str, Any]]] = {}
         self._consumers: Dict[str, List[str]] = {}
         self._sync_lock = threading.RLock()
         self._async_lock: Optional[asyncio.Lock] = None
+        self._check_capability_namespace_permission = (
+            check_capability_namespace_permission
+            or _default_check_capability_namespace_permission
+        )
+        self._trust_level_to_privilege_mapper = (
+            trust_level_to_privilege_mapper or _default_trust_level_to_privilege
+        )
 
     @property
     def _lock(self) -> asyncio.Lock:
@@ -37,7 +64,7 @@ class CapabilityRegistry:
         container_config: Optional[Dict[str, Any]] = None,
         plugin_privilege: str = "user",
     ) -> None:
-        check_capability_namespace_permission(
+        self._check_capability_namespace_permission(
             capability_id, plugin_name, plugin_privilege
         )
 
@@ -249,5 +276,4 @@ class CapabilityRegistry:
         return (len(missing) == 0, missing)
 
     def trust_level_to_privilege(self, trust_level: object = None) -> str:
-        return trust_level_to_privilege(trust_level)
-
+        return self._trust_level_to_privilege_mapper(trust_level)

@@ -54,14 +54,14 @@ class TrustPolicy:
         """
         current_level = current_state.level
         
-        # Step 1: Handle FROZEN expiration
+        # Handle FROZEN expiration
         if current_level == TrustLevel.FROZEN:
             if current_state.freeze_until and current_time >= current_state.freeze_until:
                 if self.config.auto_unfreeze_enabled:
                     return TrustAction.UNFREEZE, TrustLevel.COOLDOWN
             return TrustAction.FREEZE, TrustLevel.FROZEN
         
-        # Step 2: Handle COOLDOWN expiration
+        # Handle COOLDOWN expiration
         if current_level == TrustLevel.COOLDOWN:
             if current_state.cooldown_until and current_time >= current_state.cooldown_until:
                 # Cooldown expired, evaluate new level
@@ -75,7 +75,7 @@ class TrustPolicy:
                     return TrustAction.TEMP_BLOCK, TrustLevel.TEMP_BLOCKED
                 return TrustAction.ALLOW, TrustLevel.COOLDOWN
         
-        # Step 3: Handle TEMP_BLOCKED expiration/escalation/recovery
+        # Handle TEMP_BLOCKED expiration/escalation/recovery
         if current_level == TrustLevel.TEMP_BLOCKED:
             # Check if risk has escalated to FROZEN level
             if new_risk_score >= 80:
@@ -98,7 +98,7 @@ class TrustPolicy:
                     # Still blocked at this level
                     return TrustAction.TEMP_BLOCK, TrustLevel.TEMP_BLOCKED
         
-        # Step 4: Normal evaluation (NORMAL or ELEVATED_RISK)
+        # Normal evaluation (NORMAL or ELEVATED_RISK)
         # Check for critical risk → FREEZE
         if new_risk_score >= 80:
             return TrustAction.FREEZE, TrustLevel.FROZEN

@@ -24,9 +24,8 @@ from unittest.mock import Mock, AsyncMock, patch, MagicMock
 from modules.capability.registry import CapabilityRegistry
 from core.capability_protocol import PROTOCOL_VERSION
 from core.kernel.plugin_registry import PluginRegistry
-from core.plugins import PluginManager
-from core.base_plugin import BasePlugin, PluginMetadata
-from core.errors import ForbiddenError
+from core.kernel.plugin_manager import PluginManager
+from core.kernel.base_plugin import BasePlugin, PluginMetadata
 from core.operations import Operation, OperationInitiator, OperationInitiatorKind, OperationManager
 from modules.execution.router import ExecutionRouter
 from core.exceptions.errors import ForbiddenError
@@ -281,7 +280,7 @@ async def test_plugin_receives_isolated_storage_proxy():
                 capabilities_provided=["test.cap"]
             )
     
-    plugin = TestPlugin(runtime=mock_runtime)
+    plugin = TestPlugin(mock_runtime)
     
     # Manual setup (simulating what load_plugin does)
     plugin.storage = StorageProxy(mock_storage, namespace="test_plugin")

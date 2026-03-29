@@ -9,10 +9,14 @@ from sdk.plugin import BasePlugin
 from sdk.metadata import PluginMetadata
 from sdk.capabilities import CapabilityId
 from sdk.context import PluginRuntime
+from sdk.security import TokenEncryption, sanitize_for_logging, sanitize_headers
 
 __all__ = [
     "BasePlugin",
     "PluginMetadata",
     "CapabilityId",
     "PluginRuntime",
+    "TokenEncryption",
+    "sanitize_for_logging",
+    "sanitize_headers",
 ]

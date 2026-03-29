@@ -1,5 +1,5 @@
 """
-STEP 16.5: Chaos & Security Validation Layer
+FLOW: Chaos & Security Validation Layer
 ==============================================
 
 Real-world stress testing and chaos validation of:
@@ -9,7 +9,7 @@ Real-world stress testing and chaos validation of:
   • Concurrent write atomicity
   • Tamper detection
 
-Run: pytest tests/test_step_16_5_chaos_validation.py -v -s
+Run: pytest tests/test_security_chaos_validation.py -v -s
 
 This is NOT about adding security features.
 It's about validating what we've built ACTUALLY WORKS under stress.
@@ -151,7 +151,7 @@ class TestCrashSafetyValidation:
                 """Write data with potential crash point."""
                 cursor = self.conn.cursor()
                 
-                # Step 1: Write data
+                # flow: Write data
                 cursor.execute(
                     "INSERT OR REPLACE INTO data_store VALUES (?, ?, ?, ?)",
                     ("trust_store", "cert1", "cert_data", 1)
@@ -161,13 +161,13 @@ class TestCrashSafetyValidation:
                     # Simulate crash (no commit!)
                     return "crashed_before_commit"
                 
-                # Step 2: Update epoch
+                # flow: Update epoch
                 cursor.execute(
                     "INSERT INTO storage_metadata VALUES (?, ?, ?)",
                     (1, "merkle_hash_1", time.time())
                 )
                 
-                # Step 3: Commit (atomic)
+                # flow: Commit (atomic)
                 self.conn.commit()
                 
                 return "committed"
@@ -407,7 +407,7 @@ class TestRollbackAttackSimulation:
             def close(self):
                 self.conn.close()
         
-        # Phase 1: Normal operation with increasing epochs
+        # track: Normal operation with increasing epochs
         storage = RollbackTestStorage(rollback_fixture.db_path)
         storage.set_epoch(1)
         storage.set_epoch(2)
@@ -420,11 +420,11 @@ class TestRollbackAttackSimulation:
         
         assert final_epoch == 5, "Should have epoch 5"
         
-        # Phase 2: Simulate rollback
+        # track: Simulate rollback
         backup_db = rollback_fixture.db_path.with_suffix(".backup")
         shutil.copy(str(rollback_fixture.db_path), str(backup_db))
         
-        # Phase 3: Overwrite with old backup (epoch=2)
+        # track: Overwrite with old backup (epoch=2)
         old_storage = RollbackTestStorage(backup_db)
         old_storage.set_epoch(2)
         old_epoch = old_storage.get_epoch()
@@ -433,14 +433,14 @@ class TestRollbackAttackSimulation:
         # Replace main DB with old version
         shutil.copy(str(backup_db), str(rollback_fixture.db_path))
         
-        # Phase 4: Verify rollback is detected
+        # track: Verify rollback is detected
         storage = RollbackTestStorage(rollback_fixture.db_path)
         recovered_epoch = storage.get_epoch()
         storage.close()
         
         assert recovered_epoch == 2, "DB should be rolled back to epoch=2"
         
-        # Phase 5: Startup check should fail
+        # track: Startup check should fail
         startup_epoch = recovered_epoch
         if startup_epoch < final_epoch:
             # This would be caught by startup check

@@ -1,5 +1,5 @@
 """
-Step 12 Simplified Integration Tests — focus on core logic.
+flow Simplified Integration Tests — focus on core logic.
 
 Simplified tests that focus on main workflows without all the async/mock complexity.
 """

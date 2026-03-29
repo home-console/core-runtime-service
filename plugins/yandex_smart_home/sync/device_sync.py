@@ -120,7 +120,7 @@ class DeviceSync:
             elif isinstance(api_response, list):
                 yandex_devices = api_response
 
-        # ЭТАП 3-4: Преобразовать устройства и опубликовать события
+        # Преобразовать устройства и опубликовать события
         devices = []
         sync_timestamp = time.time()
 

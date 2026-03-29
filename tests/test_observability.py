@@ -1,5 +1,5 @@
 """
-Step 13: Observability Tests — metrics, health snapshots, and monitoring.
+flow: Observability Tests — metrics, health snapshots, and monitoring.
 
 Tests for:
 - MetricsRegistry (counters, gauges, histograms)

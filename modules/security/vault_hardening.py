@@ -79,16 +79,16 @@ class VaultHardening:
         if not _is_linux:
             print("[VaultHardening] WARNING: Platform does not support full hardening (requires Linux); using best-effort fallback")
         
-        # Step 1: Disable core dumps
+        # Disable core dumps
         VaultHardening._disable_core_dumps()
         print("[VaultHardening] ✓ Core dumps disabled")
         
         if _is_linux:
-            # Step 2: Disable ptrace (Linux only)
+            # Disable ptrace (Linux only)
             VaultHardening._disable_ptrace()
             print("[VaultHardening] ✓ ptrace attach disabled")
             
-            # Step 3: Lock process memory (Linux only)
+            # Lock process memory (Linux only)
             VaultHardening._lock_process_memory()
             print("[VaultHardening] ✓ Process memory locked")
         

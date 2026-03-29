@@ -257,19 +257,19 @@ class StorageInitializer:
                 "StorageInitializer requires create_adapter (e.g. from modules.storage.factory import create_storage_adapter)"
             )
 
-        # Step 1: Checks
+        # Проверка окружения и конфигурации
         checker = StorageStartupChecker(self.config)
         await checker.check_all()
 
-        # Step 2: Create adapter via injected factory
+        # Создание адаптера через внедрённую фабрику
         print("🚀 Initializing storage adapter...\n")
         adapter = await self._create_adapter(self.config)
         
-        # Step 3: Wrap with secure storage
+        # Обёртка адаптера secure storage слоем
         print("🔐 Initializing secure storage wrapper...\n")
         secure_storage = SecureStorageWrapper(adapter)
         
-        # Step 4-5: Initialize and verify
+        # Инициализация и проверка целостности
         print("✓ Verifying storage integrity...\n")
         await secure_storage.initialize()
         

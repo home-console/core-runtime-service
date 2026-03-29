@@ -1,4 +1,4 @@
-"""Core storage security and configuration errors."""
+"""Core storage errors: security, configuration, and integrity exceptions."""
 
 
 class StorageSecurityError(Exception):
@@ -19,4 +19,29 @@ class NamespaceViolationError(StorageSecurityError):
     pass
 
 
-__all__ = ["StorageSecurityError", "StorageConfigurationError", "NamespaceViolationError"]
+class StorageCorruptionError(RuntimeError):
+    """Storage corruption detected (invalid JSON, hash mismatch, etc.)."""
+
+    pass
+
+
+class StorageRollbackDetected(RuntimeError):
+    """Rollback attack detected via epoch regression."""
+
+    pass
+
+
+class StorageTamperDetected(RuntimeError):
+    """Protected data was modified outside expected secure flow."""
+
+    pass
+
+
+__all__ = [
+    "StorageSecurityError",
+    "StorageConfigurationError",
+    "NamespaceViolationError",
+    "StorageCorruptionError",
+    "StorageRollbackDetected",
+    "StorageTamperDetected",
+]

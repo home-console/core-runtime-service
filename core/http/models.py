@@ -1,5 +1,5 @@
 """
-HTTP Endpoint Models (D2).
+HTTP Endpoint Models .
 
 Декларативные модели для HTTP-контрактов:
 - EndpointAuthConfig: конфигурация авторизации

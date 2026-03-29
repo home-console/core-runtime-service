@@ -8,7 +8,7 @@ PresenceModule — встроенный модуль отслеживания п
 from typing import Optional
 
 from core.runtime_module import RuntimeModule
-from core.http import HttpEndpoint
+from core.http.models import HttpEndpoint
 
 
 class PresenceModule(RuntimeModule):

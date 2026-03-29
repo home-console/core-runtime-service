@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 """
-Execution runner (D3).
+Execution runner .
 
 Runner — это execution boundary: минимальная среда, которая принимает JSON envelope
 и возвращает JSON result, не зная про Core/automation/plugins/admin/ui.

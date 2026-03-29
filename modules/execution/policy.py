@@ -1,5 +1,5 @@
 """
-Execution policy (D3).
+Execution policy .
 
 Policy — данные (выбор backend), а не код Core.
 Core/Operations/Plugins/Automation не должны знать, как выбирается backend.

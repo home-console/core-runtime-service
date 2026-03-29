@@ -7,7 +7,7 @@
 ```
 YandexPassportClient.get_qr_url()
 │
-├─ Step 1: Bootstrap Device
+├─ flow: Bootstrap Device
 │  POST https://passport.yandex.ru/auth/device/start
 │  ├─ Payload:
 │  │  ├─ device_name: "HomeConsole"
@@ -15,12 +15,12 @@ YandexPassportClient.get_qr_url()
 │  │  └─ retpath: https://passport.yandex.ru/pwl-yandex/am/push/qrsecure
 │  └─ Response: { status: "ok", device_id: "xxx", ... }
 │
-├─ Step 2: Get PWL Page
+├─ flow: Get PWL Page
 │  GET https://passport.yandex.ru/pwl-yandex/auth/add?retpath=...
 │  ├─ Success: HTML without noPWL:true
 │  └─ Failure: HTML with noPWL:true → ERROR
 │
-└─ Step 3: Return QR URL
+└─ flow: Return QR URL
    https://passport.yandex.ru/pwl-yandex/auth/add?retpath=https://...
 ```
 
@@ -197,14 +197,14 @@ async def test_full_auth_flow():
 
 ### Manual Testing
 
-1. **Bootstrap Phase:**
+1. **Bootstrap Flow:**
    ```bash
    curl -X POST https://passport.yandex.ru/auth/device/start \
      -d "device_name=HomeConsole&device_type=smart_speaker&retpath=..."
    ```
    Check: `{ "status": "ok", "device_id": "xxx" }`
 
-2. **PWL Page Phase:**
+2. **PWL Page Flow:**
    ```bash
    curl https://passport.yandex.ru/pwl-yandex/auth/add?retpath=...
    ```

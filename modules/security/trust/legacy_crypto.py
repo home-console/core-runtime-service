@@ -1,8 +1,8 @@
 """
-Canonical bridge for legacy cryptographic trust layer.
+Canonical bridge for cryptographic trust helpers.
 
-This module provides a security-domain import path for the existing
-cryptographic trust implementation currently located under core.trust.*.
+This module exposes a stable import path for the security-domain
+cryptographic trust implementation in `modules.security.trust.*`.
 """
 
 from modules.security.trust.signature import (
