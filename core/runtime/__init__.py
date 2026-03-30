@@ -5,7 +5,7 @@ CoreRuntime is exposed lazily to avoid import cycles during package bootstrap.
 
 from importlib import import_module
 
-__all__ = ["CoreRuntime", "StateEngine", "Config", "RuntimeModule"]
+__all__ = ["CoreRuntime", "StateEngine", "Config", "RuntimeModule", "CoreServices", "RuntimeMonitor"]
 
 
 def __getattr__(name: str):
@@ -17,4 +17,8 @@ def __getattr__(name: str):
         return import_module("core.runtime.config").Config
     if name == "RuntimeModule":
         return import_module("core.runtime.runtime_module").RuntimeModule
+    if name == "CoreServices":
+        return import_module("core.runtime.services").CoreServices
+    if name == "RuntimeMonitor":
+        return import_module("core.runtime.monitor").RuntimeMonitor
     raise AttributeError(f"module 'core.runtime' has no attribute {name!r}")

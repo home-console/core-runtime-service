@@ -11,11 +11,14 @@ from typing import Any, Dict, List, Optional
 import sys
 import importlib
 import importlib.util
+import logging
 
 from dataclasses import dataclass
 
 from core.runtime.runtime_module import RuntimeModule
 from core.observability.logger_helper import error as log_error
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -172,8 +175,11 @@ class ModuleManager:
                             module=module.name
                         )
                     except Exception:
-                        # Fallback на print если logger недоступен
-                        print(f"[ModuleManager] Ошибка при запуске optional модуля '{module.name}': {e}", file=sys.stderr)
+                        # Fallback на logging если logger недоступен
+                        logger.exception(
+                            "[ModuleManager] Ошибка при запуске optional модуля '%s': %s",
+                            module.name, e
+                        )
         
         if failed_required:
             failed_names = [name for name, _ in failed_required]
@@ -209,8 +215,11 @@ class ModuleManager:
                         module=module.name
                     )
                 except Exception:
-                    # Fallback на print если logger недоступен
-                    print(f"[ModuleManager] Ошибка при остановке модуля '{module.name}': {e}", file=sys.stderr)
+                    # Fallback на logging если logger недоступен
+                    logger.exception(
+                        "[ModuleManager] Ошибка при остановке модуля '%s': %s",
+                        module.name, e
+                    )
 
     def clear(self) -> None:
         """Очищает все зарегистрированные модули и список required."""
@@ -256,7 +265,10 @@ class ModuleManager:
                             module=module_spec.name
                         )
                     except Exception:
-                        print(f"[ModuleManager] Ошибка при регистрации optional модуля '{module_spec.name}': {e}", file=sys.stderr)
+                        logger.exception(
+                            "[ModuleManager] Ошибка при регистрации optional модуля '%s': %s",
+                            module_spec.name, e
+                        )
             except Exception as e:
                 if module_spec.required:
                     failed_required.append((module_spec.name, f"Unexpected error: {e}"))
@@ -269,7 +281,10 @@ class ModuleManager:
                             module=module_spec.name
                         )
                     except Exception:
-                        print(f"[ModuleManager] Неожиданная ошибка при регистрации optional модуля '{module_spec.name}': {e}", file=sys.stderr)
+                        logger.exception(
+                            "[ModuleManager] Неожиданная ошибка при регистрации optional модуля '%s': %s",
+                            module_spec.name, e
+                        )
 
         if failed_required:
             failed_names = [name for name, _ in failed_required]

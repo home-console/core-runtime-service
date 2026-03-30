@@ -17,8 +17,8 @@ import time
 
 from core.runtime.runtime_module import RuntimeModule
 
-# OrchestrationService (Docker/k8s абстракция)
-from core.orchestration import OrchestrationService
+# OrchestrationService (Docker/k8s абстракция) — импортируется из app-layer
+from app.orchestration import OrchestrationService
 
 logger = logging.getLogger(__name__)
 

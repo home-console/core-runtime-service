@@ -7,6 +7,7 @@ SQLite адаптер для Storage API.
 
 import asyncio
 import json
+import logging
 import os
 import sqlite3
 import threading
@@ -17,6 +18,8 @@ from typing import Any, AsyncIterator, Callable, Optional
 from core.adapters.storage_errors import StorageCorruptionError
 
 from .storage_adapter import StorageAdapter
+
+logger = logging.getLogger(__name__)
 
 
 class SQLiteAdapter(StorageAdapter):
@@ -92,14 +95,12 @@ class SQLiteAdapter(StorageAdapter):
             sync_mode = cursor.fetchone()[0]
             # synchronous: 0=OFF, 1=NORMAL, 2=FULL, 3=EXTRA
             if sync_mode != 2:
-                import sys
-
                 # `os` is imported at module level; avoid re-importing here which
                 # would make `os` a local variable and cause UnboundLocalError
-                print(
-                    f"[SQLiteAdapter] WARNING: PRAGMA synchronous={sync_mode}, expected 2 (FULL). "
-                    f"This may result in data loss on crash.",
-                    file=sys.stderr,
+                logger.warning(
+                    "[SQLiteAdapter] PRAGMA synchronous=%d, expected 2 (FULL). "
+                    "This may result in data loss on crash.",
+                    sync_mode
                 )
 
             # Проверить Docker overlayfs (частая проблема в контейнерах)
@@ -112,10 +113,9 @@ class SQLiteAdapter(StorageAdapter):
                             and self.db_path in mounts
                             or "/app" in self.db_path
                         ):
-                            print(
-                                "[SQLiteAdapter] WARNING: Database may be on Docker overlayfs. "
-                                "This can cause durability issues. Consider using named volumes.",
-                                file=sys.stderr,
+                            logger.warning(
+                                "[SQLiteAdapter] Database may be on Docker overlayfs. "
+                                "This can cause durability issues. Consider using named volumes."
                             )
                 except Exception:
                     pass

@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from typing import Any, Optional
 
+from app.orchestration import DockerOrchestrationBackend, NullOrchestrationBackend, OrchestrationService
 from app.runtime_monitoring import collect_runtime_health, collect_runtime_metrics
 from core.runtime.config import Config
 from core.module import ModuleSpec
@@ -84,6 +85,13 @@ async def build_runtime(
     storage_manager: Optional[Any] = None,
     module_specs: Optional[list[ModuleSpec]] = None,
 ) -> CoreRuntime:
+    # Orchestration service создаётся в app-layer (не в ядре)
+    backend_name = getattr(config, "orchestration_backend", "docker")
+    if backend_name == "none":
+        orchestration_service = OrchestrationService(NullOrchestrationBackend())
+    else:
+        orchestration_service = OrchestrationService(DockerOrchestrationBackend())
+
     runtime = CoreRuntime(
         storage_port=storage_port,
         config=config,
@@ -95,6 +103,7 @@ async def build_runtime(
         capability_namespace_permission_checker=check_module_capability_namespace_permission,
         trust_level_to_privilege_mapper=module_trust_level_to_privilege,
         critical_state_prefixes=list(DEFAULT_CRITICAL_STATE_PREFIXES),
+        orchestration_service=orchestration_service,
     )
     runtime.storage_manager = storage_manager
     runtime.event_validation_middleware_factory = EventValidationMiddleware

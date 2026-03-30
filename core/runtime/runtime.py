@@ -1,13 +1,7 @@
 """
 CoreRuntime - главный класс Core Runtime.
 
-Объединяет все компоненты:
-- EventBus
-- ServiceRegistry
-- StateEngine
-- Storage
-- PluginManager
-
+Координирует работу всех компонентов через специализированные подсистемы.
 Это kernel/runtime, а не backend-приложение.
 
 Lifecycle (start/stop/shutdown/run/health) — см. core/runtime/_lifecycle.py.
@@ -16,25 +10,18 @@ Lifecycle (start/stop/shutdown/run/health) — см. core/runtime/_lifecycle.py.
 import asyncio
 from typing import Any, Awaitable, Callable, Optional
 
-from core.capability.registry import CapabilityRegistry
-from core.dependency.resolver import DependencyResolver
-from core.http.registry import HttpRegistry
-from core.kernel.integration_registry import IntegrationRegistry
+from core.capability.component import CapabilityComponent
 from core.kernel.context import KernelContext
-from core.kernel.plugin_manager import PluginManager
-from core.messaging import InMemoryEventBus
-from core.module import ModuleManager
-from core.operations.manager import OperationManager
-from core.operations.worker import OperationWorker
-from core.orchestration import (
-    DockerOrchestrationBackend,
-    NullOrchestrationBackend,
-    OrchestrationService,
-)
+from core.kernel.plugin_infrastructure import PluginInfrastructure
+from core.operations.component import OperationsComponent
 from core.runtime._lifecycle import RuntimeLifecycleMixin
+from core.runtime.monitor import RuntimeMonitor
 from core.runtime.runtime_context import RuntimeContext
-from core.service.registry import ServiceRegistry
-from core.runtime.state_engine import StateEngine
+from core.runtime.services import CoreServices
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.orchestration import OrchestrationService
 
 
 class CoreRuntime(RuntimeLifecycleMixin):
@@ -76,36 +63,38 @@ class CoreRuntime(RuntimeLifecycleMixin):
         self._config = config
         self.config = config
 
-        self.event_bus = InMemoryEventBus(storage=storage_port.storage)
-        self.policy_engine = policy_engine
-
-        default_timeout = config.service_call_timeout if config else None
-        self.service_registry = ServiceRegistry(
-            default_timeout=default_timeout,
-            policy_engine=self.policy_engine,
-            policy_engine_factory=service_policy_engine_factory,
-            acl_wrapper_builder=service_acl_wrapper_builder,
+        # Уровень 1: Базовые сервисы ядра
+        self.services = CoreServices(
+            storage_port=storage_port,
+            vault_port=vault_port,
+            config=config,
+            # policy_engine и фабрики перенесены в CapabilityComponent
         )
 
-        self.state_engine = state_engine if state_engine is not None else StateEngine()
-        self.storage = storage_port.storage
-        self.vault = vault_port if vault_port else None
-        self.http = HttpRegistry()
-        self.integrations = IntegrationRegistry()
-        self.capability_registry = capability_registry or CapabilityRegistry(
-            check_capability_namespace_permission=capability_namespace_permission_checker,
+        # Уровень 2: Capability компонент
+        self.capabilities = CapabilityComponent(
+            capability_namespace_permission_checker=capability_namespace_permission_checker,
             trust_level_to_privilege_mapper=trust_level_to_privilege_mapper,
+            policy_engine=policy_engine,
+            service_policy_engine_factory=service_policy_engine_factory,
+            service_acl_wrapper_builder=service_acl_wrapper_builder,
         )
-        self.operations = OperationManager(self)
-        self.plugin_manager = PluginManager(self)
-        module_path_prefix = (
-            getattr(config, "module_path_prefix", "modules")
-            if config is not None
-            else "modules"
+
+        # Уровень 3: Инфраструктура плагинов (использует capability_registry из компонента)
+        self.plugins = PluginInfrastructure(
+            services=self.services,
+            capability_registry=self.capabilities.registry,
+            config=config,
         )
-        self.module_manager = ModuleManager(self, module_path_prefix=module_path_prefix)
-        self.dependency_resolver = DependencyResolver(
-            self.capability_registry, self.plugin_manager, self.storage
+
+        # Уровень 4: Operations компонент
+        self.operations = OperationsComponent(self)
+
+        # Координация и контексты
+        self.kernel_context: Optional[KernelContext] = KernelContext(
+            {"service_registry": self.services.service_registry},
+            self.services.state_engine if state_engine is None else state_engine,
+            event_bus=self.services.event_bus,
         )
 
         # Agent control plane components. Initialized in start() when SecretStore is ready.
@@ -124,43 +113,24 @@ class CoreRuntime(RuntimeLifecycleMixin):
         self.plugin_service_proxy_cls: Optional[type] = None
         self.plugin_default_allowed_services: list[str] = []
 
-        self.kernel_context: Optional[KernelContext] = KernelContext(
-            {"service_registry": self.service_registry},
-            self.state_engine,
-            event_bus=self.event_bus,
-        )
+        # App-level плагины и модули доступны через self.plugins
+        # Для обратной совместимости добавлены property-методы ниже
 
         self._running = False
         self._start_time: Optional[float] = None
         # App-defined list of namespaces to hydrate into state at startup.
         self.critical_state_prefixes: list[str] = list(critical_state_prefixes or [])
-        # App-level monitoring delegates.
-        self.runtime_health_check: Optional[
-            Callable[["CoreRuntime"], Awaitable[dict[str, Any]]]
-        ] = None
-        self.runtime_metrics_collector: Optional[
-            Callable[["CoreRuntime"], Awaitable[dict[str, Any]]]
-        ] = None
 
-        # Execution controller (опционально; выставляется модулем execution)
-        self.execution_controller: Optional[Any] = None
-        self.worker: Optional[OperationWorker] = None
-        self._worker_task: Optional[asyncio.Task] = None
-
-        self.orchestration_service = (
-            orchestration_service or self._build_default_orchestration_service()
+        # Уровень 5: Monitoring компонент
+        self.monitor = RuntimeMonitor(
+            runtime=self,
+            health_check_delegate=None,  # Выставляется из app при необходимости
+            metrics_collector_delegate=None,  # Выставляется из app при необходимости
         )
 
-    def _build_default_orchestration_service(self) -> OrchestrationService:
-        """Собрать orchestration service из runtime config без глобального singleton."""
-        backend_name = (
-            getattr(self._config, "orchestration_backend", "docker")
-            if self._config is not None
-            else "docker"
-        )
-        if backend_name == "none":
-            return OrchestrationService(NullOrchestrationBackend())
-        return OrchestrationService(DockerOrchestrationBackend())
+        # Orchestration service — создаётся в app-layer, ядро только хранит ссылку.
+        # Если None, используется NullOrchestrationBackend (отключенная оркестрация).
+        self.orchestration_service: Optional["OrchestrationService"] = orchestration_service
 
     def create_context(self) -> RuntimeContext:
         """
@@ -170,58 +140,145 @@ class CoreRuntime(RuntimeLifecycleMixin):
         Используется модулями и плагинами вместо прямого доступа к runtime.
         """
         return RuntimeContext(
-            storage=self.storage,
-            vault=self.vault,
-            services=self.service_registry,
-            http=self.http,
-            capabilities=self.capability_registry,
+            storage=self.services.storage,
+            vault=self.services.vault,
+            services=self.services.service_registry,
+            http=self.services.http,
+            capabilities=self.capabilities.registry,
             operations=self.operations,
-            state=self.state_engine,
+            state=self.services.state_engine,
         )
 
-    # --- Delegation helpers ---
+    # --- Delegation helpers (через services) ---
 
     async def call_service(self, name: str, *args: Any, **kwargs: Any) -> Any:
-        return await self.service_registry.call(name, *args, **kwargs)
+        return await self.services.service_registry.call(name, *args, **kwargs)
 
     async def has_service(self, name: str) -> bool:
-        return await self.service_registry.has_service(name)
+        return await self.services.service_registry.has_service(name)
 
     async def publish_event(self, event_type: str, payload: dict[str, Any]) -> None:
-        await self.event_bus.publish(event_type, payload)
+        await self.services.event_bus.publish(event_type, payload)
 
     async def subscribe_event(
         self,
         event_type: str,
         handler: Callable[[dict[str, Any]], Awaitable[None]],
     ) -> None:
-        await self.event_bus.subscribe(event_type, handler)
+        await self.services.event_bus.subscribe(event_type, handler)
 
     async def unsubscribe_event(
         self,
         event_type: str,
         handler: Callable[[dict[str, Any]], Awaitable[None]],
     ) -> None:
-        await self.event_bus.unsubscribe(event_type, handler)
+        await self.services.event_bus.unsubscribe(event_type, handler)
 
     async def storage_get(self, namespace: str, key: str) -> Any:
-        return await self.storage.get(namespace, key)
+        return await self.services.storage.get(namespace, key)
 
     async def storage_set(self, namespace: str, key: str, value: Any) -> None:
-        await self.storage.set(namespace, key, value)
+        await self.services.storage.set(namespace, key, value)
 
     async def storage_delete(self, namespace: str, key: str) -> bool:
-        return bool(await self.storage.delete(namespace, key))
+        return bool(await self.services.storage.delete(namespace, key))
 
     async def storage_list_keys(self, namespace: str) -> list[str]:
-        return list(await self.storage.list_keys(namespace))
+        return list(await self.services.storage.list_keys(namespace))
 
     @property
     def state(self):
         """Алиас для state_engine. Плагины и Inspector используют runtime.state.get/set."""
-        return self.state_engine
+        return self.services.state_engine
 
     @property
     def is_running(self) -> bool:
         """Запущен ли runtime."""
         return self._running
+
+    # --- Property-методы для обратной совместимости ---
+    # Направляют к self.services для старого кода
+
+    @property
+    def event_bus(self) -> Any:
+        """Обратная совместимость: event_bus через services."""
+        return self.services.event_bus
+
+    @property
+    def service_registry(self) -> Any:
+        """Обратная совместимость: service_registry через services."""
+        return self.services.service_registry
+
+    @property
+    def state_engine(self) -> Any:
+        """Обратная совместимость: state_engine через services."""
+        return self.services.state_engine
+
+    @property
+    def storage(self) -> Any:
+        """Обратная совместимость: storage через services."""
+        return self.services.storage
+
+    @property
+    def vault(self) -> Any:
+        """Обратная совместимость: vault через services."""
+        return self.services.vault
+
+    @property
+    def http(self) -> Any:
+        """Обратная совместимость: http через services."""
+        return self.services.http
+
+    # --- Property-методы для обратной совместимости (плагины) ---
+    # Направляют к self.plugins для старого кода
+
+    @property
+    def plugin_manager(self) -> Any:
+        """Обратная совместимость: plugin_manager через plugins."""
+        return self.plugins.plugin_manager
+
+    @property
+    def module_manager(self) -> Any:
+        """Обратная совместимость: module_manager через plugins."""
+        return self.plugins.module_manager
+
+    @property
+    def dependency_resolver(self) -> Any:
+        """Обратная совместимость: dependency_resolver через plugins."""
+        return self.plugins.dependency_resolver
+
+    @property
+    def integrations(self) -> Any:
+        """Обратная совместимость: integrations через plugins."""
+        return self.plugins.integrations
+
+    # --- Property-методы для обратной совместимости (capabilities) ---
+    # Направляют к self.capabilities для старого кода
+
+    @property
+    def capability_registry(self) -> Any:
+        """Обратная совместимость: capability_registry через capabilities."""
+        return self.capabilities.registry
+
+    # --- Property-методы для обратной совместимости (operations) ---
+    # Направляют к self.operations для старого кода
+
+    @property
+    def worker(self) -> Any:
+        """Обратная совместимость: worker через operations."""
+        return self.operations.worker
+
+    @worker.setter
+    def worker(self, value: Any) -> None:
+        """Обратная совместимость: установка worker."""
+        self.operations.worker = value
+
+    @property
+    def execution_controller(self) -> Any:
+        """Обратная совместимость: execution_controller через operations."""
+        return self.operations.execution_controller
+
+    @execution_controller.setter
+    def execution_controller(self, value: Any) -> None:
+        """Обратная совместимость: установка execution_controller."""
+        self.operations.execution_controller = value

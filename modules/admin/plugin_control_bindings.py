@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from core.http.models import HttpEndpoint
-from core.orchestration import OrchestrationService
+from app.orchestration import OrchestrationService
 
 logger = logging.getLogger(__name__)
 

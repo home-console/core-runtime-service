@@ -310,14 +310,15 @@ class OperationWorker:
         )
         if actions:
             await self._dispatch_actions(actions, hook_context, operation)
-            await self.runtime.operations._storage.persist(operation)
+            await self.runtime.operations.persist_operation(operation)
             if operation.status in TERMINAL_STATUSES:
                 return operation
         if not allow:
             return operation
 
-        storage = self.runtime.operations._storage
-        executor = self.runtime.operations._executor
+        # Use public API instead of direct _storage access
+        storage = self.runtime.operations
+        executor = self.runtime.operations.get_executor()
 
         await storage.ensure_attempt_created(
             attempt_id=attempt_id,

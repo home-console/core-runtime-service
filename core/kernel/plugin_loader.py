@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Callable, Awaitable
 import importlib
+import importlib.util
 
 from core.observability.logger_helper import warning, info
 from sdk.plugin import BasePlugin as SDKBasePlugin
@@ -205,21 +206,35 @@ class PluginManifestLoader:
             except Exception:
                 pass
 
-            # Если class_path не в пространстве plugins.* — считаем его относительным к plugin_dir
-            # (для папок с дефисом, например client-manager-plugin, где нельзя сделать plugins.client-manager-plugin)
-            path_inserted = False
-            if not class_path.startswith("plugins."):
-                sys.path.insert(0, str(plugin_dir))
-                path_inserted = True
-
             # Импортируем класс плагина
             module_path, class_name = class_path.rsplit(".", 1)
+            
+            # Если class_path не в пространстве plugins.* — загружаем модуль явно по пути
+            # (для папок с дефисом, например client-manager-plugin, где нельзя сделать plugins.client-manager-plugin)
+            # Используем importlib.util.spec_from_file_location вместо мутации sys.path
             try:
-                module = importlib.import_module(module_path)
+                if not class_path.startswith("plugins."):
+                    # Явная загрузка модуля по пути без модификации sys.path
+                    plugin_file = plugin_dir / f"{module_path}.py"
+                    if not plugin_file.exists():
+                        # Пробуем найти модуль в поддиректории (для package-style плагинов)
+                        plugin_file = plugin_dir / module_path / "__init__.py"
+                        if not plugin_file.exists():
+                            raise FileNotFoundError(f"Модуль не найден: {module_path} в {plugin_dir}")
+                    
+                    spec = importlib.util.spec_from_file_location(module_path, plugin_file)
+                    if spec is None or spec.loader is None:
+                        raise ImportError(f"Не удалось создать spec для модуля: {module_path}")
+                    
+                    module = importlib.util.module_from_spec(spec)
+                    sys.modules[module_path] = module  # Регистрируем в sys.modules для корректной работы импортов
+                    spec.loader.exec_module(module)
+                else:
+                    # Стандартный импорт для plugins.*
+                    module = importlib.import_module(module_path)
+                
                 plugin_class = getattr(module, class_name)
-            except (ImportError, AttributeError) as e:
-                if path_inserted and sys.path and sys.path[0] == str(plugin_dir):
-                    sys.path.pop(0)
+            except (ImportError, AttributeError, FileNotFoundError) as e:
                 import traceback
                 tb = traceback.format_exc()
                 await logger_func(
@@ -316,10 +331,7 @@ class PluginManifestLoader:
                     component="plugin_loader"
                 )
                 return False
-            finally:
-                if path_inserted and sys.path and sys.path[0] == str(plugin_dir):
-                    sys.path.pop(0)
-                
+
         except Exception as e:
             import traceback
             tb = traceback.format_exc()

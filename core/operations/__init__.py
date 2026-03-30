@@ -10,6 +10,7 @@ All critical actions MUST be executed through operations.
 - Timeout enforcement
 """
 
+from core.operations.component import OperationsComponent
 from core.operations.executor import OperationExecutor
 from core.operations.manager import OperationManager
 from core.operations.models import (
@@ -32,6 +33,8 @@ __all__ = [
     "OperationError",
     "OperationInitiator",
     "TERMINAL_STATUSES",
+    # Component
+    "OperationsComponent",
     # Manager
     "OperationManager",
     # Internal components (для расширенного использования)

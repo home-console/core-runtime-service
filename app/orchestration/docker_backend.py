@@ -2,6 +2,7 @@
 Docker Orchestration Backend — реализация OrchestrationBackend для Docker.
 
 Docker backend для OrchestrationService.
+Вынесено из core в app для соблюдения границ ядра.
 """
 
 import asyncio
@@ -10,7 +11,7 @@ import shutil
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-from .service import OrchestrationBackend
+from app.orchestration.service import OrchestrationBackend
 
 logger = logging.getLogger(__name__)
 
@@ -18,15 +19,15 @@ logger = logging.getLogger(__name__)
 class DockerOrchestrationBackend(OrchestrationBackend):
     """
     Backend оркестрации на основе Docker.
-    
+
     Инкапсулирует логику работы с Docker,
     ранее находившуюся в ContainerOrchestrator.
     """
-    
+
     def __init__(self, project_root: Optional[Path] = None):
         """
         Инициализация DockerOrchestrationBackend.
-        
+
         Args:
             project_root: корень проекта (для сборки образов).
                         Если None, будет определён автоматически.
@@ -35,31 +36,31 @@ class DockerOrchestrationBackend(OrchestrationBackend):
         self._docker_cmd = shutil.which("docker")
         if not self._docker_cmd:
             logger.warning("Docker not found in PATH")
-    
+
     def _find_project_root(self) -> Optional[Path]:
         """Найти корень проекта (где есть deployment/ или core-runtime-service/)."""
         if self._project_root:
             return self._project_root
-        
+
         possible_roots = [
             Path("/app"),
             Path.cwd(),
-            Path(__file__).parent.parent.parent.parent,  # от core/orchestration/ до корня
+            Path(__file__).parent.parent.parent.parent,  # от app/orchestration/ до корня
         ]
-        
+
         for root in possible_roots:
             if (root / "deployment" / "docker-compose.yml").exists():
                 return root
             if (root / "core-runtime-service").exists():
                 return root
-        
+
         return None
-    
+
     async def container_exists(self, container_name: str) -> bool:
         """Проверить существование контейнера."""
         if not self._docker_cmd:
             return False
-        
+
         try:
             proc = await asyncio.create_subprocess_exec(
                 self._docker_cmd,
@@ -78,29 +79,29 @@ class DockerOrchestrationBackend(OrchestrationBackend):
         except Exception as e:
             logger.warning(f"Error checking container existence: {e}")
             return False
-    
+
     async def stop_container(self, container_name: str, timeout: Optional[float] = None) -> Dict[str, Any]:
         """
         Остановить контейнер.
-        
+
         Args:
             container_name: имя контейнера
             timeout: таймаут остановки (секунды), по умолчанию 30
-            
+
         Returns:
             {"ok": True} при успехе, {"ok": False, "error": "..."} при ошибке
         """
         if not self._docker_cmd:
             return {"ok": False, "error": "Docker не найден в системе"}
-        
+
         if timeout is None:
             timeout = 30.0
-        
+
         cmd = [self._docker_cmd, "stop"]
         if timeout:
             cmd.extend(["-t", str(int(timeout))])
         cmd.append(container_name)
-        
+
         try:
             logger.info(f"Stopping container {container_name} (timeout={timeout}s)")
             proc = await asyncio.create_subprocess_exec(
@@ -108,9 +109,9 @@ class DockerOrchestrationBackend(OrchestrationBackend):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            
+
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout + 5.0)
-            
+
             if proc.returncode == 0:
                 logger.info(f"Container {container_name} stopped successfully")
                 return {"ok": True, "message": f"Контейнер '{container_name}' успешно остановлен"}
@@ -123,17 +124,17 @@ class DockerOrchestrationBackend(OrchestrationBackend):
         except Exception as e:
             logger.exception(f"Error stopping container {container_name}")
             return {"ok": False, "error": f"Ошибка при остановке контейнера: {str(e)}"}
-    
+
     async def remove_container(self, container_name: str, force: bool = False) -> Dict[str, Any]:
         """Удалить контейнер."""
         if not self._docker_cmd:
             return {"ok": False, "error": "Docker не найден в системе"}
-        
+
         cmd = [self._docker_cmd, "rm"]
         if force:
             cmd.append("--force")
         cmd.append(container_name)
-        
+
         try:
             logger.info(f"Removing container {container_name} (force={force})")
             proc = await asyncio.create_subprocess_exec(
@@ -141,9 +142,9 @@ class DockerOrchestrationBackend(OrchestrationBackend):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            
+
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30.0)
-            
+
             if proc.returncode == 0:
                 logger.info(f"Container {container_name} removed successfully")
                 return {"ok": True, "message": f"Контейнер '{container_name}' успешно удалён"}
@@ -156,7 +157,7 @@ class DockerOrchestrationBackend(OrchestrationBackend):
         except Exception as e:
             logger.exception(f"Error removing container {container_name}")
             return {"ok": False, "error": f"Ошибка при удалении контейнера: {str(e)}"}
-    
+
     async def ensure_container(
         self,
         container_name: str,
@@ -164,17 +165,17 @@ class DockerOrchestrationBackend(OrchestrationBackend):
     ) -> Dict[str, Any]:
         """
         Убедиться, что контейнер существует и запущен.
-        
+
         Логика перенесена из ContainerOrchestrator.ensure_container().
         """
         if not self._docker_cmd:
             return {"ok": False, "error": "Docker не найден в системе"}
-        
+
         # Проверяем существование контейнера
         if await self.container_exists(container_name):
             logger.info(f"Container {container_name} already exists")
             return {"ok": True, "message": f"Контейнер '{container_name}' уже существует"}
-        
+
         # Получаем имя образа
         image_name = container_config.get("image")
         if not image_name:
@@ -182,16 +183,16 @@ class DockerOrchestrationBackend(OrchestrationBackend):
                 "ok": False,
                 "error": "Не указан 'image' в container_config. Невозможно создать контейнер."
             }
-        
+
         # Проверяем существование образа
         image_exists = await self._image_exists(image_name)
-        
+
         # Если образа нет, пытаемся собрать
         if not image_exists:
             build_result = await self._build_image_if_needed(image_name, container_config)
             if not build_result["ok"]:
                 return build_result
-        
+
         # Создаём контейнер
         return await self._create_container(container_name, image_name, container_config)
 
@@ -227,12 +228,12 @@ class DockerOrchestrationBackend(OrchestrationBackend):
         if not stop_result.get("ok"):
             return stop_result
         return await self.start_container(container_name)
-    
+
     async def _image_exists(self, image_name: str) -> bool:
         """Проверить существование образа."""
         if not self._docker_cmd:
             return False
-        
+
         try:
             proc = await asyncio.create_subprocess_exec(
                 self._docker_cmd,
@@ -247,7 +248,7 @@ class DockerOrchestrationBackend(OrchestrationBackend):
         except Exception as e:
             logger.warning(f"Error checking image existence: {e}")
             return False
-    
+
     async def _build_image_if_needed(
         self,
         image_name: str,
@@ -261,26 +262,26 @@ class DockerOrchestrationBackend(OrchestrationBackend):
                 "error": f"Образ '{image_name}' не найден и автоматическая сборка отключена. "
                         f"Установите 'build.auto_build: true' в container_config для автоматической сборки."
             }
-        
+
         project_root = self._find_project_root()
         if not project_root:
             return {
                 "ok": False,
                 "error": "Не удалось определить корень проекта для сборки образа"
             }
-        
+
         dockerfile_path = build_config.get("dockerfile")
         build_context_rel = build_config.get("context", ".")
-        
+
         if not dockerfile_path:
             return {
                 "ok": False,
                 "error": "Не указан 'dockerfile' в container_config.build"
             }
-        
+
         build_context = str(project_root / build_context_rel)
         return await self._build_image(image_name, dockerfile_path, build_context)
-    
+
     async def _build_image(
         self,
         image_name: str,
@@ -313,7 +314,7 @@ class DockerOrchestrationBackend(OrchestrationBackend):
                     "ok": False,
                     "error": f"Dockerfile не найден: {dockerfile_full}",
                 }
-        
+
         build_cmd = [
             self._docker_cmd,
             "build",
@@ -323,7 +324,7 @@ class DockerOrchestrationBackend(OrchestrationBackend):
             str(dockerfile_full),
             build_context,
         ]
-        
+
         try:
             logger.info(f"Building image {image_name} from {dockerfile_path} (context: {build_context})")
             proc = await asyncio.create_subprocess_exec(
@@ -331,9 +332,9 @@ class DockerOrchestrationBackend(OrchestrationBackend):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            
+
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=600.0)
-            
+
             if proc.returncode == 0:
                 logger.info(f"Image {image_name} built successfully")
                 return {"ok": True, "message": f"Образ {image_name} успешно собран"}
@@ -346,7 +347,7 @@ class DockerOrchestrationBackend(OrchestrationBackend):
         except Exception as e:
             logger.exception(f"Error building image {image_name}")
             return {"ok": False, "error": f"Ошибка при сборке образа: {str(e)}"}
-    
+
     async def _create_container(
         self,
         container_name: str,
@@ -355,7 +356,7 @@ class DockerOrchestrationBackend(OrchestrationBackend):
     ) -> Dict[str, Any]:
         """Создать и запустить контейнер."""
         run_cmd = [self._docker_cmd, "run", "-d", "--name", container_name]
-        
+
         # Опциональная сеть контейнера
         network = container_config.get("network")
         if isinstance(network, str) and network.strip():
@@ -370,7 +371,7 @@ class DockerOrchestrationBackend(OrchestrationBackend):
                     stderr=asyncio.subprocess.PIPE,
                 )
                 _, inspect_stderr = await asyncio.wait_for(inspect_proc.communicate(), timeout=10.0)
-                
+
                 if inspect_proc.returncode != 0:
                     logger.info(f"Network {network} not found, creating it")
                     create_net_proc = await asyncio.create_subprocess_exec(
@@ -386,40 +387,40 @@ class DockerOrchestrationBackend(OrchestrationBackend):
                         error_msg = create_net_stderr.decode("utf-8", errors="replace") if create_net_stderr else "Неизвестная ошибка"
                         logger.warning(f"Failed to create network {network}: {error_msg}")
                         return {"ok": False, "error": f"Не удалось создать сеть Docker '{network}': {error_msg}"}
-                
+
                 run_cmd.extend(["--network", network])
             except asyncio.TimeoutError:
                 return {"ok": False, "error": f"Таймаут при проверке/создании сети Docker '{network}'"}
             except Exception as e:
                 logger.exception(f"Error ensuring docker network {network}")
                 return {"ok": False, "error": f"Ошибка при настройке сети Docker '{network}': {str(e)}"}
-        
+
         # Добавляем аргументы из container_config
         if isinstance(container_config.get("args"), list):
             run_cmd.extend(container_config["args"])
-        
+
         # Добавляем порты
         if isinstance(container_config.get("ports"), dict):
             for host_port, container_port in container_config["ports"].items():
                 run_cmd.extend(["-p", f"{host_port}:{container_port}"])
-        
+
         # Добавляем переменные окружения
         if isinstance(container_config.get("env"), dict):
             for key, value in container_config["env"].items():
                 run_cmd.extend(["-e", f"{key}={value}"])
-        
+
         # Добавляем volumes
         if isinstance(container_config.get("volumes"), list):
             for volume in container_config["volumes"]:
                 run_cmd.extend(["-v", volume])
-        
+
         # Добавляем image
         run_cmd.append(image_name)
-        
+
         # Добавляем команду запуска
         if isinstance(container_config.get("cmd"), list):
             run_cmd.extend(container_config["cmd"])
-        
+
         try:
             logger.info(f"Creating container {container_name} with command: {' '.join(run_cmd)}")
             proc = await asyncio.create_subprocess_exec(
@@ -427,9 +428,9 @@ class DockerOrchestrationBackend(OrchestrationBackend):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            
+
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120.0)
-            
+
             if proc.returncode == 0:
                 container_id = stdout.decode("utf-8", errors="replace").strip()
                 logger.info(f"Container {container_name} created successfully with ID: {container_id}")

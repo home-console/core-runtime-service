@@ -89,7 +89,93 @@ class OperationManager:
         return self._registry.list_types()
     
     # ========== STORAGE OPERATIONS ==========
-    
+
+    async def persist_operation(self, operation: Operation) -> None:
+        """
+        Persist operation state to storage.
+        
+        Public API for OperationWorker to persist operations without accessing _storage directly.
+
+        Args:
+            operation: Operation to persist
+        """
+        await self._storage.persist(operation)
+
+    async def ensure_attempt_created(
+        self,
+        attempt_id: str,
+        operation_id: str,
+        attempt_index: int,
+    ) -> None:
+        """
+        Ensure attempt record exists in storage.
+        
+        Public API for OperationWorker without accessing _storage directly.
+
+        Args:
+            attempt_id: Attempt ID
+            operation_id: Operation ID
+            attempt_index: Attempt index
+        """
+        await self._storage.ensure_attempt_created(attempt_id, operation_id, attempt_index)
+
+    async def try_claim_attempt(
+        self,
+        attempt_id: str,
+        worker_id: str,
+        lease_ttl: int,
+    ) -> tuple[bool, Optional[str]]:
+        """
+        Try to claim attempt for execution.
+        
+        Public API for OperationWorker without accessing _storage directly.
+
+        Args:
+            attempt_id: Attempt ID
+            worker_id: Worker ID claiming the attempt
+            lease_ttl: Lease TTL in seconds
+
+        Returns:
+            Tuple of (success, claim_token)
+        """
+        return await self._storage.try_claim_attempt(attempt_id, worker_id, lease_ttl)
+
+    async def get_attempt(self, attempt_id: str) -> Optional[Attempt]:
+        """
+        Get attempt by ID.
+        
+        Public API for OperationWorker without accessing _storage directly.
+
+        Args:
+            attempt_id: Attempt ID
+
+        Returns:
+            Attempt or None
+        """
+        return await self._storage.get_attempt(attempt_id)
+
+    async def persist_attempt(self, attempt: Attempt) -> None:
+        """
+        Persist attempt state.
+        
+        Public API for OperationWorker without accessing _storage directly.
+
+        Args:
+            attempt: Attempt to persist
+        """
+        await self._storage.persist_attempt(attempt)
+
+    def get_executor(self) -> Any:
+        """
+        Get operation executor.
+        
+        Public API for OperationWorker without accessing _executor directly.
+
+        Returns:
+            Operation executor instance
+        """
+        return self._executor
+
     async def create(
         self,
         op_type: str,

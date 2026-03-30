@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from core.runtime.config import Config
-from core.orchestration import NullOrchestrationBackend
+from app.orchestration import NullOrchestrationBackend, OrchestrationService
 from core.runtime import CoreRuntime
 from core.runtime.runtime import CoreRuntime
 from core.runtime.runtime_module import RuntimeModule

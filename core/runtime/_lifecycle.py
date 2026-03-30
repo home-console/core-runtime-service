@@ -88,9 +88,6 @@ class RuntimeLifecycleMixin:
                     f"Ошибка transport runner '{module_name}': {e}",
                     component="runtime",
                 )
-                import traceback
-
-                traceback.print_exc()
 
     async def run(self) -> None:
         """
@@ -309,7 +306,12 @@ class RuntimeLifecycleMixin:
         Returns:
             Словарь с результатами проверки здоровья компонентов
         """
-        collector = self.runtime_health_check
+        # Делегируем мониторингу
+        if hasattr(self, "monitor"):
+            return await self.monitor.health_check()
+
+        # Fallback для обратной совместимости
+        collector = getattr(self, "runtime_health_check", None)
         if callable(collector):
             return await collector(self)
 
@@ -324,7 +326,7 @@ class RuntimeLifecycleMixin:
             status = "unhealthy"
         return {
             "status": status,
-            "uptime": time.time() - self._start_time if self._start_time else 0,
+            "uptime": getattr(self, "_start_time", None) and time.time() - self._start_time or 0,
             "checks": checks,
         }
 
@@ -335,12 +337,17 @@ class RuntimeLifecycleMixin:
         Returns:
             Словарь с метриками плагинов, модулей, сервисов и storage
         """
-        collector = self.runtime_metrics_collector
+        # Делегируем мониторингу
+        if hasattr(self, "monitor"):
+            return await self.monitor.get_metrics()
+
+        # Fallback для обратной совместимости
+        collector = getattr(self, "runtime_metrics_collector", None)
         if callable(collector):
             return await collector(self)
 
         metrics: Dict[str, Any] = {
-            "uptime": time.time() - self._start_time if self._start_time else 0,
+            "uptime": getattr(self, "_start_time", None) and time.time() - self._start_time or 0,
             "plugins": {},
             "modules": {},
             "services": {},

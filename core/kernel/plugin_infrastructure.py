@@ -1,103 +1,91 @@
 """
-PluginInfrastructureCoordinator — координация инфраструктурных привязок плагинов.
+PluginInfrastructure — инфраструктура для управления плагинами и модулями.
 
-Задачи:
-- Регистрация capabilities плагина в CapabilityRegistry при загрузке
-- Регистрация потребления capabilities (consumers)
-- Дерегистрация capabilities и связанных handler'ов при выгрузке
-- Дерегистрация интеграций, привязанных к плагину, из IntegrationRegistry
+Отвечает за:
+- Загрузку и lifecycle плагинов (plugin_manager)
+- Управление модулями (module_manager)
+- Разрешение зависимостей (dependency_resolver)
+- Интеграции (integrations)
 
-Важно:
-- Этот класс НЕ знает про PluginRegistry и не управляет lifecycle плагинов.
-- Его ответственность — только инфраструктурные побочные эффекты вокруг плагина.
+Этот класс инкапсулирует всю логику работы с плагинами и модулями,
+освобождая CoreRuntime от этих обязанностей.
 """
 
-from __future__ import annotations
+from typing import Any, Optional
 
-from typing import Optional
-from core.kernel.base_plugin import BasePlugin, PluginMetadata
-from core.capability.registry import CapabilityRegistry
+from core.kernel.plugin_manager import PluginManager
+from core.module import ModuleManager
+from core.dependency.resolver import DependencyResolver
 from core.kernel.integration_registry import IntegrationRegistry
-from core.operations.manager import OperationManager
+from core.capability.registry import CapabilityRegistry
 
 
-class PluginInfrastructureCoordinator:
+class PluginInfrastructure:
     """
-    Координатор инфраструктуры вокруг плагинов.
+    Инфраструктура для управления плагинами и модулями.
 
-    Инкапсулирует:
-    - Регистрацию/дерегистрацию capabilities в CapabilityRegistry
-    - Очистку operation handler'ов, связанных с capabilities плагина
-    - Очистку записей об интеграциях в IntegrationRegistry
+    Отвечает за:
+    - Загрузку и lifecycle плагинов
+    - Управление модулями
+    - Разрешение зависимостей
+    - Интеграции
+
+    Использование:
+        plugin_infra = PluginInfrastructure(services, capability_registry, config)
+        await plugin_infra.plugin_manager.load_plugin(plugin)
+        await plugin_infra.module_manager.register_module_specs(runtime, specs)
     """
 
     def __init__(
         self,
-        *,
-        capability_registry: Optional[CapabilityRegistry] = None,
-        operations: Optional[OperationManager] = None,
-        integrations: Optional[IntegrationRegistry] = None,
-    ) -> None:
-        self._cap_reg = capability_registry
-        self._ops = operations
-        self._integrations = integrations
-
-    def _has_capabilities(self) -> bool:
-        return self._cap_reg is not None
-
-    async def on_plugin_loaded(self, plugin: BasePlugin) -> None:
+        services: Any,
+        capability_registry: CapabilityRegistry,
+        config: Optional[Any] = None,
+    ):
         """
-        Обработать инфраструктурные привязки при загрузке плагина.
+        Инициализация инфраструктуры плагинов.
 
-        - Зарегистрировать provided capabilities в CapabilityRegistry
-        - Зарегистрировать required capabilities как consumers
+        Args:
+            services: экземпляр CoreServices (предоставляет storage, event_bus, service_registry)
+            capability_registry: реестр capabilities для dependency resolver
+            config: опциональная конфигурация (для module_path_prefix)
         """
-        if not self._has_capabilities():
-            return
+        self.services = services
 
-        cap_reg = self._cap_reg  # type: ignore[assignment]
-        metadata: PluginMetadata = plugin.metadata
-        plugin_name = metadata.name
+        # Интеграции
+        self.integrations = IntegrationRegistry()
 
-        # Trust-aware capability registration
-        trust_level = getattr(plugin, "_trust_level", None)
-        plugin_privilege = cap_reg.trust_level_to_privilege(trust_level)
+        # Plugin Manager — lifecycle плагинов
+        # Передаём services как runtime (плагинам нужен доступ к сервисам)
+        self.plugin_manager = PluginManager(services)
 
-        for cap_id in (metadata.capabilities_provided or []):
-            provider_type = "remote" if metadata.remote_config else "local"
-            await cap_reg.register_provider(
-                plugin_name,
-                cap_id,
-                provider_type=provider_type,
-                remote_config=metadata.remote_config,
-                plugin_privilege=plugin_privilege,
-            )
+        # Module Manager — управление модулями
+        module_path_prefix = (
+            getattr(config, "module_path_prefix", "modules")
+            if config is not None
+            else "modules"
+        )
+        self.module_manager = ModuleManager(services, module_path_prefix=module_path_prefix)
 
-        for cap_id in (metadata.capabilities_required or []):
-            await cap_reg.register_consumer(plugin_name, cap_id)
+        # Dependency Resolver — разрешение зависимостей между плагинами
+        self.dependency_resolver = DependencyResolver(
+            capability_registry,
+            self.plugin_manager,
+            services.storage
+        )
 
-    async def on_plugin_unloaded(self, plugin: BasePlugin) -> None:
+    def create_context(self) -> dict[str, Any]:
         """
-        Обработать инфраструктурную очистку при выгрузке плагина.
+        Создать контекст инфраструктуры плагинов.
 
-        - Снять handler'ы операций, завязанные на capabilities плагина
-        - Удалить записи о capabilities плагина из CapabilityRegistry
-        - Удалить связанные интеграции из IntegrationRegistry
+        Возвращает основные компоненты для работы с плагинами и модулями.
+
+        Returns:
+            Словарь с компонентами инфраструктуры
         """
-        metadata: PluginMetadata = plugin.metadata
-        plugin_name = metadata.name
-
-        # 1. Очистка operation handler'ов, связанных с capabilities плагина
-        if self._ops is not None:
-            for cap_id in (metadata.capabilities_provided or []):
-                self._ops.unregister_handler(cap_id)
-
-        # 2. Удаление capabilities из CapabilityRegistry
-        if self._cap_reg is not None:
-            await self._cap_reg.unregister_plugin(plugin_name)
-
-        # 3. Удаление интеграций, связанных с этим плагином
-        if self._integrations is not None:
-            # IntegrationRegistry хранит mapping integration_id -> info(plugin_name=...)
-            for info in list(self._integrations.list_by_plugin(plugin_name)):
-                self._integrations.unregister(info.id)
+        return {
+            "plugin_manager": self.plugin_manager,
+            "module_manager": self.module_manager,
+            "dependency_resolver": self.dependency_resolver,
+            "integrations": self.integrations,
+        }
