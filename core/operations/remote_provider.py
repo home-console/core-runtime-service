@@ -33,9 +33,15 @@ Remote Service должен реализовать API:
 from typing import TYPE_CHECKING, Optional
 
 from core.kernel.base_plugin import BasePlugin, PluginMetadata
+from core.exception_groups import LOGGING_HELPER_ERRORS
 
 if TYPE_CHECKING:
     from core.runtime.runtime import CoreRuntime
+import logging
+
+logger = logging.getLogger(__name__)
+
+_REMOTE_LOG_ERRORS = (RuntimeError, AttributeError, KeyError, TypeError, ValueError)
 
 
 class RemoteCapabilityProvider(BasePlugin):
@@ -85,8 +91,14 @@ class RemoteCapabilityProvider(BasePlugin):
                 message=f"Remote capability provider loaded: {self.metadata.name} at {self.metadata.remote_config['base_url']}",
                 plugin=self.metadata.name
             )
-        except Exception:
-            pass
+        except LOGGING_HELPER_ERRORS as e:
+            if isinstance(e, _REMOTE_LOG_ERRORS):
+                logger.debug(
+                    "remote_provider.on_load: logger.log failed (boundary)",
+                    exc_info=True,
+                )
+            else:
+                logger.debug("remote_provider.on_load: unexpected", exc_info=True)
 
     async def on_start(self) -> None:
         """Запуск: регистрируем capabilities в registry как remote."""
@@ -103,8 +115,14 @@ class RemoteCapabilityProvider(BasePlugin):
                 message=f"Remote provider capabilities started: {caps}",
                 plugin=self.metadata.name
             )
-        except Exception:
-            pass
+        except LOGGING_HELPER_ERRORS as e:
+            if isinstance(e, _REMOTE_LOG_ERRORS):
+                logger.debug(
+                    "remote_provider.on_start: logger.log failed (boundary)",
+                    exc_info=True,
+                )
+            else:
+                logger.debug("remote_provider.on_start: unexpected", exc_info=True)
 
     async def on_stop(self) -> None:
         """Остановка: cleanup graceful."""
@@ -117,8 +135,14 @@ class RemoteCapabilityProvider(BasePlugin):
                 message=f"Remote capability provider stopped",
                 plugin=self.metadata.name
             )
-        except Exception:
-            pass
+        except LOGGING_HELPER_ERRORS as e:
+            if isinstance(e, _REMOTE_LOG_ERRORS):
+                logger.debug(
+                    "remote_provider.on_stop: logger.log failed (boundary)",
+                    exc_info=True,
+                )
+            else:
+                logger.debug("remote_provider.on_stop: unexpected", exc_info=True)
 
     async def on_unload(self) -> None:
         """Выгрузка: cleanup."""

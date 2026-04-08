@@ -10,9 +10,11 @@ Runtime owns the app; this module only provides bind_routes(runtime, app).
 from __future__ import annotations
 
 import inspect
+import asyncio
+import json
 import logging
 import re
-from http.cookies import SimpleCookie
+from http.cookies import CookieError, SimpleCookie
 from typing import Any, Dict, Optional
 
 from fastapi import (
@@ -33,12 +35,39 @@ from modules.api.authz import require as authz_require
 from modules.api.domain_adapters import get_domain_adapter
 from modules.api.validation_models import validate_body_for_service
 
+from core.adapters.storage_errors import STORAGE_BOUNDARY_ERRORS
+
 logger = logging.getLogger(__name__)
 
 PUBLIC_WS_SERVICES = {
     # Agent channel uses its own auth/enrollment flow.
     "client_manager.websocket",
 }
+
+
+def _normalize_api_result(result: Any) -> Dict[str, Any]:
+    """
+    Canonical API response contract for service results:
+    - if service already returns {"ok": ...} dict - preserve it
+    - otherwise wrap raw payload into {"ok": True, "result": ...}
+    """
+    if isinstance(result, dict) and "ok" in result:
+        return result
+    return {"ok": True, "result": result}
+
+
+def _normalize_api_error(
+    response: Response,
+    status_code: int,
+    error: str,
+    *,
+    code: Optional[str] = None,
+) -> Dict[str, Any]:
+    response.status_code = status_code
+    payload: Dict[str, Any] = {"ok": False, "error": error}
+    if code:
+        payload["code"] = code
+    return payload
 
 
 def bind_routes(runtime: Any, app: Any) -> None:
@@ -134,24 +163,19 @@ def bind_routes(runtime: Any, app: Any) -> None:
 
                         set_current_request_context(context)
                     # WebSocket handlers are long-lived — bypass default_timeout
-                    await runtime.kernel_context.get_service(
-                        "service_registry"
-                    ).call_without_timeout(
+                    await runtime.service_registry.call_without_timeout(
                         ep_service, websocket=websocket, **param_values
                     )
                 except WebSocketDisconnect:
                     pass
-                except Exception as e:
-                    import logging
-
-                    logging.error(f"WebSocket error for {ep_service}: {str(e)}")
-                    import traceback
-
-                    traceback.print_exc()
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.exception("WebSocket error for service %s", ep_service)
                     try:
                         await websocket.close(code=1011, reason="Internal Server Error")
                     except Exception:
-                        pass
+                        logger.warning("websocket.close after error failed", exc_info=True)
                 finally:
                     set_current_request_context(None)
 
@@ -190,16 +214,16 @@ def _make_api_handler(runtime: Any, endpoint: Any):
             debug_runtime = getattr(request.app.state, "runtime", None) or runtime
             if debug_runtime and hasattr(debug_runtime, "logger"):
                 try:
-                    await debug_runtime.kernel_context.get_service(
-                        "service_registry"
-                    ).call(
+                    await debug_runtime.service_registry.call(
                         "logger.log",
                         level="info",
                         message=f"[ROUTE_BINDING] {endpoint.service} auth_config={auth_config} is_public={is_public}",
                         component="auth_debug",
                     )
+                except asyncio.CancelledError:
+                    raise
                 except Exception:
-                    pass
+                    logger.warning("logger.log (route_binding debug) failed", exc_info=True)
 
         # Если не указана декларативная конфигурация, используем fallback на старую логику
         # для обратной совместимости
@@ -216,16 +240,16 @@ def _make_api_handler(runtime: Any, endpoint: Any):
                 "admin.auth.initialize",
                 "admin.auth.login",
                 "admin.auth.refresh",
-                "yandex_device_auth.start",
-                "yandex_device_auth.cookies",
-                "yandex_device_auth.status",
-                "yandex_device_auth.get_session",
-                "yandex_device_auth.cancel",
-                "oauth_yandex.get_status",
-                "oauth_yandex.get_authorize_url",
-                "oauth_yandex.configure",
-                "oauth_yandex.exchange_code",
-                "oauth_yandex.clear_tokens",
+                "device_auth.start",
+                "device_auth.cookies",
+                "device_auth.status",
+                "device_auth.get_session",
+                "device_auth.cancel",
+                "oauth.get_status",
+                "oauth.get_authorize_url",
+                "oauth.configure",
+                "oauth.exchange_code",
+                "oauth.clear_tokens",
                 "yandex.login.start",
                 "yandex.login.status",
             ]
@@ -248,7 +272,7 @@ def _make_api_handler(runtime: Any, endpoint: Any):
                     ]:
                         try:
                             temp_body = await request.json()
-                        except Exception:
+                        except (json.JSONDecodeError, ValueError):
                             temp_body = None
 
                     resource = await adapter.extract_resource(
@@ -276,14 +300,28 @@ def _make_api_handler(runtime: Any, endpoint: Any):
                                 "auth_config", "first_key_created", True
                             )
                             resource = {"allow_first_key": True}
-                        except Exception:
+                        except STORAGE_BOUNDARY_ERRORS:
                             keys_retry = await runtime.storage.list_keys(
                                 "auth_api_keys"
                             )
                             if len(keys_retry) == 0:
                                 resource = {"allow_first_key": True}
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception:
+                            logger.warning(
+                                "first_key_created set unexpected error",
+                                exc_info=True,
+                            )
+                except STORAGE_BOUNDARY_ERRORS:
+                    logger.debug(
+                        "first api key bootstrap: storage read failed",
+                        exc_info=True,
+                    )
+                except asyncio.CancelledError:
+                    raise
                 except Exception:
-                    pass
+                    logger.warning("first api key bootstrap failed", exc_info=True)
 
             # Проверяем авторизацию на действие
             try:
@@ -310,7 +348,7 @@ def _make_api_handler(runtime: Any, endpoint: Any):
                     ]:
                         try:
                             temp_body = await request.json()
-                        except Exception:
+                        except (json.JSONDecodeError, ValueError):
                             temp_body = None
 
                     # Получаем resource через адаптер
@@ -337,19 +375,20 @@ def _make_api_handler(runtime: Any, endpoint: Any):
         # Извлекаем параметры для вызова сервиса
         path_params_dict = dict(request.path_params)
         query_params_dict = {k: v for k, v in request.query_params.multi_items()}
+        call_params: Dict[str, Any] = {}
 
         # Если body не передан, пытаемся прочитать из request
         if body is None and endpoint.method in ["POST", "PUT", "PATCH"]:
             try:
                 body = await request.json()
-            except Exception:
+            except (json.JSONDecodeError, ValueError):
                 body = None
 
         # Доменный адаптер для маппинга параметров
         if auth_config and auth_config.resource_adapter:
             adapter = get_domain_adapter(auth_config.resource_adapter)
             if adapter:
-                params = await adapter.extract_params(
+                call_params = await adapter.extract_params(
                     request=request,
                     body=body,
                     path_params=path_params_dict,
@@ -359,16 +398,14 @@ def _make_api_handler(runtime: Any, endpoint: Any):
                 )
             else:
                 # Fallback: стандартный маппинг
-                params: Dict[str, Any] = {}
-                params.update(path_params_dict)
-                params.update(query_params_dict)
+                call_params.update(path_params_dict)
+                call_params.update(query_params_dict)
                 if body is not None:
-                    params["body"] = body
+                    call_params["body"] = body
         else:
             # Стандартный маппинг параметров
-            params: Dict[str, Any] = {}
-            params.update(path_params_dict)
-            params.update(query_params_dict)
+            call_params.update(path_params_dict)
+            call_params.update(query_params_dict)
 
             # Валидация body
             if body is not None and endpoint.method in ["POST", "PUT", "PATCH"]:
@@ -378,39 +415,35 @@ def _make_api_handler(runtime: Any, endpoint: Any):
                     raise HTTPException(status_code=400, detail=str(ve))
 
             if body is not None:
-                params["body"] = body
+                call_params["body"] = body
 
             # OAuth endpoints need special parameter extraction
             if (
-                endpoint.service == "oauth_yandex.configure"
+                endpoint.service == "oauth.configure"
                 and body
                 and isinstance(body, dict)
             ):
-                params.pop("body", None)
-                params["client_id"] = body.get("client_id", "")
-                params["client_secret"] = body.get("client_secret", "")
-                params["redirect_uri"] = body.get("redirect_uri", "")
+                call_params.pop("body", None)
+                call_params["client_id"] = body.get("client_id", "")
+                call_params["client_secret"] = body.get("client_secret", "")
+                call_params["redirect_uri"] = body.get("redirect_uri", "")
                 if "scope" in body:
-                    params["scope"] = body.get("scope")
+                    call_params["scope"] = body.get("scope")
             elif (
-                endpoint.service == "oauth_yandex.exchange_code"
+                endpoint.service == "oauth.exchange_code"
                 and body
                 and isinstance(body, dict)
             ):
-                params.pop("body", None)
-                params["code"] = body.get("code", "")
+                call_params.pop("body", None)
+                call_params["code"] = body.get("code", "")
 
         # Проверяем существование сервиса
-        if not await runtime.kernel_context.get_service("service_registry").has_service(
-            endpoint.service
-        ):
+        if not await runtime.service_registry.has_service(endpoint.service):
             raise HTTPException(status_code=404, detail="service not found")
 
         # Вызываем сервис
         try:
-            result = await runtime.kernel_context.get_service("service_registry").call(
-                endpoint.service, **params
-            )
+            result = await runtime.service_registry.call(endpoint.service, **call_params)
         except Exception as e:
             try:
                 from core.exceptions import (
@@ -419,22 +452,28 @@ def _make_api_handler(runtime: Any, endpoint: Any):
                     NotFoundError,
                     UnauthorizedError,
                 )
-            except Exception:
+            except ImportError:
                 BadRequestError = UnauthorizedError = ForbiddenError = (
                     NotFoundError
                 ) = ()  # type: ignore
             try:
                 from modules.credentials.errors import CredentialAccessDenied
-            except Exception:
+            except ImportError:
                 CredentialAccessDenied = ()  # type: ignore
             if BadRequestError and isinstance(e, BadRequestError):
-                raise HTTPException(status_code=400, detail=str(e))
+                return _normalize_api_error(response, 400, str(e), code="BAD_REQUEST")
             if UnauthorizedError and isinstance(e, UnauthorizedError):
-                raise HTTPException(status_code=401, detail="Unauthorized")
+                return _normalize_api_error(
+                    response, 401, "Unauthorized", code="UNAUTHORIZED"
+                )
             if ForbiddenError and isinstance(e, ForbiddenError):
-                raise HTTPException(status_code=403, detail="Forbidden")
+                return _normalize_api_error(
+                    response, 403, "Forbidden", code="FORBIDDEN"
+                )
             if NotFoundError and isinstance(e, NotFoundError):
-                raise HTTPException(status_code=404, detail="Not Found")
+                return _normalize_api_error(
+                    response, 404, "Not Found", code="NOT_FOUND"
+                )
             if CredentialAccessDenied and isinstance(e, CredentialAccessDenied):
                 detail = str(e)
                 detail_lower = detail.lower()
@@ -442,11 +481,20 @@ def _make_api_handler(runtime: Any, endpoint: Any):
                     "temporarily blocked" in detail_lower
                     or "temporary block" in detail_lower
                 ):
-                    raise HTTPException(status_code=429, detail=detail)
-                raise HTTPException(status_code=403, detail=detail)
+                    return _normalize_api_error(
+                        response, 429, detail, code="RATE_LIMITED_OR_BLOCKED"
+                    )
+                return _normalize_api_error(
+                    response, 403, detail, code="FORBIDDEN"
+                )
             if isinstance(e, ValueError):
-                raise HTTPException(status_code=400, detail=str(e))
-            raise HTTPException(status_code=500, detail=str(e))
+                return _normalize_api_error(
+                    response, 400, str(e), code="BAD_REQUEST"
+                )
+            logger.error("Unhandled service error for %s: %s", endpoint.service, e, exc_info=True)
+            return _normalize_api_error(
+                response, 500, str(e), code="INTERNAL_ERROR"
+            )
 
         # Apply cookies from contextvars (set by service layer)
         try:
@@ -476,10 +524,9 @@ def _make_api_handler(runtime: Any, endpoint: Any):
                             path=path,
                         )
         except Exception:
-            # If cookie setup fails, don't break the response
-            pass
+            logger.warning("apply response cookies failed", exc_info=True)
 
-        return result
+        return _normalize_api_result(result)
 
     # Формируем сигнатуру handler'а для FastAPI
     params_sig = [
@@ -520,19 +567,17 @@ def _make_webhook_handler(runtime: Any, endpoint: Any):
             payload = None
             try:
                 payload = await request.json()
-            except Exception:
+            except (json.JSONDecodeError, ValueError):
                 payload = await request.body()
             try:
-                result = await runtime.kernel_context.get_service(
-                    "service_registry"
-                ).call(
+                result = await runtime.service_registry.call(
                     endpoint.service,
                     payload=payload,
                     headers=dict(request.headers),
                     raw_request=request,
                 )
             except TypeError:
-                result = runtime.kernel_context.get_service("service_registry").call(
+                result = runtime.service_registry.call(
                     endpoint.service,
                     payload=payload,
                     headers=dict(request.headers),
@@ -540,12 +585,7 @@ def _make_webhook_handler(runtime: Any, endpoint: Any):
                 )
             return {"ok": True, "result": result}
         except Exception as e:
-            import logging
-
-            logging.error(f"Webhook error for {endpoint.service}: {str(e)}")
-            import traceback
-
-            traceback.print_exc()
+            logger.exception("Webhook error for %s", endpoint.service)
             return {"ok": False, "error": str(e)}
 
     return webhook_handler
@@ -579,30 +619,20 @@ def _make_ws_handler(runtime: Any, endpoint: Any):
                 set_current_request_context(context)
             # WebSocket‑хендлеры по определению долгоживущие, поэтому вызываем
             # сервис без default_timeout, иначе соединение будет рваться по таймауту.
-            if hasattr(
-                runtime.kernel_context.get_service("service_registry"),
-                "call_without_timeout",
-            ):
-                await runtime.kernel_context.get_service(
-                    "service_registry"
-                ).call_without_timeout(endpoint.service, websocket=websocket)
-            else:
-                await runtime.kernel_context.get_service("service_registry").call(
+            if hasattr(runtime.service_registry, "call_without_timeout"):
+                await runtime.service_registry.call_without_timeout(
                     endpoint.service, websocket=websocket
                 )
+            else:
+                await runtime.service_registry.call(endpoint.service, websocket=websocket)
         except WebSocketDisconnect:
             pass
-        except Exception as e:
-            import logging
-
-            logging.error(f"WebSocket error for {endpoint.service}: {str(e)}")
-            import traceback
-
-            traceback.print_exc()
+        except Exception:
+            logger.exception("WebSocket error for service %s", endpoint.service)
             try:
                 await websocket.close(code=1011, reason="Internal Server Error")
             except Exception:
-                pass
+                logger.warning("websocket.close after error failed", exc_info=True)
         finally:
             set_current_request_context(None)
 
@@ -616,7 +646,7 @@ def _get_ws_cookie_value(websocket: WebSocket, key: str) -> Optional[str]:
     parsed = SimpleCookie()
     try:
         parsed.load(cookie_header)
-    except Exception:
+    except CookieError:
         return None
     morsel = parsed.get(key)
     if morsel is None:

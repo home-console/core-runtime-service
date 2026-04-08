@@ -106,12 +106,3 @@ class PluginRateLimiter:
         """Reset all limits (for testing)."""
         with self._lock:
             self._buckets.clear()
-
-
-# Global singleton instance
-_rate_limiter: PluginRateLimiter = PluginRateLimiter()
-
-
-def get_rate_limiter() -> PluginRateLimiter:
-    """Get global rate limiter."""
-    return _rate_limiter

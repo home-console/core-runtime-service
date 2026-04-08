@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+import logging
 """
 ApiModule — HTTP API Gateway (FastAPI + uvicorn).
 
@@ -5,8 +8,6 @@ ApiModule — HTTP API Gateway (FastAPI + uvicorn).
 после start() вызывает transport-контракт api_module.run_transport(runtime).
 Маршруты привязываются в run_http() — после старта модулей и плагинов.
 """
-
-from __future__ import annotations
 
 from typing import Any, Dict
 import os
@@ -18,10 +19,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
+from core.adapters.storage_errors import STORAGE_BOUNDARY_ERRORS
 from core.runtime.runtime_module import RuntimeModule
 from modules.api.auth.middleware import require_auth_middleware
 from modules.api.admin_access_middleware import admin_access_middleware
 from modules.monitoring import MonitoringModule
+logger = logging.getLogger(__name__)
 
 
 class ApiModule(RuntimeModule):
@@ -60,8 +63,8 @@ class ApiModule(RuntimeModule):
             if cfg:
                 cors_allowed = getattr(cfg, "cors_allowed_origins", None)
                 is_dev = getattr(cfg, "env", "production") == "development"
-        except Exception:
-            pass
+        except (AttributeError, TypeError) as e:
+            logger.debug("API _build_app: config introspection failed: %s", e, exc_info=True)
         
         # CORS configuration
         if is_dev:
@@ -85,42 +88,105 @@ class ApiModule(RuntimeModule):
 
         try:
             from modules.request_logger.middleware import request_logger_middleware
+
             self.app.middleware("http")(request_logger_middleware)
-        except ImportError:
-            pass
+        except ImportError as e:
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(
+                    self._log(
+                        runtime,
+                        "warning",
+                        "API: optional middleware import failed: modules.request_logger.middleware",
+                        error=str(e),
+                    )
+                )
+            except RuntimeError:
+                logger.debug(
+                    "API _build_app: no running loop for deferred middleware log",
+                    exc_info=True,
+                )
+            except Exception:
+                logger.warning(
+                    "API _build_app: deferred middleware log failed", exc_info=True
+                )
         # Middleware execution order (first registered = outermost = runs first on request):
         # require_auth → admin_access → csrf → rate_limit → security_headers
         # require_auth must run BEFORE csrf so that auth_context is populated when csrf checks it.
         self.app.middleware("http")(require_auth_middleware)
         self.app.middleware("http")(admin_access_middleware)
         try:
-            from modules.api.csrf_middleware import csrf_protection_middleware, rate_limit_middleware
+            from modules.api.csrf_middleware import (
+                csrf_protection_middleware,
+                rate_limit_middleware,
+            )
+
             self.app.middleware("http")(csrf_protection_middleware)
             self.app.middleware("http")(rate_limit_middleware)
-        except ImportError:
-            pass
+        except ImportError as e:
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(
+                    self._log(
+                        runtime,
+                        "warning",
+                        "API: optional middleware import failed: modules.api.csrf_middleware",
+                        error=str(e),
+                    )
+                )
+            except RuntimeError:
+                logger.debug(
+                    "API _build_app: no running loop for deferred csrf middleware log",
+                    exc_info=True,
+                )
+            except Exception:
+                logger.warning(
+                    "API _build_app: deferred csrf middleware log failed", exc_info=True
+                )
         from modules.api.security_headers import security_headers_middleware
         self.app.middleware("http")(security_headers_middleware)
 
         self.app.include_router(MonitoringModule(runtime=runtime).router, prefix="/monitor", tags=["monitoring"])
         try:
             from modules.request_logger.router import create_request_logger_router
+
             self.app.include_router(create_request_logger_router(runtime))
-        except ImportError:
-            pass
+        except ImportError as e:
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(
+                    self._log(
+                        runtime,
+                        "warning",
+                        "API: optional router import failed: modules.request_logger.router",
+                        error=str(e),
+                    )
+                )
+            except RuntimeError:
+                logger.debug(
+                    "API _build_app: no running loop for deferred router log",
+                    exc_info=True,
+                )
+            except Exception:
+                logger.warning(
+                    "API _build_app: deferred router log failed", exc_info=True
+                )
 
     async def _log(self, runtime: Any, level: str, message: str, **ctx: Any) -> None:
         try:
-            services = runtime.kernel_context.get_service("service_registry")
-            await services.call(
+            await runtime.service_registry.call(
                 "logger.log",
                 level=level,
                 message=message,
                 component="api",
                 **ctx,
             )
+        except STORAGE_BOUNDARY_ERRORS:
+            logger.debug(
+                "API _log: logger.log failed (storage boundary)", exc_info=True
+            )
         except Exception:
-            pass
+            logger.debug("API _log: logger.log failed", exc_info=True)
 
     async def run_http(self, runtime: Any) -> None:
         """

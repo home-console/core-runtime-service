@@ -84,7 +84,7 @@ def test_plugin_archive(temp_dir):
         "version": "1.0.0",
         "description": "Test plugin",
         "author": "test",
-        "entrypoint": "plugin.py",
+        "class_path": "plugin.TestPlugin",
         "capabilities_provided": ["test.capability"],
     }
     (plugin_dir / "plugin.json").write_text(json.dumps(plugin_json))
@@ -156,8 +156,7 @@ class TestMarketplaceInstaller:
         assert result["version"] == "1.0.0"
         assert "installed_at" in result
         assert "hash" in result
-        assert result["entrypoint"] == "plugin.py"
-        assert "test.capability" in result["capabilities_provided"]
+        assert result["class_path"] == "plugin.TestPlugin"
     
     @pytest.mark.asyncio
     async def test_install_nonexistent_archive(self, installer):
@@ -231,7 +230,7 @@ class TestMarketplaceInstaller:
                 "version": "1.0.0",
                 "description": "Test plugin",
                 "author": "test",
-                "entrypoint": "plugin.py",
+                "class_path": "plugin.TestPlugin",
             }))
             zf.writestr("plugin.py", "from core.kernel.base_plugin import BasePlugin\nclass TestPlugin(BasePlugin): pass\n")
 

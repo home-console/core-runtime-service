@@ -8,6 +8,8 @@ import time
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, Optional
+import logging
+logger = logging.getLogger(__name__)
 
 
 class OperationStatus(str, Enum):
@@ -319,7 +321,17 @@ TERMINAL_STATUSES = {
 def _normalize_status(value: Any) -> OperationStatus:
     if isinstance(value, OperationStatus):
         return value
+    
+    status_str = str(value).lower()
+    
+    # Handle compatibility aliases that don't have their own value
+    if status_str == "pending":
+        return OperationStatus.CREATED
+    if status_str == "success":
+        return OperationStatus.COMPLETED
+    
     try:
-        return OperationStatus(str(value))
-    except Exception:
+        return OperationStatus(status_str)
+    except (TypeError, ValueError) as e:
+        logger.warning("models._normalize_status: failed: %s", e, exc_info=True)
         return OperationStatus.CREATED

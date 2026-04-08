@@ -8,9 +8,6 @@ from .introspection import (
     list_events,
     list_storage_namespaces,
     get_storage_namespace_contents,
-    get_state,
-    list_state_keys,
-    get_state_value,
     list_operations_available,
 )
 
@@ -22,8 +19,5 @@ __all__ = [
     "list_events",
     "list_storage_namespaces",
     "get_storage_namespace_contents",
-    "get_state",
-    "list_state_keys",
-    "get_state_value",
     "list_operations_available",
 ]

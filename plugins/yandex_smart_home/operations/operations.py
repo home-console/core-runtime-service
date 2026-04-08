@@ -7,44 +7,26 @@ Handlers вызывают ТОЛЬКО сервисы плагина (yandex.syn
 from typing import Any, Dict
 
 
-async def handle_yandex_sync(params: Dict[str, Any], context: Any) -> Dict[str, Any]:
-    """
-    Handler: yandex.sync_devices
-    Params: (empty или произвольные)
-    """
-    runtime = context.get("runtime")
-    if not runtime:
-        raise RuntimeError("Runtime not available in context")
+def register_yandex_operations(plugin: Any) -> None:
+    """Регистрирует операции Yandex через SDK-first API плагина (BasePlugin.register_operation_handler)."""
 
-    result = await runtime.call_service("yandex.sync_devices")
+    async def handle_yandex_sync(params: Dict[str, Any], context: Any) -> Dict[str, Any]:
+        result = await plugin.call_service("yandex.sync_devices")
+        if isinstance(result, list):
+            return {"success": True, "devices": result, "count": len(result)}
+        return {"success": True, "result": result}
 
-    # Сервис возвращает список устройств; оборачиваем в dict для operation result
-    if isinstance(result, list):
-        return {"success": True, "devices": result, "count": len(result)}
-    return {"success": True, "result": result}
+    async def handle_yandex_check_devices_online(params: Dict[str, Any], context: Any) -> Dict[str, Any]:
+        result = await plugin.call_service("yandex.check_devices_online")
+        if isinstance(result, dict):
+            return {"success": True, **result}
+        return {"success": True, "result": result}
 
-
-async def handle_yandex_check_devices_online(params: Dict[str, Any], context: Any) -> Dict[str, Any]:
-    """
-    Handler: yandex.check_devices_online
-    Params: (empty или произвольные)
-    """
-    runtime = context.get("runtime")
-    if not runtime:
-        raise RuntimeError("Runtime not available in context")
-
-    result = await runtime.call_service("yandex.check_devices_online")
-
-    if isinstance(result, dict):
-        return {"success": True, **result}
-    return {"success": True, "result": result}
-
-
-def register_yandex_operations(runtime: Any) -> None:
-    """Регистрирует операции Yandex в OperationManager. Вызывать из on_start() плагина."""
-    ops = getattr(runtime, "operations", None)
-    if not ops:
+    try:
+        plugin.register_operation_handler("yandex.sync_devices", handle_yandex_sync)
+        plugin.register_operation_handler(
+            "yandex.check_devices_online", handle_yandex_check_devices_online
+        )
+    except Exception:
+        # Best-effort: отсутствие operations подсистемы не должно ломать старт.
         return
-
-    ops.register_handler("yandex.sync_devices", handle_yandex_sync)
-    ops.register_handler("yandex.check_devices_online", handle_yandex_check_devices_online)

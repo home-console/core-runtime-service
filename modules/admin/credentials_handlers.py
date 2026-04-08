@@ -1,3 +1,4 @@
+import logging
 """
 Admin HTTP handlers for credentials (SSH hosts and other secrets).
 
@@ -12,9 +13,11 @@ import threading
 import time
 from typing import Any, Dict
 
+from core.adapters.storage_errors import STORAGE_BOUNDARY_ERRORS
 from core.runtime.auth_contextvars import get_current_auth_context, set_current_auth_context
 from core.runtime.system_context import create_system_context
 from modules.credentials import CredentialType
+logger = logging.getLogger(__name__)
 
 # SystemContext не имеет user_id; для credential.* передаём явно admin
 _ADMIN_USER_ID = "admin"
@@ -38,7 +41,8 @@ def _get_repo(runtime: Any):
         from modules.credentials import CredentialRepository
 
         return CredentialRepository(storage_manager=sm, secret_store=ss)
-    except Exception:
+    except (ImportError, ModuleNotFoundError, TypeError):
+        logger.debug("_get_repo: CredentialRepository unavailable", exc_info=True)
         return None
 
 
@@ -49,8 +53,7 @@ async def admin_credentials_list(runtime: Any) -> Dict[str, Any]:
         prev = get_current_auth_context()
         try:
             set_current_auth_context(ctx)
-            services = runtime.kernel_context.get_service("service_registry")
-            out = await services.call(
+            out = await runtime.service_registry.call(
                 "credential.list",
                 _user_id=_ADMIN_USER_ID,
                 _user_roles=_ADMIN_ROLES,
@@ -78,7 +81,16 @@ async def admin_credentials_list(runtime: Any) -> Dict[str, Any]:
                 ],
                 "count": len(creds),
             }
+        except STORAGE_BOUNDARY_ERRORS:
+            logger.warning(
+                "admin_credentials_list: fallback list failed (storage boundary)",
+                exc_info=True,
+            )
+            return {"credentials": [], "count": 0}
         except Exception:
+            logger.warning(
+                "admin_credentials_list: fallback list failed", exc_info=True
+            )
             return {"credentials": [], "count": 0}
 
 
@@ -102,8 +114,7 @@ async def admin_credentials_create(
         prev = get_current_auth_context()
         try:
             set_current_auth_context(ctx)
-            services = runtime.kernel_context.get_service("service_registry")
-            return await services.call(
+            return await runtime.service_registry.call(
                 "credential.create",
                 credential=credential,
                 secret=secret_bytes,
@@ -137,10 +148,23 @@ async def admin_credentials_create(
                 metadata=credential.get("metadata") or {},
                 tags=credential.get("tags") or [],
             )
+        except (KeyError, TypeError, ValueError) as e2:
+            raise ValueError(f"Create failed: invalid input: {e2}") from e2
+        try:
             await repo.create(cred, secret_bytes)
-            return CredentialMetadata.from_domain(cred).to_dict()
+        except STORAGE_BOUNDARY_ERRORS as e2:
+            logger.warning(
+                "admin_credentials_create: fallback repo.create storage boundary",
+                exc_info=True,
+            )
+            raise ValueError(f"Create failed (storage): {e2}") from e2
         except Exception as e2:
+            logger.warning(
+                "admin_credentials_create: fallback repo.create failed",
+                exc_info=True,
+            )
             raise ValueError(f"Create failed: {e2}") from e2
+        return CredentialMetadata.from_domain(cred).to_dict()
 
 
 async def admin_credentials_get_secret(
@@ -155,8 +179,7 @@ async def admin_credentials_get_secret(
         prev = get_current_auth_context()
         try:
             set_current_auth_context(ctx)
-            services = runtime.kernel_context.get_service("service_registry")
-            out = await services.call(
+            out = await runtime.service_registry.call(
                 "credential.get_with_secret",
                 credential_id=cid,
                 _user_id=_ADMIN_USER_ID,
@@ -175,7 +198,14 @@ async def admin_credentials_get_secret(
         repo = _get_repo(runtime)
         if repo is None:
             raise ValueError("Credentials module not loaded") from e
-        pair = await repo.get_with_secret(cid)
+        try:
+            pair = await repo.get_with_secret(cid)
+        except STORAGE_BOUNDARY_ERRORS:
+            logger.warning(
+                "admin_credentials_get_secret: fallback get_with_secret storage boundary",
+                exc_info=True,
+            )
+            raise
         if pair is None:
             raise ValueError(f"Credential {cid} not found")
         cred, secret_bytes = pair
@@ -195,8 +225,7 @@ async def admin_credentials_get(
         prev = get_current_auth_context()
         try:
             set_current_auth_context(ctx)
-            services = runtime.kernel_context.get_service("service_registry")
-            return await services.call(
+            return await runtime.service_registry.call(
                 "credential.get",
                 credential_id=cid,
                 _user_id=_ADMIN_USER_ID,
@@ -210,7 +239,14 @@ async def admin_credentials_get(
         repo = _get_repo(runtime)
         if repo is None:
             raise ValueError("Credentials module not loaded") from e
-        cred = await repo.get(cid)
+        try:
+            cred = await repo.get(cid)
+        except STORAGE_BOUNDARY_ERRORS:
+            logger.warning(
+                "admin_credentials_get: fallback repo.get storage boundary",
+                exc_info=True,
+            )
+            raise
         if cred is None:
             raise ValueError(f"Credential {cid} not found")
         from modules.credentials.schemas import CredentialMetadata
@@ -230,8 +266,7 @@ async def admin_credentials_delete(
         prev = get_current_auth_context()
         try:
             set_current_auth_context(ctx)
-            services = runtime.kernel_context.get_service("service_registry")
-            await services.call(
+            await runtime.service_registry.call(
                 "credential.delete",
                 credential_id=cid,
                 _user_id=_ADMIN_USER_ID,
@@ -246,7 +281,14 @@ async def admin_credentials_delete(
         repo = _get_repo(runtime)
         if repo is None:
             raise ValueError("Credentials module not loaded") from e
-        await repo.delete(cid)
+        try:
+            await repo.delete(cid)
+        except STORAGE_BOUNDARY_ERRORS:
+            logger.warning(
+                "admin_credentials_delete: fallback repo.delete storage boundary",
+                exc_info=True,
+            )
+            raise
         return {"deleted": True}
 
 
@@ -274,8 +316,7 @@ async def admin_credentials_update(
         prev = get_current_auth_context()
         try:
             set_current_auth_context(ctx)
-            services = runtime.kernel_context.get_service("service_registry")
-            return await services.call(
+            return await runtime.service_registry.call(
                 "credential.update",
                 credential=credential,
                 secret=secret_bytes,
@@ -290,33 +331,56 @@ async def admin_credentials_update(
         repo = _get_repo(runtime)
         if repo is None:
             raise ValueError("Credentials module not loaded") from e
-        current = await repo.get(cid)
+        try:
+            current = await repo.get(cid)
+        except STORAGE_BOUNDARY_ERRORS:
+            logger.warning(
+                "admin_credentials_update: fallback repo.get storage boundary",
+                exc_info=True,
+            )
+            raise
         if current is None:
             raise ValueError(f"Credential {cid} not found")
         from modules.credentials import CredentialType
         from modules.credentials.schemas import CredentialMetadata
 
-        changes = {}
-        if credential.get("name") is not None:
-            changes["name"] = str(credential["name"]).strip()
-        if credential.get("host") is not None:
-            changes["host"] = str(credential["host"]).strip() or None
-        if credential.get("username") is not None:
-            changes["username"] = str(credential["username"]).strip() or None
-        if credential.get("port") is not None:
-            changes["port"] = int(credential["port"]) if credential["port"] else None
-        if credential.get("type") is not None:
-            changes["type"] = CredentialType(credential["type"])
-        if credential.get("secret_ref") is not None:
-            changes["secret_ref"] = str(credential["secret_ref"]).strip()
-        if credential.get("metadata") is not None:
-            changes["metadata"] = credential["metadata"]
-        if credential.get("tags") is not None:
-            changes["tags"] = credential["tags"]
-        # version не передаём в mutate — репозиторий ожидает version = current.version + 1,
-        # mutate() сам инкрементирует, если version не передан
-        updated = current.mutate(**changes)
-        await repo.update(updated, secret_bytes)
+        try:
+            changes = {}
+            if credential.get("name") is not None:
+                changes["name"] = str(credential["name"]).strip()
+            if credential.get("host") is not None:
+                changes["host"] = str(credential["host"]).strip() or None
+            if credential.get("username") is not None:
+                changes["username"] = str(credential["username"]).strip() or None
+            if credential.get("port") is not None:
+                changes["port"] = int(credential["port"]) if credential["port"] else None
+            if credential.get("type") is not None:
+                changes["type"] = CredentialType(credential["type"])
+            if credential.get("secret_ref") is not None:
+                changes["secret_ref"] = str(credential["secret_ref"]).strip()
+            if credential.get("metadata") is not None:
+                changes["metadata"] = credential["metadata"]
+            if credential.get("tags") is not None:
+                changes["tags"] = credential["tags"]
+            # version не передаём в mutate — репозиторий ожидает version = current.version + 1,
+            # mutate() сам инкрементирует, если version не передан
+            updated = current.mutate(**changes)
+        except (KeyError, TypeError, ValueError) as e2:
+            raise ValueError(f"Update failed: invalid input: {e2}") from e2
+        try:
+            await repo.update(updated, secret_bytes)
+        except STORAGE_BOUNDARY_ERRORS:
+            logger.warning(
+                "admin_credentials_update: fallback repo.update storage boundary",
+                exc_info=True,
+            )
+            raise
+        except Exception as e2:
+            logger.warning(
+                "admin_credentials_update: fallback repo.update failed",
+                exc_info=True,
+            )
+            raise ValueError(f"Update failed: {e2}") from e2
         return CredentialMetadata.from_domain(updated).to_dict()
 
 
@@ -347,6 +411,7 @@ def _ssh_connect_with_credential(cred, secret_bytes: bytes) -> Dict[str, Any]:
     try:
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        _ssh_key_errors = (paramiko.SSHException, ValueError, OSError)
         if cred.type == CredentialType.SSH_PASSWORD:
             client.connect(
                 hostname=host,
@@ -364,7 +429,7 @@ def _ssh_connect_with_credential(cred, secret_bytes: bytes) -> Dict[str, Any]:
                 try:
                     pkey = key_cls.from_private_key(io.StringIO(secret_str))
                     break
-                except Exception:
+                except _ssh_key_errors:
                     continue
             if pkey is None:
                 return {
@@ -381,14 +446,19 @@ def _ssh_connect_with_credential(cred, secret_bytes: bytes) -> Dict[str, Any]:
                 look_for_keys=False,
             )
         return {"ok": True, "message": "Подключение установлено"}
+    except (paramiko.SSHException, OSError, TimeoutError) as e:
+        return {"ok": False, "error": str(e)}
     except Exception as e:
+        logger.warning(
+            "_ssh_connect_with_credential: unexpected error: %s", e, exc_info=True
+        )
         return {"ok": False, "error": str(e)}
     finally:
         if client:
             try:
                 client.close()
-            except Exception:
-                pass
+            except OSError:
+                logger.debug("ssh connect: client.close failed", exc_info=True)
 
 
 async def admin_credentials_connect(
@@ -440,6 +510,7 @@ def _ssh_open_shell(cred, secret_bytes: bytes):
 
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    _key_load_errors = (paramiko.SSHException, ValueError, OSError)
     if cred.type == CredentialType.SSH_PASSWORD:
         client.connect(
             hostname=host,
@@ -456,7 +527,7 @@ def _ssh_open_shell(cred, secret_bytes: bytes):
             try:
                 pkey = key_cls.from_private_key(io.StringIO(secret_str))
                 break
-            except Exception:
+            except _key_load_errors:
                 continue
         if pkey is None:
             raise RuntimeError(
@@ -523,7 +594,20 @@ async def admin_credentials_terminal_ws(runtime: Any, websocket: Any) -> None:
 
     try:
         pair = await repo.get_with_secret(credential_id)
+    except STORAGE_BOUNDARY_ERRORS as e:
+        logger.warning(
+            "admin_credentials_terminal_ws: get_with_secret storage boundary: %s",
+            e,
+            exc_info=True,
+        )
+        await websocket.close(code=4002, reason=str(e)[:120])
+        return
     except Exception as e:
+        logger.warning(
+            "admin_credentials_terminal_ws: get_with_secret failed: %s",
+            e,
+            exc_info=True,
+        )
         await websocket.close(code=4002, reason=str(e)[:120])
         return
 
@@ -537,6 +621,9 @@ async def admin_credentials_terminal_ws(runtime: Any, websocket: Any) -> None:
             None, lambda: _ssh_open_shell(cred, secret_bytes)
         )
     except Exception as e:
+        logger.warning(
+            "admin_credentials_terminal_ws: ssh open failed: %s", e, exc_info=True
+        )
         await websocket.close(code=4004, reason=str(e)[:120])
         return
 
@@ -560,8 +647,10 @@ async def admin_credentials_terminal_ws(runtime: Any, websocket: Any) -> None:
                 if not data:
                     break
                 loop.call_soon_threadsafe(queue.put_nowait, data)
+        except OSError:
+            logger.debug("ssh terminal: recv ended (OSError)", exc_info=True)
         except Exception:
-            pass
+            logger.debug("ssh terminal: recv error", exc_info=True)
         loop.call_soon_threadsafe(queue.put_nowait, None)
 
     async def bridge_ssh_to_ws():
@@ -573,6 +662,9 @@ async def admin_credentials_terminal_ws(runtime: Any, websocket: Any) -> None:
                 try:
                     await websocket.send_bytes(data)
                 except Exception:
+                    logger.debug(
+                        "ssh terminal: websocket send_bytes failed", exc_info=True
+                    )
                     break
         finally:
             try:
@@ -607,7 +699,7 @@ async def admin_credentials_terminal_ws(runtime: Any, websocket: Any) -> None:
                                     lambda: channel.resize_pty(width=cols, height=rows),
                                 )
                                 handled = True
-                        except Exception:
+                        except (json.JSONDecodeError, TypeError, ValueError, OSError):
                             handled = False
                     if handled:
                         continue
@@ -615,7 +707,7 @@ async def admin_credentials_terminal_ws(runtime: Any, websocket: Any) -> None:
                     data = text.encode("utf-8", errors="replace")
                     await loop.run_in_executor(None, lambda d=data: channel.send(d))
         except Exception:
-            pass
+            logger.debug("ssh terminal: ws→ssh bridge error", exc_info=True)
 
     t = threading.Thread(target=thread_read_ssh, daemon=True)
     t.start()
@@ -630,13 +722,13 @@ async def admin_credentials_terminal_ws(runtime: Any, websocket: Any) -> None:
         try:
             if ch:
                 ch.close()
-        except Exception:
-            pass
+        except OSError:
+            logger.debug("ssh terminal cleanup: channel.close failed", exc_info=True)
         try:
             if cl:
                 cl.close()
-        except Exception:
-            pass
+        except OSError:
+            logger.debug("ssh terminal cleanup: client.close failed", exc_info=True)
 
 
 async def admin_credentials_terminal_session_close(
@@ -656,12 +748,12 @@ async def admin_credentials_terminal_session_close(
             if ch:
                 ch.close()
             closed = True
-        except Exception:
-            pass
+        except OSError:
+            logger.debug("terminal_session_close: channel.close failed", exc_info=True)
         try:
             if cl:
                 cl.close()
-        except Exception:
-            pass
+        except OSError:
+            logger.debug("terminal_session_close: client.close failed", exc_info=True)
 
     return {"deleted": closed or info is not None}

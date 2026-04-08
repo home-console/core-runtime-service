@@ -337,6 +337,7 @@ class RotationExecutor:
             return success
 
         except Exception as e:
+            logger.warning("executor_v2.rollback_rotation: unexpected error: %s", e, exc_info=True)
             await self.audit_binder.append_event(
                 event_type="credential_rotation_rollback_failed",
                 metadata={

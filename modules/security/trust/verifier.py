@@ -133,6 +133,7 @@ class PluginTrustVerifier:
         try:
             archive_hash = compute_archive_sha256(archive_path)
         except Exception:
+            logger.debug("verifier.get_signature_info: error (using fallback value)", exc_info=True)
             archive_hash = None
 
         is_trusted = self.trust_store.is_key_trusted(public_key)

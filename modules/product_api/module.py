@@ -1,3 +1,4 @@
+import logging
 """
 ProductApiModule — BFF (Backend for Frontend) для пользовательских клиентов.
 
@@ -15,6 +16,7 @@ from typing import Any
 
 from core.runtime.runtime_module import RuntimeModule
 from core.http.models import HttpEndpoint, EndpointAuthConfig
+logger = logging.getLogger(__name__)
 
 
 def _user_cred_params(kw: dict) -> dict:
@@ -106,8 +108,7 @@ class ProductApiModule(RuntimeModule):
         )
 
         # User credentials (свои креды у каждого пользователя)
-        ctx = self.runtime.kernel_context
-        services = ctx.get_service("service_registry")
+        services = self.context.services
 
         async def user_credentials_list(**kw: Any) -> Any:
             """
@@ -334,4 +335,4 @@ class ProductApiModule(RuntimeModule):
             try:
                 await self.context.services.unregister(name)
             except Exception:
-                pass
+                logger.warning("Unhandled exception", exc_info=True)

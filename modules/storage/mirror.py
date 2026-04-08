@@ -9,6 +9,8 @@ from typing import Any, AsyncIterator
 
 from core.runtime.state_engine import StateEngine
 from modules.storage.storage import Storage
+import logging
+logger = logging.getLogger(__name__)
 
 
 class StorageWithStateMirror:
@@ -77,7 +79,7 @@ class StorageWithStateMirror:
             try:
                 await self._state_engine.delete(state_key)
             except Exception:
-                pass
+                logger.warning("Unhandled exception", exc_info=True)
             # Пробрасываем оригинальную ошибку
             raise
 

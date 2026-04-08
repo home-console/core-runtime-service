@@ -56,7 +56,7 @@ curl -X POST http://localhost:8000/oauth/yandex/cookies \
 #### Способ 3: Напрямую через storage (для продвинутых)
 
 ```python
-await runtime.storage.set("yandex", "cookies", {
+await self.storage_set("yandex", "cookies", {
     "Session_id": "...",
     "yandexuid": "...",
     "sessionid2": "..."

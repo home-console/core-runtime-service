@@ -1,17 +1,7 @@
 """Observability and resource guardrails module."""
 
-from core.observability.metrics import (
-    MetricsRegistry,
-    Counter,
-    Gauge,
-    Histogram,
-    get_metrics_registry,
-)
-from core.observability.rate_limiter import (
-    PluginRateLimiter,
-    TokenBucket,
-    get_rate_limiter,
-)
+from core.observability.metrics import MetricsRegistry, Counter, Gauge, Histogram
+from core.observability.rate_limiter import PluginRateLimiter, TokenBucket
 from core.observability.health_snapshot import (
     HealthSnapshot,
     ProviderStatusSummary,
@@ -23,10 +13,8 @@ __all__ = [
     "Counter",
     "Gauge",
     "Histogram",
-    "get_metrics_registry",
     "PluginRateLimiter",
     "TokenBucket",
-    "get_rate_limiter",
     "HealthSnapshot",
     "ProviderStatusSummary",
     "HealthSnapshotCollector",

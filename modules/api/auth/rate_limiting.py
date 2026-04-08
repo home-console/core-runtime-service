@@ -13,6 +13,8 @@ from .constants import (
     RATE_LIMIT_API_REQUESTS,
     RATE_LIMIT_API_WINDOW
 )
+import logging
+logger = logging.getLogger(__name__)
 
 
 async def rate_limit_check(
@@ -42,15 +44,7 @@ async def rate_limit_check(
     
     if window_seconds is None:
         window_seconds = RATE_LIMIT_AUTH_WINDOW if limit_type == "auth" else RATE_LIMIT_API_WINDOW
-    services = None
-    try:
-        kernel_context = getattr(runtime, "kernel_context", None)
-        if kernel_context is not None:
-            services = kernel_context.get_service("service_registry")
-    except Exception:
-        services = None
-    if services is None:
-        services = getattr(runtime, "service_registry", None)
+    services = getattr(runtime, "service_registry", None)
 
     try:
         # Проверяем, что identifier не None и является строкой
@@ -118,5 +112,5 @@ async def rate_limit_check(
                     module="api"
                 )
         except Exception:
-            pass
+            logger.warning("Unhandled exception", exc_info=True)
         return True  # Fail-open

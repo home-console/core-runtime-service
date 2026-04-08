@@ -14,6 +14,8 @@ from typing import Any, Dict, Tuple
 import paramiko  # type: ignore[import-not-found]
 
 from modules.credentials import Credential, CredentialType
+import logging
+logger = logging.getLogger(__name__)
 
 CredentialWithSecret = Tuple[Credential, bytes]
 
@@ -92,6 +94,7 @@ class SSHExecutionService:
                         pkey = key_cls.from_private_key(io.StringIO(secret_str))
                         break
                     except Exception:
+                        logger.debug("ssh_execution_service._connect: error processing item (skipping)", exc_info=True)
                         continue
                 if pkey is None:
                     raise ValueError(
@@ -113,7 +116,7 @@ class SSHExecutionService:
             try:
                 client.close()
             except Exception:
-                pass
+                logger.warning("Unhandled exception", exc_info=True)
             raise
         finally:
             # Локальная строка с секретом больше не нужна
@@ -137,7 +140,7 @@ class SSHExecutionService:
             try:
                 client.close()
             except Exception:
-                pass
+                logger.warning("Unhandled exception", exc_info=True)
 
     def _run_command_sync(
         self,
@@ -173,7 +176,7 @@ class SSHExecutionService:
             try:
                 client.close()
             except Exception:
-                pass
+                logger.warning("Unhandled exception", exc_info=True)
 
     async def upload_file(
         self, credential: Any, local_path: str, remote_path: str

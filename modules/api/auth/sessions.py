@@ -8,10 +8,17 @@ import secrets
 from fastapi import Request
 
 from .context import RequestContext
-from .constants import AUTH_SESSIONS_NAMESPACE, AUTH_USERS_NAMESPACE, DEFAULT_SESSION_EXPIRATION_SECONDS
+from .constants import (
+    AUTH_SESSIONS_NAMESPACE,
+    AUTH_USERS_NAMESPACE,
+    AUTH_STORAGE_BOUNDARY_ERRORS,
+    DEFAULT_SESSION_EXPIRATION_SECONDS,
+)
 from .revocation import is_revoked, revoke_session
 from .audit import audit_log_auth_event
 from .users import validate_user_exists
+import logging
+logger = logging.getLogger(__name__)
 
 
 def extract_session_from_cookie(request: Request) -> Optional[str]:
@@ -64,14 +71,14 @@ async def validate_session(runtime: Any, session_id: str) -> Optional[RequestCon
         # Проверяем структуру данных
         if not isinstance(session_data, dict):
             try:
-                await runtime.kernel_context.get_service("service_registry").call(
+                await runtime.service_registry.call(
                     "logger.log",
                     level="warning",
                     message=f"Invalid session data structure for session: {session_id[:8]}...",
                     module="api"
                 )
             except Exception:
-                pass
+                logger.warning("logger.log service call failed", exc_info=True)
             return None
         
         # Проверяем expiration
@@ -82,8 +89,8 @@ async def validate_session(runtime: Any, session_id: str) -> Optional[RequestCon
                 # Сессия истекла - удаляем её
                 try:
                     await runtime.storage.delete(AUTH_SESSIONS_NAMESPACE, session_id)
-                except Exception:
-                    pass
+                except AUTH_STORAGE_BOUNDARY_ERRORS:
+                    logger.warning("session cleanup delete failed (expired)", exc_info=True)
                 return None
         
         # Извлекаем данные
@@ -97,8 +104,8 @@ async def validate_session(runtime: Any, session_id: str) -> Optional[RequestCon
             # Пользователь не найден - удаляем сессию
             try:
                 await runtime.storage.delete(AUTH_SESSIONS_NAMESPACE, session_id)
-            except Exception:
-                pass
+            except AUTH_STORAGE_BOUNDARY_ERRORS:
+                logger.warning("session cleanup delete failed (missing user)", exc_info=True)
             return None
         
         if not isinstance(user_data, dict):
@@ -132,17 +139,29 @@ async def validate_session(runtime: Any, session_id: str) -> Optional[RequestCon
             session_id=session_id
         )
     
-    except Exception as e:
-        # Ошибка при чтении storage - логируем и возвращаем None
+    except AUTH_STORAGE_BOUNDARY_ERRORS as e:
+        logger.warning("validate_session storage error: %s", e, exc_info=True)
         try:
-            await runtime.kernel_context.get_service("service_registry").call(
+            await runtime.service_registry.call(
                 "logger.log",
                 level="error",
                 message=f"Error validating session: {e}",
                 module="api"
             )
         except Exception:
-            pass
+            logger.warning("logger.log service call failed", exc_info=True)
+        return None
+    except Exception as e:
+        logger.exception("validate_session unexpected error: %s", e)
+        try:
+            await runtime.service_registry.call(
+                "logger.log",
+                level="error",
+                message=f"Error validating session: {e}",
+                module="api"
+            )
+        except Exception:
+            logger.warning("logger.log service call failed", exc_info=True)
         return None
 
 
@@ -228,8 +247,10 @@ async def delete_session(runtime: Any, session_id: str) -> None:
     """
     try:
         await runtime.storage.delete(AUTH_SESSIONS_NAMESPACE, session_id)
+    except AUTH_STORAGE_BOUNDARY_ERRORS:
+        logger.warning("delete_session storage delete failed", exc_info=True)
     except Exception:
-        pass
+        logger.warning("delete_session delete failed (unexpected)", exc_info=True)
 
 
 async def list_sessions(runtime: Any, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -291,15 +312,30 @@ async def list_sessions(runtime: Any, user_id: Optional[str] = None) -> List[Dic
                     session_info["user_agent"] = session_data["user_agent"]
                 
                 result.append(session_info)
+            except AUTH_STORAGE_BOUNDARY_ERRORS:
+                logger.debug(
+                    "list_sessions: skip session %s (storage/data)",
+                    session_id[:16] if session_id else "?",
+                    exc_info=True,
+                )
+                continue
             except Exception:
-                # Пропускаем повреждённые сессии
+                logger.warning(
+                    "list_sessions: unexpected error for session %s",
+                    session_id[:16] if session_id else "?",
+                    exc_info=True,
+                )
                 continue
         
         # Сортируем по last_used (новые сначала)
         result.sort(key=lambda x: x.get("last_used", 0), reverse=True)
         return result
     
+    except AUTH_STORAGE_BOUNDARY_ERRORS:
+        logger.warning("list_sessions storage error", exc_info=True)
+        return []
     except Exception:
+        logger.exception("list_sessions unexpected error")
         return []
 
 
@@ -329,8 +365,19 @@ async def revoke_all_sessions(runtime: Any, user_id: str) -> int:
                 if session_data.get("user_id") == user_id:
                     await revoke_session(runtime, session_id)
                     revoked_count += 1
+            except AUTH_STORAGE_BOUNDARY_ERRORS:
+                logger.debug(
+                    "revoke_all_sessions: skip session %s",
+                    session_id[:16] if session_id else "?",
+                    exc_info=True,
+                )
+                continue
             except Exception:
-                # Пропускаем ошибки при обработке отдельных сессий
+                logger.warning(
+                    "revoke_all_sessions: unexpected for session %s",
+                    session_id[:16] if session_id else "?",
+                    exc_info=True,
+                )
                 continue
         
         # Audit logging
@@ -344,15 +391,27 @@ async def revoke_all_sessions(runtime: Any, user_id: str) -> int:
         
         return revoked_count
     
-    except Exception as e:
-        # Логируем ошибку, но не падаем
+    except AUTH_STORAGE_BOUNDARY_ERRORS as e:
+        logger.warning("revoke_all_sessions storage error: %s", e, exc_info=True)
         try:
-            await runtime.kernel_context.get_service("service_registry").call(
+            await runtime.service_registry.call(
                 "logger.log",
                 level="error",
                 message=f"Error revoking all sessions for user {user_id}: {e}",
                 module="api"
             )
         except Exception:
-            pass
+            logger.warning("logger.log service call failed", exc_info=True)
+        return revoked_count
+    except Exception as e:
+        logger.exception("revoke_all_sessions unexpected: %s", e)
+        try:
+            await runtime.service_registry.call(
+                "logger.log",
+                level="error",
+                message=f"Error revoking all sessions for user {user_id}: {e}",
+                module="api"
+            )
+        except Exception:
+            logger.warning("logger.log service call failed", exc_info=True)
         return revoked_count

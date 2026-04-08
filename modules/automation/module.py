@@ -11,6 +11,9 @@ from . import handlers
 from .events import device_state_to_operation
 from .registry import get_event_handlers, register_event_handler
 from .operations import handle_automation_run
+from core.events_schemas import ExternalDeviceStateReportedPayload
+import logging
+logger = logging.getLogger(__name__)
 
 
 class AutomationModule(RuntimeModule):
@@ -43,11 +46,11 @@ class AutomationModule(RuntimeModule):
                 device_state_to_operation,
             )
 
-        if "automation.run" not in self.runtime.operations.list_handler_types():
-            self.runtime.operations.register_handler("automation.run", handle_automation_run)
+        if "automation.run" not in self.context.operations.list_handler_types():
+            self.context.operations.register_handler("automation.run", handle_automation_run)
 
         # Подписываем обработчик события
-        await self.runtime.event_bus.subscribe(
+        await self.context.event_bus.subscribe(
             "external.device_state_reported",
             self._handle_external_state
         )
@@ -69,15 +72,18 @@ class AutomationModule(RuntimeModule):
         Отписывается от событий при остановке.
         """
         try:
-            await self.runtime.event_bus.unsubscribe(
+            await self.context.event_bus.unsubscribe(
                 "external.device_state_reported",
                 self._handle_external_state
             )
         except Exception:
             # Не ломаем остановку при ошибках отписки
+            logger.debug("module.stop: unexpected error (suppressed)", exc_info=True)
             pass
 
-    async def _handle_external_state(self, event_type: str, data: dict) -> None:
+    async def _handle_external_state(
+        self, event_type: str, data: ExternalDeviceStateReportedPayload
+    ) -> None:
         """
         Обработчик события external.device_state_reported.
 

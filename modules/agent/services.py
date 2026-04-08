@@ -7,6 +7,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from core.adapters.storage_errors import STORAGE_BOUNDARY_ERRORS
+
 logger = logging.getLogger(__name__)
 
 
@@ -46,7 +48,11 @@ async def admin_agent_create_enrollment_token(
                 "agent_name": token.agent_name,
             },
         }
+    except STORAGE_BOUNDARY_ERRORS as e:
+        logger.warning("admin_agent_create_enrollment_token storage error", exc_info=True)
+        return {"ok": False, "error": str(e)}
     except Exception as e:
+        logger.exception("admin_agent_create_enrollment_token failed")
         return {"ok": False, "error": str(e)}
 
 
@@ -97,6 +103,12 @@ async def admin_agent_enroll_agent(runtime: Any, body: Any = None) -> Dict[str, 
         }
     except ValueError as e:
         return {"ok": False, "error": str(e)}
+    except STORAGE_BOUNDARY_ERRORS as e:
+        logger.warning("admin_agent_enroll_agent storage error", exc_info=True)
+        return {"ok": False, "error": str(e)}
+    except Exception as e:
+        logger.exception("admin_agent_enroll_agent failed")
+        return {"ok": False, "error": str(e)}
 
 
 async def admin_agent_generate_bootstrap_token(
@@ -140,8 +152,14 @@ async def admin_agent_generate_bootstrap_token(
             "token": token,
             "expires_at": expires_at,
         }
+    except STORAGE_BOUNDARY_ERRORS as e:
+        logger.warning(
+            "[AdminAgentBootstrapToken] storage error generating token",
+            exc_info=True,
+        )
+        return {"ok": False, "error": str(e)}
     except Exception as e:
-        logger.exception("[AdminAgentBootstrapToken] Error generating token: %s", e)
+        logger.exception("[AdminAgentBootstrapToken] Error generating token")
         return {"ok": False, "error": str(e)}
 
 
@@ -158,7 +176,11 @@ async def admin_agent_list_agents(runtime: Any) -> Dict[str, Any]:
     try:
         agents = await runtime.agent_registry.list_agents()
         return {"ok": True, "agents": [a.to_dict() for a in agents]}
+    except STORAGE_BOUNDARY_ERRORS as e:
+        logger.warning("admin_agent_list_agents storage error", exc_info=True)
+        return {"ok": False, "error": str(e)}
     except Exception as e:
+        logger.exception("admin_agent_list_agents failed")
         return {"ok": False, "error": str(e)}
 
 
@@ -185,7 +207,11 @@ async def admin_agent_get_agent(runtime: Any, agent_id: str) -> Dict[str, Any]:
             return {"ok": False, "error": "agent not found"}
 
         return {"ok": True, "agent": agent.to_dict()}
+    except STORAGE_BOUNDARY_ERRORS as e:
+        logger.warning("admin_agent_get_agent storage error", exc_info=True)
+        return {"ok": False, "error": str(e)}
     except Exception as e:
+        logger.exception("admin_agent_get_agent failed")
         return {"ok": False, "error": str(e)}
 
 
@@ -217,7 +243,11 @@ async def admin_agent_deregister_agent(runtime: Any, agent_id: str) -> Dict[str,
         await runtime.agent_manager.deregister_agent(agent_id)
 
         return {"ok": True}
+    except STORAGE_BOUNDARY_ERRORS as e:
+        logger.warning("admin_agent_deregister_agent storage error", exc_info=True)
+        return {"ok": False, "error": str(e)}
     except Exception as e:
+        logger.exception("admin_agent_deregister_agent failed")
         return {"ok": False, "error": str(e)}
 
 
@@ -245,7 +275,14 @@ async def admin_agent_list_agents_providing_capability(
             capability_id
         )
         return {"ok": True, "agents": [a.to_dict() for a in agents]}
+    except STORAGE_BOUNDARY_ERRORS as e:
+        logger.warning(
+            "admin_agent_list_agents_providing_capability storage error",
+            exc_info=True,
+        )
+        return {"ok": False, "error": str(e)}
     except Exception as e:
+        logger.exception("admin_agent_list_agents_providing_capability failed")
         return {"ok": False, "error": str(e)}
 
 
@@ -357,14 +394,29 @@ async def admin_agent_deploy(
                             return value
                     except TypeError:
                         continue
+                    except STORAGE_BOUNDARY_ERRORS:
+                        logger.debug(
+                            "admin_agent_deploy: legacy credential read storage error",
+                            extra={"args": args},
+                            exc_info=True,
+                        )
+                        continue
                     except Exception:
+                        logger.debug(
+                            "admin_agent_deploy: legacy credential read unexpected",
+                            extra={"args": args},
+                            exc_info=True,
+                        )
                         continue
                 return None
 
-            repo_error: Optional[Exception] = None
             try:
                 from modules.credentials.repository import CredentialRepository
-                repo = CredentialRepository(storage_manager=storage_manager, secret_store=secret_store)
+
+                secret_store = getattr(runtime, "secret_store", None)
+                repo = CredentialRepository(
+                    storage_manager=storage_manager, secret_store=secret_store
+                )
                 cred = await repo.get(credential_id)
                 host = _extract_host(cred)
                 if cred is None or not host:
@@ -373,7 +425,16 @@ async def admin_agent_deploy(
                     if cred is None and raw_cred is None:
                         return {"ok": False, "error": f"Credential {credential_id} not found"}
             except Exception as e:
-                repo_error = e
+                if isinstance(e, STORAGE_BOUNDARY_ERRORS):
+                    logger.debug(
+                        "admin_agent_deploy: CredentialRepository.get storage error",
+                        exc_info=True,
+                    )
+                else:
+                    logger.warning(
+                        "admin_agent_deploy: CredentialRepository.get failed",
+                        exc_info=True,
+                    )
                 raw_cred = await _read_legacy_raw_credential()
                 host = _extract_host(raw_cred)
                 if raw_cred is None:
@@ -384,8 +445,11 @@ async def admin_agent_deploy(
                 "ok": False,
                 "error": "Cannot determine host: credential has no host field. Please set the host in the SSH credential.",
             }
+    except STORAGE_BOUNDARY_ERRORS as e:
+        logger.warning("[AdminAgentDeploy] credential resolution storage error", exc_info=True)
+        return {"ok": False, "error": f"Failed to get credential: {e}"}
     except Exception as e:
-        logger.exception(f"[AdminAgentDeploy] Failed to get credential: {e}")
+        logger.exception("[AdminAgentDeploy] Failed to get credential")
         return {"ok": False, "error": f"Failed to get credential: {e}"}
 
     # Create deployment tracker entry
@@ -397,8 +461,11 @@ async def admin_agent_deploy(
             host=host,
             custom_env=custom_env or {},
         )
+    except STORAGE_BOUNDARY_ERRORS as e:
+        logger.warning("[AdminAgentDeploy] deployment_tracker.create storage error", exc_info=True)
+        return {"ok": False, "error": f"Failed to create deployment: {e}"}
     except Exception as e:
-        logger.exception(f"[AdminAgentDeploy] Failed to create deployment: {e}")
+        logger.exception("[AdminAgentDeploy] Failed to create deployment")
         return {"ok": False, "error": f"Failed to create deployment: {e}"}
 
     # ========== GENERATE ENROLLMENT TOKEN ==========
@@ -411,8 +478,17 @@ async def admin_agent_deploy(
         deployment = await runtime.deployment_tracker.get(deployment_id)
         if deployment:
             deployment.enrollment_token_str = enrollment_token
+    except STORAGE_BOUNDARY_ERRORS as e:
+        logger.warning(
+            "[AdminAgentDeploy] token generation / deployment persist storage error",
+            exc_info=True,
+        )
+        await runtime.deployment_tracker.update_status(
+            deployment_id, "failed", error_message=f"Token generation failed: {e}"
+        )
+        return {"ok": False, "error": f"Failed to generate enrollment token: {e}"}
     except Exception as e:
-        logger.exception(f"[AdminAgentDeploy] Token generation failed: {e}")
+        logger.exception("[AdminAgentDeploy] Token generation failed")
         await runtime.deployment_tracker.update_status(
             deployment_id, "failed", error_message=f"Token generation failed: {e}"
         )
@@ -506,8 +582,19 @@ async def _execute_deployment(
                     "result": deploy_result,
                 },
             )
+        except (OSError, asyncio.TimeoutError) as e:
+            logger.warning(
+                "[ExecuteDeployment] SSH deployment IO/timeout: %s", e, exc_info=True
+            )
+            await runtime.deployment_tracker.update_status(
+                deployment_id,
+                status="failed",
+                error_message=f"SSH deployment failed: {e}",
+                completed_at=datetime.now(timezone.utc).isoformat(),
+            )
+            return
         except Exception as e:
-            logger.exception(f"[ExecuteDeployment] SSH deployment failed: {e}")
+            logger.exception("[ExecuteDeployment] SSH deployment failed")
             await runtime.deployment_tracker.update_status(
                 deployment_id,
                 status="failed",
@@ -563,10 +650,16 @@ async def _execute_deployment(
 
                 if enrolled_agent_id:
                     break
-            except Exception as e:
-                logger.warning(f"[ExecuteDeployment] Error checking enrollment: {e}")
-                # Continue polling on error
-                pass
+            except STORAGE_BOUNDARY_ERRORS:
+                logger.debug(
+                    "[ExecuteDeployment] enrollment poll storage error",
+                    exc_info=True,
+                )
+            except Exception:
+                logger.warning(
+                    "[ExecuteDeployment] Error checking enrollment",
+                    exc_info=True,
+                )
 
             await asyncio.sleep(2)
 
@@ -587,8 +680,16 @@ async def _execute_deployment(
                     await runtime.agent_manager.revoke_enrollment_token(
                         deployment.enrollment_token_id
                     )
+            except STORAGE_BOUNDARY_ERRORS:
+                logger.debug(
+                    "[ExecuteDeployment] revoke enrollment token cleanup storage error",
+                    exc_info=True,
+                )
             except Exception:
-                pass  # Best effort cleanup
+                logger.warning(
+                    "[ExecuteDeployment] revoke enrollment token cleanup failed",
+                    exc_info=True,
+                )
 
             return
 
@@ -646,9 +747,16 @@ async def _execute_deployment(
                     ):
                         agent_online = True
                         break
-            except Exception as e:
-                logger.debug(f"[ExecuteDeployment] Error checking heartbeat: {e}")
-                pass
+            except STORAGE_BOUNDARY_ERRORS:
+                logger.debug(
+                    "[ExecuteDeployment] heartbeat check storage error",
+                    exc_info=True,
+                )
+            except Exception:
+                logger.debug(
+                    "[ExecuteDeployment] Error checking heartbeat",
+                    exc_info=True,
+                )
 
             await asyncio.sleep(3)
 
@@ -685,7 +793,7 @@ async def _execute_deployment(
 
     except Exception as e:
         # ========== UNEXPECTED FAILURE HANDLING ==========
-        logger.exception(f"[ExecuteDeployment] Unexpected error during deployment: {e}")
+        logger.exception("[ExecuteDeployment] Unexpected error during deployment")
 
         try:
             await runtime.deployment_tracker.update_status(
@@ -694,9 +802,14 @@ async def _execute_deployment(
                 error_message=str(e),
                 completed_at=datetime.now(timezone.utc).isoformat(),
             )
-        except Exception as cleanup_error:
-            logger.error(
-                f"[ExecuteDeployment] Failed to update deployment status: {cleanup_error}"
+        except STORAGE_BOUNDARY_ERRORS:
+            logger.warning(
+                "[ExecuteDeployment] update_status after error (storage boundary)",
+                exc_info=True,
+            )
+        except Exception:
+            logger.exception(
+                "[ExecuteDeployment] Failed to update deployment status after error"
             )
 
 
@@ -764,8 +877,11 @@ async def admin_agent_get_deployment_status(
 
         return result
 
+    except STORAGE_BOUNDARY_ERRORS as e:
+        logger.warning("[AdminAgentGetDeploymentStatus] storage error", exc_info=True)
+        return {"ok": False, "error": str(e)}
     except Exception as e:
-        logger.exception(f"[AdminAgentGetDeploymentStatus] Error: {e}")
+        logger.exception("[AdminAgentGetDeploymentStatus] Error")
         return {"ok": False, "error": str(e)}
 
 
@@ -792,8 +908,11 @@ async def admin_agent_get_deployment_metrics(runtime: Any) -> Dict[str, Any]:
     try:
         metrics = await runtime.deployment_tracker.get_deployment_metrics()
         return {"ok": True, **metrics}
+    except STORAGE_BOUNDARY_ERRORS as e:
+        logger.warning("[AdminAgentGetDeploymentMetrics] storage error", exc_info=True)
+        return {"ok": False, "error": str(e)}
     except Exception as e:
-        logger.exception(f"[AdminAgentGetDeploymentMetrics] Error: {e}")
+        logger.exception("[AdminAgentGetDeploymentMetrics] Error")
         return {"ok": False, "error": str(e)}
 
 
@@ -900,15 +1019,24 @@ async def admin_agent_heartbeat(
                                 "agent_id": agent_id,
                             },
                         )
-            except Exception as e:
+            except STORAGE_BOUNDARY_ERRORS:
                 logger.debug(
-                    f"[AdminAgentHeartbeat] Error updating deployment status: {e}"
+                    "[AdminAgentHeartbeat] deployment status update storage error",
+                    exc_info=True,
+                )
+            except Exception:
+                logger.debug(
+                    "[AdminAgentHeartbeat] Error updating deployment status",
+                    exc_info=True,
                 )
 
         return {"ok": True, "ack": True, "server_time": now.isoformat()}
 
+    except STORAGE_BOUNDARY_ERRORS as e:
+        logger.warning("[AdminAgentHeartbeat] storage error", exc_info=True)
+        return {"ok": False, "error": str(e)}
     except Exception as e:
-        logger.exception(f"[AdminAgentHeartbeat] Error: {e}")
+        logger.exception("[AdminAgentHeartbeat] Error")
         return {"ok": False, "error": str(e)}
 
 
@@ -983,8 +1111,13 @@ async def admin_agent_download_checksum(
             "version": "latest",
             "cached": False,
         }
+    except OSError as e:
+        logger.warning(
+            "[AdminAgentDownloadChecksum] OS error reading binary: %s", e, exc_info=True
+        )
+        return {"ok": False, "error": str(e)}
     except Exception as e:
-        logger.exception(f"[AdminAgentDownloadChecksum] Error reading binary: {e}")
+        logger.exception("[AdminAgentDownloadChecksum] Error reading binary")
         return {"ok": False, "error": str(e)}
 
 
@@ -1133,8 +1266,11 @@ async def admin_agent_get_heartbeat_status(
             "metrics": metrics,
         }
 
+    except STORAGE_BOUNDARY_ERRORS as e:
+        logger.warning("[AdminAgentHeartbeatStatus] storage error", exc_info=True)
+        return {"ok": False, "error": str(e)}
     except Exception as e:
-        logger.exception(f"[AdminAgentHeartbeatStatus] Error: {e}")
+        logger.exception("[AdminAgentHeartbeatStatus] Error")
         return {"ok": False, "error": str(e)}
 
 
@@ -1227,8 +1363,11 @@ async def admin_agent_check_agents_health(runtime: Any) -> Dict[str, Any]:
                         extra={"agent_id": agent_id},
                     )
                     # Optionally call: await runtime.agent_registry.deregister_agent(agent_id)
-            except Exception as e:
-                logger.debug(f"[AdminAgentHealthCheck] Error marking dead agent: {e}")
+            except (AttributeError, TypeError):
+                logger.debug(
+                    "[AdminAgentHealthCheck] dead agent metadata access failed",
+                    exc_info=True,
+                )
 
         logger.info("[AdminAgentHealthCheck] Health check completed", extra=stats)
 
@@ -1240,8 +1379,11 @@ async def admin_agent_check_agents_health(runtime: Any) -> Dict[str, Any]:
             "agents": agent_statuses,
         }
 
+    except STORAGE_BOUNDARY_ERRORS as e:
+        logger.warning("[AdminAgentHealthCheck] storage error", exc_info=True)
+        return {"ok": False, "error": str(e)}
     except Exception as e:
-        logger.exception(f"[AdminAgentHealthCheck] Error: {e}")
+        logger.exception("[AdminAgentHealthCheck] Error")
         return {"ok": False, "error": str(e)}
 
 
@@ -1308,8 +1450,11 @@ async def admin_agent_list_online_agents(runtime: Any) -> Dict[str, Any]:
 
         return {"ok": True, "count": len(online_agents), "agents": online_agents}
 
+    except STORAGE_BOUNDARY_ERRORS as e:
+        logger.warning("[AdminAgentListOnline] storage error", exc_info=True)
+        return {"ok": False, "error": str(e)}
     except Exception as e:
-        logger.exception(f"[AdminAgentListOnline] Error: {e}")
+        logger.exception("[AdminAgentListOnline] Error")
         return {"ok": False, "error": str(e)}
 
 
@@ -1422,8 +1567,11 @@ async def admin_agent_get_logs(
             "agent_online": agent_online,
         }
 
+    except STORAGE_BOUNDARY_ERRORS as e:
+        logger.warning("[AdminAgentGetLogs] storage error", exc_info=True)
+        return {"ok": False, "error": str(e)}
     except Exception as e:
-        logger.exception(f"[AdminAgentGetLogs] Error: {e}")
+        logger.exception("[AdminAgentGetLogs] Error")
         return {"ok": False, "error": str(e)}
 
 
@@ -1505,8 +1653,16 @@ async def admin_agent_get_status(
                     if dep.agent_id == agent_id:
                         deployment_id = dep.deployment_id
                         break
+            except STORAGE_BOUNDARY_ERRORS:
+                logger.debug(
+                    "[AdminAgentGetStatus] list_deployments storage error",
+                    exc_info=True,
+                )
             except Exception:
-                pass
+                logger.warning(
+                    "[AdminAgentGetStatus] list_deployments failed",
+                    exc_info=True,
+                )
 
         props = agent.properties or {}
 
@@ -1531,8 +1687,11 @@ async def admin_agent_get_status(
             "deployment_id": deployment_id,
         }
 
+    except STORAGE_BOUNDARY_ERRORS as e:
+        logger.warning("[AdminAgentGetStatus] storage error", exc_info=True)
+        return {"ok": False, "error": str(e)}
     except Exception as e:
-        logger.exception(f"[AdminAgentGetStatus] Error: {e}")
+        logger.exception("[AdminAgentGetStatus] Error")
         return {"ok": False, "error": str(e)}
 
 
@@ -1575,6 +1734,8 @@ async def _monitor_agent_health_background(runtime: Any) -> None:
                 else:
                     logger.debug("[AgentHealthMonitor] Health check OK", extra=stats)
 
-        except Exception as e:
-            logger.exception(f"[AgentHealthMonitor] Error in health monitoring: {e}")
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("[AgentHealthMonitor] Error in health monitoring")
             await asyncio.sleep(60)  # Wait before retry

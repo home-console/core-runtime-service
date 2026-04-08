@@ -216,7 +216,7 @@ curl -X GET http://localhost:8000/oauth/yandex/cookies
 ```python
 async def fetch_quasar_devices():
     # Загружаем cookies
-    cookies = await runtime.service_registry.call("oauth_yandex.get_cookies")
+    cookies = await self.call_service("oauth_yandex.get_cookies")
     if not cookies:
         raise RuntimeError("Cookies required")
     

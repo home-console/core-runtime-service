@@ -27,6 +27,8 @@ from modules.security.crypto import (
     decrypt,
     constant_time_compare,
 )
+import logging
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -410,4 +412,5 @@ class SecretStore:
                 "version": secret_blob.version,
             }
         except Exception as e:
+            logger.warning("secret_store.get_metadata: failed, returning None: %s", e, exc_info=True)
             return None

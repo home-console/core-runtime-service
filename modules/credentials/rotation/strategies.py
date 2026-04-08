@@ -11,6 +11,8 @@ from .strategy import (
     StrategyExecutionError,
 )
 from .secret_gen import generate_strong_secret
+import logging
+logger = logging.getLogger(__name__)
 
 
 class GenerateNewSecretStrategy(RotationStrategy):
@@ -97,6 +99,7 @@ class GenerateNewSecretStrategy(RotationStrategy):
             return result
         
         except Exception as e:
+            logger.warning("strategies.execute: unexpected error: %s", e, exc_info=True)
             await context.audit_binder.append_event(
                 event_type="rotation_strategy_failed",
                 metadata={
@@ -130,7 +133,8 @@ class GenerateNewSecretStrategy(RotationStrategy):
             await context.vault_store.store_secret(key=test_key, value="test")
             # Note: In production, might want to delete test key
             return True
-        except Exception:
+        except Exception as e:
+            logger.warning("strategies.validate: failed, returning False: %s", e, exc_info=True)
             return False
     
     async def rollback(
@@ -325,6 +329,7 @@ class AgentPushStrategy(RotationStrategy):
             )
         
         except Exception as e:
+            logger.warning("strategies.execute: unexpected error: %s", e, exc_info=True)
             await context.audit_binder.append_event(
                 event_type="rotation_strategy_failed",
                 metadata={
@@ -361,7 +366,8 @@ class AgentPushStrategy(RotationStrategy):
             # Check if operation manager is healthy
             # In real implementation, would ping agent or check status
             return hasattr(operation_manager, "create_operation")
-        except Exception:
+        except Exception as e:
+            logger.warning("strategies.validate: failed, returning False: %s", e, exc_info=True)
             return False
     
     async def rollback(
@@ -421,6 +427,7 @@ class AgentPushStrategy(RotationStrategy):
             return success
         
         except Exception as e:
+            logger.warning("strategies.rollback: unexpected error: %s", e, exc_info=True)
             await context.audit_binder.append_event(
                 event_type="rotation_strategy_rollback_failed",
                 metadata={
@@ -549,6 +556,7 @@ class WebhookRotationStrategy(RotationStrategy):
             )
         
         except Exception as e:
+            logger.warning("strategies.execute: unexpected error: %s", e, exc_info=True)
             await context.audit_binder.append_event(
                 event_type="rotation_strategy_failed",
                 metadata={
@@ -586,7 +594,8 @@ class WebhookRotationStrategy(RotationStrategy):
             
             # In production, would make HEAD request
             return True
-        except Exception:
+        except Exception as e:
+            logger.warning("strategies.validate: failed, returning False: %s", e, exc_info=True)
             return False
     
     async def rollback(
@@ -626,6 +635,7 @@ class WebhookRotationStrategy(RotationStrategy):
             return True
         
         except Exception as e:
+            logger.warning("strategies.rollback: unexpected error: %s", e, exc_info=True)
             await context.audit_binder.append_event(
                 event_type="rotation_strategy_rollback_failed",
                 metadata={

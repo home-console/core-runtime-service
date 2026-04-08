@@ -45,7 +45,7 @@ curl http://localhost:8000/oauth/yandex/cookies
 
 ```python
 # Загрузить cookies
-cookies = await runtime.service_registry.call("oauth_yandex.get_cookies")
+cookies = await self.call_service("oauth_yandex.get_cookies")
 
 # Создать CookieJar
 jar = aiohttp.CookieJar()

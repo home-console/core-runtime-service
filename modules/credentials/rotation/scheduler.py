@@ -7,6 +7,8 @@ import asyncio
 
 from .policy import RotationPolicy, RotationState, RotationStatus
 from .exceptions import RotationException
+import logging
+logger = logging.getLogger(__name__)
 
 
 class RotationScheduler:
@@ -248,4 +250,5 @@ class RotationScheduler:
                 break
             except Exception:
                 # Continue on errors (don't crash background task)
+                logger.debug("scheduler._periodic_check: error processing item (skipping)", exc_info=True)
                 continue

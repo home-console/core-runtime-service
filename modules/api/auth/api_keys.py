@@ -8,10 +8,12 @@ import secrets
 from fastapi import Request
 
 from .context import RequestContext
-from .constants import AUTH_API_KEYS_NAMESPACE
+from .constants import AUTH_API_KEYS_NAMESPACE, AUTH_STORAGE_BOUNDARY_ERRORS
 from .revocation import is_revoked, revoke_api_key
 from .audit import audit_log_auth_event
 from .utils import validate_scopes
+import logging
+logger = logging.getLogger(__name__)
 
 
 async def validate_api_key(runtime: Any, api_key: str) -> Optional[RequestContext]:
@@ -46,14 +48,14 @@ async def validate_api_key(runtime: Any, api_key: str) -> Optional[RequestContex
         # Проверяем структуру данных
         if not isinstance(key_data, dict):
             try:
-                await runtime.kernel_context.get_service("service_registry").call(
+                await runtime.service_registry.call(
                     "logger.log",
                     level="warning",
                     message=f"Invalid API key data structure for key: {api_key[:8]}...",
                     module="api"
                 )
             except Exception:
-                pass
+                logger.warning("logger.log service call failed", exc_info=True)
             return None
         
         # Проверяем expiration
@@ -64,8 +66,10 @@ async def validate_api_key(runtime: Any, api_key: str) -> Optional[RequestContex
                 try:
                     await runtime.storage.delete(AUTH_API_KEYS_NAMESPACE, api_key)
                     await revoke_api_key(runtime, api_key)
+                except AUTH_STORAGE_BOUNDARY_ERRORS:
+                    logger.warning("expired api key cleanup (storage) failed", exc_info=True)
                 except Exception:
-                    pass
+                    logger.warning("expired api key revoke failed", exc_info=True)
                 return None
         
         # Извлекаем данные
@@ -97,16 +101,29 @@ async def validate_api_key(runtime: Any, api_key: str) -> Optional[RequestContex
             user_id=user_id  # Для поддержки ACL (ownership/shared)
         )
     
-    except Exception as e:
+    except AUTH_STORAGE_BOUNDARY_ERRORS as e:
+        logger.warning("validate_api_key storage error: %s", e, exc_info=True)
         try:
-            await runtime.kernel_context.get_service("service_registry").call(
+            await runtime.service_registry.call(
                 "logger.log",
                 level="error",
                 message=f"Error validating API key: {e}",
                 module="api"
             )
         except Exception:
-            pass
+            logger.warning("logger.log service call failed", exc_info=True)
+        return None
+    except Exception as e:
+        logger.exception("validate_api_key unexpected: %s", e)
+        try:
+            await runtime.service_registry.call(
+                "logger.log",
+                level="error",
+                message=f"Error validating API key: {e}",
+                module="api"
+            )
+        except Exception:
+            logger.warning("logger.log service call failed", exc_info=True)
         return None
 
 
@@ -209,9 +226,10 @@ async def create_api_key(
             all_keys = await runtime.storage.list_keys(AUTH_API_KEYS_NAMESPACE)
             if len(all_keys) == 1:  # Только что созданный ключ
                 await runtime.storage.set("auth_config", "first_key_created", True)
+    except AUTH_STORAGE_BOUNDARY_ERRORS:
+        logger.debug("first_key_created flag update skipped (storage)", exc_info=True)
     except Exception:
-        # Игнорируем ошибки при установке флага
-        pass
+        logger.warning("first_key_created flag update failed", exc_info=True)
     
     # Audit logging
     await audit_log_auth_event(

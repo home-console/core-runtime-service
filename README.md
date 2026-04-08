@@ -7,10 +7,18 @@ Execution platform with strict separation:
 
 For plugin authors, kernel exposes a thin runtime contract (`runtime.api`) to keep plugin code decoupled from internal runtime objects.
 
+## Inspector data surfaces
+
+- **Auth flows**: Inspector endpoint `GET /admin/v1/inspector/auth` returns `{ "auth_flows": [...] }`.
+  Source of truth is **storage**: namespace `inspector`, key `auth_flows`.
+- **Legacy state**: raw `state` inspector surface was removed. New features should expose
+  inspector views via **storage-backed** read-only endpoints instead of dumping `runtime.state`.
+
 ## Core Architecture Rules
 - Russian core policy (mandatory): [docs/CORE_KERNEL_POLICY_RU.md](docs/CORE_KERNEL_POLICY_RU.md)
-- Migration roadmap: [ARCHITECTURE_ROADMAP.md](ARCHITECTURE_ROADMAP.md)
 - Cleanup playbook: [PROJECT_CLEANUP_PLAYBOOK.md](PROJECT_CLEANUP_PLAYBOOK.md)
+- Main core backlog (source of truth): [MAIN_PROBLEMS.md](MAIN_PROBLEMS.md)
+- Modules/plugins boundary backlog: [modules_plugins_problems.md](modules_plugins_problems.md)
 
 ## Local Architecture Guard
 ```bash

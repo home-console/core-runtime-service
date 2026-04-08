@@ -18,6 +18,7 @@ from typing import Any
 from core.runtime.runtime_module import RuntimeModule
 from modules.hooks.system import register_system_hook, unregister_system_hook
 from modules.hooks.runtime_contract import ensure_runtime_execution_contract
+logger = logging.getLogger(__name__)
 
 
 class LoggerModule(RuntimeModule):
@@ -63,7 +64,7 @@ class LoggerModule(RuntimeModule):
         # Регистрируем сервис logger.log (ACL обвязка в ядре — без ограничений)
         # Поддерживаем старые FakeRegistry объекты в тестах, поэтому используем
         # register_with_acl если доступен, иначе падаем back на register().
-        services = self._get_service_registry()
+        services = self.context.services
         if hasattr(services, "register_with_acl"):
             await services.register_with_acl("logger.log", self._log_service)
         else:
@@ -92,7 +93,7 @@ class LoggerModule(RuntimeModule):
             )
         except Exception:
             # Не мешаем запуску системы при ошибках логирования
-            pass
+            logger.warning("Unhandled exception", exc_info=True)
 
     async def stop(self) -> None:
         """
@@ -107,7 +108,7 @@ class LoggerModule(RuntimeModule):
                 module="logger"
             )
         except Exception:
-            pass
+            logger.warning("Unhandled exception", exc_info=True)
 
         for hook_name, handler in self._hook_bindings:
             unregister_system_hook(hook_name, handler)
@@ -117,22 +118,14 @@ class LoggerModule(RuntimeModule):
         try:
             self._log_level = logging.INFO
         except Exception:
-            pass
+            logger.warning("Unhandled exception", exc_info=True)
 
         # Отменяем регистрацию сервиса
         try:
-            services = self._get_service_registry()
+            services = self.context.services
             await services.unregister("logger.log")
         except Exception:
-            pass
-
-    def _get_service_registry(self):
-        kernel_context = getattr(self.runtime, "kernel_context", None)
-        if kernel_context is not None:
-            services = kernel_context.get_service("service_registry")
-            if services is not None:
-                return services
-        return getattr(self.runtime, "service_registry", None)
+            logger.warning("Unhandled exception", exc_info=True)
 
     async def _log_service(self, level: str, message: str, **context: Any) -> None:
         """
@@ -225,8 +218,9 @@ class LoggerModule(RuntimeModule):
             if has_request_logger:
                 # Используем operation_id из параметров или из контекста выполнения
                 if not operation_id:
-                    from core.runtime.operation_context import get_operation_id
-                    operation_id = get_operation_id()
+                    op_ctx = self.context.operation_context
+                    if op_ctx is not None:
+                        operation_id = op_ctx.get_operation_id()
 
                 if operation_id:
                     await self.context.services.call(
@@ -239,13 +233,13 @@ class LoggerModule(RuntimeModule):
         except Exception:
             # Игнорируем ошибки при записи в RequestLoggerModule
             # Это не должно влиять на основное логирование
-            pass
+            logger.warning("Unhandled exception", exc_info=True)
 
     async def _after_execute(self, ctx: dict[str, Any]):
         operation = ctx.get("operation")
         if operation is None:
             return None
-        await self.runtime.service_registry.call(
+        await self.context.services.call(
             "logger.log",
             level="info",
             message="operation executed",
@@ -261,7 +255,7 @@ class LoggerModule(RuntimeModule):
         operation = ctx.get("operation")
         if operation is None:
             return None
-        await self.runtime.service_registry.call(
+        await self.context.services.call(
             "logger.log",
             level="warning",
             message="operation failed",

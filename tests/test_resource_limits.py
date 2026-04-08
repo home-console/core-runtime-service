@@ -15,7 +15,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from core.observability.rate_limiter import (
     PluginRateLimiter,
     TokenBucket,
-    get_rate_limiter,
 )
 
 
@@ -221,23 +220,15 @@ class TestRateLimitBurstTraffic:
 class TestRateLimitGlobalSingleton:
     """Test global rate limiter singleton."""
     
-    def test_global_limiter_singleton(self):
-        """Test get_rate_limiter returns same instance."""
-        limiter1 = get_rate_limiter()
-        limiter2 = get_rate_limiter()
-        
-        assert limiter1 is limiter2
-    
-    def test_global_limiter_settings_persist(self):
-        """Test rate limit settings persist."""
-        limiter1 = get_rate_limiter()
+    def test_limiter_instances_are_independent(self):
+        """Rate limiter should be instantiated per-runtime (no global singleton)."""
+        limiter1 = PluginRateLimiter()
+        limiter2 = PluginRateLimiter()
+
         limiter1.set_limit("test_plugin", 50)
-        
-        limiter2 = get_rate_limiter()
         status = limiter2.get_status("test_plugin")
-        
-        assert status["limited"] is True
-        assert status["calls_per_minute"] == 50
+
+        assert status["limited"] is False
 
 
 class TestConcurrentRateLimiting:

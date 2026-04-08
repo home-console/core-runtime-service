@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+import logging
 """
 ExecutionModule  — подключаемый слой исполнения operations.
 
@@ -10,12 +13,11 @@ ExecutionModule  — подключаемый слой исполнения oper
 Core не знает про process/container/docker — это знания backends, которые живут вне core/.
 """
 
-from __future__ import annotations
-
 import time
 import asyncio
 from typing import Any, Optional, Callable, Awaitable
 
+from core.adapters.storage_errors import STORAGE_BOUNDARY_ERRORS
 from core.capability import protocol as capability_protocol
 from core.runtime.runtime_module import RuntimeModule
 from core.operations.models import Operation, OperationStatus
@@ -29,6 +31,7 @@ from modules.hooks.system import (
     unregister_system_hook,
 )
 from modules.hooks.runtime_contract import ensure_runtime_execution_contract
+logger = logging.getLogger(__name__)
 
 
 class ExecutionModule(RuntimeModule):
@@ -44,6 +47,8 @@ class ExecutionModule(RuntimeModule):
         self._hook_bindings: list[tuple[str, Any]] = []
 
     async def register(self) -> None:
+        if self.runtime is None:
+            raise RuntimeError("ExecutionModule requires full runtime (not RuntimeContext)")
         ensure_runtime_execution_contract(self.runtime)
 
         # Создаём controller и публикуем в runtime как расширение (не Core API).
@@ -54,7 +59,10 @@ class ExecutionModule(RuntimeModule):
 
         ops_mgr = getattr(self.runtime, "operations", None)
         if ops_mgr is None:
-            return
+            raise RuntimeError(
+                "ExecutionModule requires runtime.operations to register execution handlers. "
+                "Check module wiring/bootstrap order."
+            )
 
         # Operation: execution.cancel 
         async def _handle_execution_cancel(params: dict, context: dict) -> dict:
@@ -157,7 +165,7 @@ class ExecutionModule(RuntimeModule):
                         last_run_at=None,
                         now=now,
                     )
-                except Exception as e:
+                except (ValueError, TypeError) as e:
                     return {
                         "status": "error",
                         "error": {"code": "invalid_cron_expr", "message": str(e)},
@@ -209,15 +217,20 @@ class ExecutionModule(RuntimeModule):
 
             # Событие creation (best-effort)
             try:
-                await self.runtime.kernel_context.emit(
+                from core.events_schemas import ExecutionScheduledPayload
+
+                payload: ExecutionScheduledPayload = {
+                    "schedule_id": schedule_id,
+                    "operation_type": operation_type,
+                }
+                await self.context.event_bus.publish(
                     "execution.scheduled",
-                    {
-                        "schedule_id": schedule_id,
-                        "operation_type": operation_type,
-                    },
+                    payload,
                 )
             except Exception:
-                pass
+                logger.debug(
+                    "execution.schedule.create: event_bus.publish failed", exc_info=True
+                )
 
             return {"status": "ok", "schedule_id": schedule_id}
 
@@ -227,7 +240,19 @@ class ExecutionModule(RuntimeModule):
                 return None
             try:
                 data = await storage.get("execution", f"schedules/{schedule_id}")
+            except STORAGE_BOUNDARY_ERRORS:
+                logger.debug(
+                    "execution._load_schedule: storage.get boundary (id=%s)",
+                    schedule_id,
+                    exc_info=True,
+                )
+                return None
             except Exception:
+                logger.debug(
+                    "execution._load_schedule: storage.get failed (id=%s)",
+                    schedule_id,
+                    exc_info=True,
+                )
                 return None
             if not isinstance(data, dict):
                 return None
@@ -254,7 +279,7 @@ class ExecutionModule(RuntimeModule):
             await _persist_schedule(sched)
 
             try:
-                await self.runtime.kernel_context.emit(
+                await self.context.event_bus.publish(
                     "execution.schedule.disabled",
                     {
                         "schedule_id": sched.schedule_id,
@@ -263,7 +288,9 @@ class ExecutionModule(RuntimeModule):
                     },
                 )
             except Exception:
-                pass
+                logger.debug(
+                    "execution.schedule.pause: event_bus.publish failed", exc_info=True
+                )
 
             return {"status": "ok", "schedule_id": sched.schedule_id}
 
@@ -324,19 +351,45 @@ class ExecutionModule(RuntimeModule):
             # Удаляем сам schedule
             try:
                 await storage.delete("execution", f"schedules/{sid}")
+            except STORAGE_BOUNDARY_ERRORS:
+                logger.warning(
+                    "execution.schedule.delete: delete schedule storage boundary",
+                    exc_info=True,
+                )
             except Exception:
-                pass
+                logger.warning(
+                    "execution.schedule.delete: delete schedule failed", exc_info=True
+                )
             # Чистим индексы по operation_type
             try:
                 keys = await storage.list_keys("execution")
+            except STORAGE_BOUNDARY_ERRORS:
+                logger.debug(
+                    "execution.schedule.delete: list_keys storage boundary",
+                    exc_info=True,
+                )
+                keys = []
             except Exception:
+                logger.debug(
+                    "execution.schedule.delete: list_keys failed", exc_info=True
+                )
                 keys = []
             for key in keys:
                 if key.startswith("schedules_by_operation/") and key.endswith(f"/{sid}"):
                     try:
                         await storage.delete("execution", key)
+                    except STORAGE_BOUNDARY_ERRORS:
+                        logger.debug(
+                            "execution.schedule.delete: index delete boundary key=%s",
+                            key,
+                            exc_info=True,
+                        )
                     except Exception:
-                        continue
+                        logger.debug(
+                            "execution.schedule.delete: index delete failed key=%s",
+                            key,
+                            exc_info=True,
+                        )
             return {"status": "ok", "schedule_id": sid}
 
         ops_mgr.register_handler("execution.schedule.create", _handle_schedule_create)
@@ -434,7 +487,23 @@ class ExecutionModule(RuntimeModule):
                 context=context,
                 timeout=timeout,
             )
+        except (OSError, asyncio.TimeoutError) as exc:
+            logger.warning(
+                "execution._execute_remote: IO/timeout type=%s", operation.type, exc_info=True
+            )
+            return {
+                "status": "failed",
+                "result": None,
+                "error": {
+                    "code": "remote_execution_failed",
+                    "message": str(exc),
+                },
+                "finished_at": time.time(),
+            }
         except Exception as exc:
+            logger.warning(
+                "execution._execute_remote: failed type=%s", operation.type, exc_info=True
+            )
             return {
                 "status": "failed",
                 "result": None,
@@ -491,15 +560,29 @@ class ExecutionModule(RuntimeModule):
         )
         if execution_token:
             try:
-                cached = await self.runtime.storage.get("operation_results", execution_token)
+                cached = await self.context.storage.get("operation_results", execution_token)
+            except STORAGE_BOUNDARY_ERRORS:
+                logger.debug(
+                    "execution._before_execute: operation_results get boundary",
+                    exc_info=True,
+                )
+                cached = None
             except Exception:
+                logger.debug(
+                    "execution._before_execute: operation_results get failed",
+                    exc_info=True,
+                )
                 cached = None
             if isinstance(cached, dict):
                 return SystemHookResult(allow=True)
 
         local_handler = None
         ops_mgr = getattr(self.runtime, "operations", None)
-        registry = getattr(ops_mgr, "_registry", None)
+        registry = None
+        if ops_mgr is not None:
+            registry = getattr(ops_mgr, "_registry", None)
+            if registry is None and hasattr(ops_mgr, "manager"):
+                registry = getattr(ops_mgr.manager, "_registry", None)
         if registry is not None and hasattr(registry, "find_handler"):
             local_handler = registry.find_handler(operation.type)
 
@@ -522,6 +605,11 @@ class ExecutionModule(RuntimeModule):
         try:
             provider_metadata = cap_reg.select_provider_for(operation.type)
         except Exception:
+            logger.debug(
+                "execution._before_execute: select_provider_for failed type=%s",
+                operation.type,
+                exc_info=True,
+            )
             provider_metadata = None
         if provider_metadata is None:
             return SystemHookResult(

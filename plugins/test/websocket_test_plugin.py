@@ -4,8 +4,8 @@ WebSocket Test Plugin для демонстрации поддержки WebSock
 Плагин регистрирует WebSocket endpoint и простой echo handler.
 """
 
-from core.kernel.base_plugin import BasePlugin, PluginMetadata
-from core.http.models import HttpEndpoint
+from sdk.plugin_ext import BasePlugin, PluginMetadata
+from sdk import HttpEndpoint
 from fastapi import WebSocket
 from datetime import datetime, UTC
 

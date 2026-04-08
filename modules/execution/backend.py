@@ -11,6 +11,8 @@ import asyncio
 import inspect
 from dataclasses import dataclass
 from typing import Any, Dict, Literal, Optional, Protocol
+import logging
+logger = logging.getLogger(__name__)
 
 BackendId = Literal["in_process", "process", "container"]
 
@@ -79,7 +81,10 @@ class InProcessBackend:
             )
 
         # IMPORTANT: не используем ops_mgr.execute(), чтобы не зациклиться на execution layer.
-        handler = getattr(ops_mgr, "_find_handler", lambda _: None)(operation_type)
+        find_handler = getattr(ops_mgr, "_find_handler", None)
+        if not callable(find_handler) and hasattr(ops_mgr, "manager"):
+            find_handler = getattr(ops_mgr.manager, "_find_handler", None)
+        handler = find_handler(operation_type) if callable(find_handler) else None
         if handler is None:
             return OperationResult(
                 ok=False,
@@ -112,6 +117,7 @@ class InProcessBackend:
                     backend="in_process",
                 )
             except Exception as e:
+                logger.warning("backend._run: failed: %s", e, exc_info=True)
                 return OperationResult(
                     ok=False,
                     error={

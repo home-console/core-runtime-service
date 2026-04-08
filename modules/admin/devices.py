@@ -8,6 +8,8 @@ AdminModule does not contain plugin-specific or mutating device logic.
 from typing import Any, Optional
 from core.runtime.system_context import create_system_context
 from core.runtime.auth_contextvars import set_current_auth_context, get_current_auth_context
+import logging
+logger = logging.getLogger(__name__)
 
 
 async def admin_devices_list(runtime: Any):
@@ -15,8 +17,7 @@ async def admin_devices_list(runtime: Any):
     prev = get_current_auth_context()
     try:
         set_current_auth_context(ctx)
-        services = runtime.kernel_context.get_service("service_registry")
-        return await services.call("devices.list")
+        return await runtime.service_registry.call("devices.list")
     finally:
         set_current_auth_context(prev)
 
@@ -29,8 +30,7 @@ async def admin_devices_get(runtime: Any, id: Optional[str] = None, **kwargs):
     prev = get_current_auth_context()
     try:
         set_current_auth_context(ctx)
-        services = runtime.kernel_context.get_service("service_registry")
-        return await services.call("devices.get", device_id)
+        return await runtime.service_registry.call("devices.get", device_id)
     finally:
         set_current_auth_context(prev)
 
@@ -42,8 +42,7 @@ async def admin_devices_list_external(runtime: Any, provider: Optional[str] = No
     prev = get_current_auth_context()
     try:
         set_current_auth_context(ctx)
-        services = runtime.kernel_context.get_service("service_registry")
-        return await services.call("devices.list_external", provider)
+        return await runtime.service_registry.call("devices.list_external", provider)
     finally:
         set_current_auth_context(prev)
 
@@ -54,11 +53,11 @@ async def admin_devices_list_mappings(runtime: Any) -> Any:
         prev = get_current_auth_context()
         try:
             set_current_auth_context(ctx)
-            services = runtime.kernel_context.get_service("service_registry")
-            return await services.call("devices.list_mappings")
+            return await runtime.service_registry.call("devices.list_mappings")
         finally:
             set_current_auth_context(prev)
     except Exception as e:
+        logger.warning("devices.admin_devices_list_mappings: failed: %s", e, exc_info=True)
         return {"ok": False, "error": str(e)}
 
 
@@ -71,7 +70,6 @@ async def admin_devices_get_external_for_device(runtime: Any, id: Optional[str] 
     prev = get_current_auth_context()
     try:
         set_current_auth_context(ctx)
-        services = runtime.kernel_context.get_service("service_registry")
-        return await services.call("devices.get_external_for_device", device_id)
+        return await runtime.service_registry.call("devices.get_external_for_device", device_id)
     finally:
         set_current_auth_context(prev)

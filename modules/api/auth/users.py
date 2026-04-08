@@ -2,10 +2,13 @@
 User management — создание и валидация пользователей.
 """
 
-from typing import Any, List, Set, Optional, Union
+import logging
 import time
+from typing import Any, List, Optional, Set, Union
 
 from .constants import AUTH_USERS_NAMESPACE
+
+logger = logging.getLogger(__name__)
 from .audit import audit_log_auth_event
 from .utils import validate_scopes
 
@@ -24,7 +27,8 @@ async def validate_user_exists(runtime: Any, user_id: str) -> bool:
     try:
         user_data = await runtime.storage.get(AUTH_USERS_NAMESPACE, user_id)
         return user_data is not None and isinstance(user_data, dict)
-    except Exception:
+    except Exception as e:
+        logger.warning("users.validate_user_exists: failed, returning False: %s", e, exc_info=True)
         return False
 
 

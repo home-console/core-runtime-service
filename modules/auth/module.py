@@ -70,47 +70,44 @@ class AuthModule(RuntimeModule):
         """
         
         # --- Register Services with ACL ---
-        def wrap_domain(fn: Any) -> Any:
-            """Wrap handler to pass runtime as first argument."""
-            return lambda *args, **kw: fn(self.runtime, *args, **kw)
-        
         services_config = [
             # Bootstrap (read-only system state, no auth required)
-            ("auth.bootstrap", wrap_domain(auth_bootstrap), False),
+            ("auth.bootstrap", auth_bootstrap, False),
             # Dev-only: api_base_url + api_key для веба (только при DEV_CREDENTIALS=1)
-            ("auth.dev_credentials", wrap_domain(auth_dev_credentials), False),
-            
+            ("auth.dev_credentials", auth_dev_credentials, False),
+
             # Public services (no auth required)
-            ("auth.initialize", wrap_domain(auth_initialize), False),
-            ("auth.login", wrap_domain(auth_login), False),
-            ("auth.refresh", wrap_domain(auth_refresh), False),
-            ("auth.logout", wrap_domain(auth_logout), False),
-            ("auth.me", wrap_domain(auth_me), False),
-            
+            ("auth.initialize", auth_initialize, False),
+            ("auth.login", auth_login, False),
+            ("auth.refresh", auth_refresh, False),
+            ("auth.logout", auth_logout, False),
+            ("auth.me", auth_me, False),
+
             # Protected services (admin-only)
-            ("admin.auth.create_api_key", wrap_domain(auth_create_api_key), True),
-            ("admin.auth.list_api_keys", wrap_domain(auth_list_api_keys), True),
-            ("admin.auth.create_user", wrap_domain(auth_create_user), True),
-            ("admin.auth.list_users", wrap_domain(auth_list_users), True),
-            ("admin.auth.set_password", wrap_domain(auth_set_password), True),
-            ("admin.auth.change_password", wrap_domain(auth_change_password), True),
-            ("admin.auth.list_sessions", wrap_domain(auth_list_sessions), True),
-            ("admin.auth.revoke_session", wrap_domain(auth_revoke_session), True),
-            ("admin.auth.revoke_all_sessions", wrap_domain(auth_revoke_all_sessions), True),
-            ("admin.auth.revoke_api_key", wrap_domain(auth_revoke_api_key), True),
-            ("admin.auth.rotate_api_key", wrap_domain(auth_rotate_api_key), True),
+            ("admin.auth.create_api_key", auth_create_api_key, True),
+            ("admin.auth.list_api_keys", auth_list_api_keys, True),
+            ("admin.auth.create_user", auth_create_user, True),
+            ("admin.auth.list_users", auth_list_users, True),
+            ("admin.auth.set_password", auth_set_password, True),
+            ("admin.auth.change_password", auth_change_password, True),
+            ("admin.auth.list_sessions", auth_list_sessions, True),
+            ("admin.auth.revoke_session", auth_revoke_session, True),
+            ("admin.auth.revoke_all_sessions", auth_revoke_all_sessions, True),
+            ("admin.auth.revoke_api_key", auth_revoke_api_key, True),
+            ("admin.auth.rotate_api_key", auth_rotate_api_key, True),
         ]
-        
+
         for service_name, handler, admin_only in services_config:
             try:
-                await self.context.services.register_with_acl(
-                    service_name, handler, admin_only=admin_only
+                await self.register_runtime_service(
+                    service_name,
+                    handler,
+                    admin_only=admin_only,
                 )
-            except ValueError:
-                # Service already registered (best-effort)
-                pass
             except Exception as e:
-                self.runtime.logger.warning(f"Failed to register {service_name}: {e}")
+                logger = getattr(self.runtime, "logger", None) if self.runtime else None
+                if logger:
+                    logger.warning(f"Failed to register {service_name}: {e}")
         
         # --- Register HTTP Endpoints ---
         # Bootstrap endpoint (check if system initialized)

@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional, Protocol
 
 from .backend import BackendId
+import logging
+logger = logging.getLogger(__name__)
 
 
 class ExecutionPolicy(Protocol):
@@ -31,7 +33,7 @@ class StateExecutionPolicy:
       execution:
         default: in_process
         plugins:
-          yandex_smart_home: container
+          publisher_plugin: container
         operations:
           automation.run: process
     """
@@ -48,7 +50,7 @@ class StateExecutionPolicy:
                 # Решение: policy держим в storage namespace "state" через StorageWithStateMirror и читаем через storage.get.
                 pass
         except Exception:
-            pass
+            logger.warning("Unhandled exception", exc_info=True)
         return {}
 
     def select_backend(
@@ -65,6 +67,7 @@ class StateExecutionPolicy:
             # Поэтому policy прокидывается в metadata заранее (controller делает async fetch).
             policy = metadata.get("_execution_policy") or {}
         except Exception:
+            logger.debug("policy.select_backend: error (using fallback value)", exc_info=True)
             policy = {}
 
         default_backend: BackendId = (policy.get("default") or "in_process")

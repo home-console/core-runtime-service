@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+import logging
 """
 Execution controller .
 
@@ -8,8 +11,6 @@ Controller:
 - работает только с operation envelope + policy + backend registry
 """
 
-from __future__ import annotations
-
 from typing import Any, Dict, Optional, Protocol
 from uuid import uuid4
 from datetime import datetime, UTC
@@ -18,7 +19,10 @@ import asyncio
 
 from .backend import BackendId, ExecutionBackend, InProcessBackend, ProcessBackend, ContainerBackend, OperationResult
 from .policy import ExecutionPolicy, StateExecutionPolicy
+from core.adapters.storage_errors import STORAGE_BOUNDARY_ERRORS
+
 from .trace import ExecutionTrace, ExecutionStatus, make_execution_namespace_keys
+logger = logging.getLogger(__name__)
 
 
 class ExecutionController(Protocol):
@@ -69,8 +73,12 @@ class ExecutionControllerImpl:
             raw = await storage.get(self._policy_ns, self._policy_key)
             if isinstance(raw, dict):
                 return raw
+        except STORAGE_BOUNDARY_ERRORS:
+            logger.warning(
+                "execution: load policy from storage failed (boundary)", exc_info=True
+            )
         except Exception:
-            pass
+            logger.warning("execution: load policy unexpected error", exc_info=True)
         return {}
 
     def _generate_execution_id(self) -> str:
@@ -91,7 +99,19 @@ class ExecutionControllerImpl:
             if isinstance(data, dict):
                 # operation_id внутри trace, поэтому operation_id в keys здесь не нужен
                 return ExecutionTrace.from_dict(data)
+        except STORAGE_BOUNDARY_ERRORS:
+            logger.debug(
+                "execution: load trace storage boundary (execution_id=%s)",
+                execution_id,
+                exc_info=True,
+            )
+            return None
         except Exception:
+            logger.debug(
+                "execution: load trace unexpected (execution_id=%s)",
+                execution_id,
+                exc_info=True,
+            )
             return None
         return None
 
@@ -142,25 +162,38 @@ class ExecutionControllerImpl:
                             "retry_index": trace.retry_index,
                         },
                     )
+            except STORAGE_BOUNDARY_ERRORS:
+                logger.warning(
+                    "execution.on_execution_start: persist trace storage boundary",
+                    exc_info=True,
+                )
             except Exception:
-                # Observability не должен ломать execution
-                pass
+                logger.warning(
+                    "execution.on_execution_start: persist trace unexpected",
+                    exc_info=True,
+                )
 
         # Events (optional, best-effort)
         event_bus = getattr(self._runtime, "event_bus", None)
         if event_bus is not None and hasattr(event_bus, "publish"):
             try:
+                from core.events_schemas import ExecutionStartedPayload
+
+                payload: ExecutionStartedPayload = {
+                    "execution_id": trace.execution_id,
+                    "operation_id": trace.operation_id,
+                    "backend": trace.backend,
+                    "status": trace.status,
+                }
                 await event_bus.publish(
                     "execution.started",
-                    {
-                        "execution_id": trace.execution_id,
-                        "operation_id": trace.operation_id,
-                        "backend": trace.backend,
-                        "status": trace.status,
-                    },
+                    payload,
                 )
             except Exception:
-                pass
+                logger.debug(
+                    "execution.on_execution_start: event_bus.publish failed",
+                    exc_info=True,
+                )
 
     async def on_execution_finish(self, trace: ExecutionTrace) -> None:
         """
@@ -208,23 +241,37 @@ class ExecutionControllerImpl:
                             "retry_index": trace.retry_index,
                         },
                     )
+            except STORAGE_BOUNDARY_ERRORS:
+                logger.warning(
+                    "execution.on_execution_finish: persist trace storage boundary",
+                    exc_info=True,
+                )
             except Exception:
-                pass
+                logger.warning(
+                    "execution.on_execution_finish: persist trace unexpected",
+                    exc_info=True,
+                )
 
         event_bus = getattr(self._runtime, "event_bus", None)
         if event_bus is not None and hasattr(event_bus, "publish"):
             try:
+                from core.events_schemas import ExecutionFinishedPayload
+
+                payload: ExecutionFinishedPayload = {
+                    "execution_id": trace.execution_id,
+                    "operation_id": trace.operation_id,
+                    "backend": trace.backend,
+                    "status": trace.status,
+                }
                 await event_bus.publish(
                     "execution.finished",
-                    {
-                        "execution_id": trace.execution_id,
-                        "operation_id": trace.operation_id,
-                        "backend": trace.backend,
-                        "status": trace.status,
-                    },
+                    payload,
                 )
             except Exception:
-                pass
+                logger.debug(
+                    "execution.on_execution_finish: event_bus.publish failed",
+                    exc_info=True,
+                )
 
     def _map_status_from_result(self, res: OperationResult) -> ExecutionStatus:
         if res.ok:
@@ -259,7 +306,7 @@ class ExecutionControllerImpl:
                 details = (res.error or {}).get("details") or {}
                 if isinstance(details, dict):
                     stderr = details.get("stderr")
-            except Exception:
+            except (TypeError, AttributeError, KeyError):
                 stderr = None
         if not stderr:
             return None
@@ -408,7 +455,12 @@ class ExecutionControllerImpl:
                         cancelled = True
                         break
                 except Exception:
-                    pass
+                    logger.debug(
+                        "execution.cancel_execution: backend.cancel failed "
+                        "(backend=%s)",
+                        type(backend).__name__,
+                        exc_info=True,
+                    )
 
         # Обновляем trace в storage
         trace = await self._load_execution_trace(execution_id)
@@ -463,8 +515,16 @@ class ExecutionControllerImpl:
                             error={"code": "retry_limit_exceeded", "message": f"Retry limit exceeded: max_attempts={max_attempts}"},
                             backend="in_process",
                         )
+            except STORAGE_BOUNDARY_ERRORS:
+                logger.warning(
+                    "execution.retry_execution: list_keys storage boundary",
+                    exc_info=True,
+                )
             except Exception:
-                pass
+                logger.warning(
+                    "execution.retry_execution: retry policy check failed",
+                    exc_info=True,
+                )
 
         # Создаём новый execution с расширенным контекстом
         new_retry_index = trace.retry_index + 1

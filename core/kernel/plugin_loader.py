@@ -5,9 +5,14 @@ PluginLoader - загрузка манифестов плагинов и discove
 - Загрузку манифестов (plugin.json, manifest.json)
 - Топологическую сортировку по зависимостям
 - Discovery плагинов в директории
+
+Использует формализованный контракт (PluginManifest, PluginDependencies, PluginContext)
+вместо runtime mutation через setattr.
 """
 
+import asyncio
 import json
+import logging
 import sys
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Callable, Awaitable
@@ -18,6 +23,14 @@ from core.observability.logger_helper import warning, info
 from sdk.plugin import BasePlugin as SDKBasePlugin
 from core.kernel.base_plugin import BasePlugin
 from dataclasses import replace
+from core.kernel.plugin_contract import PluginManifest, PluginDependencies, PluginContext
+from core.exception_groups import (
+    BEST_EFFORT_BACKGROUND_ERRORS,
+    LOGGING_HELPER_ERRORS,
+    PLUGIN_INTROSPECTION_ERRORS,
+)
+
+logger = logging.getLogger(__name__)
 
 
 class PluginManifestLoader:
@@ -106,15 +119,25 @@ class PluginManifestLoader:
         if remaining:
             # Логируем предупреждение, но продолжаем загрузку
             try:
-                import asyncio
                 asyncio.create_task(warning(
                     runtime,
                     f"Обнаружены возможные циклические зависимости между плагинами: {remaining}",
                     component="plugin_loader"
                 ))
-            except Exception:
-                pass
-        
+            except RuntimeError as e:
+                # Нет running loop (например sync-контекст) — не критично
+                logger.debug(
+                    "Failed to schedule cyclic dependency warning: %s",
+                    e,
+                    exc_info=True,
+                )
+            except LOGGING_HELPER_ERRORS as e:
+                logger.debug(
+                    "Failed to log warning about cyclic dependencies: %s",
+                    e,
+                    exc_info=True,
+                )
+
         return result
     
     @staticmethod
@@ -203,32 +226,55 @@ class PluginManifestLoader:
                     f"Найден манифест для плагина '{plugin_name}' (class_path: {class_path})",
                     component="plugin_loader"
                 )
-            except Exception:
-                pass
+            except LOGGING_HELPER_ERRORS as e:
+                logger.debug(
+                    "Failed to log manifest discovery for %s: %s",
+                    plugin_name,
+                    e,
+                    exc_info=True,
+                )
 
             # Импортируем класс плагина
             module_path, class_name = class_path.rsplit(".", 1)
             
-            # Если class_path не в пространстве plugins.* — загружаем модуль явно по пути
-            # (для папок с дефисом, например client-manager-plugin, где нельзя сделать plugins.client-manager-plugin)
-            # Используем importlib.util.spec_from_file_location вместо мутации sys.path
+            # Если class_path не в пространстве plugins.*:
+            # 1) сначала пробуем обычный import_module (поддержка package-style class_path)
+            # 2) если не вышло — загружаем модуль явно по пути (для папок с дефисом)
             try:
                 if not class_path.startswith("plugins."):
-                    # Явная загрузка модуля по пути без модификации sys.path
+                    # Prefer loading from the plugin directory when possible to avoid
+                    # accidental collisions with existing installed/imported modules
+                    # (e.g. module_path == "plugin").
                     plugin_file = plugin_dir / f"{module_path}.py"
-                    if not plugin_file.exists():
-                        # Пробуем найти модуль в поддиректории (для package-style плагинов)
-                        plugin_file = plugin_dir / module_path / "__init__.py"
-                        if not plugin_file.exists():
-                            raise FileNotFoundError(f"Модуль не найден: {module_path} в {plugin_dir}")
-                    
-                    spec = importlib.util.spec_from_file_location(module_path, plugin_file)
-                    if spec is None or spec.loader is None:
-                        raise ImportError(f"Не удалось создать spec для модуля: {module_path}")
-                    
-                    module = importlib.util.module_from_spec(spec)
-                    sys.modules[module_path] = module  # Регистрируем в sys.modules для корректной работы импортов
-                    spec.loader.exec_module(module)
+                    if plugin_file.exists():
+                        unique_module_name = f"hc_dynamic_plugins.{plugin_name}.{module_path}"
+                        spec = importlib.util.spec_from_file_location(unique_module_name, plugin_file)
+                        if spec is None or spec.loader is None:
+                            raise ImportError(f"Не удалось создать spec для модуля: {module_path}")
+
+                        module = importlib.util.module_from_spec(spec)
+                        sys.modules[unique_module_name] = module  # уникально, без перезаписи коротких имён
+                        spec.loader.exec_module(module)
+                    else:
+                        try:
+                            module = importlib.import_module(module_path)
+                        except ImportError:
+                            # Явная загрузка модуля по пути без модификации sys.path
+                            rel_path = Path(*module_path.split("."))
+                            plugin_file = plugin_dir.parent / rel_path / "__init__.py"
+                            if not plugin_file.exists():
+                                plugin_file = plugin_dir.parent / rel_path.with_suffix(".py")
+                                if not plugin_file.exists():
+                                    raise FileNotFoundError(f"Модуль не найден: {module_path} в {plugin_dir}")
+
+                            unique_module_name = f"hc_dynamic_plugins.{plugin_name}.{module_path}"
+                            spec = importlib.util.spec_from_file_location(unique_module_name, plugin_file)
+                            if spec is None or spec.loader is None:
+                                raise ImportError(f"Не удалось создать spec для модуля: {module_path}")
+
+                            module = importlib.util.module_from_spec(spec)
+                            sys.modules[unique_module_name] = module  # уникально, без перезаписи коротких имён
+                            spec.loader.exec_module(module)
                 else:
                     # Стандартный импорт для plugins.*
                     module = importlib.import_module(module_path)
@@ -257,33 +303,17 @@ class PluginManifestLoader:
             # Создаём экземпляр плагина
             try:
                 plugin_instance = plugin_class(runtime)
-                
-                # Зависимости из манифеста: передаём в load_plugin через атрибут (для sdk.PluginMetadata нет merge)
-                manifest_dependencies = manifest.get("dependencies", [])
-                # allowed_services: если указано в manifest — ограничивает ServiceProxy
-                manifest_allowed = manifest.get("allowed_services")
-                if isinstance(manifest_allowed, list) and manifest_allowed:
-                    setattr(plugin_instance, "_manifest_allowed_services", manifest_allowed)
-                if isinstance(manifest_dependencies, list) and manifest_dependencies:
-                    setattr(plugin_instance, "_manifest_dependencies", manifest_dependencies)
-                # Для core.PluginMetadata можно обновить metadata.dependencies (mutable)
-                if manifest_dependencies and hasattr(plugin_instance.metadata, "__dataclass_fields__") and "dependencies" in getattr(plugin_instance.metadata, "__dataclass_fields__", {}):
-                    try:
-                        current_metadata = plugin_instance.metadata
-                        updated_metadata = replace(
-                            current_metadata,
-                            dependencies=manifest_dependencies if isinstance(manifest_dependencies, list) else []
-                        )
-                        setattr(plugin_instance, "_manifest_metadata", updated_metadata)
-                        original_metadata = type(plugin_instance).metadata
-                        def get_updated_metadata(self):
-                            if hasattr(self, "_manifest_metadata"):
-                                return getattr(self, "_manifest_metadata")
-                            return original_metadata.__get__(self, type(self))
-                        setattr(type(plugin_instance), "metadata", property(get_updated_metadata))
-                    except Exception:
-                        pass
-                
+
+                # Создаём формализованный манифест
+                manifest_obj = PluginManifest.from_dict(manifest)
+
+                # Создаём контекст плагина (вместо setattr на экземпляр/класс)
+                plugin_context = PluginContext.create(plugin_instance, manifest_obj)
+
+                # Сохраняем контекст в plugin_instance для доступа через _plugin_context
+                # Это явный контракт вместо скрытой инъекции полей
+                object.__setattr__(plugin_instance, '_plugin_context', plugin_context)
+
                 await load_plugin_func(plugin_instance)
                 
                 # Автоопределение интеграций (если runtime доступен)
@@ -303,8 +333,18 @@ class PluginManifestLoader:
                         f"Плагин '{plugin_name}' успешно загружен из манифеста",
                         component="plugin_loader"
                     )
-                except Exception:
-                    pass
+                except asyncio.CancelledError:
+                    raise
+                except PLUGIN_INTROSPECTION_ERRORS:
+                    logger.debug(
+                        "plugin_loader.load_plugin_from_manifest: info() failed (expected introspection boundary)",
+                        exc_info=True,
+                    )
+                except LOGGING_HELPER_ERRORS:
+                    logger.warning(
+                        "plugin_loader.load_plugin_from_manifest: info() failed (unexpected)",
+                        exc_info=True,
+                    )
                 
                 return True
             except ValueError as e:
@@ -324,7 +364,10 @@ class PluginManifestLoader:
                         component="plugin_loader"
                     )
                 return False
-            except Exception as e:
+            except asyncio.CancelledError:
+                raise
+            except BEST_EFFORT_BACKGROUND_ERRORS as e:
+                logger.warning("plugin_loader.load_plugin_from_manifest: unexpected error: %s", e, exc_info=True)
                 await logger_func(
                     runtime,
                     f"Ошибка при создании плагина из манифеста: {e}",
@@ -332,7 +375,10 @@ class PluginManifestLoader:
                 )
                 return False
 
-        except Exception as e:
+        except asyncio.CancelledError:
+            raise
+        except BEST_EFFORT_BACKGROUND_ERRORS as e:
+            logger.warning("plugin_loader.load_plugin_from_manifest: unexpected error: %s", e, exc_info=True)
             import traceback
             tb = traceback.format_exc()
             plugin_name = manifest.get("name", "unknown")

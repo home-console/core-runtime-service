@@ -15,7 +15,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from core.dependency.resolver import DependencyResolver
+from core.dependency.integrity_checker import DependencyIntegrityChecker
 from core.kernel.base_plugin import BasePlugin, PluginMetadata
 from core.kernel.plugin_manager import PluginManager
 from core.kernel.plugin_registry import PluginState
@@ -29,6 +29,9 @@ from tests.conftest import InMemoryStorageAdapter
 # Test Plugin fixtures
 class DemoPluginA(BasePlugin):
     """Demo plugin A."""
+
+    def __init__(self, runtime_or_context=None):
+        super().__init__(runtime_or_context)
 
     @property
     def metadata(self) -> PluginMetadata:
@@ -48,6 +51,9 @@ class DemoPluginA(BasePlugin):
 
 class DemoPluginB(BasePlugin):
     """Demo plugin B with circular requirement."""
+
+    def __init__(self, runtime_or_context=None):
+        super().__init__(runtime_or_context)
 
     @property
     def metadata(self) -> PluginMetadata:
@@ -69,6 +75,9 @@ class DemoPluginB(BasePlugin):
 
 class DemoPluginC(BasePlugin):
     """Demo plugin C that requires plugin B."""
+
+    def __init__(self, runtime_or_context=None):
+        super().__init__(runtime_or_context)
 
     @property
     def metadata(self) -> PluginMetadata:
@@ -235,7 +244,7 @@ def test_circular_dependency_detection():
     plugin_manager = Mock()
     storage = Mock()
 
-    resolver = DependencyResolver(registry, plugin_manager, storage)
+    checker = DependencyIntegrityChecker(registry, plugin_manager)
 
     # Create test plugins
     plugin_b = DemoPluginB()
@@ -251,7 +260,7 @@ def test_circular_dependency_detection():
     # B requires test:service_a, C provides test:service_a
     # C requires test:service_b, B provides test:service_b
     # This creates a cycle: B -> C -> B
-    errors = resolver.validate_runtime_integrity()
+    errors = checker.check_runtime_integrity()
 
     # Should have circular dependency error
     assert len(errors) > 0, f"Should detect circular dependency, got {errors}"

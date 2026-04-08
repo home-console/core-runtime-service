@@ -42,7 +42,7 @@ from __future__ import annotations
 
 import asyncio
 
-from core.kernel.base_plugin import BasePlugin, PluginMetadata
+from sdk.plugin_ext import BasePlugin, PluginMetadata
 from .sync import DeviceSync, DeviceStatusChecker
 from .command_handler import CommandHandler
 from .yandex_quasar_ws import YandexQuasarWS
@@ -59,8 +59,7 @@ class YandexSmartHomeRealPlugin(BasePlugin):
     - external.device_discovered для каждого полученного устройства
 
     Взаимодействует только через:
-    - event_bus (публикация событий)
-    - service_registry (получение токенов, регистрация сервиса)
+    - sdk helpers / runtime.api (регистрация сервисов, публикация событий, вызов зависимостей)
     - state_engine / storage (не требуется для первой версии)
     """
 
@@ -83,11 +82,12 @@ class YandexSmartHomeRealPlugin(BasePlugin):
         self._tasks: set = set()
 
         # Инициализируем модули
-        self.device_sync = DeviceSync(self.runtime, self.metadata.name)
-        self.device_status_checker = DeviceStatusChecker(self.runtime, self.metadata.name)
-        self.quasar_ws = YandexQuasarWS(self.runtime, self.metadata.name)
+        # Передаём self (BasePlugin) как SDK-first facade: call_service/storage_*/publish_event/has_service.
+        self.device_sync = DeviceSync(self, self.metadata.name)
+        self.device_status_checker = DeviceStatusChecker(self, self.metadata.name)
+        self.quasar_ws = YandexQuasarWS(self, self.metadata.name)
         # Передаем quasar_ws в command_handler для проверки активности WebSocket
-        self.command_handler = CommandHandler(self.runtime, self.metadata.name, self._tasks, self.quasar_ws)
+        self.command_handler = CommandHandler(self, self.metadata.name, self._tasks, self.quasar_ws)
 
         # Регистрируем сервис синхронизации устройств
         async def _sync_devices():
@@ -133,7 +133,7 @@ class YandexSmartHomeRealPlugin(BasePlugin):
         await super().on_start()
 
         from .operations import register_yandex_operations
-        register_yandex_operations(self.runtime)
+        register_yandex_operations(self)
 
         try:
             await self.call_service(
@@ -331,21 +331,14 @@ class YandexSmartHomeRealPlugin(BasePlugin):
             result["synced"] = len(devices) if devices else 0
             
             try:
-                from core.runtime.system_context import create_system_context
-                from core.runtime.auth_contextvars import set_current_auth_context, get_current_auth_context
-                
-                ctx = create_system_context(self.metadata.name, "devices.auto_map_external")
-                prev = get_current_auth_context()
-                set_current_auth_context(ctx)
-                try:
-                    map_result = await self.call_service(
-                        "devices.auto_map_external",
-                        provider="yandex",
-                    )
-                    if isinstance(map_result, dict):
-                        result["mapped"] = map_result.get("created", 0)
-                finally:
-                    set_current_auth_context(prev)
+                # Best-effort: auto-mapping может требовать специальных ACL/контекста.
+                # Плагин не должен тянуть core-internals; если сервис недоступен — просто логируем.
+                map_result = await self.call_service(
+                    "devices.auto_map_external",
+                    provider="yandex",
+                )
+                if isinstance(map_result, dict):
+                    result["mapped"] = map_result.get("created", 0)
             except Exception as map_err:
                 # Log mapping error but don't fail entire sync
                 try:

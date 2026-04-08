@@ -15,6 +15,8 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+import logging
+logger = logging.getLogger(__name__)
 
 
 class MTLSCertificateAuthority:
@@ -181,7 +183,8 @@ class MTLSCertificateAuthority:
                 return False
 
             return True
-        except Exception:
+        except Exception as e:
+            logger.warning("tls.verify_certificate: failed, returning False: %s", e, exc_info=True)
             return False
 
     def get_certificate_common_name(self, cert_pem: bytes) -> str:
@@ -194,7 +197,8 @@ class MTLSCertificateAuthority:
             if cn:
                 return str(cn[0].value)
             return ""
-        except Exception:
+        except Exception as e:
+            logger.warning("tls.get_certificate_common_name: failed: %s", e, exc_info=True)
             return ""
 
     def get_agent_id_from_certificate(self, cert_pem: bytes) -> str:
@@ -207,5 +211,6 @@ class MTLSCertificateAuthority:
             if ou:
                 return str(ou[0].value)
             return ""
-        except Exception:
+        except Exception as e:
+            logger.warning("tls.get_agent_id_from_certificate: failed: %s", e, exc_info=True)
             return ""

@@ -15,6 +15,13 @@ from core.operations.runtime_contract import (
     OperationSource,
     PassThroughActionResolver,
 )
+from core.operations.worker_dependencies import WorkerDependencies
+from core.adapters.storage_errors import STORAGE_BOUNDARY_ERRORS
+from core.exception_groups import BEST_EFFORT_BACKGROUND_ERRORS
+from core.operations.dedup import DedupLayer
+from core.operations.dedup_contract import OPERATION_READY_EVENT_TYPE
+import logging
+logger = logging.getLogger(__name__)
 
 _NOOP_HOOKS = NoopExecutionHooks()
 _NOOP_ACTION_DISPATCHER = NoopActionDispatcher()
@@ -29,6 +36,13 @@ class OperationWorker:
         self._task: asyncio.Task[Any] | None = None
         self.worker_id = f"worker-{id(self)}-{uuid.uuid4().hex[:8]}"
         self._event_subscription_active = False
+
+        # Формальные зависимости вместо чтения через __dict__/getattr
+        self.dependencies = WorkerDependencies.from_runtime(runtime)
+        
+        # Централизованный dedup layer для at-least-once семантики
+        storage = getattr(runtime, "storage", None)
+        self._dedup = DedupLayer(storage) if storage is not None else None
 
     async def start(self):
         self.running = True
@@ -54,44 +68,32 @@ class OperationWorker:
             self._task.cancel()
             try:
                 await self._task
-            except asyncio.CancelledError:
+            except asyncio.CancelledError:  # allow_cancelled_suppress
                 pass
         self._task = None
 
     def _resolve_hooks(self) -> Any:
-        runtime_dict = getattr(self.runtime, "__dict__", {})
-        hooks = runtime_dict.get("hooks")
-        if hooks is not None and callable(getattr(hooks, "run", None)):
-            return hooks
-        return _NOOP_HOOKS
+        """Получить execution hooks из формальных зависимостей."""
+        return self.dependencies.hooks or _NOOP_HOOKS
 
     def _resolve_action_dispatcher(self) -> Any:
-        runtime_dict = getattr(self.runtime, "__dict__", {})
-        dispatcher = runtime_dict.get("action_dispatcher")
-        if dispatcher is not None and callable(getattr(dispatcher, "dispatch", None)):
-            return dispatcher
-        return _NOOP_ACTION_DISPATCHER
+        """Получить action dispatcher из формальных зависимостей."""
+        return self.dependencies.action_dispatcher or _NOOP_ACTION_DISPATCHER
 
     def _resolve_action_resolver(self) -> Any:
-        runtime_dict = getattr(self.runtime, "__dict__", {})
-        resolver = runtime_dict.get("action_resolver")
-        if resolver is not None and callable(getattr(resolver, "resolve", None)):
-            return resolver
-        return _PASS_THROUGH_ACTION_RESOLVER
+        """Получить action resolver из формальных зависимостей."""
+        return self.dependencies.action_resolver or _PASS_THROUGH_ACTION_RESOLVER
 
     def _resolve_operation_source(self) -> OperationSource:
-        runtime_dict = getattr(self.runtime, "__dict__", {})
-        source = runtime_dict.get("operation_source")
-        if source is not None and callable(getattr(source, "get_runnable", None)):
+        """Получить operation source из формальных зависимостей."""
+        source = self.dependencies.operation_source
+        if source is not None:
             return source
         return _NOOP_OPERATION_SOURCE
 
     def _resolve_event_bus(self) -> Any:
-        runtime_dict = getattr(self.runtime, "__dict__", {})
-        event_bus = runtime_dict.get("event_bus")
-        if event_bus is not None and callable(getattr(event_bus, "subscribe", None)):
-            return event_bus
-        return None
+        """Получить event bus из формальных зависимостей."""
+        return self.dependencies.event_bus
 
     async def _subscribe_operation_events(self) -> None:
         if self._event_subscription_active:
@@ -99,7 +101,7 @@ class OperationWorker:
         event_bus = self._resolve_event_bus()
         if event_bus is None:
             return
-        outcome = event_bus.subscribe("operation_ready", self._on_event)
+        outcome = event_bus.subscribe(OPERATION_READY_EVENT_TYPE, self._on_event)
         if inspect.isawaitable(outcome):
             await outcome
         self._event_subscription_active = True
@@ -113,7 +115,7 @@ class OperationWorker:
             return
         unsubscribe = getattr(event_bus, "unsubscribe", None)
         if callable(unsubscribe):
-            outcome = unsubscribe("operation_ready", self._on_event)
+            outcome = unsubscribe(OPERATION_READY_EVENT_TYPE, self._on_event)
             if inspect.isawaitable(outcome):
                 await outcome
         self._event_subscription_active = False
@@ -137,26 +139,8 @@ class OperationWorker:
             await self._on_event(event)
 
     async def _mark_event_processed(self, event_id: str) -> None:
-        event_bus = self._resolve_event_bus()
-        if event_bus is None:
-            return
-        mark = getattr(event_bus, "mark_event_processed", None)
-        if not callable(mark):
-            return
-        outcome = mark(event_id)
-        if inspect.isawaitable(outcome):
-            await outcome
-
-    async def _is_event_processed(self, event_id: str) -> bool:
-        event_bus = self._resolve_event_bus()
-        if event_bus is None:
-            return False
-        is_processed = getattr(event_bus, "is_event_processed", None)
-        if not callable(is_processed):
-            return False
-        outcome = is_processed(event_id)
-        value = await outcome if inspect.isawaitable(outcome) else outcome
-        return bool(value)
+        if self._dedup:
+            await self._dedup.mark_event_processed(event_id)
 
     async def _claim_event(self, event_id: str) -> bool:
         event_bus = self._resolve_event_bus()
@@ -179,7 +163,7 @@ class OperationWorker:
             payload = cast(dict[str, Any], data) if isinstance(data, dict) else {}
             resolved_type = event_type if isinstance(event_type, str) else ""
 
-        if resolved_type != "operation_ready":
+        if resolved_type != OPERATION_READY_EVENT_TYPE:
             return
 
         operation_id = payload.get("operation_id")
@@ -187,22 +171,39 @@ class OperationWorker:
         if not operation_id:
             return
 
-        if event_id and await self._is_event_processed(str(event_id)):
-            return
-        if event_id and not await self._claim_event(str(event_id)):
-            return
+        # Централизованный dedup check через DedupLayer
+        if event_id:
+            # Проверяем было ли событие уже обработано
+            if self._dedup and await self._dedup.is_event_processed(str(event_id)):
+                return  # Уже обработано, skip
+            if not await self._claim_event(str(event_id)):
+                return  # Не удалось claim, skip
 
         operation = await self.runtime.operations.get(str(operation_id))
         if operation is None:
             return
 
-        try:
-            await self.execute_operation_now(operation)
-            if event_id:
-                await self._mark_event_processed(str(event_id))
-        except Exception:
-            # at-least-once: keep event unacked so replay can retry later
-            raise
+        # Если операция уже помечена как обработанная в DedupLayer, игнорируем повторные события.
+        if self._dedup is not None:
+            try:
+                if await self._dedup.is_operation_processed(str(operation.operation_id)):
+                    if event_id:
+                        await self._mark_event_processed(str(event_id))
+                    return
+            except STORAGE_BOUNDARY_ERRORS:
+                logger.debug(
+                    "worker._on_event: dedup storage boundary (suppressed)",
+                    exc_info=True,
+                )
+            except BEST_EFFORT_BACKGROUND_ERRORS:
+                logger.warning(
+                    "worker._on_event: dedup unexpected error (suppressed)",
+                    exc_info=True,
+                )
+
+        await self.execute_operation_now(operation)
+        if event_id:
+            await self._mark_event_processed(str(event_id))
 
     def _normalize_hook_decision(
         self,
@@ -279,8 +280,30 @@ class OperationWorker:
         if inspect.isawaitable(outcome):
             await outcome
 
+    async def _maybe_await(self, value: Any) -> Any:
+        if inspect.isawaitable(value):
+            return await value
+        return value
+
     async def execute_operation_now(self, operation: Operation) -> Operation:
         now = time.time()
+
+        # Сквозной dedup enforcement: если операция уже помечена как завершённая (terminal)
+        # в DedupLayer, повторные вызовы execute_operation_now должны быть no-op.
+        if self._dedup is not None:
+            try:
+                if await self._dedup.is_operation_processed(str(operation.operation_id)):
+                    return operation
+            except STORAGE_BOUNDARY_ERRORS:
+                logger.debug(
+                    "worker.execute_operation_now: dedup storage boundary (suppressed)",
+                    exc_info=True,
+                )
+            except BEST_EFFORT_BACKGROUND_ERRORS:
+                logger.warning(
+                    "worker.execute_operation_now: dedup unexpected error (suppressed)",
+                    exc_info=True,
+                )
 
         attempt_index = int(operation.retry_count or 0)
         attempt_id = f"attempt-{operation.operation_id}-i{attempt_index}"
@@ -288,7 +311,12 @@ class OperationWorker:
         lease_ttl_raw = getattr(self.runtime, "operation_attempt_lease_ttl", 30)
         try:
             lease_ttl_s = int(lease_ttl_raw)
-        except Exception:
+        except (TypeError, ValueError):
+            logger.debug(
+                "worker.execute_operation_now: invalid lease TTL %r, using default",
+                lease_ttl_raw,
+                exc_info=True,
+            )
             lease_ttl_s = 30
 
         hook_context: dict[str, Any] = {
@@ -317,17 +345,26 @@ class OperationWorker:
             return operation
 
         # Use public API instead of direct _storage access
-        storage = self.runtime.operations
-        executor = self.runtime.operations.get_executor()
+        operations_api = self.runtime.operations
+        storage = getattr(operations_api, "_storage", operations_api)
+        executor = getattr(operations_api, "_executor", None)
+        if executor is None:
+            get_executor = getattr(operations_api, "get_executor", None)
+            if callable(get_executor):
+                executor = get_executor()
 
-        await storage.ensure_attempt_created(
-            attempt_id=attempt_id,
-            operation_id=operation.operation_id,
-            attempt_index=attempt_index,
+        await self._maybe_await(
+            storage.ensure_attempt_created(
+                attempt_id=attempt_id,
+                operation_id=operation.operation_id,
+                attempt_index=attempt_index,
+            )
         )
 
-        ok, claim_token = await storage.try_claim_attempt(
-            attempt_id=attempt_id, worker_id=self.worker_id, lease_ttl=lease_ttl_s
+        ok, claim_token = await self._maybe_await(
+            storage.try_claim_attempt(
+                attempt_id=attempt_id, worker_id=self.worker_id, lease_ttl=lease_ttl_s
+            )
         )
         if not ok or not claim_token:
             return operation
@@ -357,7 +394,7 @@ class OperationWorker:
             latest_attempt = hook_context.get("attempt")
             if isinstance(latest_attempt, Attempt):
                 await self._persist_attempt(storage, latest_attempt)
-            await storage.persist(operation)
+            await self._maybe_await(storage.persist(operation))
             if operation.status in TERMINAL_STATUSES:
                 return operation
 
@@ -365,7 +402,9 @@ class OperationWorker:
             await self._release_claim(storage, attempt_id)
             return operation
 
-        result: Operation = await executor.execute_attempt(attempt_id, claim_token)
+        result: Operation = await self._maybe_await(
+            executor.execute_attempt(attempt_id, claim_token)
+        )
         hook_context.update(
             {
                 "result": result,
@@ -398,6 +437,22 @@ class OperationWorker:
                 await self._persist_attempt(storage, latest_attempt)
 
         await storage.persist(result)
+        # Помечаем операцию как обработанную в DedupLayer (если доступен) после успешной фиксации результата.
+        if self._dedup is not None:
+            try:
+                if result.status in TERMINAL_STATUSES:
+                    await self._dedup.mark_operation_processed(str(result.operation_id))
+            except STORAGE_BOUNDARY_ERRORS:
+                logger.debug(
+                    "worker.execute_operation_now: dedup mark storage boundary (suppressed)",
+                    exc_info=True,
+                )
+            except BEST_EFFORT_BACKGROUND_ERRORS:
+                logger.warning(
+                    "worker.execute_operation_now: dedup mark unexpected (suppressed)",
+                    exc_info=True,
+                )
+
         return result
 
     async def tick(self):

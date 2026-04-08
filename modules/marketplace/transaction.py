@@ -18,14 +18,16 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from core.adapters.storage_errors import STORAGE_BOUNDARY_ERRORS
+
 logger = logging.getLogger(__name__)
 
 
 class TransactionState(str, Enum):
     """Transaction lifecycle states."""
 
-    PREPARING = "preparing"  # Download stage
-    VALIDATING = "validating"  # Verification stage
+    PREPARING = "preparing"  # Download step
+    VALIDATING = "validating"  # Verification step
     STAGED = "staged"  # Ready for swap
     SWAPPING = "swapping"  # Atomic directory swap
     ACTIVATING = "activating"  # Starting plugin
@@ -98,9 +100,13 @@ class UpdateTransactionManager:
 
     def _load_pending_transactions(self):
         """Load transactions that may need recovery."""
+        if self.runtime is None:
+            return
         try:
             # Check storage for pending transactions
             pending = self.runtime.storage.get("marketplace.transactions", {})
+            if not isinstance(pending, dict):
+                pending = {}
             for txn_id, txn_data in pending.items():
                 txn = self._deserialize_transaction(txn_data)
                 # If crashed during swap, mark for recovery
@@ -112,8 +118,15 @@ class UpdateTransactionManager:
                         f"Found pending transaction {txn_id} in state {txn.state.value}"
                     )
                     self._active_transactions[txn_id] = txn
+        except STORAGE_BOUNDARY_ERRORS:
+            logger.error(
+                "UpdateTransactionManager: load pending transactions storage boundary",
+                exc_info=True,
+            )
         except Exception as e:
-            logger.error(f"Failed to load pending transactions: {e}")
+            logger.error(
+                "Failed to load pending transactions: %s", e, exc_info=True
+            )
 
     async def prepare_install(
         self, plugin_name: str, version: str, archive_path: Path
@@ -172,8 +185,12 @@ class UpdateTransactionManager:
                 with open(metadata_path) as f:
                     metadata = json.load(f)
                     old_version = metadata.get("version", "unknown")
-            except Exception:
-                pass
+            except (OSError, json.JSONDecodeError, TypeError, ValueError):
+                logger.debug(
+                    "prepare_update: read metadata.json failed path=%s",
+                    metadata_path,
+                    exc_info=True,
+                )
 
         txn_id = f"{plugin_name}_{version}_{int(datetime.now().timestamp())}"
         staging_path = self.staging_dir / plugin_name
@@ -372,9 +389,13 @@ class UpdateTransactionManager:
 
     def _save_transaction(self, txn_id: str, txn: Transaction):
         """Save transaction state to persistent storage."""
+        if self.runtime is None:
+            return
         try:
             txn_data = self._serialize_transaction(txn)
             current = self.runtime.storage.get("marketplace.transactions", {})
+            if not isinstance(current, dict):
+                current = {}
             current[txn_id] = txn_data
             self.runtime.storage.set("marketplace.transactions", current)
         except Exception as e:
@@ -416,6 +437,8 @@ class UpdateTransactionManager:
         self, txn: Transaction, final_status: str, reason: Optional[str] = None
     ):
         """Write audit log entry."""
+        if self.runtime is None:
+            return
         try:
             entry = {
                 "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
@@ -428,6 +451,8 @@ class UpdateTransactionManager:
             }
 
             audit_log = self.runtime.storage.get("marketplace.audit", {})
+            if not isinstance(audit_log, dict):
+                audit_log = {}
             log_id = f"{txn.plugin_name}_{int(datetime.now().timestamp() * 1000)}"
             audit_log[log_id] = entry
             self.runtime.storage.set("marketplace.audit", audit_log)

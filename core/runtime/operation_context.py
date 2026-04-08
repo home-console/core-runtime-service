@@ -5,11 +5,21 @@ Core не реализует хранение operation_id и не импорт�
 Модуль request_logger (или другой) регистрирует провайдер при старте;
 Core только вызывает провайдер, если он установлен.
 Если провайдер не установлен — get_operation_id() возвращает None, set_operation_id() не делает ничего.
+
+Operation logging вынесен в OperationLogger интерфейс — core не знает про logger.log сервисы.
 """
 
+from __future__ import annotations
+
+import logging
 import uuid
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from typing import Any, Optional, Protocol
+
+from core.exception_groups import LOGGING_HELPER_ERRORS
+
+_op_ctx_log = logging.getLogger(__name__)
 
 
 class OperationContextProvider(Protocol):
@@ -19,39 +29,133 @@ class OperationContextProvider(Protocol):
     def set_operation_id(self, value: str) -> None: ...
 
 
-_provider: Optional[OperationContextProvider] = None
-
-
-def set_operation_context_provider(
-    provider: Optional[OperationContextProvider],
-) -> None:
-    """Установить провайдер контекста операций (вызывается модулем при start/stop)."""
-    global _provider
-    _provider = provider
-
-
-def get_operation_context_provider() -> Optional[OperationContextProvider]:
-    """Получить текущий провайдер (для тестов или диагностики)."""
-    return _provider
-
-
-def get_operation_id() -> Optional[str]:
+class OperationLogger(Protocol):
     """
-    Получить operation_id из текущего контекста выполнения.
-    Если провайдер не установлен — возвращает None.
+    Интерфейс для логирования операций.
+    
+    Выносится в app-layer — core не знает про конкретные сервисы логирования.
     """
-    if _provider is None:
-        return None
-    return _provider.get_operation_id()
+    
+    async def log_operation_start(
+        self,
+        operation_id: str,
+        operation_name: str,
+        source: str,
+    ) -> None:
+        """Логировать начало операции."""
+        ...
+    
+    async def log_operation_ok(
+        self,
+        operation_id: str,
+        operation_name: str,
+        source: str,
+    ) -> None:
+        """Логировать успешное завершение операции."""
+        ...
+    
+    async def log_operation_error(
+        self,
+        operation_id: str,
+        operation_name: str,
+        source: str,
+        error: str,
+        error_type: str,
+    ) -> None:
+        """Логировать ошибку операции."""
+        ...
 
 
-def set_operation_id(value: str) -> None:
+@dataclass
+class OperationContext:
     """
-    Установить operation_id в текущий контекст выполнения.
-    Если провайдер не установлен — ничего не делает.
+    Per-runtime operation context holder.
+
+    This avoids module-level globals leaking between tests/runtimes/plugins.
     """
-    if _provider is not None:
-        _provider.set_operation_id(value)
+
+    _provider: Optional[OperationContextProvider] = None
+    _logger: Optional[OperationLogger] = None
+
+    def set_provider(self, provider: Optional[OperationContextProvider]) -> None:
+        self._provider = provider
+
+    def get_provider(self) -> Optional[OperationContextProvider]:
+        return self._provider
+
+    def set_logger(self, logger: Optional[OperationLogger]) -> None:
+        self._logger = logger
+
+    def get_operation_id(self) -> Optional[str]:
+        if self._provider is None:
+            return None
+        return self._provider.get_operation_id()
+
+    def set_operation_id(self, value: str) -> None:
+        if self._provider is not None:
+            self._provider.set_operation_id(value)
+
+    @asynccontextmanager
+    async def operation(self, name: str, source: str, runtime: Optional[Any] = None):
+        new_operation_id = str(uuid.uuid4())
+        previous_operation_id = self.get_operation_id()
+        self.set_operation_id(new_operation_id)
+        operation_id = new_operation_id
+
+        if self._logger is not None:
+            try:
+                await self._logger.log_operation_start(
+                    operation_id=operation_id,
+                    operation_name=name,
+                    source=source,
+                )
+            except (RuntimeError, TypeError, AttributeError, ValueError) as e:
+                _op_ctx_log.debug("Failed to log operation.start: %s", e, exc_info=True)
+            except LOGGING_HELPER_ERRORS as e:
+                _op_ctx_log.debug("Failed to log operation.start (unexpected): %s", e, exc_info=True)
+
+        try:
+            yield operation_id
+            if self._logger is not None:
+                try:
+                    await self._logger.log_operation_ok(
+                        operation_id=operation_id,
+                        operation_name=name,
+                        source=source,
+                    )
+                except (RuntimeError, TypeError, AttributeError, ValueError) as e:
+                    _op_ctx_log.debug("Failed to log operation.ok: %s", e, exc_info=True)
+                except LOGGING_HELPER_ERRORS as e:
+                    _op_ctx_log.debug("Failed to log operation.ok (unexpected): %s", e, exc_info=True)
+        except LOGGING_HELPER_ERRORS as e:
+            if self._logger is not None:
+                try:
+                    await self._logger.log_operation_error(
+                        operation_id=operation_id,
+                        operation_name=name,
+                        source=source,
+                        error=str(e),
+                        error_type=type(e).__name__,
+                    )
+                except (RuntimeError, TypeError, AttributeError, ValueError):
+                    _op_ctx_log.debug(
+                        "operation_context.operation: log_operation_error failed (boundary)",
+                        exc_info=True,
+                    )
+                except LOGGING_HELPER_ERRORS:
+                    _op_ctx_log.debug(
+                        "operation_context.operation: log_operation_error failed (unexpected)",
+                        exc_info=True,
+                    )
+            raise
+        finally:
+            if previous_operation_id:
+                self.set_operation_id(previous_operation_id)
+
+
+# Process-global default context for the module-level `operation()` context manager.
+# Plugins and modules should use RuntimeContext.operation_context for per-runtime isolation.
+_DEFAULT_CONTEXT: OperationContext = OperationContext()
 
 
 @asynccontextmanager
@@ -61,7 +165,7 @@ async def operation(name: str, source: str, runtime: Optional[Any] = None):
 
     При входе:
     - Создаёт новый UUID operation_id и устанавливает его через set_operation_id()
-    - Записывает лог "operation.start"
+    - Записывает лог "operation.start" (если OperationLogger установлен)
 
     При успешном выходе:
     - Записывает лог "operation.ok"
@@ -73,84 +177,11 @@ async def operation(name: str, source: str, runtime: Optional[Any] = None):
     Args:
         name: имя операции (например, "example.op")
         source: источник операции (имя плагина/модуля)
-        runtime: экземпляр CoreRuntime (опционально, для логирования)
+        runtime: экземпляр CoreRuntime (опционально, для обратной совместимости)
 
     Example:
         async with operation("example.op", "example_plugin", runtime):
             await do_work()
     """
-    new_operation_id = str(uuid.uuid4())
-    previous_operation_id = get_operation_id()
-    set_operation_id(new_operation_id)
-    operation_id = new_operation_id
-
-    if runtime:
-        try:
-            try:
-                has_request_logger = await runtime.service_registry.has_service(
-                    "request_logger.set_request_metadata"
-                )
-                if has_request_logger:
-                    await runtime.service_registry.call(
-                        "request_logger.set_request_metadata",
-                        request_id=operation_id,
-                        request_metadata={
-                            "method": "SYSTEM",
-                            "url": f"system://{source}/{name}",
-                            "path": f"/system/{source}/{name}",
-                            "direction": "outgoing",
-                            "origin": "system",
-                        },
-                    )
-            except Exception:
-                pass
-            await runtime.service_registry.call(
-                "logger.log",
-                level="info",
-                message="operation.start",
-                plugin=source,
-                operation_id=operation_id,
-                operation_name=name,
-                source=source,
-                origin="system",
-            )
-        except Exception:
-            pass
-
-    try:
-        yield operation_id
-        if runtime:
-            try:
-                await runtime.service_registry.call(
-                    "logger.log",
-                    level="info",
-                    message="operation.ok",
-                    plugin=source,
-                    operation_id=operation_id,
-                    operation_name=name,
-                    source=source,
-                    origin="system",
-                )
-            except Exception:
-                pass
-    except Exception as e:
-        if runtime:
-            try:
-                await runtime.service_registry.call(
-                    "logger.log",
-                    level="error",
-                    message="operation.error",
-                    plugin=source,
-                    operation_id=operation_id,
-                    operation_name=name,
-                    source=source,
-                    error=str(e),
-                    error_type=type(e).__name__,
-                    origin="system",
-                )
-            except Exception:
-                pass
-        raise
-    finally:
-        if previous_operation_id:
-            set_operation_id(previous_operation_id)
+    async with _DEFAULT_CONTEXT.operation(name, source, runtime):
+        yield _DEFAULT_CONTEXT.get_operation_id() or ""

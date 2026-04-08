@@ -1,5 +1,5 @@
 """
-Execution Layer 
+Execution Layer
 
 Execution — подключаемая подсистема (policy + backend), которая исполняет operations
 в разных режимах (in-process / process / container) без знания доменов, UI, SDK, automation.
@@ -17,6 +17,9 @@ from .controller import ExecutionControllerImpl
 from .policy import ExecutionPolicy, StateExecutionPolicy
 from .scheduler import ExecutionSchedule, ExecutionScheduler
 from .trace import ExecutionTrace
+
+# Explicit entrypoint for module discovery
+from .module import ExecutionModule as __runtime_module_class__
 
 
 def __getattr__(name: str):

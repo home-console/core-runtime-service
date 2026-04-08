@@ -8,6 +8,11 @@ Pending Cleaner — механизм для очистки зависших ко
 import asyncio
 import time
 from typing import Any, List, Dict, Optional
+import logging
+
+from core.adapters.storage_errors import STORAGE_BOUNDARY_ERRORS
+
+logger = logging.getLogger(__name__)
 
 
 PENDING_TIMEOUT_SEC = 60  # Timeout для зависших команд (60 секунд)
@@ -34,7 +39,16 @@ async def start_pending_cleaner(runtime: Any) -> None:
                 # Получаем все устройства
                 try:
                     keys = await runtime.storage.list_keys("devices")
+                except STORAGE_BOUNDARY_ERRORS:
+                    logger.warning(
+                        "devices_pending_cleaner: list_keys storage boundary",
+                        exc_info=True,
+                    )
+                    continue
                 except Exception:
+                    logger.warning(
+                        "devices_pending_cleaner: list_keys failed", exc_info=True
+                    )
                     continue
                 
                 now = time.time()
@@ -68,7 +82,7 @@ async def start_pending_cleaner(runtime: Any) -> None:
                                     
                                     # Логируем очистку
                                     try:
-                                        await runtime.kernel_context.get_service("service_registry").call(
+                                        await runtime.service_registry.call(
                                             "logger.log",
                                             level="warning",
                                             message=f"Cleared hung pending command for device {device_id} (elapsed {elapsed:.1f}s > {PENDING_TIMEOUT_SEC}s)",
@@ -80,18 +94,44 @@ async def start_pending_cleaner(runtime: Any) -> None:
                                             }
                                         )
                                     except Exception:
-                                        pass
+                                        logger.debug(
+                                            "devices_pending_cleaner: logger.log failed",
+                                            exc_info=True,
+                                        )
+                                except STORAGE_BOUNDARY_ERRORS:
+                                    logger.warning(
+                                        "devices_pending_cleaner: set device storage boundary "
+                                        "(device_id=%s)",
+                                        device_id,
+                                        exc_info=True,
+                                    )
                                 except Exception:
-                                    pass
+                                    logger.warning(
+                                        "devices_pending_cleaner: set device failed "
+                                        "(device_id=%s)",
+                                        device_id,
+                                        exc_info=True,
+                                    )
                     
+                    except STORAGE_BOUNDARY_ERRORS:
+                        logger.debug(
+                            "devices_pending_cleaner: get device storage boundary "
+                            "(device_id=%s)",
+                            device_id,
+                            exc_info=True,
+                        )
                     except Exception:
-                        # Пропускаем ошибки обработки отдельных устройств
-                        pass
+                        logger.debug(
+                            "devices_pending_cleaner: device iteration error "
+                            "(device_id=%s)",
+                            device_id,
+                            exc_info=True,
+                        )
                 
                 # Логируем итоги если что-то было очищено
                 if cleared_count > 0:
                     try:
-                        await runtime.kernel_context.get_service("service_registry").call(
+                        await runtime.service_registry.call(
                             "logger.log",
                             level="info",
                             message=f"Cleaned {cleared_count} hung pending commands",
@@ -99,19 +139,25 @@ async def start_pending_cleaner(runtime: Any) -> None:
                             context={"cleared_count": cleared_count}
                         )
                     except Exception:
-                        pass
+                        logger.debug(
+                            "devices_pending_cleaner: summary logger.log failed",
+                            exc_info=True,
+                        )
             
             except Exception as e:
                 # Ловим все ошибки чтобы loop не умер
                 try:
-                    await runtime.kernel_context.get_service("service_registry").call(
+                    await runtime.service_registry.call(
                         "logger.log",
                         level="error",
                         message=f"Error in pending cleaner loop: {e}",
                         module="devices_pending_cleaner",
                     )
                 except Exception:
-                    pass
+                    logger.warning(
+                        "devices_pending_cleaner: loop error logger.log failed",
+                        exc_info=True,
+                    )
     
     # Запускаем loop в фоне
     asyncio.create_task(cleanup_loop())
@@ -131,7 +177,13 @@ async def get_hung_pending_devices(runtime: Any) -> List[Dict[str, Any]]:
     
     try:
         keys = await runtime.storage.list_keys("devices")
+    except STORAGE_BOUNDARY_ERRORS:
+        logger.warning(
+            "get_hung_pending_devices: list_keys storage boundary", exc_info=True
+        )
+        return result
     except Exception:
+        logger.warning("get_hung_pending_devices: list_keys failed", exc_info=True)
         return result
     
     for device_id in keys:
@@ -156,8 +208,19 @@ async def get_hung_pending_devices(runtime: Any) -> List[Dict[str, Any]]:
                         "timeout_sec": PENDING_TIMEOUT_SEC,
                         "device": device,
                     })
+        except STORAGE_BOUNDARY_ERRORS:
+            logger.debug(
+                "get_hung_pending_devices: get device storage boundary "
+                "(device_id=%s)",
+                device_id,
+                exc_info=True,
+            )
         except Exception:
-            pass
+            logger.debug(
+                "get_hung_pending_devices: get device failed (device_id=%s)",
+                device_id,
+                exc_info=True,
+            )
     
     return result
 
@@ -193,7 +256,7 @@ async def clear_pending_manually(runtime: Any, device_id: str) -> Dict[str, Any]
         
         # Логируем
         try:
-            await runtime.kernel_context.get_service("service_registry").call(
+            await runtime.service_registry.call(
                 "logger.log",
                 level="info",
                 message=f"Manually cleared pending for device {device_id}",
@@ -201,7 +264,9 @@ async def clear_pending_manually(runtime: Any, device_id: str) -> Dict[str, Any]
                 context={"device_id": device_id, "was_pending": was_pending}
             )
         except Exception:
-            pass
+            logger.debug(
+                "clear_pending_manually: logger.log failed", exc_info=True
+            )
         
         return {
             "ok": True,
@@ -210,5 +275,11 @@ async def clear_pending_manually(runtime: Any, device_id: str) -> Dict[str, Any]
             "now_pending": False,
         }
     
+    except STORAGE_BOUNDARY_ERRORS as e:
+        logger.warning(
+            "clear_pending_manually: storage boundary", exc_info=True
+        )
+        return {"ok": False, "error": str(e)}
     except Exception as e:
+        logger.warning("clear_pending_manually: failed", exc_info=True)
         return {"ok": False, "error": str(e)}

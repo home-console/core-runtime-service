@@ -13,6 +13,8 @@ Implements operations:
 from typing import Dict, Any, List, Optional
 from core.runtime.runtime_module import RuntimeModule
 from modules.marketplace.services import MarketplaceService
+import logging
+logger = logging.getLogger(__name__)
 
 
 class MarketplaceModule(RuntimeModule):
@@ -52,64 +54,70 @@ class MarketplaceModule(RuntimeModule):
     
     async def register(self) -> None:
         """Register marketplace operations."""
+        ops_mgr = self.context.operations or getattr(self.runtime, "operations", None)
+        if ops_mgr is None:
+            raise RuntimeError(
+                "MarketplaceModule requires runtime.operations to register handlers. "
+                "Check module wiring/bootstrap order."
+            )
         # Register install operation
-        self.runtime.operations.register_handler(
+        ops_mgr.register_handler(
             "marketplace.install",
             self._wrap_handler(self.service.handle_install)
         )
         
         # Register remove operation
-        self.runtime.operations.register_handler(
+        ops_mgr.register_handler(
             "marketplace.remove",
             self._wrap_handler(self.service.handle_remove)
         )
         
         # Register update operation
-        self.runtime.operations.register_handler(
+        ops_mgr.register_handler(
             "marketplace.update",
             self._wrap_handler(self.service.handle_update)
         )
         
         # Register enable operation
-        self.runtime.operations.register_handler(
+        ops_mgr.register_handler(
             "marketplace.enable",
             self._wrap_handler(self.service.handle_enable)
         )
         
         # Register disable operation
-        self.runtime.operations.register_handler(
+        ops_mgr.register_handler(
             "marketplace.disable",
             self._wrap_handler(self.service.handle_disable)
         )
         
         # Register list_installed operation
-        self.runtime.operations.register_handler(
+        ops_mgr.register_handler(
             "marketplace.list_installed",
             self._wrap_handler(self.service.handle_list_installed)
         )
         
         # Register registry-based operations
-        self.runtime.operations.register_handler(
+        ops_mgr.register_handler(
             "marketplace.install_from_registry",
             self._wrap_handler(self.service.handle_install_from_registry)
         )
         
-        self.runtime.operations.register_handler(
+        ops_mgr.register_handler(
             "marketplace.search",
             self._wrap_handler(self.service.handle_search)
         )
         
-        self.runtime.operations.register_handler(
+        ops_mgr.register_handler(
             "marketplace.list_available",
             self._wrap_handler(self.service.handle_list_available)
         )
         
-        self.runtime.operations.register_handler(
+        ops_mgr.register_handler(
             "marketplace.check_updates",
             self._wrap_handler(self.service.handle_check_updates)
         )
         
-        self.runtime.operations.register_handler(
+        ops_mgr.register_handler(
             "marketplace.update_all",
             self._wrap_handler(self.service.handle_update_all)
         )
@@ -118,7 +126,7 @@ class MarketplaceModule(RuntimeModule):
         """Start marketplace module."""
         # Register with capability registry
         if hasattr(self.runtime, 'capability_registry'):
-            cap_reg = self.runtime.capability_registry
+            cap_reg = self.context.capabilities
             
             operations = [
                 ("marketplace.install", "Install plugin from archive"),
@@ -138,7 +146,11 @@ class MarketplaceModule(RuntimeModule):
                 try:
                     cap_reg.register_provider(self._name, op_name)
                 except Exception:
-                    pass  # May already be registered
+                    logger.debug(
+                        "marketplace.start: register_provider skipped or failed op=%s",
+                        op_name,
+                        exc_info=True,
+                    )
     
     async def stop(self) -> None:
         """Cleanup on shutdown."""
@@ -158,9 +170,13 @@ class MarketplaceModule(RuntimeModule):
         ]
         for op_name in operations:
             try:
-                self.runtime.operations.unregister_handler(op_name)
+                self.context.operations.unregister_handler(op_name)
             except Exception:
-                pass  # Already unregistered
+                logger.debug(
+                    "marketplace.stop: unregister_handler skipped op=%s",
+                    op_name,
+                    exc_info=True,
+                )
     
     async def on_start(self) -> None:
         """Alias for start() for backward compatibility."""

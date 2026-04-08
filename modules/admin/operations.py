@@ -8,6 +8,7 @@ import time
 from typing import Any, Dict, Optional
 
 from core.operations.models import OperationStatus
+from sdk.operations_events import OPERATION_READY_EVENT_TYPE, build_operation_ready_payload
 from modules.retry_policy.policy import is_retry_due
 
 
@@ -17,11 +18,8 @@ async def _publish_operation_ready(runtime: Any, operation_id: str) -> None:
     if not callable(publish):
         return
     await publish(
-        "operation_ready",
-        {
-            "type": "operation_ready",
-            "operation_id": operation_id,
-        },
+        OPERATION_READY_EVENT_TYPE,
+        build_operation_ready_payload(operation_id),
     )
 
 

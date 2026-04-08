@@ -16,6 +16,9 @@ from .errors import (
 from .repository import CredentialRepository
 
 from .module import CredentialModule
+
+# Explicit entrypoint for module discovery
+__runtime_module_class__ = CredentialModule
 from .policy_enforcer import CredentialRBACEnforcer
 from .schemas import (
     CreateCredentialRequest,
@@ -25,16 +28,6 @@ from .schemas import (
     UpdateCredentialRequest,
 )
 from .services import CredentialService
-
-
-class CredentialsModule(CredentialModule):
-    """
-    Backward-compatible alias for CredentialModule.
-
-    ModuleManager ищет класс `CredentialsModule` в пакете `modules.credentials`
-    для ModuleSpec(name="credentials"), поэтому этот alias позволяет загрузить
-    модуль `credentials` без изменения bootstrap.
-    """
 
 
 __all__ = [
@@ -49,7 +42,6 @@ __all__ = [
     "CredentialSecretLeakage",
     "CredentialAccessDenied",
     "CredentialModule",
-    "CredentialsModule",
     "CredentialService",
     "CredentialRBACEnforcer",
     "CreateCredentialRequest",

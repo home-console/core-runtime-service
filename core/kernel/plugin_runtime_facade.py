@@ -51,6 +51,11 @@ class PluginRuntimeFacade:
     async def publish_event(self, event_type: str, payload: dict[str, Any]) -> None:
         await self.event_bus.publish(event_type, payload)
 
+    async def publish_operation_ready(self, operation_id: str, **extra: Any) -> None:
+        if self.api is None:
+            raise RuntimeError("PluginAPI not initialized")
+        await self.api.publish_operation_ready(operation_id, **extra)
+
     async def subscribe_event(
         self,
         event_type: str,

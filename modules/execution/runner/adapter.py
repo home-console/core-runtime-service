@@ -12,6 +12,8 @@ ExecutionAdapter — единственная логика execution environment
 
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Mapping, Protocol
+import logging
+logger = logging.getLogger(__name__)
 
 
 class Handler(Protocol):
@@ -64,6 +66,7 @@ class ExecutionAdapter:
                 res = {"value": value}
             return ExecutionResult(status="ok", result=res)
         except Exception as e:
+            logger.warning("adapter.execute: failed: %s", e, exc_info=True)
             return ExecutionResult(
                 status="error",
                 error=ExecutionError(

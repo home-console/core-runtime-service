@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 from abc import abstractmethod
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 from typing import Any, Awaitable, Callable, Literal, Optional, Protocol, cast, runtime_checkable
 
 from sdk.metadata import PluginMetadata as SDKPluginMetadata
@@ -19,6 +20,8 @@ from sdk.plugin import BasePlugin as SDKBasePlugin
 
 from core.runtime.runtime_context import RuntimeContext
 from core.service._acl import PreloadResourceFunc
+import logging
+logger = logging.getLogger(__name__)
 
 
 @runtime_checkable
@@ -149,13 +152,52 @@ class BasePlugin(SDKBasePlugin):
             self.context = runtime_or_context
             return
 
-        self.context = runtime_or_context.create_context()
+        # Backward compatibility for lightweight tests/dummy plugins.
+        if runtime_or_context is None:
+            self.context = SimpleNamespace(
+                storage=None,
+                services=None,
+                http=None,
+                capabilities=None,
+                operations=None,
+                vault=None,
+                state=None,
+            )
+            return
+
+        self.runtime = cast(Any, runtime_or_context)
+        create_context = getattr(runtime_or_context, "create_context", None)
+        if callable(create_context):
+            self.context = create_context()
+            return
+
+        # Backward compatibility for lightweight tests/mocks without create_context().
+        self.context = RuntimeContext(
+            storage=getattr(runtime_or_context, "storage", None),
+            vault=getattr(runtime_or_context, "vault", None),
+            services=cast(Any, getattr(runtime_or_context, "service_registry", None)),
+            http=cast(Any, getattr(runtime_or_context, "http", None)),
+            capabilities=cast(
+                Any,
+                getattr(
+                    runtime_or_context,
+                    "capability_registry",
+                    getattr(runtime_or_context, "capabilities", None),
+                ),
+            ),
+            operations=cast(Any, getattr(runtime_or_context, "operations", None)),
+            state=getattr(
+                runtime_or_context,
+                "state_engine",
+                getattr(runtime_or_context, "state", None),
+            ),
+        )
 
     def _runtime_api(self) -> Any:
         runtime_obj = self.runtime
         if runtime_obj is None:
             raise RuntimeError("Plugin runtime API not available")
-        return runtime_obj
+        return getattr(runtime_obj, "api", None) or runtime_obj
 
     async def register_service(
         self,
@@ -184,8 +226,10 @@ class BasePlugin(SDKBasePlugin):
                 and getattr(self, "metadata", None) is not None
             ):
                 effective_admin_only = bool(self.metadata.default_admin_only)
-        except Exception:
+        except (AttributeError, TypeError, ValueError):
+
             # В сомнительных случаях не ужесточаем, оставляем на усмотрение конвенций в ServiceRegistry
+            logger.debug("base_plugin.register_service: error (using fallback value)", exc_info=True)
             effective_admin_only = admin_only
 
         runtime_api = self._runtime_api()
@@ -218,6 +262,11 @@ class BasePlugin(SDKBasePlugin):
         """SDK-friendly helper for event publishing."""
         runtime_api = self._runtime_api()
         await runtime_api.publish_event(event_type, payload)
+
+    async def publish_operation_ready(self, operation_id: str, **extra: Any) -> None:
+        """Публикация `operation_ready` по контракту (очередь OperationWorker)."""
+        runtime_api = self._runtime_api()
+        await runtime_api.publish_operation_ready(operation_id, **extra)
 
     async def subscribe_event(
         self,
@@ -294,8 +343,9 @@ class BasePlugin(SDKBasePlugin):
                 # Пытаемся получить имя плагина из metadata
                 plugin_name = self.metadata.name.upper().replace("-", "_")
                 prefix = plugin_name
-            except Exception:
+            except (AttributeError, TypeError, ValueError):
                 # Если metadata недоступен, используем имя класса
+                logger.debug("base_plugin.get_env_config: error (using fallback value)", exc_info=True)
                 prefix = self.__class__.__name__.upper()
 
         # Пробуем варианты в порядке приоритета
@@ -304,8 +354,11 @@ class BasePlugin(SDKBasePlugin):
             key,  # Без префикса
         ]
 
+        # NOTE: keep env read local to this helper.
+        import os
+
         for env_key in env_keys:
-            value = os.getenv(env_key)
+            value = os.environ.get(env_key)
             if value is not None:
                 return value
 
@@ -383,7 +436,7 @@ class BasePlugin(SDKBasePlugin):
         - подписываться на события
 
         Для логирования используйте:
-            await self.runtime.service_registry.call(
+            await self.call_service(
                 "logger.log",
                 level="info",
                 message="...",

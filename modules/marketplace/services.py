@@ -1,3 +1,4 @@
+import logging
 """
 Marketplace service - operation handlers.
 
@@ -19,6 +20,7 @@ from modules.marketplace.installer import InstallerError, MarketplaceInstaller
 from modules.marketplace.registry_client import RegistryClient
 from modules.marketplace.transaction import UpdateTransactionManager
 from modules.marketplace.update_validator import PluginUpdateValidator
+logger = logging.getLogger(__name__)
 
 
 class MarketplaceServiceError(Exception):
@@ -139,20 +141,18 @@ class MarketplaceService:
             plugin_info = installed[plugin_name]
 
             # Validate that plugin can be removed (no dependencies on it)
-            if hasattr(self.runtime, "dependency_resolver"):
-                try:
-                    errors = self.runtime.dependency_resolver.validate_plugin_removal(
-                        plugin_name
-                    )
-                    if errors:
+            try:
+                policy = getattr(getattr(self.runtime, "plugins", None), "lifecycle_policy", None)
+                if policy is not None:
+                    ok, errors = policy.can_remove_plugin(plugin_name)
+                    if not ok and errors:
                         return {
                             "status": "failure",
-                            "error": f"Cannot remove {plugin_name}: "
-                            + "\n".join(errors),
+                            "error": f"Cannot remove {plugin_name}: " + "\n".join(errors),
                         }
-                except (TypeError, AttributeError):
-                    # В тестах с mock runtime dependency_resolver может отсутствовать
-                    pass
+            except (TypeError, AttributeError):
+                # В тестах с mock runtime plugins/lifecycle_policy может отсутствовать
+                pass
 
             # Uninstall
             result = await self.installer.uninstall(plugin_name, runtime=self.runtime)
@@ -292,6 +292,7 @@ class MarketplaceService:
             }
 
         except Exception as e:
+            logger.warning("handle_enable failed for plugin %s: %s", params.get("plugin_name"), e, exc_info=True)
             return {"status": "failure", "error": str(e)}
 
     async def handle_disable(self, operation: Operation) -> Dict[str, Any]:
@@ -322,7 +323,7 @@ class MarketplaceService:
                 }
 
             # Validate that plugin can be disabled (no dependencies on it)
-            if hasattr(self.runtime, "dependency_resolver"):
+            if self.runtime is not None and hasattr(self.runtime, "dependency_resolver"):
                 try:
                     errors = self.runtime.dependency_resolver.validate_plugin_disable(
                         plugin_name
@@ -353,6 +354,7 @@ class MarketplaceService:
             }
 
         except Exception as e:
+            logger.warning("handle_disable failed for plugin %s: %s", plugin_name, e, exc_info=True)
             return {"status": "failure", "error": str(e)}
 
     async def handle_list_installed(self, operation: Operation) -> Dict[str, Any]:
@@ -371,6 +373,7 @@ class MarketplaceService:
                 "data": {"installed_plugins": installed, "count": len(installed)},
             }
         except Exception as e:
+            logger.warning("handle_list_installed failed: %s", e, exc_info=True)
             return {"status": "failure", "error": str(e)}
 
     def _store_installed_plugin(self, plugin_info: Dict[str, Any]) -> None:
@@ -384,7 +387,7 @@ class MarketplaceService:
             "version": plugin_info["version"],
             "path": plugin_info["path"],
             "hash": plugin_info["hash"],
-            "entrypoint": plugin_info["entrypoint"],
+            "class_path": plugin_info["class_path"],
             "installed_at": plugin_info["installed_at"],
             "enabled": plugin_info.get("enabled", True),
             "capabilities_provided": plugin_info.get("capabilities_provided", []),
@@ -495,6 +498,7 @@ class MarketplaceService:
             }
             self._add_audit_log(audit_entry)
 
+            logger.warning("handle_install_from_registry failed for plugin %s: %s", plugin_name, e, exc_info=True)
             return {"status": "failure", "error": str(e)}
 
     async def handle_search(self, operation: Operation) -> Dict[str, Any]:
@@ -524,6 +528,7 @@ class MarketplaceService:
             return {"status": "success", "data": {"query": query, "results": results}}
 
         except Exception as e:
+            logger.warning("handle_search failed for query %r: %s", query, e, exc_info=True)
             return {"status": "failure", "error": str(e)}
 
     async def handle_list_available(self, operation: Operation) -> Dict[str, Any]:
@@ -554,6 +559,7 @@ class MarketplaceService:
             }
 
         except Exception as e:
+            logger.warning("handle_list_available failed for registry %s: %s", registry_url, e, exc_info=True)
             return {"status": "failure", "error": str(e)}
 
     async def handle_check_updates(self, operation: Operation) -> Dict[str, Any]:
@@ -606,7 +612,7 @@ class MarketplaceService:
 
                 except Exception:
                     # Log but don't fail
-                    pass
+                    logger.warning("handle_check_updates: failed to check updates for plugin %s: %s", plugin_name, exc_info=True)
 
             return {
                 "status": "success",
@@ -614,6 +620,7 @@ class MarketplaceService:
             }
 
         except Exception as e:
+            logger.warning("handle_check_updates failed: %s", e, exc_info=True)
             return {"status": "failure", "error": str(e)}
 
     async def handle_update_all(self, operation: Operation) -> Dict[str, Any]:
@@ -682,6 +689,7 @@ class MarketplaceService:
                     self._store_installed_plugin(result)
 
                 except Exception as e:
+                    logger.warning("handle_update_all: failed to update plugin %s: %s", plugin_name, e, exc_info=True)
                     results["errors"].append({"plugin": plugin_name, "error": str(e)})
 
             return {
@@ -690,6 +698,7 @@ class MarketplaceService:
             }
 
         except Exception as e:
+            logger.warning("handle_update_all failed: %s", e, exc_info=True)
             return {"status": "failure", "error": str(e)}
 
     def _add_audit_log(self, audit_entry: Dict[str, Any]) -> None:

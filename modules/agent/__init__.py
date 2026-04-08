@@ -6,6 +6,9 @@ control plane and agent domain primitives.
 
 from modules.agent.module import AgentControlPlaneModule
 
+# Explicit entrypoint for module discovery
+__runtime_module_class__ = AgentControlPlaneModule
+
 from .deploy_service import AgentDeployConfig, AgentDeployService
 from .domain import (
     AgentEnrollmentManager,

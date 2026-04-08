@@ -104,8 +104,17 @@ async def run_cli(
         config=config,
         vault_port=storage_stack.vault_port,
         state_engine=state_engine,
-        critical_state_prefixes=list(DEFAULT_CRITICAL_STATE_PREFIXES),
     )
+    # App-level policy: какие namespaces гидратировать при старте.
+    async def _state_hydration_namespaces() -> list[str]:
+        all_namespaces = await runtime.storage.list_namespaces()
+        return [
+            ns
+            for ns in all_namespaces
+            if any(ns.startswith(prefix) for prefix in DEFAULT_CRITICAL_STATE_PREFIXES)
+        ]
+
+    runtime.set_state_hydration_callback(_state_hydration_namespaces)
 
     await _auto_load_plugins(runtime, config)
     await runtime.start()

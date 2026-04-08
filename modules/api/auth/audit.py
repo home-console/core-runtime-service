@@ -7,6 +7,8 @@ import time
 import hashlib
 
 from .constants import AUTH_AUDIT_LOG_NAMESPACE
+import logging
+logger = logging.getLogger(__name__)
 
 
 async def audit_log_auth_event(
@@ -29,10 +31,9 @@ async def audit_log_auth_event(
     try:
         services = None
         try:
-            kernel_context = getattr(runtime, "kernel_context", None)
-            if kernel_context is not None:
-                services = kernel_context.get_service("service_registry")
+            services = getattr(runtime, "service_registry", None)
         except Exception:
+            logger.debug("audit.audit_log_auth_event: error (using fallback value)", exc_info=True)
             services = None
         if services is None:
             services = getattr(runtime, "service_registry", None)
@@ -78,7 +79,7 @@ async def audit_log_auth_event(
                         context={"event_type": event_type, "subject": safe_subject}
                     )
             except Exception:
-                pass
+                logger.warning("Unhandled exception", exc_info=True)
     
     except Exception as e:
         # Не падаем при ошибке audit logging
@@ -98,4 +99,4 @@ async def audit_log_auth_event(
                     }
                 )
         except Exception:
-            pass
+            logger.warning("Unhandled exception", exc_info=True)

@@ -13,6 +13,7 @@ Trust restoration engine
 Unified security decision orchestrator
 """
 
+import logging
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from core.runtime.runtime_module import RuntimeModule
@@ -36,6 +37,9 @@ from modules.credentials.services import CredentialService
 
 if TYPE_CHECKING:
     from core.audit.binder import AuditBinder
+
+
+logger = logging.getLogger(__name__)
 
 
 class PolicyStoreAdapter:
@@ -117,6 +121,9 @@ class CredentialModule(RuntimeModule):
         Abuse Detection:
         Secret access validated for behavioral anomalies ().
         """
+        if self.runtime is None:
+            raise RuntimeError("CredentialsModule requires full runtime (not RuntimeContext)")
+
         # Initialize repository (StorageManager для core/vault, иначе только secret_store)
         sm = getattr(self.runtime, "storage_manager", None)
         if sm is None:
@@ -194,26 +201,8 @@ class CredentialModule(RuntimeModule):
             audit_logger=self.runtime.audit if hasattr(self.runtime, "audit") else None,
         )
 
-        # Start background cleanup tasks
-        try:
-            await self._abuse_detector.start()
-        except Exception as e:
-            print(f"[WARNING] Failed to start abuse detector: {e}")
-
-        try:
-            await self._mfa_service.start()
-        except Exception as e:
-            print(f"[WARNING] Failed to start MFA service: {e}")
-
-        try:
-            await self._risk_engine.start()
-        except Exception as e:
-            print(f"[WARNING] Failed to start risk engine: {e}")
-
-        try:
-            self._trust_engine.start()  # Non-async start
-        except Exception as e:
-            print(f"[WARNING] Failed to start trust engine: {e}")
+        # Start critical security components in fail-closed mode.
+        await self._start_security_components_or_fail()
 
         # Register all 8 operations through service registry
         await self._register_create_operation()
@@ -462,4 +451,61 @@ class CredentialModule(RuntimeModule):
             "credential.count",
             lambda runtime, **kw: count_handler(runtime, **kw),
             resource="credential",
+        )
+
+    async def _start_security_components_or_fail(self) -> None:
+        """
+        Start background security components in fail-closed mode.
+
+        If any critical component fails to start, registration fails to avoid
+        running credentials in degraded security mode.
+        """
+        started: list[Any] = []
+        failures: list[str] = []
+
+        startup_plan = [
+            ("abuse_detector", self._abuse_detector, "start", True),
+            ("mfa_service", self._mfa_service, "start", True),
+            ("risk_engine", self._risk_engine, "start", True),
+            ("trust_engine", self._trust_engine, "start", False),
+        ]
+
+        for name, instance, method_name, is_async in startup_plan:
+            if instance is None:
+                failures.append(f"{name}: not initialized")
+                break
+            try:
+                method = getattr(instance, method_name)
+                if is_async:
+                    await method()
+                else:
+                    method()
+                started.append(instance)
+            except Exception as e:
+                logger.warning("module._start_security_components_or_fail: unexpected error: %s", e, exc_info=True)
+                failures.append(f"{name}: {e}")
+                # Fail-closed: don't start later components after first failure.
+                break
+
+        if not failures:
+            return
+
+        for instance in reversed(started):
+            stop_method = getattr(instance, "stop", None)
+            if stop_method is None:
+                continue
+            try:
+                result = stop_method()
+                if hasattr(result, "__await__"):
+                    await result
+            except Exception as e:
+                logger.warning(
+                    "credentials security rollback failed for %s: %s",
+                    type(instance).__name__,
+                    e,
+                )
+
+        raise RuntimeError(
+            "Failed to start credential security components: "
+            + "; ".join(failures)
         )

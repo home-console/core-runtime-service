@@ -13,6 +13,8 @@ from typing import Any, Dict, Optional
 
 from core.capability import protocol as capability_protocol
 from core.operations.remote_executor_interface import IRemoteExecutor
+import logging
+logger = logging.getLogger(__name__)
 
 
 class RemoteOperationExecutor(IRemoteExecutor):
@@ -138,7 +140,8 @@ class RemoteOperationExecutor(IRemoteExecutor):
 
         except (httpx.TimeoutException, httpx.ConnectError, httpx.NetworkError):
             return None
-        except Exception:
+        except Exception as e:
+            logger.warning("remote_executor.get_manifest: failed, returning None: %s", e, exc_info=True)
             return None
 
     @staticmethod
@@ -179,7 +182,8 @@ class RemoteOperationExecutor(IRemoteExecutor):
 
         except (httpx.TimeoutException, httpx.ConnectError, httpx.NetworkError):
             return None
-        except Exception:
+        except Exception as e:
+            logger.warning("remote_executor.check_health: failed, returning None: %s", e, exc_info=True)
             return None
 
     @staticmethod

@@ -8,10 +8,12 @@ import inspect
 import time
 from typing import Any
 
+from core.exception_groups import BEST_EFFORT_BACKGROUND_ERRORS
 from core.operations.interface import IOperationExecutor
 from core.operations.models import AttemptStatus, Operation, OperationError, OperationStatus
 from core.operations.registry import OperationHandlerRegistry
-
+import logging
+logger = logging.getLogger(__name__)
 
 class OperationExecutor(IOperationExecutor):
     def __init__(
@@ -95,7 +97,21 @@ class OperationExecutor(IOperationExecutor):
                 )
                 if operation.status == OperationStatus.RUNNING:
                     operation.status = OperationStatus.COMPLETED
-        except Exception as exc:
+        except LookupError as exc:
+            logger.debug(
+                "executor.execute: no handler for operation type %s: %s",
+                operation.type,
+                exc,
+            )
+            operation.status = OperationStatus.FAILED
+            if operation.error is None:
+                operation.error = OperationError(
+                    code="no_handler",
+                    message=str(exc),
+                    details={"exception_type": type(exc).__name__},
+                )
+        except BEST_EFFORT_BACKGROUND_ERRORS as exc:
+            logger.debug("executor.execute: handler error: %s", exc, exc_info=True)
             operation.status = OperationStatus.FAILED
             if operation.error is None:
                 operation.error = OperationError(

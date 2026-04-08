@@ -2,8 +2,14 @@
 API Router для RequestLoggerModule.
 """
 
+import logging
 from typing import Any, Dict
+
 from fastapi import APIRouter, HTTPException, Query, Request, Body
+
+from core.adapters.storage_errors import STORAGE_BOUNDARY_ERRORS
+
+logger = logging.getLogger(__name__)
 
 
 def create_request_logger_router(runtime: Any) -> APIRouter:
@@ -30,22 +36,30 @@ def create_request_logger_router(runtime: Any) -> APIRouter:
             Словарь с информацией о запросе и списком логов
         """
         try:
-            services = runtime.kernel_context.get_service("service_registry")
-            if not await services.has_service("request_logger.get_request_logs"):
+            if not await runtime.service_registry.has_service(
+                "request_logger.get_request_logs"
+            ):
                 raise HTTPException(
                     status_code=503,
                     detail="RequestLogger module is not available. The module may not be loaded or failed to start. Check server logs for details."
                 )
             
-            result = await services.call(
+            result = await runtime.service_registry.call(
                 "request_logger.get_request_logs",
                 request_id=request_id
             )
             return result
         except HTTPException:
             raise
+        except STORAGE_BOUNDARY_ERRORS as e:
+            logger.warning(
+                "request_logger router: get_request_logs storage boundary",
+                exc_info=True,
+            )
+            raise HTTPException(status_code=503, detail=str(e)) from e
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            logger.exception("request_logger router: get_request_logs failed")
+            raise HTTPException(status_code=500, detail=str(e)) from e
     
     @router.get("")
     async def list_requests(
@@ -63,14 +77,13 @@ def create_request_logger_router(runtime: Any) -> APIRouter:
             Словарь со списком запросов и метаданными
         """
         try:
-            services = runtime.kernel_context.get_service("service_registry")
-            if not await services.has_service("request_logger.list_requests"):
+            if not await runtime.service_registry.has_service("request_logger.list_requests"):
                 raise HTTPException(
                     status_code=503,
                     detail="RequestLogger module is not available. The module may not be loaded or failed to start. Check server logs for details."
                 )
             
-            result = await services.call(
+            result = await runtime.service_registry.call(
                 "request_logger.list_requests",
                 limit=limit,
                 offset=offset
@@ -78,8 +91,15 @@ def create_request_logger_router(runtime: Any) -> APIRouter:
             return result
         except HTTPException:
             raise
+        except STORAGE_BOUNDARY_ERRORS as e:
+            logger.warning(
+                "request_logger router: list_requests storage boundary",
+                exc_info=True,
+            )
+            raise HTTPException(status_code=503, detail=str(e)) from e
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            logger.exception("request_logger router: list_requests failed")
+            raise HTTPException(status_code=500, detail=str(e)) from e
     
     @router.delete("")
     async def clear_logs():
@@ -90,19 +110,25 @@ def create_request_logger_router(runtime: Any) -> APIRouter:
             Подтверждение очистки
         """
         try:
-            services = runtime.kernel_context.get_service("service_registry")
-            if not await services.has_service("request_logger.clear_logs"):
+            if not await runtime.service_registry.has_service("request_logger.clear_logs"):
                 raise HTTPException(
                     status_code=503,
                     detail="RequestLogger module is not available. The module may not be loaded or failed to start. Check server logs for details."
                 )
             
-            result = await services.call("request_logger.clear_logs")
+            result = await runtime.service_registry.call("request_logger.clear_logs")
             return result
         except HTTPException:
             raise
+        except STORAGE_BOUNDARY_ERRORS as e:
+            logger.warning(
+                "request_logger router: clear_logs storage boundary",
+                exc_info=True,
+            )
+            raise HTTPException(status_code=503, detail=str(e)) from e
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            logger.exception("request_logger router: clear_logs failed")
+            raise HTTPException(status_code=500, detail=str(e)) from e
     
     @router.post("/log")
     async def log_frontend_request(
@@ -123,8 +149,7 @@ def create_request_logger_router(runtime: Any) -> APIRouter:
         }
         """
         try:
-            services = runtime.kernel_context.get_service("service_registry")
-            if not await services.has_service("request_logger.log"):
+            if not await runtime.service_registry.has_service("request_logger.log"):
                 raise HTTPException(
                     status_code=503,
                     detail="RequestLogger module is not available. The module may not be loaded or failed to start. Check server logs for details."
@@ -145,7 +170,7 @@ def create_request_logger_router(runtime: Any) -> APIRouter:
                 request_metadata["direction"] = "incoming"
             
             # Логируем сообщение
-            await services.call(
+            await runtime.service_registry.call(
                 "request_logger.log",
                 request_id=request_id,
                 level=level,
@@ -155,7 +180,7 @@ def create_request_logger_router(runtime: Any) -> APIRouter:
             
             # Сохраняем метаданные запроса и ответа, если они есть
             if request_metadata or response_metadata:
-                await services.call(
+                await runtime.service_registry.call(
                     "request_logger.set_request_metadata",
                     request_id=request_id,
                     request_metadata=request_metadata or {},
@@ -165,7 +190,14 @@ def create_request_logger_router(runtime: Any) -> APIRouter:
             return {"ok": True}
         except HTTPException:
             raise
+        except STORAGE_BOUNDARY_ERRORS as e:
+            logger.warning(
+                "request_logger router: log_frontend_request storage boundary",
+                exc_info=True,
+            )
+            raise HTTPException(status_code=503, detail=str(e)) from e
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            logger.exception("request_logger router: log_frontend_request failed")
+            raise HTTPException(status_code=500, detail=str(e)) from e
     
     return router

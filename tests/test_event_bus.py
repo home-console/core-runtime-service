@@ -22,7 +22,49 @@ async def test_subscribe_and_publish():
 
     assert received['type'] == 'test.event'
     assert received['data']['x'] == 1
+    # Typed handler now also receives unified payload metadata
+    assert received['data']['type'] == 'test.event'
     assert 'id' in received['data']
+
+
+@pytest.mark.asyncio
+async def test_subscribe_simple_handler_gets_type_and_id():
+    bus = EventBus()
+    received = {}
+
+    async def simple_handler(payload):
+        received['payload'] = payload
+
+    await bus.subscribe(simple_handler)
+    await bus.publish('simple.event', {'x': 1})
+
+    await asyncio.sleep(0)
+
+    assert received['payload']['type'] == 'simple.event'
+    assert received['payload']['x'] == 1
+    assert 'id' in received['payload']
+
+
+@pytest.mark.asyncio
+async def test_subscribe_simple_handler_for_specific_event_type_and_unsubscribe():
+    bus = EventBus()
+    received = {"count": 0}
+
+    async def simple_handler(payload):
+        received["count"] += 1
+        assert payload["type"] == "x"
+        assert "id" in payload
+
+    await bus.subscribe("x", simple_handler)
+    await bus.publish("x", {"v": 1})
+    await asyncio.sleep(0)
+    assert received["count"] == 1
+
+    # Unsubscribe by passing the original simple handler (not the wrapper).
+    await bus.unsubscribe("x", simple_handler)
+    await bus.publish("x", {"v": 2})
+    await asyncio.sleep(0)
+    assert received["count"] == 1
 
 
 @pytest.mark.asyncio

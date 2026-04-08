@@ -8,6 +8,9 @@ StateEngine - управление общим состоянием runtime.
 from typing import Any, Optional
 import asyncio
 import time
+import logging
+from core.exception_groups import BEST_EFFORT_BACKGROUND_ERRORS
+logger = logging.getLogger(__name__)
 
 
 class StateEngine:
@@ -168,9 +171,16 @@ class StateEngine:
                 except asyncio.CancelledError:
                     self._cleanup_running = False
                     break
-                except Exception:
-                    # Игнорируем ошибки в фоновой задаче
-                    pass
+                except (RuntimeError, TypeError, KeyError, ValueError):
+                    logger.debug(
+                        "state_engine._cleanup_expired: recoverable error",
+                        exc_info=True,
+                    )
+                except BEST_EFFORT_BACKGROUND_ERRORS:
+                    logger.warning(
+                        "state_engine._cleanup_expired: unexpected error (suppressed)",
+                        exc_info=True,
+                    )
         
         self._cleanup_task = asyncio.create_task(_cleanup_expired())
 

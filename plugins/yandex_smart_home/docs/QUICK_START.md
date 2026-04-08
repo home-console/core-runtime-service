@@ -47,12 +47,14 @@ if config:  # If OAuth already configured
         client_id=config["client_id"],
         client_secret=config["client_secret"],
         redirect_uri=config["redirect_uri"],
-        storage=self.runtime.storage,
+        storage=self.context.storage,
         http_client=await self._get_http_session()
     )
     
     endpoints = UnifiedYandexAuthEndpoints(self.unified_auth)
-    endpoints.register_routes(self.runtime.http_registry.app)
+    # Регистрируйте HTTP через SDK путь (PluginAPI), а не через внутренности registry/app.
+    # Например: self.register_http_endpoint(HttpEndpoint(...))
+    endpoints.register_routes(self.context.http)
 ```
 
 ### 3. Update Services

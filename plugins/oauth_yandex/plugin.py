@@ -4,7 +4,7 @@
 
 Роль:
 - capability provider для возможности `oauth:yandex`
-- используется другими плагинами/модулями только через `runtime.service_registry`
+- используется другими плагинами/модулями только через `self.register_service(...)` / `self.call_service(...)`
 - не содержит доменной логики устройств/интеграций, только инфраструктурный OAuth
 
 Назначение:
@@ -13,7 +13,7 @@
 - обмен `code` на `access_token`/`refresh_token` (`exchange_code`)
 - проверка статуса авторизации (`get_status`)
 - автоматическое обновление токенов через refresh (`get_access_token`)
-- хранение токенов через `runtime.storage`
+- хранение токенов через SDK-хелперы `self.storage_get/set(...)` (под капотом storage)
 
 Публичная поверхность capability-провайдера (для других плагинов через ServiceRegistry):
 - `oauth_yandex.get_access_token` — получить валидный access_token (с auto-refresh)
@@ -26,7 +26,7 @@ INTERNAL или DEPRECATED и сохраняются только для обр�
 - Вся логика OAuth — в плагине (self-contained)
 - UI НЕ передаёт OAuth параметры после вызова `configure`
 - UI только отображает статус и инициирует действия
-- Конфигурация и токены хранятся в `runtime.storage`
+- Конфигурация и токены хранятся в storage (через `self.storage_*`)
 - Автоматический refresh токенов прозрачен для потребителей
 
 Ограничения:
@@ -43,7 +43,7 @@ from urllib.parse import urlencode
 
 import aiohttp
 
-from core.kernel.base_plugin import BasePlugin, PluginMetadata
+from sdk.plugin_ext import BasePlugin, PluginMetadata
 
 # Логический идентификатор capability, который реализует этот плагин.
 # Сервисы ServiceRegistry остаются в пространстве имён `oauth_yandex.*` для
@@ -305,8 +305,8 @@ class OAuthYandexPlugin(BasePlugin):
                 ValueError: если code не указан
                 RuntimeError: если обмен не удался
             """
-            from core.runtime.operation_context import operation
-            
+            from sdk import operation
+
             async with operation("oauth.exchange_code", self.metadata.name, self.runtime):
                 if not code:
                     raise ValueError("code обязателен")
@@ -638,7 +638,7 @@ class OAuthYandexPlugin(BasePlugin):
                                 # Если новый токен тоже истек, продолжаем обновление
                         
                         # Пытаемся обновить (только если токен не был обновлен другим запросом)
-                        from core.runtime.operation_context import operation
+                        from sdk import operation
                         try:
                             async with operation("oauth.refresh_token", self.metadata.name, self.runtime):
                                 new_token = await _refresh_access_token()
@@ -684,7 +684,7 @@ class OAuthYandexPlugin(BasePlugin):
             """Получить сохранённые токены (internal service, deprecated).
 
             Этот сервис предназначен только для внутреннего использования другими
-            плагинами через `runtime.service_registry.call("oauth_yandex.get_tokens")`.
+            плагинами через `await self.call_service("oauth_yandex.get_tokens")`.
             Ни при каких условиях токены не регистрируются как публичный HTTP-эндпоинт.
             
             ВАЖНО: Для получения валидного access_token используйте get_access_token().
@@ -828,6 +828,9 @@ class OAuthYandexPlugin(BasePlugin):
         # Публичные capability-сервисы (используются другими плагинами/модулями):
         await self.register_service("oauth_yandex.get_status", get_status)
         await self.register_service("oauth_yandex.get_access_token", get_access_token)
+        # Нейтральные сервисы без привязки к провайдеру (для модульного слоя).
+        await self.register_service("oauth.get_status", get_status)
+        await self.register_service("oauth.get_access_token", get_access_token)
 
         # INTERNAL / admin / legacy surface — только для админов (явно admin_only):
         await self.register_service("oauth_yandex.configure", configure, admin_only=True)
@@ -836,6 +839,13 @@ class OAuthYandexPlugin(BasePlugin):
         await self.register_service("oauth_yandex.get_tokens", get_tokens, admin_only=True)
         await self.register_service("oauth_yandex.validate_token", validate_token, admin_only=True)
         await self.register_service("oauth_yandex.set_tokens", set_tokens, admin_only=True)
+        # Нейтральные admin-only сервисы (совместимы по контрактам).
+        await self.register_service("oauth.configure", configure, admin_only=True)
+        await self.register_service("oauth.get_authorize_url", get_authorize_url, admin_only=True)
+        await self.register_service("oauth.exchange_code", exchange_code, admin_only=True)
+        await self.register_service("oauth.get_tokens", get_tokens, admin_only=True)
+        await self.register_service("oauth.validate_token", validate_token, admin_only=True)
+        await self.register_service("oauth.set_tokens", set_tokens, admin_only=True)
 
         async def set_cookies(cookies: Dict[str, str]) -> Dict[str, Any]:
             """Сохранить cookies сессии Яндекса для Quasar API.
@@ -872,6 +882,9 @@ class OAuthYandexPlugin(BasePlugin):
         await self.register_service("oauth_yandex.clear_tokens", clear_tokens, admin_only=True)
         await self.register_service("oauth_yandex.set_cookies", set_cookies, admin_only=True)
         await self.register_service("oauth_yandex.get_cookies", get_cookies, admin_only=True)
+        await self.register_service("oauth.clear_tokens", clear_tokens, admin_only=True)
+        await self.register_service("oauth.set_cookies", set_cookies, admin_only=True)
+        await self.register_service("oauth.get_cookies", get_cookies, admin_only=True)
 
         # Register operation handler for oauth.refresh_token so operations API can invoke refresh
         try:
@@ -886,10 +899,8 @@ class OAuthYandexPlugin(BasePlugin):
                     "timestamp": result.get("timestamp"),
                 }
 
-            ops = getattr(self.runtime, "operations", None)
-            if ops:
-                # register_handler is synchronous
-                ops.register_handler("oauth.refresh_token", handle_oauth_refresh)
+            # register_handler is synchronous
+            self.register_operation_handler("oauth.refresh_token", handle_oauth_refresh)
         except Exception:
             # Best-effort: failure to register should not block plugin load
             pass
@@ -897,7 +908,8 @@ class OAuthYandexPlugin(BasePlugin):
         # Дополнительно: единый login entrypoint через контролируемый WebView
         # (новая архитектура). Сервисы: yandex.login.start / yandex.login.status
         from .login_flow import YandexLoginService
-        self._login_service = YandexLoginService(self.runtime)
+        # Передаём self (BasePlugin) как SDK-first facade: call_service/storage_*/publish_event/has_service.
+        self._login_service = YandexLoginService(self)
 
         async def yandex_login_start() -> Dict[str, Any]:
             return await self._login_service.start()
@@ -908,7 +920,7 @@ class OAuthYandexPlugin(BasePlugin):
         await self.register_service("yandex.login.start", yandex_login_start, admin_only=True)
         await self.register_service("yandex.login.status", yandex_login_status, admin_only=True)
 
-        # Регистрируем HTTP-контракты через runtime.http.register().
+        # Регистрируем HTTP-контракты через SDK helper `self.register_http_endpoint(...)`.
         #
         # ВАЖНО:
         # - Эти HTTP-эндпоинты считаются legacy/user-facing поверхностью и
@@ -918,20 +930,20 @@ class OAuthYandexPlugin(BasePlugin):
         #   напрямую через HTTP.
         # - UI НЕ должен передавать OAuth параметры после configure —
         #   они берутся из storage автоматически.
-        from core.http.models import HttpEndpoint
+        from sdk.http import HttpEndpoint
         try:
             # POST /oauth/yandex/configure — сохранить конфигурацию OAuth
             self.register_http_endpoint(HttpEndpoint(
                 method="POST",
                 path="/oauth/yandex/configure",
-                service="oauth_yandex.configure",
+                service="oauth.configure",
                 description="Настроить OAuth параметры (client_id, client_secret, redirect_uri)"
             ))
             # GET /oauth/yandex/status — получить статус авторизации (не возвращает токены)
             self.register_http_endpoint(HttpEndpoint(
                 method="GET",
                 path="/oauth/yandex/status",
-                service="oauth_yandex.get_status",
+                service="oauth.get_status",
                 description="Получить статус OAuth: configured, authorized, access_token_valid"
             ))
             # [DEPRECATED] /oauth/yandex/authorize-url — НЕ публикуем как HTTP.
@@ -941,35 +953,35 @@ class OAuthYandexPlugin(BasePlugin):
             self.register_http_endpoint(HttpEndpoint(
                 method="POST",
                 path="/oauth/yandex/exchange-code",
-                service="oauth_yandex.exchange_code",
+                service="oauth.exchange_code",
                 description="Обменять code на токены (использует сохранённую конфигурацию)"
             ))
             # GET /oauth/yandex/validate — проверить access_token (optional query param `token`)
             self.register_http_endpoint(HttpEndpoint(
                 method="GET",
                 path="/oauth/yandex/validate",
-                service="oauth_yandex.validate_token",
+                service="oauth.validate_token",
                 description="Проверить валидность access_token (если не указан, используется сохранённый)"
             ))
             # POST /oauth/yandex/unlink — очистить токены и разлинковать аккаунт
             self.register_http_endpoint(HttpEndpoint(
                 method="POST",
                 path="/oauth/yandex/unlink",
-                service="oauth_yandex.clear_tokens",
+                service="oauth.clear_tokens",
                 description="Очистить сохранённые токены (разлинковка аккаунта)"
             ))
             # POST /oauth/yandex/cookies — сохранить cookies для Quasar API
             self.register_http_endpoint(HttpEndpoint(
                 method="POST",
                 path="/oauth/yandex/cookies",
-                service="oauth_yandex.set_cookies",
+                service="oauth.set_cookies",
                 description="Сохранить Yandex session cookies для Quasar API"
             ))
             # GET /oauth/yandex/cookies — получить cookies
             self.register_http_endpoint(HttpEndpoint(
                 method="GET",
                 path="/oauth/yandex/cookies",
-                service="oauth_yandex.get_cookies",
+                service="oauth.get_cookies",
                 description="Получить сохранённые Yandex session cookies"
             ))
 
@@ -1005,6 +1017,17 @@ class OAuthYandexPlugin(BasePlugin):
             await self.unregister_service("oauth_yandex.set_tokens")
             await self.unregister_service("oauth_yandex.set_cookies")
             await self.unregister_service("oauth_yandex.get_cookies")
+            await self.unregister_service("oauth.get_status")
+            await self.unregister_service("oauth.get_access_token")
+            await self.unregister_service("oauth.configure")
+            await self.unregister_service("oauth.get_authorize_url")
+            await self.unregister_service("oauth.exchange_code")
+            await self.unregister_service("oauth.get_tokens")
+            await self.unregister_service("oauth.validate_token")
+            await self.unregister_service("oauth.clear_tokens")
+            await self.unregister_service("oauth.set_tokens")
+            await self.unregister_service("oauth.set_cookies")
+            await self.unregister_service("oauth.get_cookies")
             await self.unregister_service("yandex.login.start")
             await self.unregister_service("yandex.login.status")
         except Exception:

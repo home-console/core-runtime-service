@@ -7,7 +7,7 @@ Yandex QR-code authentication (magic_x_token):
 - x_token used for Quasar API calls
 
 Архитектура: UI не знает провайдера/OAuth. Плагин пишет состояние в
-runtime.state["auth_inspector.flows"]; Inspector читает; UI только
+storage ("inspector"/"auth_flows"); Inspector читает; UI только
 GET /admin/v1/inspector/auth и POST /admin/v1/operations.
 
 HTTP API (legacy/прямые вызовы):
@@ -26,11 +26,12 @@ Storage:
 """
 from typing import Any, Dict, List, Optional
 
-from core.kernel.base_plugin import BasePlugin, PluginMetadata
+from sdk.plugin_ext import BasePlugin, PluginMetadata
 from .device_auth_service import YandexDeviceAuthService
 
-AUTH_INSPECTOR_FLOWS_KEY = "auth_inspector.flows"
 FLOW_ID_YANDEX_DEVICE = "yandex-device"
+AUTH_INSPECTOR_STORAGE_NS = "inspector"
+AUTH_INSPECTOR_STORAGE_KEY = "auth_flows"
 
 
 class YandexDeviceAuthPlugin(BasePlugin):
@@ -49,7 +50,9 @@ class YandexDeviceAuthPlugin(BasePlugin):
     async def _sync_auth_inspector_flows(
         self, extra_flow_data: Optional[Dict[str, Any]] = None
     ) -> None:
-        """Обновить runtime.state["auth_inspector.flows"] — UI читает только Inspector, не знает провайдера.
+        """Обновить инспекторные auth-flows в storage (SDK-first).
+
+        UI читает только Inspector, не знает провайдера.
         extra_flow_data: при старте QR — сюда передать result с qr_url/qr_svg для отображения в UI."""
         try:
             account = await self.auth_service.get_account_status()
@@ -92,11 +95,11 @@ class YandexDeviceAuthPlugin(BasePlugin):
                 if extra_flow_data.get("qr_svg"):
                     flow["qr_svg"] = extra_flow_data["qr_svg"]
 
-            raw = await self.runtime.state.get(AUTH_INSPECTOR_FLOWS_KEY)
+            raw = await self.storage_get(AUTH_INSPECTOR_STORAGE_NS, AUTH_INSPECTOR_STORAGE_KEY)
             flows: List[Dict[str, Any]] = list(raw) if isinstance(raw, list) else []
             flows = [f for f in flows if isinstance(f, dict) and f.get("id") != FLOW_ID_YANDEX_DEVICE]
             flows.append(flow)
-            await self.runtime.state.set(AUTH_INSPECTOR_FLOWS_KEY, flows)
+            await self.storage_set(AUTH_INSPECTOR_STORAGE_NS, AUTH_INSPECTOR_STORAGE_KEY, flows)
         except Exception:
             pass
 
@@ -104,7 +107,8 @@ class YandexDeviceAuthPlugin(BasePlugin):
         """Register services and HTTP endpoints."""
         await super().on_load()
 
-        self.auth_service = YandexDeviceAuthService(self.runtime)
+        # Передаём self (BasePlugin) как SDK-first facade: call_service/storage_*/publish_event/has_service.
+        self.auth_service = YandexDeviceAuthService(self)
 
         async def start_device_auth(
             *, body: Optional[Dict[str, Any]] = None, method: Optional[str] = None, **kwargs
@@ -235,36 +239,47 @@ class YandexDeviceAuthPlugin(BasePlugin):
         await self.register_service(
             "yandex_device_auth.start", start_device_auth, admin_only=True
         )
+        await self.register_service("device_auth.start", start_device_auth, admin_only=True)
         await self.register_service(
             "yandex_device_auth.status", check_qr_status, admin_only=True
         )
+        await self.register_service("device_auth.status", check_qr_status, admin_only=True)
         await self.register_service(
             "yandex_device_auth.cookies", save_cookies, admin_only=True
         )
+        await self.register_service("device_auth.cookies", save_cookies, admin_only=True)
         await self.register_service(
             "yandex_device_auth.get_account_status",
             get_account_status,
             admin_only=True,
         )
         await self.register_service(
+            "device_auth.get_account_status",
+            get_account_status,
+            admin_only=True,
+        )
+        await self.register_service(
             "yandex_device_auth.cancel", cancel_auth, admin_only=True
         )
+        await self.register_service("device_auth.cancel", cancel_auth, admin_only=True)
         await self.register_service(
             "yandex_device_auth.unlink", unlink_account, admin_only=True
         )
+        await self.register_service("device_auth.unlink", unlink_account, admin_only=True)
         await self.register_service(
             "yandex_device_auth.get_session", get_account_session, admin_only=True
         )
+        await self.register_service("device_auth.get_session", get_account_session, admin_only=True)
 
         # Register HTTP endpoints
-        from core.http.models import HttpEndpoint
+        from sdk.http import HttpEndpoint
 
         try:
             self.register_http_endpoint(
                 HttpEndpoint(
                     method="POST",
                     path="/yandex/auth/device/start",
-                    service="yandex_device_auth.start",
+                    service="device_auth.start",
                     description="Start QR or password authorization",
                 )
             )
@@ -273,7 +288,7 @@ class YandexDeviceAuthPlugin(BasePlugin):
                 HttpEndpoint(
                     method="GET",
                     path="/yandex/auth/device/status",
-                    service="yandex_device_auth.status",
+                    service="device_auth.status",
                     description="Check QR confirmation status",
                 )
             )
@@ -282,7 +297,7 @@ class YandexDeviceAuthPlugin(BasePlugin):
                 HttpEndpoint(
                     method="POST",
                     path="/yandex/auth/device/cookies",
-                    service="yandex_device_auth.cookies",
+                    service="device_auth.cookies",
                     description="Save cookies from manual submission",
                 )
             )
@@ -291,7 +306,7 @@ class YandexDeviceAuthPlugin(BasePlugin):
                 HttpEndpoint(
                     method="GET",
                     path="/yandex/auth/device/session",
-                    service="yandex_device_auth.get_session",
+                    service="device_auth.get_session",
                     description="Get account session status",
                 )
             )
@@ -300,7 +315,7 @@ class YandexDeviceAuthPlugin(BasePlugin):
                 HttpEndpoint(
                     method="POST",
                     path="/yandex/auth/device/cancel",
-                    service="yandex_device_auth.cancel",
+                    service="device_auth.cancel",
                     description="Cancel ongoing authorization",
                 )
             )
@@ -309,7 +324,7 @@ class YandexDeviceAuthPlugin(BasePlugin):
                 HttpEndpoint(
                     method="POST",
                     path="/yandex/auth/device/unlink",
-                    service="yandex_device_auth.unlink",
+                    service="device_auth.unlink",
                     description="Unlink account",
                 )
             )
@@ -318,37 +333,38 @@ class YandexDeviceAuthPlugin(BasePlugin):
 
         # Operation handlers: UI вызывает POST /admin/v1/operations с type из auth_flows;
         # operations.execute() ищет handler по type — регистрируем делегацию в service_registry.
-        ops = getattr(self.runtime, "operations", None)
-        if ops and hasattr(ops, "register_handler"):
-
+        try:
             async def _op_start(params: Any, context: Any) -> Dict[str, Any]:
                 result = await self.call_service(
-                    "yandex_device_auth.start", body=params if isinstance(params, dict) else {}
+                    "device_auth.start", body=params if isinstance(params, dict) else {}
                 )
                 return result if isinstance(result, dict) else {"value": result}
 
             async def _op_status(params: Any, context: Any) -> Dict[str, Any]:
                 result = await self.call_service(
-                    "yandex_device_auth.status", body=params if isinstance(params, dict) else {}
+                    "device_auth.status", body=params if isinstance(params, dict) else {}
                 )
                 return result if isinstance(result, dict) else {"value": result}
 
             async def _op_cancel(params: Any, context: Any) -> Dict[str, Any]:
                 result = await self.call_service(
-                    "yandex_device_auth.cancel", body=params if isinstance(params, dict) else {}
+                    "device_auth.cancel", body=params if isinstance(params, dict) else {}
                 )
                 return result if isinstance(result, dict) else {"value": result}
 
             async def _op_unlink(params: Any, context: Any) -> Dict[str, Any]:
                 result = await self.call_service(
-                    "yandex_device_auth.unlink", body=params if isinstance(params, dict) else {}
+                    "device_auth.unlink", body=params if isinstance(params, dict) else {}
                 )
                 return result if isinstance(result, dict) else {"value": result}
 
-            ops.register_handler("yandex_device_auth.start", _op_start)
-            ops.register_handler("yandex_device_auth.status", _op_status)
-            ops.register_handler("yandex_device_auth.cancel", _op_cancel)
-            ops.register_handler("yandex_device_auth.unlink", _op_unlink)
+            self.register_operation_handler("device_auth.start", _op_start)
+            self.register_operation_handler("device_auth.status", _op_status)
+            self.register_operation_handler("device_auth.cancel", _op_cancel)
+            self.register_operation_handler("device_auth.unlink", _op_unlink)
+        except Exception:
+            # Best-effort: отсутствие operations подсистемы не должно блокировать load.
+            pass
 
         await self._sync_auth_inspector_flows()
 
@@ -360,10 +376,10 @@ class YandexDeviceAuthPlugin(BasePlugin):
             await self.auth_service.cleanup()
 
         try:
-            raw = await self.runtime.state.get(AUTH_INSPECTOR_FLOWS_KEY)
+            raw = await self.storage_get(AUTH_INSPECTOR_STORAGE_NS, AUTH_INSPECTOR_STORAGE_KEY)
             flows = list(raw) if isinstance(raw, list) else []
             flows = [f for f in flows if isinstance(f, dict) and f.get("id") != FLOW_ID_YANDEX_DEVICE]
-            await self.runtime.state.set(AUTH_INSPECTOR_FLOWS_KEY, flows)
+            await self.storage_set(AUTH_INSPECTOR_STORAGE_NS, AUTH_INSPECTOR_STORAGE_KEY, flows)
         except Exception:
             pass
 
@@ -375,5 +391,12 @@ class YandexDeviceAuthPlugin(BasePlugin):
             await self.unregister_service("yandex_device_auth.cancel")
             await self.unregister_service("yandex_device_auth.unlink")
             await self.unregister_service("yandex_device_auth.get_session")
+            await self.unregister_service("device_auth.start")
+            await self.unregister_service("device_auth.status")
+            await self.unregister_service("device_auth.cookies")
+            await self.unregister_service("device_auth.get_account_status")
+            await self.unregister_service("device_auth.cancel")
+            await self.unregister_service("device_auth.unlink")
+            await self.unregister_service("device_auth.get_session")
         except Exception:
             pass

@@ -26,7 +26,8 @@ import asyncio
 import os
 from typing import TYPE_CHECKING, Optional
 
-from core.kernel.base_plugin import BasePlugin, PluginMetadata
+from sdk.plugin_ext import BasePlugin, PluginMetadata
+from sdk import ExternalDeviceDiscoveredPayload
 from .scanner import NetworkScanner
 
 if TYPE_CHECKING:
@@ -59,7 +60,7 @@ class NetworkScannerPlugin(BasePlugin):
         await super().on_load()
 
         # Инициализируем NetworkScanner
-        self.scanner = NetworkScanner(logger=self.runtime.logger if hasattr(self.runtime, 'logger') else None)
+        self.scanner = NetworkScanner(logger=None)
         self._background_tasks: set = set()
         self._scan_task: Optional[asyncio.Task] = None
         
@@ -71,7 +72,7 @@ class NetworkScannerPlugin(BasePlugin):
         # Регистрируем сервисы в service_registry
         await self._register_services()
         
-        self._log("info", "Network Scanner плагин загружен")
+        await self._log("info", "Network Scanner плагин загружен")
 
     async def _register_services(self) -> None:
         """Регистрация сервисов в service_registry."""
@@ -92,7 +93,7 @@ class NetworkScannerPlugin(BasePlugin):
             
             # Опубликуем события об обнаруженных устройствах
             for host in hosts:
-                device_event = {
+                device_event: ExternalDeviceDiscoveredPayload = {
                     "ip_address": host.ip_address,
                     "hostname": host.hostname,
                     "mac_address": host.mac_address,
@@ -106,7 +107,7 @@ class NetworkScannerPlugin(BasePlugin):
                         device_event
                     )
                 except Exception as e:
-                    self._log("error", f"Ошибка при публикации события: {e}")
+                    await self._log("error", f"Ошибка при публикации события: {e}")
             
             return {
                 "status": "success",
@@ -181,14 +182,14 @@ class NetworkScannerPlugin(BasePlugin):
                 get_auto_scan_status_service,
                 admin_only=False
             )
-            self._log("info", "Сервисы зарегистрированы")
+            await self._log("info", "Сервисы зарегистрированы")
         except Exception as e:
-            self._log("error", f"Ошибка при регистрации сервисов: {e}")
+            await self._log("error", f"Ошибка при регистрации сервисов: {e}")
             raise
 
     async def on_start(self) -> None:
         """Запуск: инициализация автосканирования если включено в конфиге."""
-        self._log("info", "Network Scanner плагин запущен")
+        await self._log("info", "Network Scanner плагин запущен")
         
         # Проверяем переменные окружения для автосканирования
         auto_scan_enabled = os.getenv("NETWORK_SCANNER_AUTO_SCAN", "false").lower() == "true"
@@ -199,9 +200,9 @@ class NetworkScannerPlugin(BasePlugin):
             
             try:
                 await self._enable_auto_scan(interval, networks_list)
-                self._log("info", f"Автоматическое сканирование включено (интервал: {interval}с)")
+                await self._log("info", f"Автоматическое сканирование включено (интервал: {interval}с)")
             except Exception as e:
-                self._log("error", f"Ошибка при включении автосканирования: {e}")
+                await self._log("error", f"Ошибка при включении автосканирования: {e}")
 
     async def on_stop(self) -> None:
         """Остановка: отмена фоновых задач."""
@@ -220,17 +221,17 @@ class NetworkScannerPlugin(BasePlugin):
             except asyncio.CancelledError:
                 pass
         
-        self._log("info", "Network Scanner плагин остановлен")
+        await self._log("info", "Network Scanner плагин остановлен")
 
     async def on_unload(self) -> None:
         """Выгрузка: очистка ресурсов."""
         self.scanner.clear_discovered_hosts()
-        self._log("info", "Network Scanner плагин выгружен")
+        await self._log("info", "Network Scanner плагин выгружен")
 
     async def _enable_auto_scan(self, interval_seconds: int = 300, networks: Optional[list] = None) -> None:
         """Включить периодическое сканирование сети."""
         if self._auto_scan_enabled:
-            self._log("warning", "Автосканирование уже включено")
+            await self._log("warning", "Автосканирование уже включено")
             return
         
         self._auto_scan_enabled = True
@@ -241,7 +242,7 @@ class NetworkScannerPlugin(BasePlugin):
         self._background_tasks.add(self._scan_task)
         self._scan_task.add_done_callback(self._background_tasks.discard)
         
-        self._log("info", f"Периодическое сканирование включено (интервал: {interval_seconds}с)")
+        await self._log("info", f"Периодическое сканирование включено (интервал: {interval_seconds}с)")
     
     async def _disable_auto_scan(self) -> None:
         """Отключить периодическое сканирование сети."""
@@ -257,14 +258,14 @@ class NetworkScannerPlugin(BasePlugin):
             except asyncio.CancelledError:
                 pass
         
-        self._log("info", "Периодическое сканирование отключено")
+        await self._log("info", "Периодическое сканирование отключено")
     
     async def _periodic_scan_loop(self) -> None:
         """Фоновая задача для периодического сканирования сети."""
         try:
             while self._auto_scan_enabled:
                 try:
-                    self._log("debug", f"Запуск периодического сканирования (интервал: {self._auto_scan_interval}с)")
+                    await self._log("debug", f"Запуск периодического сканирования (интервал: {self._auto_scan_interval}с)")
                     
                     networks = self._auto_scan_networks
                     if not networks:
@@ -273,26 +274,31 @@ class NetworkScannerPlugin(BasePlugin):
                     for network in networks:
                         try:
                             hosts = await self.scanner.scan_network(network=network)
-                            self._log("info", f"Периодическое сканирование: найдено {len(hosts)} хостов в {network}")
+                            await self._log("info", f"Периодическое сканирование: найдено {len(hosts)} хостов в {network}")
                         except Exception as e:
-                            self._log("error", f"Ошибка при сканировании {network}: {e}")
+                            await self._log("error", f"Ошибка при сканировании {network}: {e}")
                     
                     await asyncio.sleep(self._auto_scan_interval)
                     
                 except asyncio.CancelledError:
                     break
                 except Exception as e:
-                    self._log("error", f"Ошибка в периодическом сканировании: {e}")
+                    await self._log("error", f"Ошибка в периодическом сканировании: {e}")
                     await asyncio.sleep(self._auto_scan_interval)
         except asyncio.CancelledError:
-            self._log("info", "Периодическое сканирование отменено")
+            await self._log("info", "Периодическое сканирование отменено")
         except Exception as e:
-            self._log("error", f"Критическая ошибка в периодическом сканировании: {e}")
+            await self._log("error", f"Критическая ошибка в периодическом сканировании: {e}")
 
-    def _log(self, level: str, message: str) -> None:
-        """Логирование через runtime logger если доступен."""
-        if hasattr(self.runtime, 'logger'):
-            logger = self.runtime.logger
-            getattr(logger, level, print)(f"[NetworkScannerPlugin] {message}")
-        else:
-            print(f"[{level.upper()}] {message}")
+    async def _log(self, level: str, message: str) -> None:
+        """SDK-first логирование через service `logger.log` (best-effort)."""
+        try:
+            await self.call_service(
+                "logger.log",
+                level=level,
+                message=message,
+                plugin=self.metadata.name,
+            )
+        except Exception:
+            # Best-effort fallback: avoid crashing plugin because of logging failures.
+            pass

@@ -11,6 +11,8 @@ from modules.hooks.system import (
     unregister_system_hook,
 )
 from modules.hooks.runtime_contract import ensure_runtime_execution_contract
+import logging
+logger = logging.getLogger(__name__)
 
 
 class IdempotencyModule(RuntimeModule):
@@ -54,7 +56,8 @@ class IdempotencyModule(RuntimeModule):
 
         try:
             cached = await storage.get("operation_results", execution_token)
-        except Exception:
+        except Exception as e:
+            logger.warning("module._before_execute: failed: %s", e, exc_info=True)
             return SystemHookResult(allow=True)
 
         if isinstance(cached, dict):
@@ -95,5 +98,5 @@ class IdempotencyModule(RuntimeModule):
         try:
             await storage.set("operation_results", execution_token, outcome)
         except Exception:
-            pass
+            logger.warning("Unhandled exception", exc_info=True)
         return SystemHookResult(allow=True)

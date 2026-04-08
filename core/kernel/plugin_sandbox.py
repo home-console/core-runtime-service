@@ -7,10 +7,14 @@ PluginSandbox - создание изолированного контекста
 - Установку RuntimeContext для плагина
 """
 
-from typing import Optional, Any
+import logging
+from typing import Any, Optional
 
 from core.kernel.base_plugin import BasePlugin
 from core.kernel.plugin_runtime_facade import PluginRuntimeFacade
+from core.exception_groups import BEST_EFFORT_BACKGROUND_ERRORS
+
+_log = logging.getLogger(__name__)
 
 
 class PluginSandbox:
@@ -57,8 +61,18 @@ class PluginSandbox:
             # Create ServiceProxy for plugin (limited service access)
             if service_proxy_cls is not None and hasattr(runtime, "service_registry"):
                 allowed = getattr(plugin, "_manifest_allowed_services", None)
+
+                # Bridge current contract:
+                # - manifest.allowed_services is stored in plugin._plugin_context.manifest
+                # - sandbox historically looked only at _manifest_allowed_services
                 if not allowed or not isinstance(allowed, list):
-                    allowed = default_allowed_services
+                    ctx = getattr(plugin, "_plugin_context", None)
+                    manifest = getattr(ctx, "manifest", None) if ctx is not None else None
+                    manifest_allowed = getattr(manifest, "allowed_services", None)
+                    if isinstance(manifest_allowed, list) and manifest_allowed:
+                        allowed = manifest_allowed
+                    else:
+                        allowed = default_allowed_services
                 plugin.services = service_proxy_cls(
                     runtime.service_registry,
                     allowed_services=allowed,
@@ -84,8 +98,17 @@ class PluginSandbox:
                 agent_registry=getattr(runtime, "agent_registry", None),
             )  # type: ignore[assignment]
             
-        except Exception as e:
-            # Isolation setup failed - still continue but log
-            from core.observability.logger_helper import warning
-
-            warning(f"Plugin isolation setup failed for {plugin_name}: {e}")
+        except (AttributeError, RuntimeError, TypeError, ValueError) as e:
+            _log.warning(
+                "Plugin isolation setup failed for %s: %s",
+                plugin_name,
+                e,
+                exc_info=True,
+            )
+        except BEST_EFFORT_BACKGROUND_ERRORS as e:
+            _log.warning(
+                "Plugin isolation setup failed (unexpected) for %s: %s",
+                plugin_name,
+                e,
+                exc_info=True,
+            )

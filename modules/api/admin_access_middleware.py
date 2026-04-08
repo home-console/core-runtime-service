@@ -9,6 +9,8 @@ Admin Access Middleware — ограничение доступа к админ-
 import ipaddress
 from typing import Optional
 from fastapi import Request, Response
+import logging
+logger = logging.getLogger(__name__)
 
 
 def _add_cors_if_localhost(request: Request, response: Response) -> None:
@@ -70,6 +72,7 @@ def get_client_ip(request: Request) -> Optional[str]:
         cfg = getattr(runtime, "_config", None) if runtime is not None else None
         trust_proxy_headers = bool(getattr(cfg, "trust_proxy_headers", False)) if cfg is not None else False
     except Exception:
+        logger.debug("admin_access_middleware.get_client_ip: error (using fallback value)", exc_info=True)
         trust_proxy_headers = False
 
     if trust_proxy_headers:

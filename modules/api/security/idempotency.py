@@ -11,6 +11,8 @@ from starlette.responses import StreamingResponse
 import json
 import time
 import hashlib
+import logging
+logger = logging.getLogger(__name__)
 
 
 class IdempotencyStore:
@@ -115,6 +117,7 @@ async def idempotency_middleware(request: Request, call_next: Callable) -> Respo
     try:
         body_bytes = await request.body()
     except Exception:
+        logger.debug("idempotency.idempotency_middleware: error (using fallback value)", exc_info=True)
         body_bytes = b""
     body_hash = hashlib.sha256(body_bytes).hexdigest()
     fingerprint = f"{request.method}:{request.url.path}:{body_hash}"
@@ -173,8 +176,9 @@ async def idempotency_middleware(request: Request, call_next: Callable) -> Respo
                 headers=dict(response.headers),
                 media_type=response.media_type
             )
-        except Exception:
+        except Exception as e:
             # Если ошибка при сохранении — просто возвращаем оригинальный ответ
+            logger.warning("idempotency.idempotency_middleware: failed: %s", e, exc_info=True)
             return response
     
     return response

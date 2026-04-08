@@ -11,6 +11,8 @@ from .exceptions import (
     RotationFailedError,
     RotationNotAllowedError,
 )
+import logging
+logger = logging.getLogger(__name__)
 
 
 class CredentialRotationEngine:
@@ -281,8 +283,9 @@ class CredentialRotationEngine:
                 
             except asyncio.CancelledError:
                 break
-            except Exception:
+            except Exception as e:
                 # Continue on errors
+                logger.warning("engine._process_due_rotations: unexpected error: %s", e, exc_info=True)
                 await asyncio.sleep(10)
     
     async def _rotate_one(
@@ -295,4 +298,4 @@ class CredentialRotationEngine:
             await self.rotate_now(credential_id, policy)
         except Exception:
             # Error already logged by rotate_now
-            pass
+            logger.warning("Unhandled exception", exc_info=True)

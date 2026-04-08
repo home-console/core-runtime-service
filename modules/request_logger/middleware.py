@@ -1,13 +1,18 @@
+
 """
 Middleware для перехвата HTTP запросов и записи логов в RequestLoggerModule.
 """
-
+import logging
 import uuid
 import time
 from typing import Any, Callable, Optional
 from contextvars import ContextVar
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import ClientDisconnect
+
+from core.adapters.storage_errors import STORAGE_BOUNDARY_ERRORS
+logger = logging.getLogger(__name__)
 
 # ContextVar для хранения request_id в текущем контексте выполнения
 _request_id_var: ContextVar[Optional[str]] = ContextVar("request_id", default=None)
@@ -69,9 +74,8 @@ async def _log_request_to_console(
     message = f"{method} {path} {status_code} {duration_ms}ms{client_str}{err_str}"
 
     try:
-        services = runtime.kernel_context.get_service("service_registry")
-        if runtime and await services.has_service("logger.log"):
-            await services.call(
+        if runtime and await runtime.service_registry.has_service("logger.log"):
+            await runtime.service_registry.call(
                 "logger.log",
                 level="info",
                 message=message,
@@ -86,8 +90,13 @@ async def _log_request_to_console(
                 },
             )
             return
+    except STORAGE_BOUNDARY_ERRORS:
+        logger.debug(
+            "_log_request_to_console: logger.log unavailable (storage boundary)",
+            exc_info=True,
+        )
     except Exception:
-        pass
+        logger.debug("_log_request_to_console: logger.log failed", exc_info=True)
     print(f"[http] {message}")
 
 
@@ -169,9 +178,15 @@ async def request_logger_middleware(request: Request, call_next: Callable) -> Re
                     except (json.JSONDecodeError, UnicodeDecodeError):
                         # Если не JSON, сохраняем как строку (ограничиваем размер)
                         request_body = body_bytes.decode("utf-8", errors="replace")[:10000]
+        except ClientDisconnect:
+            logger.debug(
+                "request_logger middleware: client disconnected while reading request body",
+                exc_info=True,
+            )
         except Exception:
-            # Игнорируем ошибки при чтении тела
-            pass
+            logger.debug(
+                "request_logger middleware: request body capture failed", exc_info=True
+            )
     
     # Сохраняем метаданные запроса
     request_metadata = {
@@ -189,19 +204,18 @@ async def request_logger_middleware(request: Request, call_next: Callable) -> Re
     
     try:
         # Проверяем, доступен ли RequestLoggerModule
-        services = runtime.kernel_context.get_service("service_registry")
-        has_request_logger = await services.has_service("request_logger.log")
+        has_request_logger = await runtime.service_registry.has_service("request_logger.log")
         
         if has_request_logger:
             # Сохраняем метаданные запроса используя operation_id (который равен request_id для HTTP запросов)
-            await services.call(
+            await runtime.service_registry.call(
                 "request_logger.set_request_metadata",
                 request_id=operation_id,  # Используем operation_id вместо request_id
                 request_metadata=request_metadata
             )
             
             # Логируем начало запроса (только в request_logger, не в обычный logger чтобы избежать двойного логирования)
-            await services.call(
+            await runtime.service_registry.call(
                 "request_logger.log",
                 request_id=operation_id,  # Используем operation_id вместо request_id
                 level="info",
@@ -250,8 +264,10 @@ async def request_logger_middleware(request: Request, call_next: Callable) -> Re
                             except (AttributeError, TypeError):
                                 response_body = str(body_bytes)[:10000] if body_bytes else None
             except Exception:
-                # Игнорируем ошибки при чтении тела
-                pass
+                logger.debug(
+                    "request_logger middleware: response body capture failed",
+                    exc_info=True,
+                )
         
         # Сохраняем метаданные ответа
         response_metadata = {
@@ -263,7 +279,7 @@ async def request_logger_middleware(request: Request, call_next: Callable) -> Re
         
         if has_request_logger:
             # Сохраняем метаданные ответа используя operation_id
-            await services.call(
+            await runtime.service_registry.call(
                 "request_logger.set_request_metadata",
                 request_id=operation_id,  # Используем operation_id вместо request_id
                 request_metadata=request_metadata,
@@ -271,7 +287,7 @@ async def request_logger_middleware(request: Request, call_next: Callable) -> Re
             )
             
             # Логируем завершение запроса
-            await services.call(
+            await runtime.service_registry.call(
                 "request_logger.log",
                 request_id=operation_id,  # Используем operation_id вместо request_id
                 level="info",
@@ -308,21 +324,20 @@ async def request_logger_middleware(request: Request, call_next: Callable) -> Re
         }
         
         try:
-            services = runtime.kernel_context.get_service("service_registry")
-            has_request_logger = await services.has_service("request_logger.log")
+            has_request_logger = await runtime.service_registry.has_service("request_logger.log")
             if has_request_logger:
                 # Получаем operation_id для этого запроса
                 operation_id = _operation_id_var.get() or request_id
                 
                 # Сохраняем метаданные ответа с ошибкой используя operation_id
-                await services.call(
+                await runtime.service_registry.call(
                     "request_logger.set_request_metadata",
                     request_id=operation_id,  # Используем operation_id вместо request_id
                     request_metadata=request_metadata,
                     response_metadata=error_response_metadata
                 )
                 
-                await services.call(
+                await runtime.service_registry.call(
                     "request_logger.log",
                     request_id=operation_id,  # Используем operation_id вместо request_id
                     level="error",
@@ -334,8 +349,16 @@ async def request_logger_middleware(request: Request, call_next: Callable) -> Re
                         "origin": "http",  # HTTP запрос
                     }
                 )
+        except STORAGE_BOUNDARY_ERRORS:
+            logger.warning(
+                "request_logger middleware: error-path metadata (storage boundary)",
+                exc_info=True,
+            )
         except Exception:
-            pass
+            logger.debug(
+                "request_logger middleware: error-path metadata logging failed",
+                exc_info=True,
+            )
 
         # Логируем запрос в консоль даже при ошибке
         await _log_request_to_console(

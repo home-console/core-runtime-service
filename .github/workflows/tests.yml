@@ -27,6 +27,10 @@ jobs:
           pip install pytest pytest-asyncio coverage codecov
       - name: Architecture dependency report
         run: python scripts/validate_architecture_rules.py --enforce
+      - name: Plugin SDK imports guard
+        run: python scripts/validate_plugin_sdk_imports.py --root . --enforce
+      - name: Plugin SDK usage guard
+        run: python scripts/validate_plugin_sdk_usage.py --root . --enforce
       - name: Run tests with coverage
         run: |
           coverage run -m pytest -q

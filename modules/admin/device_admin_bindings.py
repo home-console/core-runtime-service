@@ -10,8 +10,7 @@ logger = logging.getLogger(__name__)
 
 async def register_device_admin_bindings(context: Any) -> list[str]:
     registered_services: list[str] = []
-    runtime = context.runtime
-    services = runtime.kernel_context.get_service("service_registry")
+    services = context.services
 
     try:
         for endpoint in [

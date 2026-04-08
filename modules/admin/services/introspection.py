@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+import logging
+import asyncio
 """
 Inspector: read-only runtime snapshot (runtime mirror).
 
@@ -9,15 +13,28 @@ event_bus.list_subscriptions(), state, storage, operations.list_handler_types().
 Inspector = memory dump runtime, не API.
 """
 
-from __future__ import annotations
-
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 import time
 
 from modules.plugins import PluginState
+from core.adapters.storage_errors import STORAGE_BOUNDARY_ERRORS
 from core.observability.logger_helper import debug
 from core.kernel.plugin_loader import PluginManifestLoader
+logger = logging.getLogger(__name__)
+
+
+async def _inspector_execution_list_keys(runtime: Any) -> List[str]:
+    try:
+        return await runtime.storage.list_keys("execution")
+    except STORAGE_BOUNDARY_ERRORS:
+        logger.debug("inspector: list_keys('execution') storage error", exc_info=True)
+        return []
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.warning("inspector: list_keys('execution') unexpected error", exc_info=True)
+        return []
 
 
 async def get_runtime_info(runtime: Any, admin_started_at: float | None) -> Dict[str, Any]:
@@ -31,9 +48,14 @@ async def get_runtime_info(runtime: Any, admin_started_at: float | None) -> Dict
     version = "0.1.0"
     try:
         import importlib.metadata
+
         version = importlib.metadata.version("home-console")
-    except Exception:
+    except importlib.metadata.PackageNotFoundError:
         pass
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.warning("Failed to read home-console package version", exc_info=True)
     
     return {
         "version": version,
@@ -61,16 +83,28 @@ async def list_plugins(runtime: Any) -> List[Dict[str, Any]]:
         event_subscriptions = []
         
         try:
-            all_services = await runtime.kernel_context.get_service("service_registry").list_services()
+            all_services = await runtime.service_registry.list_services()
             services = [s for s in all_services if s.startswith(f"{name}.")]
+        except asyncio.CancelledError:
+            raise
         except Exception:
-            pass
+            logger.warning(
+                "list_plugins: service_registry.list_services failed for plugin %s",
+                name,
+                exc_info=True,
+            )
 
         try:
             all_http = runtime.http.list()
             http_endpoints = [ep for ep in all_http if ep.service.startswith(f"{name}.")]
+        except asyncio.CancelledError:
+            raise
         except Exception:
-            pass
+            logger.warning(
+                "list_plugins: http.list failed for plugin %s",
+                name,
+                exc_info=True,
+            )
 
         try:
             if hasattr(runtime, "event_bus") and runtime.event_bus:
@@ -79,8 +113,14 @@ async def list_plugins(runtime: Any) -> List[Dict[str, Any]]:
                     plugin_subs = [s for s in subs if s.get("plugin") == name]
                     if plugin_subs:
                         event_subscriptions.append(event_name)
+        except asyncio.CancelledError:
+            raise
         except Exception:
-            pass
+            logger.warning(
+                "list_plugins: event_bus.list_subscriptions failed for plugin %s",
+                name,
+                exc_info=True,
+            )
         
         # Get plugin state
         state = await pm.get_plugin_state(name)
@@ -129,18 +169,13 @@ async def list_plugins(runtime: Any) -> List[Dict[str, Any]]:
     return result
 
 
-def _get_plugins_dir(runtime: Any) -> Path:
-    """Путь к каталогу плагинов (как в PluginManager)."""
+def _get_plugins_dir(runtime: Any) -> Optional[Path]:
+    """Путь к каталогу плагинов из Config.plugins_dir. Возвращает None если не сконфигурировано."""
     config = getattr(runtime, "_config", None)
-    if config is not None and getattr(config, "plugins_dir", None):
-        return Path(config.plugins_dir)
-    if config is not None and hasattr(config, "get") and callable(config.get):
-        pd = config.get("plugins_dir")
-        if pd:
-            return Path(pd)
-    # Тот же default, что в PluginManager:
-    # <repo_root>/core/kernel/plugin_manager.py -> <repo_root>/plugins
-    return Path(__file__).resolve().parents[4] / "plugins"
+    plugins_dir_str = getattr(config, "plugins_dir", None) if config is not None else None
+    if not plugins_dir_str:
+        return None
+    return Path(plugins_dir_str).expanduser()
 
 
 async def discover_manifests_for_inspector(runtime: Any) -> Dict[str, Any]:
@@ -151,14 +186,14 @@ async def discover_manifests_for_inspector(runtime: Any) -> Dict[str, Any]:
     """
     plugins_dir = _get_plugins_dir(runtime)
     loaded = list(await runtime.plugin_manager.list_plugins())
-    if not plugins_dir.exists() or not plugins_dir.is_dir():
+    if plugins_dir is None or not plugins_dir.exists() or not plugins_dir.is_dir():
         return {
-            "plugins_dir": str(plugins_dir),
+            "plugins_dir": str(plugins_dir) if plugins_dir is not None else None,
             "manifests": {},
             "load_order": [],
             "loaded": loaded,
         }
-    manifests = await PluginManifestLoader.discover_manifests(plugins_dir, runtime)
+    manifests = await PluginManifestLoader.discover_manifests(plugins_dir, runtime)  # type: ignore[arg-type]
     load_order = PluginManifestLoader.topological_sort(manifests, runtime)
     return {
         "plugins_dir": str(plugins_dir),
@@ -175,8 +210,8 @@ async def get_plugin_details(runtime: Any, plugin_name: str) -> Optional[Dict[st
     """
     pm = runtime.plugin_manager
     plugins_dir = _get_plugins_dir(runtime)
-    plugin_dir = plugins_dir / plugin_name
-    manifest = PluginManifestLoader.load_manifest(plugin_dir) if plugin_dir.exists() else None
+    plugin_dir = plugins_dir / plugin_name if plugins_dir is not None else None
+    manifest = PluginManifestLoader.load_manifest(plugin_dir) if plugin_dir is not None and plugin_dir.exists() else None
 
     # Если плагин загружен — полные данные как в list_plugins
     if await pm.get_plugin(plugin_name):
@@ -207,7 +242,7 @@ async def get_plugin_details(runtime: Any, plugin_name: str) -> Optional[Dict[st
 
 async def list_services(runtime: Any) -> List[Dict[str, str]]:
     """List all registered services."""
-    services = await runtime.kernel_context.get_service("service_registry").list_services()
+    services = await runtime.service_registry.list_services()
     result = []
     for service in services:
         plugin_name = service.split(".")[0] if "." in service else "core"
@@ -292,8 +327,18 @@ async def list_storage_namespaces(runtime: Any) -> List[Dict[str, Any]]:
         try:
             keys = await runtime.storage.list_keys(ns)
             keys_count = len(keys)
+        except STORAGE_BOUNDARY_ERRORS:
+            logger.debug(
+                "list_storage_namespaces: list_keys failed for namespace %s",
+                ns,
+                exc_info=True,
+            )
         except Exception:
-            pass
+            logger.warning(
+                "list_storage_namespaces: unexpected error for namespace %s",
+                ns,
+                exc_info=True,
+            )
         item = {"namespace": ns, "keys_count": keys_count}
         # В production не отдаём содержимое vault — только метаданные
         if not debug_mode and _is_vault_namespace(ns):
@@ -317,9 +362,12 @@ async def list_storage_namespaces(runtime: Any) -> List[Dict[str, Any]]:
                             else:
                                 try:
                                     entries[key] = raw.decode("utf-8", errors="replace")
-                                except Exception:
-                                    entries[key] = f"[binary, {len(raw)} bytes]"
+                                except (TypeError, AttributeError, UnicodeDecodeError):
+                                    entries[key] = (
+                                        f"[binary, {len(raw) if raw is not None else 0} bytes]"
+                                    )
                         except Exception as e:
+                            logger.debug("introspection.list_storage_namespaces: error (using fallback value): %s", e)
                             entries[key] = {"error": str(e)}
                     if has_secrets_item:
                         for item in result:
@@ -343,6 +391,10 @@ async def list_storage_namespaces(runtime: Any) -> List[Dict[str, Any]]:
                         "_hint": "SecretStore not initialized; click to try loading",
                     })
             except Exception:
+                logger.debug(
+                    "list_storage_namespaces: secret_store debug branch failed",
+                    exc_info=True,
+                )
                 if not has_secrets_item:
                     result.append({
                         "namespace": "secrets.store",
@@ -397,9 +449,12 @@ async def get_storage_namespace_contents(runtime: Any, namespace: str) -> Dict[s
                         else:
                             try:
                                 entries[key] = raw.decode("utf-8", errors="replace")
-                            except Exception:
-                                entries[key] = f"[binary, {len(raw)} bytes]"
+                            except (TypeError, AttributeError, UnicodeDecodeError):
+                                entries[key] = (
+                                    f"[binary, {len(raw) if raw is not None else 0} bytes]"
+                                )
                     except Exception as e:
+                        logger.debug("introspection.get_storage_namespace_contents: error (using fallback value): %s", e)
                         entries[key] = {"error": str(e)}
                 return {
                     "namespace": namespace,
@@ -408,6 +463,10 @@ async def get_storage_namespace_contents(runtime: Any, namespace: str) -> Dict[s
                     "debug_decrypted": True,
                 }
         except Exception as e:
+            logger.debug(
+                "get_storage_namespace_contents: secrets.store debug branch failed",
+                exc_info=True,
+            )
             return {"namespace": namespace, "keys": [], "entries": {}, "error": str(e)}
 
     # Обычный storage: list_keys + get по каждому ключу
@@ -418,40 +477,26 @@ async def get_storage_namespace_contents(runtime: Any, namespace: str) -> Dict[s
             try:
                 val = await runtime.storage.get(namespace, key)
                 entries[key] = val
+            except STORAGE_BOUNDARY_ERRORS as e:
+                entries[key] = {"error": str(e)}
             except Exception as e:
+                logger.debug(
+                    "get_storage_namespace_contents: get failed for %s/%s",
+                    namespace,
+                    key,
+                    exc_info=True,
+                )
                 entries[key] = {"error": str(e)}
         return {"namespace": namespace, "keys": keys, "entries": entries}
-    except Exception as e:
+    except STORAGE_BOUNDARY_ERRORS as e:
         return {"namespace": namespace, "keys": [], "entries": {}, "error": str(e)}
-
-
-async def get_state(runtime: Any) -> Dict[str, Any]:
-    """Get all state keys and values."""
-    if not hasattr(runtime, "state") or runtime.state is None:
-        return {}
-    
-    keys = await runtime.state.list_keys()
-    result = {}
-    for key in keys:
-        try:
-            result[key] = await runtime.state.get(key)
-        except Exception as e:
-            result[key] = {"error": str(e)}
-    return result
-
-
-async def list_state_keys(runtime: Any) -> List[str]:
-    """List all state keys."""
-    if not hasattr(runtime, "state") or runtime.state is None:
-        return []
-    return await runtime.state.list_keys()
-
-
-async def get_state_value(runtime: Any, key: str) -> Any:
-    """Get state value by key."""
-    if not hasattr(runtime, "state") or runtime.state is None:
-        raise ValueError("State engine not available")
-    return await runtime.state.get(key)
+    except Exception as e:
+        logger.warning(
+            "get_storage_namespace_contents: unexpected error for namespace %s",
+            namespace,
+            exc_info=True,
+        )
+        return {"namespace": namespace, "keys": [], "entries": {}, "error": str(e)}
 
 
 async def list_operations_available(runtime: Any) -> List[Dict[str, Any]]:
@@ -469,15 +514,18 @@ async def list_operations_available(runtime: Any) -> List[Dict[str, Any]]:
 async def list_auth_flows(runtime: Any) -> List[Dict[str, Any]]:
     """
     Inspector view: list auth flows (read-only).
-    Source: runtime.state["auth_inspector.flows"] only. No service_registry.call.
-    Plugins (OAuth, device auth, etc.) write to this state; Inspector only reads.
+    Source: storage only ("inspector"/"auth_flows").
+    Plugins (OAuth, device auth, etc.) write flows; Inspector only reads.
     Если плагин выгружен или не запущен — state="unavailable", message="Временно недоступно".
     Returns list of { id, state, message?, actions: [{ type, label, params? }] }.
     """
     try:
-        if not hasattr(runtime, "state") or runtime.state is None:
+        api = getattr(runtime, "api", None) or runtime
+        storage_get = getattr(api, "storage_get", None)
+        if not callable(storage_get):
             return []
-        raw = await runtime.state.get("auth_inspector.flows")
+        raw = await storage_get("inspector", "auth_flows")
+
         if not isinstance(raw, list):
             return []
         result = []
@@ -497,24 +545,35 @@ async def list_auth_flows(runtime: Any) -> List[Dict[str, Any]]:
                 flow["qr_svg"] = item["qr_svg"]
             result.append(flow)
 
-        # Пометить привязки выгруженных/незапущенных плагинов как «Временно недоступно»
-        flow_id_to_plugin = _flow_id_to_plugin_map()
-        pm = getattr(runtime, "plugin_manager", None)
-        if pm is not None:
-            for flow in result:
-                if not isinstance(flow, dict):
-                    continue
-                plugin_name = _plugin_name_for_integration_item(flow, flow_id_to_plugin)
-                if not plugin_name:
-                    continue
-                plugin = await pm.get_plugin(plugin_name)
-                state = await pm.get_plugin_state(plugin_name)
-                if plugin is None or state != PluginState.STARTED:
-                    flow["state"] = "unavailable"
-                    flow["message"] = "Временно недоступно (плагин выгружен или не запущен)"
-                    flow["_unavailable_reason"] = "plugin_unloaded" if plugin is None else "plugin_not_started"
+        # Пометить привязки как «Временно недоступно», если нужные сервисы отсутствуют.
+        # Это работает и для flow-объектов из storage (они не обязаны содержать plugin_name).
+        flow_id_to_probe = _flow_id_to_probe_service_map()
+        for flow in result:
+            if not isinstance(flow, dict):
+                continue
+            fid = flow.get("id")
+            if not isinstance(fid, str):
+                continue
+            probe_service = flow_id_to_probe.get(fid)
+            if not probe_service:
+                continue
+            has = False
+            try:
+                has = await runtime.service_registry.has_service(probe_service)
+            except Exception:
+                logger.debug(
+                    "list_auth_flows: has_service failed for %s",
+                    probe_service,
+                    exc_info=True,
+                )
+                has = False
+            if not has:
+                flow["state"] = "unavailable"
+                flow["message"] = "Временно недоступно (сервис не зарегистрирован)"
+                flow["_unavailable_reason"] = "service_unavailable"
         return result
     except Exception:
+        logger.warning("list_auth_flows failed", exc_info=True)
         return []
 
 
@@ -527,39 +586,40 @@ def _flow_ids_set(flows: List[Dict[str, Any]]) -> set:
     return out
 
 
-# Плагины, которые пишут в auth_inspector.flows под своим flow id (не plugin_name).
-# Если такой flow уже есть в result, не добавлять ту же интеграцию из реестра.
-_PLUGIN_FLOW_ID_ALIASES: Dict[str, List[str]] = {
-    "yandex_device_auth": ["yandex-device"],
+# Auth flows, которые приходят из storage и не обязаны совпадать с каким-либо plugin-id.
+# Для статуса "unavailable" используем probe через
+# нейтральные сервисы, а не через имена плагинов.
+_FLOW_ID_PROBE_SERVICES: Dict[str, str] = {
+    # flow id (UI) -> service name to probe
+    "yandex-device": "device_auth.start",
 }
 
-
-def _flow_id_to_plugin_map() -> Dict[str, str]:
-    """Обратный маппинг: flow_id (id в UI) -> plugin_name."""
-    out: Dict[str, str] = {}
-    for plugin_name, ids in _PLUGIN_FLOW_ID_ALIASES.items():
-        for fid in ids:
-            out[fid] = plugin_name
-    return out
+# plugin_name -> flow id из state, которые считаются тем же плагином (дедуп в UI)
+_PLUGIN_FLOW_ID_ALIASES: Dict[str, List[str]] = {}
 
 
-def _plugin_name_for_integration_item(item: Dict[str, Any], flow_id_to_plugin: Dict[str, str]) -> Optional[str]:
+def _flow_id_to_probe_service_map() -> Dict[str, str]:
+    """Обратный маппинг: flow_id (id в UI) -> probe service."""
+    return dict(_FLOW_ID_PROBE_SERVICES)
+
+
+def _plugin_name_for_integration_item(item: Dict[str, Any]) -> Optional[str]:
     """Определить plugin_name для элемента списка интеграций (из state или реестра)."""
     pid = item.get("id")
     if isinstance(pid, str):
-        return item.get("plugin_name") or flow_id_to_plugin.get(pid) or pid
+        return item.get("plugin_name") or pid
     return item.get("plugin_name")
 
 
 async def list_integrations(runtime: Any) -> List[Dict[str, Any]]:
     """
     Inspector view: list integrations (read-only).
-    Source: runtime.state["integration_inspector.integrations"] + auth_inspector.flows.
+    Source: runtime.state["integration_inspector.integrations"] + auth_flows (storage).
     Fallback: runtime.integrations (IntegrationRegistry) — плагины с is_integration: true
     регистрируются при загрузке; если в state ничего не записали, показываем их как "available".
-    Плагины могут писать в integration_inspector.integrations; auth-плагины (yandex_device_auth)
-    пишут в auth_inspector.flows. Для единого списка в UI объединяем оба — тогда в «Интеграциях»
-    видны и обычные интеграции, и привязки авторизаций (Яндекс и т.д.).
+    Плагины могут писать в integration_inspector.integrations; auth-плагины для device-auth
+    пишут auth flows в storage. Для единого списка в UI объединяем оба — тогда в «Интеграциях»
+    видны и обычные интеграции, и привязки авторизаций (конкретные провайдеры и т.д.).
     Returns list of { id, state, message?, actions: [{ type, label, params? }] }.
     """
     result: List[Dict[str, Any]] = []
@@ -572,24 +632,14 @@ async def list_integrations(runtime: Any) -> List[Dict[str, Any]]:
                 for item in data:
                     if isinstance(item, dict):
                         result.append(item)
-            raw_flows = await runtime.state.get("auth_inspector.flows")
-            if isinstance(raw_flows, list):
-                for item in raw_flows:
-                    if not isinstance(item, dict):
-                        continue
-                    flow = {
-                        "id": item.get("id"),
-                        "state": item.get("state"),
-                        "actions": item.get("actions") if isinstance(item.get("actions"), list) else [],
-                    }
-                    if "message" in item and item["message"] is not None:
-                        flow["message"] = item["message"]
-                    if "qr_url" in item and item["qr_url"] is not None:
-                        flow["qr_url"] = item["qr_url"]
-                    if "qr_svg" in item and item["qr_svg"] is not None:
-                        flow["qr_svg"] = item["qr_svg"]
-                    result.append(flow)
             state_count = len(result)
+
+        # Auth flows: storage (SDK-first).
+        raw_flows = await list_auth_flows(runtime)
+        for item in raw_flows:
+            if not isinstance(item, dict):
+                continue
+            result.append(item)
 
         # Fallback: интеграции из реестра (плагины с is_integration в manifest),
         # чтобы список не был пустым, если плагины не пишут в state
@@ -623,13 +673,12 @@ async def list_integrations(runtime: Any) -> List[Dict[str, Any]]:
                 registry_count += 1
 
         # Пометить привязки выгруженных/незапущенных плагинов как «Временно недоступно»
-        flow_id_to_plugin = _flow_id_to_plugin_map()
         pm = getattr(runtime, "plugin_manager", None)
         if pm is not None:
             for item in result:
                 if not isinstance(item, dict):
                     continue
-                plugin_name = _plugin_name_for_integration_item(item, flow_id_to_plugin)
+                plugin_name = _plugin_name_for_integration_item(item)
                 if not plugin_name:
                     continue
                 plugin = await pm.get_plugin(plugin_name)
@@ -646,9 +695,10 @@ async def list_integrations(runtime: Any) -> List[Dict[str, Any]]:
                 component="introspection",
             )
         except Exception:
-            pass
+            logger.warning("list_integrations: debug log failed", exc_info=True)
         return result
     except Exception:
+        logger.warning("list_integrations failed", exc_info=True)
         return result
 
 
@@ -688,15 +738,15 @@ async def inspector_auth_summary(runtime: Any) -> Dict[str, Any]:
 
 async def dashboard_inspector_response(runtime: Any) -> Dict[str, Any]:
     """
-    Ответ для GET /admin/v1/inspector/dashboard: агрегат plugins, services, http_endpoints, state_keys
+    Ответ для GET /admin/v1/inspector/dashboard: агрегат plugins, services, http_endpoints
     для главной страницы Admin UI (AdminDashboard).
     """
     try:
         plugins = await list_plugins(runtime)
         services = await list_services(runtime)
         http_endpoints = await list_http_endpoints(runtime)
-        state_keys = await list_state_keys(runtime)
     except Exception as e:
+        logger.exception("dashboard_inspector_response failed")
         return {"ok": False, "error": str(e), "summary": None}
     return {
         "ok": True,
@@ -704,7 +754,6 @@ async def dashboard_inspector_response(runtime: Any) -> Dict[str, Any]:
             "plugins": plugins,
             "services": services,
             "http_endpoints": http_endpoints,
-            "state_keys": state_keys,
         },
     }
 
@@ -718,10 +767,7 @@ async def list_execution_traces(runtime: Any) -> List[Dict[str, Any]]:
     Источник: runtime.storage, namespace \"execution\", ключи traces/{execution_id}.
     Никаких service_registry.call(), только прямое чтение storage.
     """
-    try:
-        keys = await runtime.storage.list_keys("execution")
-    except Exception:
-        return []
+    keys = await _inspector_execution_list_keys(runtime)
 
     result: List[Dict[str, Any]] = []
     for key in keys:
@@ -731,7 +777,11 @@ async def list_execution_traces(runtime: Any) -> List[Dict[str, Any]]:
             data = await runtime.storage.get("execution", key)
             if isinstance(data, dict):
                 result.append(data)
+        except STORAGE_BOUNDARY_ERRORS:
+            logger.debug("list_execution_traces: skip key %s (storage)", key, exc_info=True)
+            continue
         except Exception:
+            logger.debug("list_execution_traces: skip key %s (unexpected)", key, exc_info=True)
             continue
     return result
 
@@ -747,7 +797,19 @@ async def get_execution_trace(runtime: Any, execution_id: str) -> Dict[str, Any]
         data = await runtime.storage.get("execution", key)
         if isinstance(data, dict):
             return data
+    except STORAGE_BOUNDARY_ERRORS:
+        logger.debug(
+            "get_execution_trace: storage error for %s",
+            execution_id,
+            exc_info=True,
+        )
+        return None
     except Exception:
+        logger.warning(
+            "get_execution_trace: unexpected error for %s",
+            execution_id,
+            exc_info=True,
+        )
         return None
     return None
 
@@ -761,10 +823,7 @@ async def list_operation_executions(runtime: Any, operation_id: str) -> List[Dic
     if not operation_id:
         return []
 
-    try:
-        keys = await runtime.storage.list_keys("execution")
-    except Exception:
-        return []
+    keys = await _inspector_execution_list_keys(runtime)
 
     prefix = f"by_operation/{operation_id}/"
     result: List[Dict[str, Any]] = []
@@ -775,7 +834,19 @@ async def list_operation_executions(runtime: Any, operation_id: str) -> List[Dic
             data = await runtime.storage.get("execution", key)
             if isinstance(data, dict):
                 result.append(data)
+        except STORAGE_BOUNDARY_ERRORS:
+            logger.debug(
+                "list_operation_executions: skip key %s (storage)",
+                key,
+                exc_info=True,
+            )
+            continue
         except Exception:
+            logger.debug(
+                "list_operation_executions: skip key %s (unexpected)",
+                key,
+                exc_info=True,
+            )
             continue
     return result
 
@@ -789,10 +860,7 @@ async def list_schedules(runtime: Any) -> List[Dict[str, Any]]:
 
     Источник: runtime.storage, namespace \"execution\", ключи schedules/{schedule_id}.
     """
-    try:
-        keys = await runtime.storage.list_keys("execution")
-    except Exception:
-        return []
+    keys = await _inspector_execution_list_keys(runtime)
 
     result: List[Dict[str, Any]] = []
     for key in keys:
@@ -802,7 +870,11 @@ async def list_schedules(runtime: Any) -> List[Dict[str, Any]]:
             data = await runtime.storage.get("execution", key)
             if isinstance(data, dict):
                 result.append(data)
+        except STORAGE_BOUNDARY_ERRORS:
+            logger.debug("list_schedules: skip key %s (storage)", key, exc_info=True)
+            continue
         except Exception:
+            logger.debug("list_schedules: skip key %s (unexpected)", key, exc_info=True)
             continue
     return result
 
@@ -818,7 +890,11 @@ async def get_schedule(runtime: Any, schedule_id: str) -> Dict[str, Any] | None:
         data = await runtime.storage.get("execution", key)
         if isinstance(data, dict):
             return data
+    except STORAGE_BOUNDARY_ERRORS:
+        logger.debug("get_schedule: storage error for %s", schedule_id, exc_info=True)
+        return None
     except Exception:
+        logger.warning("get_schedule: unexpected error for %s", schedule_id, exc_info=True)
         return None
     return None
 
@@ -832,10 +908,7 @@ async def list_operation_schedules(runtime: Any, operation_id: str) -> List[Dict
     if not operation_id:
         return []
 
-    try:
-        keys = await runtime.storage.list_keys("execution")
-    except Exception:
-        return []
+    keys = await _inspector_execution_list_keys(runtime)
 
     prefix = f"schedules_by_operation/{operation_id}/"
     result: List[Dict[str, Any]] = []
@@ -852,7 +925,19 @@ async def list_operation_schedules(runtime: Any, operation_id: str) -> List[Dict
             sched = await runtime.storage.get("execution", f"schedules/{sched_id}")
             if isinstance(sched, dict):
                 result.append(sched)
+        except STORAGE_BOUNDARY_ERRORS:
+            logger.debug(
+                "list_operation_schedules: skip key %s (storage)",
+                key,
+                exc_info=True,
+            )
+            continue
         except Exception:
+            logger.debug(
+                "list_operation_schedules: skip key %s (unexpected)",
+                key,
+                exc_info=True,
+            )
             continue
     return result
 
@@ -866,10 +951,7 @@ async def list_execution_retries(runtime: Any, execution_id: str) -> List[Dict[s
     if not execution_id:
         return []
 
-    try:
-        keys = await runtime.storage.list_keys("execution")
-    except Exception:
-        return []
+    keys = await _inspector_execution_list_keys(runtime)
 
     prefix = f"by_parent/{execution_id}/"
     result: List[Dict[str, Any]] = []
@@ -886,7 +968,19 @@ async def list_execution_retries(runtime: Any, execution_id: str) -> List[Dict[s
             trace = await runtime.storage.get("execution", f"traces/{child_id}")
             if isinstance(trace, dict):
                 result.append(trace)
+        except STORAGE_BOUNDARY_ERRORS:
+            logger.debug(
+                "list_execution_retries: skip key %s (storage)",
+                key,
+                exc_info=True,
+            )
+            continue
         except Exception:
+            logger.debug(
+                "list_execution_retries: skip key %s (unexpected)",
+                key,
+                exc_info=True,
+            )
             continue
 
     # Сортируем по retry_index для предсказуемого порядка
@@ -982,7 +1076,7 @@ async def list_capabilities(runtime: Any) -> List[Dict[str, Any]]:
         for cap_id in sorted(capabilities.keys()):
             result.append(capabilities[cap_id])
     except Exception:
-        pass
+        logger.exception("list_capabilities failed")
     
     return result
 
@@ -1000,7 +1094,7 @@ async def get_system_health(runtime: Any) -> Dict[str, Any]:
         snapshot = collector.collect()
         return snapshot.to_dict()
     except Exception as e:
-        # Return minimal health if collection fails
+        logger.warning("get_system_health: snapshot collection failed: %s", e, exc_info=True)
         return {
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "error": str(e),

@@ -1,9 +1,18 @@
 import copy
 import time
+from core.adapters.storage_errors import STORAGE_BOUNDARY_ERRORS
 from modules.devices.services import _is_device_online
+from core.events_schemas import (
+    ExternalDeviceDiscoveredPayload,
+    ExternalDeviceStateReportedPayload,
+)
+import logging
+logger = logging.getLogger(__name__)
 
 
-async def handle_external_device_discovered(runtime, data: dict) -> None:
+async def handle_external_device_discovered(
+    runtime, data: ExternalDeviceDiscoveredPayload
+) -> None:
     external_id = data.get("external_id")
     if not external_id:
         return
@@ -11,10 +20,10 @@ async def handle_external_device_discovered(runtime, data: dict) -> None:
     await runtime.storage.set("devices_external", external_id, data)
 
 
-async def handle_external_state(runtime, data: dict) -> None:
+async def handle_external_state(runtime, data: ExternalDeviceStateReportedPayload) -> None:
     # Логируем получение события
     try:
-        await runtime.kernel_context.get_service("service_registry").call(
+        await runtime.service_registry.call(
             "logger.log",
             level="debug",
             message=f"handle_external_state: received event",
@@ -22,14 +31,17 @@ async def handle_external_state(runtime, data: dict) -> None:
             context={"data": data}
         )
     except Exception:
-        pass
+        logger.debug(
+            "devices.handle_external_state: logger.log (event received) failed",
+            exc_info=True,
+        )
 
     external_id = data.get("external_id")
     reported_state = data.get("state")
 
     if not external_id or reported_state is None:
         try:
-            await runtime.kernel_context.get_service("service_registry").call(
+            await runtime.service_registry.call(
                 "logger.log",
                 level="debug",
                 message=f"handle_external_state: missing external_id or state",
@@ -37,7 +49,10 @@ async def handle_external_state(runtime, data: dict) -> None:
                 context={"data": data}
             )
         except Exception:
-            pass
+            logger.debug(
+                "devices.handle_external_state: logger.log (missing id/state) failed",
+                exc_info=True,
+            )
         return
 
     mapping = await runtime.storage.get("devices_mappings", external_id)
@@ -49,19 +64,35 @@ async def handle_external_state(runtime, data: dict) -> None:
         # Сохраняем pending state на случай если mapping будет создан позже
         # (например, WebSocket обновление пришло ДО auto_map_external)
         try:
-            await runtime.storage.set("devices_external_pending_state", external_id, reported_state)
-            await runtime.kernel_context.get_service("service_registry").call(
-                "logger.log",
-                level="debug",
-                message=f"[STATE_FLOW] Mapping NOT found, storing pending state",
-                plugin="devices_module",
-                context={
-                    "external_id": external_id,
-                    "incoming_state": reported_state,
-                }
+            await runtime.storage.set(
+                "devices_external_pending_state", external_id, reported_state
             )
-            
-            # Save trace
+        except STORAGE_BOUNDARY_ERRORS:
+            logger.warning(
+                "devices.handle_external_state: pending state storage failed",
+                exc_info=True,
+            )
+        except Exception:
+            logger.exception(
+                "devices.handle_external_state: unexpected error persisting pending state"
+            )
+        else:
+            try:
+                await runtime.service_registry.call(
+                    "logger.log",
+                    level="debug",
+                    message=f"[STATE_FLOW] Mapping NOT found, storing pending state",
+                    plugin="devices_module",
+                    context={
+                        "external_id": external_id,
+                        "incoming_state": reported_state,
+                    },
+                )
+            except Exception:
+                logger.debug(
+                    "devices.handle_external_state: logger.log (pending branch) failed",
+                    exc_info=True,
+                )
             try:
                 await runtime.storage.set(
                     "yandex_debug_state_flow",
@@ -73,15 +104,21 @@ async def handle_external_state(runtime, data: dict) -> None:
                         "incoming_state": reported_state,
                     },
                 )
+            except STORAGE_BOUNDARY_ERRORS:
+                logger.debug(
+                    "devices.handle_external_state: yandex_debug_state_flow pending write failed",
+                    exc_info=True,
+                )
             except Exception:
-                pass
-        except Exception:
-            pass
+                logger.debug(
+                    "devices.handle_external_state: yandex_debug_state_flow pending unexpected",
+                    exc_info=True,
+                )
         return
 
     # DEBUG 4B: Mapping found
     try:
-        await runtime.kernel_context.get_service("service_registry").call(
+        await runtime.service_registry.call(
             "logger.log",
             level="debug",
             message=f"[STATE_FLOW] Mapping FOUND, applying state",
@@ -93,12 +130,15 @@ async def handle_external_state(runtime, data: dict) -> None:
             }
         )
     except Exception:
-        pass
+        logger.debug(
+            "devices.handle_external_state: logger.log (mapping found) failed",
+            exc_info=True,
+        )
 
     internal_id = mapping.get("internal_id")
     if not internal_id:
         try:
-            await runtime.kernel_context.get_service("service_registry").call(
+            await runtime.service_registry.call(
                 "logger.log",
                 level="debug",
                 message=f"handle_external_state: mapping has no internal_id",
@@ -106,14 +146,17 @@ async def handle_external_state(runtime, data: dict) -> None:
                 context={"mapping": mapping}
             )
         except Exception:
-            pass
+            logger.debug(
+                "devices.handle_external_state: logger.log (no internal_id) failed",
+                exc_info=True,
+            )
         return
 
     device = await runtime.storage.get("devices", internal_id)
 
     if device is None:
         try:
-            await runtime.kernel_context.get_service("service_registry").call(
+            await runtime.service_registry.call(
                 "logger.log",
                 level="debug",
                 message=f"handle_external_state: device not found for internal_id={internal_id}",
@@ -121,7 +164,10 @@ async def handle_external_state(runtime, data: dict) -> None:
                 context={"external_id": external_id}
             )
         except Exception:
-            pass
+            logger.debug(
+                "devices.handle_external_state: logger.log (device missing) failed",
+                exc_info=True,
+            )
         return
 
     # Обновляем метаданные контакта устройства
@@ -165,8 +211,16 @@ async def handle_external_state(runtime, data: dict) -> None:
                 "online_changed": old_online != new_online,
             },
         )
+    except STORAGE_BOUNDARY_ERRORS:
+        logger.debug(
+            "devices.handle_external_state: yandex_debug_state_flow apply write failed",
+            exc_info=True,
+        )
     except Exception:
-        pass
+        logger.debug(
+            "devices.handle_external_state: yandex_debug_state_flow apply unexpected",
+            exc_info=True,
+        )
 
     if not isinstance(old_state, dict) or \
         not all(k in old_state for k in ["desired", "reported", "pending"]):
@@ -226,7 +280,7 @@ async def handle_external_state(runtime, data: dict) -> None:
     
     # Логируем обновление для отладки
     try:
-        await runtime.kernel_context.get_service("service_registry").call(
+        await runtime.service_registry.call(
             "logger.log",
             level="debug",
             message=f"handle_external_state: processing update",
@@ -244,7 +298,10 @@ async def handle_external_state(runtime, data: dict) -> None:
             }
         )
     except Exception:
-        pass
+        logger.debug(
+            "devices.handle_external_state: logger.log (processing update) failed",
+            exc_info=True,
+        )
 
     new_state = old_state
 
@@ -254,7 +311,7 @@ async def handle_external_state(runtime, data: dict) -> None:
     
     # Логируем успешное обновление
     try:
-        await runtime.kernel_context.get_service("service_registry").call(
+        await runtime.service_registry.call(
             "logger.log",
             level="debug",
             message=f"handle_external_state: state updated successfully",
@@ -266,11 +323,14 @@ async def handle_external_state(runtime, data: dict) -> None:
             }
         )
     except Exception:
-        pass
+        logger.debug(
+            "devices.handle_external_state: logger.log (state updated) failed",
+            exc_info=True,
+        )
 
     # Логируем успешное обновление
     try:
-        await runtime.kernel_context.get_service("service_registry").call(
+        await runtime.service_registry.call(
             "logger.log",
             level="debug",
             message=f"handle_external_state: updated device {internal_id}, pending=False",
@@ -282,9 +342,12 @@ async def handle_external_state(runtime, data: dict) -> None:
             }
         )
     except Exception:
-        pass
+        logger.debug(
+            "devices.handle_external_state: logger.log (device updated detail) failed",
+            exc_info=True,
+        )
 
-    await runtime.kernel_context.emit(
+    await runtime.event_bus.publish(
         "internal.device_state_updated",
         {
             "internal_id": internal_id,

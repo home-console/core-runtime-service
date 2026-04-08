@@ -20,6 +20,8 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 from ..backend import OperationResult
+import logging
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -80,6 +82,7 @@ class ProcessBackend:
                 backend="process",
             )
         except Exception as e:
+            logger.warning("process.execute: failed: %s", e, exc_info=True)
             return OperationResult(
                 ok=False,
                 error={"code": "process_spawn_failed", "message": str(e), "type": type(e).__name__},
@@ -102,7 +105,7 @@ class ProcessBackend:
                 try:
                     proc.kill()
                 except Exception:
-                    pass
+                    logger.warning("Unhandled exception", exc_info=True)
                 return OperationResult(
                     ok=False,
                     error={"code": "timeout", "message": "Process execution timed out"},
@@ -111,6 +114,7 @@ class ProcessBackend:
                     timed_out=True,
                 )
             except Exception as e:
+                logger.warning("process.execute: failed: %s", e, exc_info=True)
                 return OperationResult(
                     ok=False,
                     error={"code": "process_io_failed", "message": str(e), "type": type(e).__name__},
@@ -148,6 +152,7 @@ class ProcessBackend:
             try:
                 res = json.loads(stdout_text)
             except Exception as e:
+                logger.warning("process.execute: failed: %s", e, exc_info=True)
                 return OperationResult(
                     ok=False,
                     error={
@@ -205,7 +210,7 @@ class ProcessBackend:
             try:
                 proc.kill()
             except Exception:
-                pass
+                logger.warning("Unhandled exception", exc_info=True)
             return True
 
         # Даём немного времени на мягкое завершение
@@ -215,6 +220,6 @@ class ProcessBackend:
             try:
                 proc.kill()
             except Exception:
-                pass
+                logger.warning("Unhandled exception", exc_info=True)
         return True
 

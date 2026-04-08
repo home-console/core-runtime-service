@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any, Optional
 
 from app.orchestration import DockerOrchestrationBackend, NullOrchestrationBackend, OrchestrationService
@@ -36,7 +37,7 @@ APP_MODULES: list[ModuleSpec] = [
     ModuleSpec("operations", required=True),
     ModuleSpec("agent", required=False),
     ModuleSpec("credentials", required=False),
-    ModuleSpec("execution", required=True),
+    ModuleSpec("execution", required=True, dependencies=["operations"]),
     ModuleSpec("integrations", required=True),
     ModuleSpec("devices", required=True),
     ModuleSpec("automation", required=False),
@@ -102,16 +103,25 @@ async def build_runtime(
         service_acl_wrapper_builder=build_module_service_acl_wrapper,
         capability_namespace_permission_checker=check_module_capability_namespace_permission,
         trust_level_to_privilege_mapper=module_trust_level_to_privilege,
-        critical_state_prefixes=list(DEFAULT_CRITICAL_STATE_PREFIXES),
         orchestration_service=orchestration_service,
     )
+    # App-level policy: какие namespaces гидратировать при старте.
+    async def _state_hydration_namespaces() -> list[str]:
+        all_namespaces = await runtime.storage.list_namespaces()
+        return [
+            ns
+            for ns in all_namespaces
+            if any(ns.startswith(prefix) for prefix in DEFAULT_CRITICAL_STATE_PREFIXES)
+        ]
+
+    runtime.set_state_hydration_callback(_state_hydration_namespaces)
     runtime.storage_manager = storage_manager
     runtime.event_validation_middleware_factory = EventValidationMiddleware
     runtime.plugin_storage_proxy_cls = StorageProxy
     runtime.plugin_service_proxy_cls = ServiceProxy
     runtime.plugin_default_allowed_services = list(DEFAULT_ALLOWED_SERVICES)
-    runtime.runtime_health_check = collect_runtime_health
-    runtime.runtime_metrics_collector = collect_runtime_metrics
+    runtime.monitor.health_check_delegate = collect_runtime_health
+    runtime.monitor.metrics_collector_delegate = collect_runtime_metrics
 
     specs = module_specs or parse_module_specs(config)
     await runtime.module_manager.register_module_specs(runtime, specs)
@@ -136,4 +146,6 @@ async def auto_load_plugins_if_enabled(runtime: CoreRuntime, config: Config) -> 
     if loaded_plugins:
         return
 
-    await runtime.plugin_manager.auto_load_plugins()
+    plugins_dir_str = getattr(config, "plugins_dir", None)
+    plugins_dir = Path(plugins_dir_str).expanduser() if plugins_dir_str else None
+    await runtime.plugin_manager.auto_load_plugins(plugins_dir=plugins_dir)

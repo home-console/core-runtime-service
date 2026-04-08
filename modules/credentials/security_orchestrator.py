@@ -17,10 +17,11 @@ Design:
 - No direct bypass paths
 """
 
+import logging
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Optional, List, TYPE_CHECKING
-from datetime import datetime, UTC
+from typing import TYPE_CHECKING, List, Optional
 
 if TYPE_CHECKING:
     from core.audit.binder import AuditBinder
@@ -28,6 +29,8 @@ if TYPE_CHECKING:
     from modules.credentials.abuse_detection import CredentialAbuseDetector
     from modules.security import RiskEngine, TrustEngine
     from modules.credentials.policy_enforcer import CredentialRBACEnforcer
+
+logger = logging.getLogger(__name__)
 
 
 class SecurityDecisionReason(str, Enum):
@@ -197,6 +200,7 @@ class CredentialSecurityOrchestrator:
                 )
                 audit_events.append("RBAC:ALLOWED")
             except Exception as e:
+                logger.warning("security_orchestrator.authorize_secret_access: unexpected error: %s", e, exc_info=True)
                 audit_events.append(f"RBAC:DENIED:{str(e)}")
                 await self._audit_access_denied(
                     user_id,
@@ -218,6 +222,7 @@ class CredentialSecurityOrchestrator:
                 await self.abuse.validate_secret_read(user_id, credential_id)
                 audit_events.append("ABUSE_CHECK:PASSED")
             except Exception as e:
+                logger.warning("security_orchestrator.authorize_secret_access: unexpected error: %s", e, exc_info=True)
                 audit_events.append(f"ABUSE_CHECK:BLOCKED:{str(e)}")
                 await self._audit_access_denied(
                     user_id,
@@ -362,6 +367,7 @@ class CredentialSecurityOrchestrator:
                 )
                 await self.audit.append(event)
             except Exception as e:
+                logger.warning("security_orchestrator._audit_access_allowed: unexpected error: %s", e, exc_info=True)
                 print(f"[WARNING] Failed to audit allowed access: {e}")
     
     async def _audit_access_denied(
@@ -383,4 +389,5 @@ class CredentialSecurityOrchestrator:
                 )
                 await self.audit.append(event)
             except Exception as e:
+                logger.warning("security_orchestrator._audit_access_denied: unexpected error: %s", e, exc_info=True)
                 print(f"[WARNING] Failed to audit denied access: {e}")

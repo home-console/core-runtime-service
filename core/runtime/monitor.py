@@ -10,8 +10,14 @@ RuntimeMonitor — компонент мониторинга, health checks и m
 освобождая CoreRuntime от этих обязанностей.
 """
 
+import logging
 import time
 from typing import Any, Awaitable, Callable, Dict, Optional
+
+from core.adapters.storage_errors import STORAGE_BOUNDARY_ERRORS
+from core.exception_groups import BEST_EFFORT_BACKGROUND_ERRORS
+
+logger = logging.getLogger(__name__)
 
 
 class RuntimeMonitor:
@@ -66,7 +72,22 @@ class RuntimeMonitor:
             # Проверка storage
             await self.runtime.storage.get("health_check", "test")
             checks["storage"] = "healthy"
-        except Exception as exc:
+        except STORAGE_BOUNDARY_ERRORS as exc:
+            logger.debug(
+                "monitor.health_check: storage boundary: %s",
+                exc,
+                exc_info=True,
+            )
+            checks["storage"] = "unhealthy"
+            checks["storage_error"] = str(exc)
+            checks["storage_error_kind"] = "storage_boundary"
+            status = "unhealthy"
+        except BEST_EFFORT_BACKGROUND_ERRORS as exc:
+            logger.debug(
+                "monitor.health_check: unexpected storage error: %s",
+                exc,
+                exc_info=True,
+            )
             checks["storage"] = "unhealthy"
             checks["storage_error"] = str(exc)
             status = "unhealthy"
@@ -101,7 +122,23 @@ class RuntimeMonitor:
         try:
             await self.runtime.storage.get("metrics", "test")
             metrics["storage"] = {"available": True}
-        except Exception as exc:
+        except STORAGE_BOUNDARY_ERRORS as exc:
+            logger.debug(
+                "monitor.get_metrics: storage boundary: %s",
+                exc,
+                exc_info=True,
+            )
+            metrics["storage"] = {
+                "available": False,
+                "error": str(exc),
+                "error_kind": "storage_boundary",
+            }
+        except BEST_EFFORT_BACKGROUND_ERRORS as exc:
+            logger.debug(
+                "monitor.get_metrics: unexpected storage error: %s",
+                exc,
+                exc_info=True,
+            )
             metrics["storage"] = {"available": False, "error": str(exc)}
 
         return metrics

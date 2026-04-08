@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 CoreRuntime - главный класс Core Runtime.
 
@@ -8,16 +10,19 @@ Lifecycle (start/stop/shutdown/run/health) — см. core/runtime/_lifecycle.py.
 """
 
 import asyncio
-from typing import Any, Awaitable, Callable, Optional
+from typing import Any, Awaitable, Callable, List, Optional
 
 from core.capability.component import CapabilityComponent
 from core.kernel.context import KernelContext
+from core.kernel.plugin_api import PluginAPI
 from core.kernel.plugin_infrastructure import PluginInfrastructure
 from core.operations.component import OperationsComponent
 from core.runtime._lifecycle import RuntimeLifecycleMixin
+from core.runtime.app_config import AppExtensionConfig
 from core.runtime.monitor import RuntimeMonitor
 from core.runtime.runtime_context import RuntimeContext
 from core.runtime.services import CoreServices
+from app.orchestration import NullOrchestrationBackend, OrchestrationService
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -62,13 +67,16 @@ class CoreRuntime(RuntimeLifecycleMixin):
         """
         self._config = config
         self.config = config
+        self.policy_engine = policy_engine
 
         # Уровень 1: Базовые сервисы ядра
         self.services = CoreServices(
             storage_port=storage_port,
             vault_port=vault_port,
             config=config,
-            # policy_engine и фабрики перенесены в CapabilityComponent
+            policy_engine=policy_engine,
+            service_policy_engine_factory=service_policy_engine_factory,
+            service_acl_wrapper_builder=service_acl_wrapper_builder,
         )
 
         # Уровень 2: Capability компонент
@@ -80,15 +88,24 @@ class CoreRuntime(RuntimeLifecycleMixin):
             service_acl_wrapper_builder=service_acl_wrapper_builder,
         )
 
-        # Уровень 3: Инфраструктура плагинов (использует capability_registry из компонента)
+        # Уровень 3: Operations компонент
+        self.operations = OperationsComponent(self)
+
+        # Stable plugin-facing API over runtime primitives.
+        self.api = PluginAPI(
+            service_registry=self.services.service_registry,
+            event_bus=self.services.event_bus,
+            storage=self.services.storage,
+            operations=self.operations,
+            http=self.services.http,
+        )
+
+        # Уровень 4: Инфраструктура плагинов (использует capability_registry из компонента)
         self.plugins = PluginInfrastructure(
-            services=self.services,
+            runtime=self,
             capability_registry=self.capabilities.registry,
             config=config,
         )
-
-        # Уровень 4: Operations компонент
-        self.operations = OperationsComponent(self)
 
         # Координация и контексты
         self.kernel_context: Optional[KernelContext] = KernelContext(
@@ -106,18 +123,28 @@ class CoreRuntime(RuntimeLifecycleMixin):
         self.secret_store: Optional[Any] = None
         # StorageManager (core + vault) — выставляется в main для модуля credentials
         self.storage_manager: Optional[Any] = None
-        # Optional app-level middleware factory. Core keeps no direct module dependency.
-        self.event_validation_middleware_factory: Optional[Callable[[], Any]] = None
-        # Optional app-level plugin isolation wiring. Core keeps no direct module dependency.
-        self.plugin_storage_proxy_cls: Optional[type] = None
-        self.plugin_service_proxy_cls: Optional[type] = None
-        self.plugin_default_allowed_services: list[str] = []
+        
+        # App-level extension hooks (вынесено в app_config для соблюдения границ ядра)
+        self.app_config: AppExtensionConfig = AppExtensionConfig.create()
 
         # App-level плагины и модули доступны через self.plugins
         # Для обратной совместимости добавлены property-методы ниже
 
         self._running = False
         self._start_time: Optional[float] = None
+        
+        # Metrics registry — dependency injection вместо global singleton
+        from core.observability.metrics import MetricsRegistry
+        self._metrics_registry = MetricsRegistry()
+
+        # Rate limiter — per-runtime instance (do not use global singleton)
+        from core.observability.rate_limiter import PluginRateLimiter
+        self._rate_limiter = PluginRateLimiter()
+
+        # Operation context — per-runtime instance (do not use module-level globals)
+        from core.runtime.operation_context import OperationContext
+        self._operation_context = OperationContext()
+        
         # App-defined list of namespaces to hydrate into state at startup.
         self.critical_state_prefixes: list[str] = list(critical_state_prefixes or [])
 
@@ -131,6 +158,13 @@ class CoreRuntime(RuntimeLifecycleMixin):
         # Orchestration service — создаётся в app-layer, ядро только хранит ссылку.
         # Если None, используется NullOrchestrationBackend (отключенная оркестрация).
         self.orchestration_service: Optional["OrchestrationService"] = orchestration_service
+        if self.orchestration_service is None:
+            backend_mode = str(getattr(config, "orchestration_backend", "none")).lower()
+            if backend_mode == "none":
+                self.orchestration_service = OrchestrationService(NullOrchestrationBackend())
+
+        # Backward-compatible runtime worker task handle (used in tests and lifecycle helpers).
+        self._worker_task: Optional[asyncio.Task[Any]] = None
 
     def create_context(self) -> RuntimeContext:
         """
@@ -145,8 +179,12 @@ class CoreRuntime(RuntimeLifecycleMixin):
             services=self.services.service_registry,
             http=self.services.http,
             capabilities=self.capabilities.registry,
-            operations=self.operations,
+            operations=self.operations.manager,
             state=self.services.state_engine,
+            event_bus=self.services.event_bus,
+            metrics=self._metrics_registry,
+            rate_limiter=self._rate_limiter,
+            operation_context=self._operation_context,
         )
 
     # --- Delegation helpers (через services) ---
@@ -244,8 +282,10 @@ class CoreRuntime(RuntimeLifecycleMixin):
 
     @property
     def dependency_resolver(self) -> Any:
-        """Обратная совместимость: dependency_resolver через plugins."""
-        return self.plugins.dependency_resolver
+        raise AttributeError(
+            "dependency_resolver has been removed; use runtime.plugins.lifecycle_policy "
+            "and runtime.plugins.integrity_checker"
+        )
 
     @property
     def integrations(self) -> Any:
@@ -282,3 +322,64 @@ class CoreRuntime(RuntimeLifecycleMixin):
     def execution_controller(self, value: Any) -> None:
         """Обратная совместимость: установка execution_controller."""
         self.operations.execution_controller = value
+
+    # --- App extension hooks ---
+
+    def set_state_hydration_callback(
+        self,
+        callback: Callable[[], Awaitable[List[str]]]
+    ) -> None:
+        """
+        Установить callback для гидратации state при старте.
+
+        App-layer предоставляет callback который возвращает список namespaces
+        для гидратации в StateEngine. Это устраняет необходимость ядра знать
+        о доменных префиксах.
+
+        Args:
+            callback: Async callback возвращающий список namespaces
+        """
+        self._state_hydration_callback = callback
+
+    # --- Property-методы для обратной совместимости (app_config) ---
+    # Направляют к self.app_config для старого кода
+
+    @property
+    def event_validation_middleware_factory(self) -> Any:
+        """Обратная совместимость: event_validation_middleware_factory через app_config."""
+        return self.app_config.event_validation_middleware_factory
+
+    @event_validation_middleware_factory.setter
+    def event_validation_middleware_factory(self, value: Any) -> None:
+        """Обратная совместимость: установка event_validation_middleware_factory."""
+        self.app_config.event_validation_middleware_factory = value
+
+    @property
+    def plugin_storage_proxy_cls(self) -> Any:
+        """Обратная совместимость: plugin_storage_proxy_cls через app_config."""
+        return self.app_config.plugin_storage_proxy_cls
+
+    @plugin_storage_proxy_cls.setter
+    def plugin_storage_proxy_cls(self, value: Any) -> None:
+        """Обратная совместимость: установка plugin_storage_proxy_cls."""
+        self.app_config.plugin_storage_proxy_cls = value
+
+    @property
+    def plugin_service_proxy_cls(self) -> Any:
+        """Обратная совместимость: plugin_service_proxy_cls через app_config."""
+        return self.app_config.plugin_service_proxy_cls
+
+    @plugin_service_proxy_cls.setter
+    def plugin_service_proxy_cls(self, value: Any) -> None:
+        """Обратная совместимость: установка plugin_service_proxy_cls."""
+        self.app_config.plugin_service_proxy_cls = value
+
+    @property
+    def plugin_default_allowed_services(self) -> Any:
+        """Обратная совместимость: plugin_default_allowed_services через app_config."""
+        return self.app_config.plugin_default_allowed_services
+
+    @plugin_default_allowed_services.setter
+    def plugin_default_allowed_services(self, value: Any) -> None:
+        """Обратная совместимость: установка plugin_default_allowed_services."""
+        self.app_config.plugin_default_allowed_services = value

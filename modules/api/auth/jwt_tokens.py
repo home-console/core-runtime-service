@@ -13,15 +13,18 @@ from .context import RequestContext
 from .constants import (
     AUTH_USERS_NAMESPACE,
     AUTH_REFRESH_TOKENS_NAMESPACE,
+    AUTH_STORAGE_BOUNDARY_ERRORS,
     JWT_ALGORITHM,
     JWT_SECRET_KEY_LENGTH,
     ACCESS_TOKEN_EXPIRATION_SECONDS,
     REFRESH_TOKEN_EXPIRATION_SECONDS,
-    JWT_SECRET_KEY_STORAGE_KEY
+    JWT_SECRET_KEY_STORAGE_KEY,
 )
 from .revocation import is_revoked, revoke_refresh_token
 from .audit import audit_log_auth_event
 from .users import validate_user_exists
+import logging
+logger = logging.getLogger(__name__)
 
 
 # In-memory cache для JWT secret чтобы избежать race condition
@@ -94,9 +97,9 @@ async def get_or_create_jwt_secret(runtime: Any) -> str:
                 # Убрано избыточное логирование загрузки секрета
                 _jwt_secret_cache = secret
                 return secret
-    except Exception as e:
+    except AUTH_STORAGE_BOUNDARY_ERRORS as e:
         try:
-            await runtime.kernel_context.get_service("service_registry").call(
+            await runtime.service_registry.call(
                 "logger.log",
                 level="warning",
                 message="Failed to load JWT secret from storage",
@@ -104,12 +107,12 @@ async def get_or_create_jwt_secret(runtime: Any) -> str:
                 error=str(e)
             )
         except Exception:
-            pass
+            logger.warning("logger.log service call failed", exc_info=True)
     
     # Генерируем новый secret
     secret = secrets.token_urlsafe(JWT_SECRET_KEY_LENGTH)
     try:
-        await runtime.kernel_context.get_service("service_registry").call(
+        await runtime.service_registry.call(
             "logger.log",
             level="info",
             message="Generated new JWT secret",
@@ -117,22 +120,22 @@ async def get_or_create_jwt_secret(runtime: Any) -> str:
             secret_length=len(secret)
         )
     except Exception:
-        pass
+        logger.warning("logger.log service call failed", exc_info=True)
     try:
         # Оборачиваем в dict, так как storage.set требует dict
         await runtime.storage.set("auth_config", JWT_SECRET_KEY_STORAGE_KEY, {"value": secret})
         try:
-            await runtime.kernel_context.get_service("service_registry").call(
+            await runtime.service_registry.call(
                 "logger.log",
                 level="debug",
                 message="Saved new JWT secret to storage",
                 module="auth"
             )
         except Exception:
-            pass
-    except Exception as e:
+            logger.warning("logger.log service call failed", exc_info=True)
+    except AUTH_STORAGE_BOUNDARY_ERRORS as e:
         try:
-            await runtime.kernel_context.get_service("service_registry").call(
+            await runtime.service_registry.call(
                 "logger.log",
                 level="error",
                 message="Failed to save JWT secret to storage",
@@ -140,7 +143,7 @@ async def get_or_create_jwt_secret(runtime: Any) -> str:
                 error=str(e)
             )
         except Exception:
-            pass
+            logger.warning("logger.log service call failed", exc_info=True)
     
     # Кешируем в памяти
     _jwt_secret_cache = secret
@@ -202,7 +205,7 @@ async def validate_access_token(token: str, secret: str, runtime: Optional[Any] 
         if payload.get("type") != "access":
             if runtime:
                 try:
-                    await runtime.kernel_context.get_service("service_registry").call(
+                    await runtime.service_registry.call(
                         "logger.log",
                         level="warning",
                         message="JWT token type mismatch",
@@ -211,7 +214,7 @@ async def validate_access_token(token: str, secret: str, runtime: Optional[Any] 
                         actual_type=payload.get("type")
                     )
                 except Exception:
-                    pass
+                    logger.warning("logger.log service call failed", exc_info=True)
             return None
         
         # Убрано избыточное логирование успешной валидации токена
@@ -223,9 +226,10 @@ async def validate_access_token(token: str, secret: str, runtime: Optional[Any] 
         # Убрано избыточное логирование невалидных токенов (нормальная ситуация)
         return None
     except Exception as e:
+        logger.exception("validate_access_token unexpected error")
         if runtime:
             try:
-                await runtime.kernel_context.get_service("service_registry").call(
+                await runtime.service_registry.call(
                     "logger.log",
                     level="warning",
                     message="JWT token validation error",
@@ -233,7 +237,7 @@ async def validate_access_token(token: str, secret: str, runtime: Optional[Any] 
                     error=str(e)
                 )
             except Exception:
-                pass
+                logger.warning("logger.log service call failed", exc_info=True)
         return None
 
 
@@ -280,7 +284,11 @@ async def validate_jwt_token(runtime: Any, token: str) -> Optional[RequestContex
             user_id=user_id
         )
     
+    except AUTH_STORAGE_BOUNDARY_ERRORS:
+        logger.warning("validate_jwt_token storage/backend error", exc_info=True)
+        return None
     except Exception:
+        logger.exception("validate_jwt_token unexpected error")
         return None
 
 
@@ -386,8 +394,10 @@ async def validate_refresh_token(runtime: Any, refresh_token: str) -> Optional[D
                     await runtime.storage.delete(AUTH_REFRESH_TOKENS_NAMESPACE, refresh_token)
                     # Отзываем токен для консистентности
                     await revoke_refresh_token(runtime, refresh_token)
+                except AUTH_STORAGE_BOUNDARY_ERRORS:
+                    logger.warning("refresh token expiry cleanup failed", exc_info=True)
                 except Exception:
-                    pass
+                    logger.warning("refresh token expiry revoke failed", exc_info=True)
                 return None
         
         # Обновляем last_used
@@ -396,7 +406,11 @@ async def validate_refresh_token(runtime: Any, refresh_token: str) -> Optional[D
         
         return token_data
     
+    except AUTH_STORAGE_BOUNDARY_ERRORS:
+        logger.warning("validate_refresh_token storage error", exc_info=True)
+        return None
     except Exception:
+        logger.exception("validate_refresh_token unexpected error")
         return None
 
 

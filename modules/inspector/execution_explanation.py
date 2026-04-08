@@ -13,6 +13,8 @@ from enum import Enum
 from typing import Any, Optional, Protocol
 
 from core.operations.models import Attempt, Operation
+import logging
+logger = logging.getLogger(__name__)
 
 
 class ExplanationSeverity(str, Enum):
@@ -268,7 +270,8 @@ class RuntimeExecutionExplanationSource:
 
         try:
             keys = await storage.list_keys("execution")
-        except Exception:
+        except Exception as e:
+            logger.warning("execution_explanation.get_timeline: failed to list items: %s", e, exc_info=True)
             return []
 
         traces: list[dict[str, Any]] = []
@@ -287,6 +290,7 @@ class RuntimeExecutionExplanationSource:
                 if isinstance(trace, dict):
                     traces.append(trace)
             except Exception:
+                logger.debug("execution_explanation.get_timeline: error processing item (skipping)", exc_info=True)
                 continue
 
         traces.sort(

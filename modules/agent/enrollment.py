@@ -1,3 +1,4 @@
+import logging
 """
 Agent Enrollment Flow — Token-based enrollment with TTL.
 
@@ -22,6 +23,7 @@ from enum import Enum
 from typing import Any, Dict, Optional
 
 from .identity import AgentIdentity, AgentIdentityFactory
+logger = logging.getLogger(__name__)
 
 
 class EnrollmentTokenStatus(str, Enum):
@@ -274,7 +276,7 @@ class AgentEnrollmentManager:
             try:
                 await self._secret_store.delete(hash_key)
             except Exception:
-                pass
+                logger.warning("Unhandled exception", exc_info=True)
 
             return agent_name
         except ValueError:
@@ -315,7 +317,7 @@ class AgentEnrollmentManager:
             hash_key = f"{self._token_hash_prefix}{token.token_id}"
             await self._secret_store.delete(hash_key)
         except Exception:
-            pass
+            logger.warning("Unhandled exception", exc_info=True)
 
         self._enrolled_agents[identity.agent_id] = identity
 
@@ -363,7 +365,7 @@ class AgentEnrollmentManager:
                 secret_key = f"agent:{identity.agent_id}:private_key"
                 await self._secret_store.put(secret_key, private_pem)
             except Exception:
-                pass
+                logger.warning("Unhandled exception", exc_info=True)
             self._enrolled_agents[identity.agent_id] = identity
             logging.getLogger(__name__).info(
                 f"[AgentEnrollment] ✅ Registered agent from WS: agent_name={agent_name!r} "
@@ -382,7 +384,7 @@ class AgentEnrollmentManager:
                     now=now,
                 )
             except Exception:
-                pass
+                logger.warning("Unhandled exception", exc_info=True)
 
         return identity.agent_id
 

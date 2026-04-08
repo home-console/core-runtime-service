@@ -4,6 +4,8 @@ import json
 from typing import Iterable
 
 from .system import CancelOperation, CompleteOperation, ExecutionAction, ScheduleRetry
+import logging
+logger = logging.getLogger(__name__)
 
 
 PRIORITY = {
@@ -28,7 +30,8 @@ def _stable_value(action: ExecutionAction) -> str:
         payload = action
     try:
         return json.dumps(payload, sort_keys=True, default=str)
-    except Exception:
+    except Exception as e:
+        logger.warning("action_resolver._stable_value: failed: %s", e, exc_info=True)
         return repr(payload)
 
 

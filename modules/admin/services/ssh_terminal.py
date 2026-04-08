@@ -85,8 +85,13 @@ class _SshSession:
         for q in subs:
             try:
                 loop.call_soon_threadsafe(q.put_nowait, data)
-            except Exception:
-                pass
+            except (RuntimeError, asyncio.CancelledError):
+                # RuntimeError: loop closed during shutdown; CancelledError: best-effort path.
+                return
+            except TypeError:
+                logger.debug(
+                    "ssh_terminal._broadcast: queue dispatch failed", exc_info=True
+                )
 
     # ── PTY read loop (background thread) ─────────────────────────────────
 
@@ -107,6 +112,10 @@ class _SshSession:
                 try:
                     data = self.channel.recv(4096)
                 except Exception:
+                    logger.debug(
+                        "ssh_terminal._read_loop: error in loop (breaking out)",
+                        exc_info=True,
+                    )
                     break
                 if not data:
                     break
@@ -124,13 +133,13 @@ class _SshSession:
         try:
             if self.channel:
                 self.channel.close()
-        except Exception:
-            pass
+        except OSError:
+            logger.debug("ssh_terminal.close: channel.close failed", exc_info=True)
         try:
             if self.client:
                 self.client.close()
-        except Exception:
-            pass
+        except OSError:
+            logger.debug("ssh_terminal.close: client.close failed", exc_info=True)
 
     def is_alive(self) -> bool:
         return (
@@ -192,6 +201,10 @@ def _open_shell_paramiko(
                 pkey = key_cls.from_private_key(io.StringIO(private_key_pem))
                 break
             except Exception:
+                logger.debug(
+                    "ssh_terminal._open_shell_paramiko: error processing item (skipping)",
+                    exc_info=True,
+                )
                 continue
         if pkey is None:
             raise RuntimeError(
@@ -283,8 +296,14 @@ async def attach_websocket(websocket: Any, session_id: str) -> None:
     # FastAPI/Starlette WS must be accepted before send/receive.
     try:
         await websocket.accept()
+    except asyncio.CancelledError:
+        raise
     except Exception:
         # Already accepted by upstream wrapper or incompatible WS object.
+        logger.debug(
+            "ssh_terminal.attach_websocket: unexpected error (suppressed)",
+            exc_info=True,
+        )
         pass
 
     if session is None or not session.is_alive():
@@ -315,15 +334,25 @@ async def attach_websocket(websocket: Any, session_id: str) -> None:
                             )
                         )
                         await websocket.close(code=1000)
+                    except asyncio.CancelledError:
+                        raise
                     except Exception:
-                        pass
+                        logger.warning("Unhandled exception", exc_info=True)
                     break
                 try:
                     await websocket.send_bytes(data)
+                except asyncio.CancelledError:
+                    raise
                 except Exception:
+                    logger.debug(
+                        "ssh_terminal._ssh_to_ws: error in loop (breaking out)",
+                        exc_info=True,
+                    )
                     break
+        except asyncio.CancelledError:
+            raise
         except Exception:
-            pass
+            logger.warning("Unhandled exception", exc_info=True)
 
     # WS → SSH
     async def _ws_to_ssh():
@@ -335,7 +364,13 @@ async def attach_websocket(websocket: Any, session_id: str) -> None:
                     if not session.is_alive():
                         break
                     continue
+                except asyncio.CancelledError:
+                    raise
                 except Exception:
+                    logger.debug(
+                        "ssh_terminal._ws_to_ssh: error in loop (breaking out)",
+                        exc_info=True,
+                    )
                     break
 
                 if msg.get("type") == "websocket.disconnect":
@@ -368,15 +403,21 @@ async def attach_websocket(websocket: Any, session_id: str) -> None:
                                     await websocket.send_text(
                                         json.dumps({"type": "pong"})
                                     )
+                                except asyncio.CancelledError:
+                                    raise
                                 except Exception:
-                                    pass
+                                    logger.warning("Unhandled exception", exc_info=True)
                                 continue
+                        except asyncio.CancelledError:
+                            raise
                         except Exception:
-                            pass
+                            logger.warning("Unhandled exception", exc_info=True)
                     data = text.encode("utf-8", errors="replace")
                     await loop.run_in_executor(None, lambda d=data: channel.send(d))
+        except asyncio.CancelledError:
+            raise
         except Exception:
-            pass
+            logger.warning("Unhandled exception", exc_info=True)
 
     try:
         await asyncio.gather(_ssh_to_ws(), _ws_to_ssh())
@@ -422,7 +463,12 @@ async def http_create_session(
 
             repo = CredentialRepository(storage_manager=sm, secret_store=ss)
             pair = await repo.get_with_secret(credential_id)
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
+            logger.warning(
+                "ssh_terminal.http_create_session: failed: %s", e, exc_info=True
+            )
             return {"error": f"Cannot load credential: {e}"}
         if pair is None:
             return {"error": f"Credential {credential_id} not found"}
@@ -451,6 +497,8 @@ async def http_create_session(
             credential_id=credential_id,
         )
         return session.to_dict()
+    except asyncio.CancelledError:
+        raise
     except Exception as e:
         logger.error(f"[ssh] create_session failed: {e}", exc_info=True)
         return {"error": str(e)}

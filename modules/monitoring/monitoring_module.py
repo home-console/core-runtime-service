@@ -5,6 +5,8 @@ import time
 from prometheus_client import CollectorRegistry, generate_latest, CONTENT_TYPE_LATEST
 from prometheus_client import Counter, Gauge, Histogram
 from fastapi import APIRouter, Response
+import logging
+logger = logging.getLogger(__name__)
 
 
 class MonitoringModule:
@@ -57,10 +59,11 @@ class MonitoringModule:
         # Check storage if runtime available
         if self.runtime:
             try:
-                storage = self.runtime.storage
+                storage = self.context.storage
                 await storage.get("health_check", "test")
                 checks["storage"] = "ok"
             except Exception as e:
+                logger.debug("monitoring_module.health_endpoint: error (using fallback value): %s", e)
                 checks["storage"] = "error"
                 checks["storage_error"] = str(e)
                 checks["status"] = "degraded"

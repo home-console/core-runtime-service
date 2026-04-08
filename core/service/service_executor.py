@@ -4,6 +4,7 @@ import asyncio
 from typing import Any, Optional
 
 from core.service.models import ServiceFunc, ServiceMiddleware
+from core.exception_groups import BEST_EFFORT_BACKGROUND_ERRORS
 
 
 class ServiceExecutor:
@@ -25,7 +26,7 @@ class ServiceExecutor:
 
         try:
             result = await func(*args, **kwargs)
-        except Exception as error:
+        except BEST_EFFORT_BACKGROUND_ERRORS as error:
             for item in middleware:
                 await item.on_error(service_name, error)
             raise

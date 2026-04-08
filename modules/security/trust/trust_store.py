@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any
 from enum import Enum
 from datetime import datetime, UTC
+import logging
+logger = logging.getLogger(__name__)
 
 
 class TrustLevel(Enum):
@@ -147,7 +149,7 @@ class TrustStore:
                     data = json.load(f)
                     return data.get("self_hosted", False)
             except Exception:
-                pass
+                logger.warning("Unhandled exception", exc_info=True)
         return False
 
     def mark_self_hosted(self, value: bool = True) -> None:
@@ -160,7 +162,7 @@ class TrustStore:
                     data = json.load(f)
                     return data.get("auto_trust_enabled", False)
             except Exception:
-                pass
+                logger.warning("Unhandled exception", exc_info=True)
         return False
 
     def enable_auto_trust(self) -> None:

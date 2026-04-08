@@ -26,6 +26,7 @@ async def register_plugin_control_bindings(
             await runtime.plugin_manager.unload_plugin(plugin_name)
             return {"ok": True}
         except Exception as e:
+            logger.warning("plugin_control_bindings._admin_unload_plugin: failed: %s", e, exc_info=True)
             return {"ok": False, "error": str(e)}
 
     async def _admin_reload_plugin(name: str = None, **kw):
@@ -36,6 +37,7 @@ async def register_plugin_control_bindings(
             await runtime.plugin_manager.reload_plugin(plugin_name)
             return {"ok": True}
         except Exception as e:
+            logger.warning("plugin_control_bindings._admin_reload_plugin: failed: %s", e, exc_info=True)
             return {"ok": False, "error": str(e)}
 
     async def _admin_restart_plugin_container(name: str = None, body: Any = None, **kw):
@@ -162,6 +164,7 @@ async def register_plugin_control_bindings(
             await runtime.plugin_manager.start_plugin(plugin_name)
             return {"ok": True}
         except Exception as e:
+            logger.warning("plugin_control_bindings._admin_start_plugin: failed: %s", e, exc_info=True)
             return {"ok": False, "error": str(e)}
 
     async def _admin_stop_plugin(name: str = None, **kw):
@@ -172,6 +175,7 @@ async def register_plugin_control_bindings(
             await runtime.plugin_manager.stop_plugin(plugin_name)
             return {"ok": True}
         except Exception as e:
+            logger.warning("plugin_control_bindings._admin_stop_plugin: failed: %s", e, exc_info=True)
             return {"ok": False, "error": str(e)}
 
     async def _admin_load_plugin_by_name(name: str = None, body: Any = None, **kw):
@@ -187,6 +191,7 @@ async def register_plugin_control_bindings(
                 return {"ok": True}
             return {"ok": False, "error": f"Не удалось загрузить плагин '{plugin_name}' (нет манифеста или зависимости)"}
         except Exception as e:
+            logger.warning("plugin_control_bindings._admin_load_plugin_by_name: failed: %s", e, exc_info=True)
             return {"ok": False, "error": str(e)}
 
     async def _admin_auto_load_plugins(body: Any = None, **kw):
@@ -197,6 +202,7 @@ async def register_plugin_control_bindings(
             await runtime.plugin_manager.auto_load_plugins(plugins_dir=plugins_dir)
             return {"ok": True, "loaded": await runtime.plugin_manager.list_plugins()}
         except Exception as e:
+            logger.warning("plugin_control_bindings._admin_auto_load_plugins: failed: %s", e, exc_info=True)
             return {"ok": False, "error": str(e)}
 
     handlers = [
@@ -210,7 +216,7 @@ async def register_plugin_control_bindings(
         ("admin.v1.plugins.auto_load", _admin_auto_load_plugins),
     ]
     try:
-        services = runtime.kernel_context.get_service("service_registry")
+        services = context.services
         for name, handler in handlers:
             await services.register_with_acl(name, handler, admin_only=True)
             registered_services.append(name)

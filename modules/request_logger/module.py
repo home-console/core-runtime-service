@@ -1,3 +1,4 @@
+import logging
 """
 RequestLoggerModule — модуль для хранения полных логов каждого запроса.
 
@@ -11,7 +12,9 @@ from typing import Any, Dict, List, Optional
 from collections import deque
 from datetime import datetime, UTC
 
+from core.adapters.storage_errors import STORAGE_BOUNDARY_ERRORS
 from core.runtime.runtime_module import RuntimeModule
+logger = logging.getLogger(__name__)
 
 
 class RequestLoggerModule(RuntimeModule):
@@ -58,9 +61,9 @@ class RequestLoggerModule(RuntimeModule):
 
     async def start(self) -> None:
         """Запуск модуля."""
-        from core.runtime.operation_context import set_operation_context_provider
         from modules.request_logger.middleware import RequestLoggerOperationContext
-        set_operation_context_provider(RequestLoggerOperationContext())
+        if self.context.operation_context is not None:
+            self.context.operation_context.set_provider(RequestLoggerOperationContext())
         try:
             await self.context.services.call(
                 "logger.log",
@@ -68,13 +71,18 @@ class RequestLoggerModule(RuntimeModule):
                 message="RequestLogger module started",
                 module="request_logger"
             )
+        except STORAGE_BOUNDARY_ERRORS:
+            logger.debug(
+                "request_logger.start: logger.log failed (storage boundary)",
+                exc_info=True,
+            )
         except Exception:
-            pass
+            logger.debug("request_logger.start: logger.log failed", exc_info=True)
 
     async def stop(self) -> None:
         """Остановка модуля."""
-        from core.runtime.operation_context import set_operation_context_provider
-        set_operation_context_provider(None)
+        if self.context.operation_context is not None:
+            self.context.operation_context.set_provider(None)
         try:
             await self.context.services.call(
                 "logger.log",
@@ -82,8 +90,13 @@ class RequestLoggerModule(RuntimeModule):
                 message="RequestLogger module stopped",
                 module="request_logger"
             )
+        except STORAGE_BOUNDARY_ERRORS:
+            logger.debug(
+                "request_logger.stop: logger.log failed (storage boundary)",
+                exc_info=True,
+            )
         except Exception:
-            pass
+            logger.debug("request_logger.stop: logger.log failed", exc_info=True)
 
         # Отменяем регистрацию сервисов
         try:
@@ -93,8 +106,12 @@ class RequestLoggerModule(RuntimeModule):
             await self.context.services.unregister("request_logger.clear_logs")
             await self.context.services.unregister("request_logger.set_request_metadata")
             await self.context.services.unregister("request_logger.create_http_session")
+        except STORAGE_BOUNDARY_ERRORS:
+            logger.debug(
+                "request_logger.stop: unregister storage boundary", exc_info=True
+            )
         except Exception:
-            pass
+            logger.debug("request_logger.stop: unregister failed", exc_info=True)
 
         # Очищаем хранилище
         self._request_logs.clear()

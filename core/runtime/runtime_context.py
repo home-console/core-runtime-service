@@ -11,7 +11,10 @@ from typing import Any, Optional
 from core.capability.registry import CapabilityRegistry
 from core.http.registry import HttpRegistry
 from core.operations.manager import OperationManager
+from core.observability.metrics import MetricsRegistry
+from core.observability.rate_limiter import PluginRateLimiter
 from core.service.registry import ServiceRegistry
+from core.runtime.operation_context import OperationContext
 
 
 @dataclass
@@ -43,6 +46,10 @@ class RuntimeContext:
     # Опциональные (с default — должны идти после обязательных)
     vault: Optional[Any] = None  # Vault storage port (если dual-mode)
     state: Optional[Any] = None  # StateEngine (для быстрого доступа к state)
+    event_bus: Optional[Any] = None  # InMemoryEventBus (pub/sub)
+    metrics: Optional[MetricsRegistry] = None  # Observability metrics registry (per-runtime)
+    rate_limiter: Optional[PluginRateLimiter] = None  # Plugin rate limiter (per-runtime)
+    operation_context: Optional[OperationContext] = None  # Operation context (per-runtime)
 
     def __post_init__(self):
         """Валидация обязательных полей."""

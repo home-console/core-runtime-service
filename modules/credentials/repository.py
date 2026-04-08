@@ -19,6 +19,8 @@ from modules.credentials.errors import (
     CredentialVersionConflict,
 )
 from modules.storage.manager import StorageManager
+import logging
+logger = logging.getLogger(__name__)
 
 METADATA_NAMESPACE = "credentials.meta"
 SECRET_NAMESPACE = "secrets.store"
@@ -79,7 +81,7 @@ class CredentialRepository:
             try:
                 await self._secrets.delete(_make_secret_key(credential.id))
             except Exception:
-                pass
+                logger.warning("Unhandled exception", exc_info=True)
             raise
 
     async def get(self, credential_id: str) -> Optional[Credential]:
@@ -150,7 +152,7 @@ class CredentialRepository:
             if self._secrets is not None:
                 await self._secrets.delete(_make_secret_key(credential_id))
         except Exception:
-            pass
+            logger.warning("Unhandled exception", exc_info=True)
 
     async def list(self) -> list[Credential]:
         keys = await self._storage.list_keys(METADATA_NAMESPACE, target="core")
@@ -194,7 +196,8 @@ class CredentialRepository:
             if policy_dict is None:
                 return None
             return CredentialPolicy.from_dict(policy_dict)
-        except Exception:
+        except Exception as e:
+            logger.warning("repository.get_policy: failed, returning None: %s", e, exc_info=True)
             return None
 
     async def update_policy(self, policy: CredentialPolicy) -> CredentialPolicy:

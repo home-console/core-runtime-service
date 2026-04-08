@@ -14,6 +14,7 @@ from core.operations.models import (
 from core.operations.worker import OperationWorker
 from core.runtime.runtime import CoreRuntime
 from modules.hooks.runtime_contract import ensure_runtime_execution_contract
+from core.operations.dedup import DedupLayer
 
 
 @pytest.mark.asyncio
@@ -58,6 +59,55 @@ async def test_worker_executes_runnable_operations_from_operation_source(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_worker_skips_operation_if_already_processed_by_dedup(monkeypatch):
+    monkeypatch.setattr("core.operations.worker.time.time", lambda: 1000.0)
+
+    class _Storage:
+        def __init__(self):
+            self._data: dict[tuple[str, str], object] = {}
+
+        async def get(self, namespace: str, key: str):
+            return self._data.get((namespace, key))
+
+        async def set(self, namespace: str, key: str, value: object):
+            self._data[(namespace, key)] = value
+
+        async def delete(self, namespace: str, key: str):
+            self._data.pop((namespace, key), None)
+            return True
+
+    runtime = Mock()
+    runtime.storage = _Storage()
+
+    operation = Operation(
+        operation_id="op-processed",
+        op_type="test.processed",
+        params={},
+        initiator=OperationInitiator(kind=OperationInitiatorKind.SYSTEM),
+    )
+
+    runtime.operations = Mock()
+    runtime.operations._storage = Mock()
+    runtime.operations._storage.ensure_attempt_created = AsyncMock()
+    runtime.operations._storage.try_claim_attempt = AsyncMock(return_value=(True, "t1"))
+    runtime.operations._storage.persist = AsyncMock()
+    runtime.operations._executor = Mock()
+    runtime.operations._executor.execute_attempt = AsyncMock()
+
+    ensure_runtime_execution_contract(runtime)
+
+    # Mark operation as processed before execution.
+    dedup = DedupLayer(runtime.storage)
+    await dedup.mark_operation_processed(operation.operation_id)
+
+    worker = OperationWorker(runtime)
+    result = await worker.execute_operation_now(operation)
+
+    assert result.operation_id == "op-processed"
+    assert runtime.operations._executor.execute_attempt.await_count == 0
+
+
+@pytest.mark.asyncio
 async def test_runtime_start_wires_operation_worker(monkeypatch, memory_adapter):
     monkeypatch.setenv("TEST_MODE", "1")
 
@@ -69,7 +119,7 @@ async def test_runtime_start_wires_operation_worker(monkeypatch, memory_adapter)
     runtime.plugin_manager.list_plugins = AsyncMock(return_value=[])
     runtime.plugin_manager.start_all = AsyncMock()
     runtime.plugin_manager.stop_all = AsyncMock()
-    runtime.dependency_resolver.validate_runtime_integrity = Mock(return_value=[])
+    runtime.plugins.integrity_checker.check_runtime_integrity = Mock(return_value=[])
 
     await runtime.start()
     await asyncio.sleep(0)

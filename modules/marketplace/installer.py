@@ -1,3 +1,4 @@
+import logging
 """
 Marketplace plugin installer.
 
@@ -32,6 +33,7 @@ from modules.security.trust.legacy_crypto import (
 )
 from modules.plugins.schema import ValidationError as SchemaValidationError
 from modules.plugins.schema import validate_plugin_json
+logger = logging.getLogger(__name__)
 
 
 class InstallerError(Exception):
@@ -166,10 +168,14 @@ class MarketplaceInstaller:
 
             plugin_name = plugin_data["name"]
             plugin_version = plugin_data["version"]
-            entrypoint = plugin_data["entrypoint"]
+            class_path = plugin_data["class_path"]
+
+            # Derive module file from class_path (e.g. "plugin.TestPlugin" → "plugin.py")
+            module_name = class_path.rsplit(".", 1)[0]
+            entrypoint_file = module_name.replace(".", "/") + ".py"
 
             # Validate that plugin can be installed (dependencies satisfied)
-            if runtime and hasattr(runtime, "dependency_resolver"):
+            if runtime:
                 from core.kernel.base_plugin import PluginMetadata
 
                 # Create metadata for validation
@@ -189,22 +195,26 @@ class MarketplaceInstaller:
                     )
 
                     # Validate installation would not break system
-                    errors = runtime.dependency_resolver.validate_plugin_install(
-                        metadata
-                    )
-                    if errors:
-                        raise InstallerError(
-                            f"Cannot install {plugin_name}: dependency validation failed:\n"
-                            + "\n".join(f"  - {e}" for e in errors)
-                        )
+                    policy = getattr(getattr(runtime, "plugins", None), "lifecycle_policy", None)
+                    if policy is not None:
+                        ok, errors = policy.can_install_plugin(metadata)
+                        if not ok and errors:
+                            raise InstallerError(
+                                f"Cannot install {plugin_name}: dependency validation failed:\n"
+                                + "\n".join(f"  - {e}" for e in errors)
+                            )
+                    else:
+                        errors = []
                 except InstallerError:
                     raise
                 except (TypeError, AttributeError):
                     # In test environments with mocks, skip strict validation
                     pass
                 except Exception:
-                    # Log validation errors but don't fail installation
-                    pass
+                    logger.warning(
+                        "MarketplaceInstaller: dependency validation unexpected error",
+                        exc_info=True,
+                    )
 
             # Check for conflicts
             target_dir = self.plugins_dir / plugin_name
@@ -214,9 +224,9 @@ class MarketplaceInstaller:
                 )
 
             # Validate entrypoint exists in archive
-            entrypoint_path = Path(temp_dir) / entrypoint
+            entrypoint_path = Path(temp_dir) / entrypoint_file
             if not entrypoint_path.exists():
-                raise InstallerError(f"Entrypoint file not found: {entrypoint}")
+                raise InstallerError(f"Plugin module not found: {entrypoint_file}")
 
             # Move to plugins directory
             target_dir.mkdir(parents=True, exist_ok=True)
@@ -233,13 +243,13 @@ class MarketplaceInstaller:
                     # P0: Wrap load in try-finally for proper cleanup
                     try:
                         # Dynamically import the plugin module
-                        plugin_module = self._load_plugin_module(target_dir, entrypoint)
+                        plugin_module = self._load_plugin_module(target_dir, entrypoint_file)
 
                         # Find BasePlugin subclass
                         plugin_class = self._find_plugin_class(plugin_module)
                         if not plugin_class:
                             raise InstallerError(
-                                f"No BasePlugin subclass found in {entrypoint}"
+                                f"No BasePlugin subclass found in {class_path}"
                             )
 
                         # Instantiate and load
@@ -262,9 +272,12 @@ class MarketplaceInstaller:
                                 await runtime.plugin_manager.start_plugin(metadata.name)
                         except Exception as e:
                             # Log activation error but don't fail installation
-                            logger = getattr(runtime, "logger", None)
-                            if logger:
-                                logger.warning(f"Failed to auto-start plugin: {str(e)}")
+                            rlog = getattr(runtime, "logger", None)
+                            if rlog:
+                                rlog.warning(f"Failed to auto-start plugin: {str(e)}")
+                            logger.debug(
+                                "MarketplaceInstaller: auto-start failed", exc_info=True
+                            )
 
                     except InstallerError:
                         raise
@@ -286,7 +299,7 @@ class MarketplaceInstaller:
                 "installed_at": datetime.now(timezone.utc).isoformat(),
                 "installed_at": datetime.now(UTC).isoformat(),
                 "hash": calculated_hash,
-                "entrypoint": entrypoint,
+                "class_path": class_path,
                 "capabilities_provided": plugin_data.get("capabilities_provided", []),
                 "capabilities_required": plugin_data.get("capabilities_required", []),
             }
@@ -296,8 +309,10 @@ class MarketplaceInstaller:
             try:
                 if target_dir is not None and target_dir.exists():
                     shutil.rmtree(target_dir)
-            except Exception:
-                pass  # Best effort cleanup
+            except OSError:
+                logger.debug(
+                    "MarketplaceInstaller: cleanup target_dir after failure", exc_info=True
+                )
             raise
 
         finally:
@@ -305,8 +320,10 @@ class MarketplaceInstaller:
             try:
                 if temp_dir is not None and os.path.exists(temp_dir):
                     shutil.rmtree(temp_dir)
-            except Exception:
-                pass  # Best effort cleanup
+            except OSError:
+                logger.debug(
+                    "MarketplaceInstaller: temp_dir cleanup failed", exc_info=True
+                )
 
     async def uninstall(
         self,
@@ -337,8 +354,10 @@ class MarketplaceInstaller:
                 await runtime.plugin_manager.stop_plugin(plugin_name)
                 await runtime.plugin_manager.unload_plugin(plugin_name)
             except Exception:
-                # Log but don't fail - plugin might not be loaded
-                pass
+                logger.debug(
+                    "MarketplaceInstaller.uninstall: stop/unload (plugin may be absent)",
+                    exc_info=True,
+                )
 
         # Remove directory
         shutil.rmtree(target_dir)
@@ -407,7 +426,7 @@ class MarketplaceInstaller:
         except (zipfile.BadZipFile, tarfile.TarError) as e:
             raise InstallerError(f"Invalid archive: {str(e)}")
 
-    def _load_plugin_module(self, plugin_dir: Path, entrypoint: str):
+    def _load_plugin_module(self, plugin_dir: Path, entrypoint_file: str):
         """Dynamically load plugin module."""
         import importlib.util
         import sys
@@ -418,15 +437,15 @@ class MarketplaceInstaller:
         if plugin_dir_str not in sys.path:
             sys.path.insert(0, plugin_dir_str)
             path_inserted = True
-        
+
 
         # Load module
-        entrypoint_path = plugin_dir / entrypoint
-        module_name = entrypoint.replace(".py", "")
+        entrypoint_path = plugin_dir / entrypoint_file
+        module_name = entrypoint_file.replace("/", ".").replace(".py", "")
 
         spec = importlib.util.spec_from_file_location(module_name, entrypoint_path)
         if not spec or not spec.loader:
-            raise InstallerError(f"Cannot load module: {entrypoint}")
+            raise InstallerError(f"Cannot load module: {entrypoint_file}")
 
         module = importlib.util.module_from_spec(spec)
         try:

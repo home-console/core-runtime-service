@@ -10,6 +10,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 from starlette.types import ASGIApp
+import logging
+logger = logging.getLogger(__name__)
 
 
 def _is_localhost_origin(origin: str | None) -> bool:
@@ -21,7 +23,8 @@ def _is_localhost_origin(origin: str | None) -> bool:
             parsed.scheme in ("http", "https")
             and parsed.hostname in ("localhost", "127.0.0.1")
         )
-    except Exception:
+    except Exception as e:
+        logger.warning("cors_localhost._is_localhost_origin: failed, returning False: %s", e, exc_info=True)
         return False
 
 

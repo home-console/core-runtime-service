@@ -20,7 +20,10 @@ from datetime import datetime, timezone
 import ipaddress
 import socket
 
-import netifaces
+try:
+    import netifaces  # type: ignore
+except ImportError:  # pragma: no cover
+    netifaces = None
 
 
 @dataclass
@@ -75,6 +78,13 @@ class NetworkScanner:
         Returns:
             Список CIDR адресов типа ['192.168.1.0/24', '10.0.0.0/8']
         """
+        if netifaces is None:
+            self._log(
+                "warning",
+                "netifaces is not installed; get_local_networks() returns [].",
+            )
+            return []
+
         networks = []
         try:
             for interface in netifaces.interfaces():

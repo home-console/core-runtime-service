@@ -9,6 +9,9 @@ from typing import Optional
 
 from core.runtime.runtime_module import RuntimeModule
 from core.http.models import HttpEndpoint
+from core.events_schemas import PresenceEnteredPayload, PresenceLeftPayload
+import logging
+logger = logging.getLogger(__name__)
 
 
 class PresenceModule(RuntimeModule):
@@ -51,6 +54,7 @@ class PresenceModule(RuntimeModule):
             )
         except Exception:
             # Ошибки регистрации контрактов не должны блокировать загрузку
+            logger.debug("module.register: unexpected error (suppressed)", exc_info=True)
             pass
 
     async def start(self) -> None:
@@ -66,6 +70,7 @@ class PresenceModule(RuntimeModule):
                 await self.context.storage.set("presence", "home", {"value": False})
         except Exception:
             # Не мешаем старту системы
+            logger.debug("module.start: unexpected error (suppressed)", exc_info=True)
             pass
 
     async def stop(self) -> None:
@@ -78,13 +83,13 @@ class PresenceModule(RuntimeModule):
         try:
             await self.context.services.unregister("presence.set")
         except Exception:
-            pass
+            logger.warning("Unhandled exception", exc_info=True)
 
         # Удаление HTTP контрактов
         try:
             self.context.http.clear(self.name)
         except Exception:
-            pass
+            logger.warning("Unhandled exception", exc_info=True)
 
     async def _set_service(self, home: bool) -> Optional[bool]:
         """
@@ -119,11 +124,14 @@ class PresenceModule(RuntimeModule):
             await self.context.storage.set("presence", "home", {"value": home})
 
             # Публикуем событие в зависимости от направления изменения
-            payload = {"old_state": old_val, "new_state": home}
+            payload: PresenceEnteredPayload | PresenceLeftPayload = {
+                "old_state": old_val,
+                "new_state": home,
+            }
             if old_val is False and home is True:
-                await self.runtime.kernel_context.emit("presence.entered", payload)
+                await self.context.event_bus.publish("presence.entered", payload)
             elif old_val is True and home is False:
-                await self.runtime.kernel_context.emit("presence.left", payload)
+                await self.context.event_bus.publish("presence.left", payload)
 
             return home
 
@@ -137,6 +145,6 @@ class PresenceModule(RuntimeModule):
                     plugin="presence_module",
                 )
             except Exception:
-                pass
+                logger.warning("Unhandled exception", exc_info=True)
             # Повторно выбрасываем, чтобы вызывающий получил информацию
             raise

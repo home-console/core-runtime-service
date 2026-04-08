@@ -1,3 +1,4 @@
+import logging
 """
 Обработчики событий для automation модуля.
 """
@@ -5,6 +6,7 @@
 from typing import Any, Dict
 
 from .registry import get_event_handlers
+logger = logging.getLogger(__name__)
 
 
 async def handle_external_state_reported(runtime, data: Dict[str, Any]) -> None:
@@ -29,8 +31,9 @@ async def handle_external_state_reported(runtime, data: Dict[str, Any]) -> None:
     # Используем storage напрямую, как в devices модуле
     try:
         mapping = await runtime.storage.get("devices_mappings", external_id)
-    except Exception:
+    except Exception as e:
         # Если storage недоступен — ничего не делаем
+        logger.warning("handlers.handle_external_state_reported: failed, returning None: %s", e, exc_info=True)
         return
 
     # mapping теперь dict с ключом "internal_id"
@@ -77,4 +80,4 @@ async def handle_external_state_reported(runtime, data: Dict[str, Any]) -> None:
                     )
         except Exception:
             # Automation best-effort: не ломаем event loop из-за ошибок оркестрации
-            pass
+            logger.warning("Unhandled exception", exc_info=True)

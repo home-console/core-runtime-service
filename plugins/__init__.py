@@ -1,6 +1,6 @@
 """
 Плагины для расширения Core Runtime.
 
-Базовые классы находятся в core.kernel.base_plugin.
-Импортируйте: from core.kernel.base_plugin import BasePlugin, PluginMetadata
+Базовые классы и контракт для плагинов — в `sdk`.
+Импортируйте: `from sdk.plugin_ext import BasePlugin, PluginMetadata`
 """

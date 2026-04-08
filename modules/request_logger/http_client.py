@@ -1,3 +1,4 @@
+import logging
 """
 HTTP Client wrapper для логирования всех исходящих HTTP запросов.
 
@@ -8,13 +9,16 @@ HTTP Client wrapper для логирования всех исходящих HT
 поведения оригинального ClientSession.
 """
 
+import asyncio
 import time
 import uuid
 from typing import Any, Optional, Dict
 import aiohttp
 from contextvars import ContextVar
 
+from core.adapters.storage_errors import STORAGE_BOUNDARY_ERRORS
 from modules.request_logger.middleware import get_request_id, get_operation_id
+logger = logging.getLogger(__name__)
 
 
 class LoggedClientSession:
@@ -82,8 +86,8 @@ class LoggedClientSession:
                         trace_config_ctx.body = params.data
                     else:
                         trace_config_ctx.body = str(params.data)[:1000]  # Ограничиваем размер
-                except Exception:
-                    pass
+                except (TypeError, ValueError, UnicodeEncodeError):
+                    logger.debug("trace on_request_start: body coerce failed", exc_info=True)
         
         async def on_request_end(session, trace_config_ctx, params):
             """Вызывается при завершении запроса."""
@@ -119,12 +123,16 @@ class LoggedClientSession:
                             # Восстанавливаем body для оригинального response
                             # Сохраняем прочитанные байты в _body
                             params.response._body = body_bytes
-                    except Exception:
-                        # Если не удалось прочитать body, продолжаем без него
-                        pass
-            except Exception:
-                # Если не удалось прочитать body, продолжаем без него
-                pass
+                    except (aiohttp.ClientError, OSError, RuntimeError, asyncio.CancelledError):
+                        logger.debug(
+                            "trace on_request_end: response body read failed",
+                            exc_info=True,
+                        )
+            except (aiohttp.ClientError, OSError, RuntimeError, asyncio.CancelledError):
+                logger.debug(
+                    "trace on_request_end: response handling failed",
+                    exc_info=True,
+                )
             
             # Маскируем чувствительные данные
             sensitive_headers = ["authorization", "cookie", "x-api-key", "api-key"]
@@ -144,9 +152,7 @@ class LoggedClientSession:
             
             # Логируем запрос в обычный logger (чтобы видеть в консоли)
             try:
-                services = self.runtime.kernel_context.get_service("service_registry")
-                if services:
-                    await services.call(
+                await self.context.services.call(
                         "logger.log",
                         level="info",
                         message=f"Outgoing HTTP {trace_config_ctx.method} {trace_config_ctx.url}",
@@ -156,13 +162,17 @@ class LoggedClientSession:
                             "url": trace_config_ctx.url,
                         }
                     )
+            except asyncio.CancelledError:
+                raise
             except Exception:
-                pass
+                logger.debug(
+                    "request_logger trace: logger.log (outgoing start) failed",
+                    exc_info=True,
+                )
             
             # Логируем запрос в request_logger используя operation_id
-            services = self.runtime.kernel_context.get_service("service_registry")
-            if services:
-                await services.call(
+            services = self.context.services
+            await services.call(
                     "request_logger.log",
                     request_id=trace_config_ctx.operation_id,  # Используем operation_id вместо request_id
                     level="info",
@@ -223,8 +233,13 @@ class LoggedClientSession:
                             "duration_ms": duration_ms,
                         }
                     )
+            except asyncio.CancelledError:
+                raise
             except Exception:
-                pass
+                logger.debug(
+                    "request_logger trace: logger.log (outgoing response) failed",
+                    exc_info=True,
+                )
             
             if services:
                 await services.call(
@@ -251,10 +266,9 @@ class LoggedClientSession:
             duration_ms = (time.time() - trace_config_ctx.start_time) * 1000
             
             # Логируем ошибку в обычный logger
-            services = self.runtime.kernel_context.get_service("service_registry")
+            services = self.context.services
             try:
-                if services:
-                    await services.call(
+                await services.call(
                         "logger.log",
                         level="error",
                         message=f"Outgoing HTTP {trace_config_ctx.method} {trace_config_ctx.url} failed: {type(params.exception).__name__}: {str(params.exception)}",
@@ -266,8 +280,13 @@ class LoggedClientSession:
                             "error_type": type(params.exception).__name__,
                         }
                     )
+            except asyncio.CancelledError:
+                raise
             except Exception:
-                pass
+                logger.debug(
+                    "request_logger trace: logger.log (outgoing error path) failed",
+                    exc_info=True,
+                )
             
             # Маскируем чувствительные данные
             sensitive_headers = ["authorization", "cookie", "x-api-key", "api-key"]
@@ -334,12 +353,20 @@ class LoggedClientSession:
         """Проверяет, доступен ли RequestLoggerModule."""
         if self._has_request_logger is None:
             try:
-                services = self.runtime.kernel_context.get_service("service_registry")
-                if services:
-                    self._has_request_logger = await services.has_service("request_logger.log")
-                else:
-                    self._has_request_logger = False
+                self._has_request_logger = await self.context.services.has_service(
+                    "request_logger.log"
+                )
+            except STORAGE_BOUNDARY_ERRORS:
+                logger.debug(
+                    "request_logger: has_service check failed (storage boundary)",
+                    exc_info=True,
+                )
+                self._has_request_logger = False
             except Exception:
+                logger.debug(
+                    "request_logger: has_service check failed",
+                    exc_info=True,
+                )
                 self._has_request_logger = False
         return self._has_request_logger
     
@@ -377,50 +404,49 @@ class LoggedClientSession:
                         sanitized_headers[k] = v
             
             # Логируем запрос
-            services = self.runtime.kernel_context.get_service("service_registry")
-            if services:
+            services = self.context.services
+            await services.call(
+                "request_logger.log",
+                request_id=request_id,
+                level="info",
+                message=f"Outgoing HTTP {method} {url}",
+                context={
+                    "type": "outgoing_request",
+                    "source": self.source,
+                    "method": method,
+                    "url": str(url),
+                    "headers": sanitized_headers,
+                    "body": body if body else None,
+                },
+            )
+
+            # Логируем ответ
+            if error:
                 await services.call(
                     "request_logger.log",
                     request_id=request_id,
-                    level="info",
-                    message=f"Outgoing HTTP {method} {url}",
+                    level="error",
+                    message=f"Outgoing HTTP {method} {url} failed",
                     context={
-                        "type": "outgoing_request",
+                        "type": "outgoing_response",
                         "source": self.source,
-                        "method": method,
-                        "url": str(url),
-                        "headers": sanitized_headers,
-                        "body": body if body else None,
+                        "error": error,
+                        "duration_ms": duration_ms,
                     }
                 )
-                
-                # Логируем ответ
-                if error:
-                    await services.call(
-                        "request_logger.log",
-                        request_id=request_id,
-                        level="error",
-                        message=f"Outgoing HTTP {method} {url} failed",
-                        context={
-                            "type": "outgoing_response",
-                            "source": self.source,
-                            "error": error,
-                            "duration_ms": duration_ms,
-                        }
-                    )
-                elif response_status is not None:
-                    sanitized_response_headers = {}
-                    if response_headers:
-                        for k, v in response_headers.items():
-                            if k.lower() in ["set-cookie"]:
-                                sanitized_response_headers[k] = "***"
-                            else:
-                                sanitized_response_headers[k] = v
-                    
-                    await services.call(
-                        "request_logger.log",
-                        request_id=request_id,
-                        level="info" if 200 <= response_status < 400 else "warning" if 400 <= response_status < 500 else "error",
+            elif response_status is not None:
+                sanitized_response_headers = {}
+                if response_headers:
+                    for k, v in response_headers.items():
+                        if k.lower() in ["set-cookie"]:
+                            sanitized_response_headers[k] = "***"
+                        else:
+                            sanitized_response_headers[k] = v
+
+                await services.call(
+                    "request_logger.log",
+                    request_id=request_id,
+                    level="info" if 200 <= response_status < 400 else "warning" if 400 <= response_status < 500 else "error",
                     message=f"Outgoing HTTP {method} {url} completed",
                     context={
                         "type": "outgoing_response",
@@ -431,9 +457,13 @@ class LoggedClientSession:
                         "duration_ms": duration_ms,
                     }
                 )
+        except STORAGE_BOUNDARY_ERRORS:
+            logger.debug(
+                "_log_outgoing_request: logging failed (storage boundary)",
+                exc_info=True,
+            )
         except Exception:
-            # Игнорируем ошибки логирования, чтобы не ломать основной функционал
-            pass
+            logger.debug("_log_outgoing_request: logging failed", exc_info=True)
     
     async def request(self, method: str, url: str, **kwargs) -> aiohttp.ClientResponse:
         """Проксирует request к оригинальному session."""
@@ -497,7 +527,7 @@ def create_logged_session(runtime: Any, source: str = "unknown", **session_kwarg
         LoggedClientSession обёртка
         
     Example:
-        async with create_logged_session(runtime, source="yandex_smart_home") as session:
+        async with create_logged_session(runtime, source="publisher_plugin") as session:
             async with await session.get("https://api.example.com/data") as resp:
                 data = await resp.json()
     """

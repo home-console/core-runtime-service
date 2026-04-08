@@ -15,6 +15,8 @@ from core.operations.models import (
 )
 
 from .system import CancelOperation, CompleteOperation, ExecutionAction, ScheduleRetry
+import logging
+logger = logging.getLogger(__name__)
 
 
 ActionContext = Mapping[str, Any]
@@ -52,6 +54,7 @@ async def dispatch_action(action: ExecutionAction, ctx: ActionContext) -> None:
             if inspect.isawaitable(outcome):
                 await outcome
         except Exception:
+            logger.debug("actions.dispatch_action: error processing item (skipping)", exc_info=True)
             continue
 
 
@@ -97,6 +100,7 @@ class CompleteOperationActionHandler(ActionHandler):
             try:
                 operation.status = OperationStatus(str(status_value))
             except Exception:
+                logger.debug("actions.handle: error (using fallback value)", exc_info=True)
                 operation.status = OperationStatus.COMPLETED
             operation.result = payload.get("result")
 

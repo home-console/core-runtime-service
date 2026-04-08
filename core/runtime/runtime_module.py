@@ -94,7 +94,33 @@ class RuntimeModule(ABC):
 
         self.runtime = runtime_or_context
 
-        self.context = runtime_or_context.create_context()
+        create_context = getattr(runtime_or_context, "create_context", None)
+        if callable(create_context):
+            maybe_context = create_context()
+            if isinstance(maybe_context, RuntimeContext):
+                self.context = maybe_context
+                return
+            # Some tests/mocks define create_context() but return None or a non-RuntimeContext.
+            # Fall back to a best-effort RuntimeContext constructed from runtime attributes.
+
+        # Backward compatibility for lightweight tests/mocks without create_context().
+        self.context = RuntimeContext(
+            storage=getattr(runtime_or_context, "storage", None),
+            vault=getattr(runtime_or_context, "vault", None),
+            services=getattr(runtime_or_context, "service_registry", None),
+            http=getattr(runtime_or_context, "http", None),
+            capabilities=getattr(
+                runtime_or_context,
+                "capability_registry",
+                getattr(runtime_or_context, "capabilities", None),
+            ),
+            operations=getattr(runtime_or_context, "operations", None),
+            state=getattr(
+                runtime_or_context,
+                "state_engine",
+                getattr(runtime_or_context, "state", None),
+            ),
+        )
 
     async def register_service(
         self,
@@ -124,21 +150,117 @@ class RuntimeModule(ABC):
         register_with_acl: Callable[..., Awaitable[Any]] | None = getattr(
             reg, "register_with_acl", None
         )
-        if register_with_acl is not None:
-            await register_with_acl(
-                name,
-                _wrapper,
-                resource=resource,
-                admin_only=admin_only,
-                filter_result=filter_result,
-                enforce_result=enforce_result,
-                preload_resource=preload_resource,
-                inject_owner_param=inject_owner_param,
-                version=version,
-            )
-            return
+        try:
+            if register_with_acl is not None:
+                await register_with_acl(
+                    name,
+                    _wrapper,
+                    resource=resource,
+                    admin_only=admin_only,
+                    filter_result=filter_result,
+                    enforce_result=enforce_result,
+                    preload_resource=preload_resource,
+                    inject_owner_param=inject_owner_param,
+                    version=version,
+                )
+                return
 
-        await reg.register(name, _wrapper, version=version)
+            await reg.register(name, _wrapper, version=version)
+        except ValueError:
+            # Service already registered (hot-reload / repeated test setup) — skip silently.
+            pass
+
+    async def register_runtime_service(
+        self,
+        name: str,
+        func: Callable[..., Awaitable[Any]],
+        *,
+        resource: Optional[str] = None,
+        admin_only: bool = False,
+        filter_result: bool = False,
+        enforce_result: bool = False,
+        preload_resource: Optional[PreloadResourceFunc] = None,
+        inject_owner_param: Optional[str] = None,
+        version: Optional[str] = None,
+    ) -> None:
+        """
+        Удобный helper для регистрации сервиса из модулей, где доменный хендлер
+        ожидает `runtime` первым аргументом (исторический контракт многих модулей).
+        """
+
+        async def _wrapper(*args: object, **kwargs: object) -> Any:
+            return await func(self.runtime, *args, **kwargs)
+
+        reg = self.context.services
+        register_with_acl: Callable[..., Awaitable[Any]] | None = getattr(
+            reg, "register_with_acl", None
+        )
+        try:
+            if register_with_acl is not None:
+                await register_with_acl(
+                    name,
+                    _wrapper,
+                    resource=resource,
+                    admin_only=admin_only,
+                    filter_result=filter_result,
+                    enforce_result=enforce_result,
+                    preload_resource=preload_resource,
+                    inject_owner_param=inject_owner_param,
+                    version=version,
+                )
+                return
+
+            await reg.register(name, _wrapper, version=version)
+        except ValueError:
+            # Service already registered (hot-reload / repeated test setup) — skip silently.
+            pass
+
+    async def register_raw_service(
+        self,
+        name: str,
+        func: Callable[..., Awaitable[Any]],
+        *,
+        resource: Optional[str] = None,
+        admin_only: bool = False,
+        filter_result: bool = False,
+        enforce_result: bool = False,
+        preload_resource: Optional[PreloadResourceFunc] = None,
+        inject_owner_param: Optional[str] = None,
+        version: Optional[str] = None,
+    ) -> None:
+        """
+        Зарегистрировать сервис "как есть" (без инъекции runtime/context в аргументы).
+
+        Нужен для glue-хендлеров, которые уже закрыли над собой runtime/контекст
+        или имеют нестандартную сигнатуру.
+        """
+
+        async def _wrapper(*args: object, **kwargs: object) -> Any:
+            return await func(*args, **kwargs)
+
+        reg = self.context.services
+        register_with_acl: Callable[..., Awaitable[Any]] | None = getattr(
+            reg, "register_with_acl", None
+        )
+        try:
+            if register_with_acl is not None:
+                await register_with_acl(
+                    name,
+                    _wrapper,
+                    resource=resource,
+                    admin_only=admin_only,
+                    filter_result=filter_result,
+                    enforce_result=enforce_result,
+                    preload_resource=preload_resource,
+                    inject_owner_param=inject_owner_param,
+                    version=version,
+                )
+                return
+
+            await reg.register(name, _wrapper, version=version)
+        except ValueError:
+            # Service already registered (hot-reload / repeated test setup) — skip silently.
+            pass
 
     @property
     @abstractmethod

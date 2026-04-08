@@ -8,6 +8,8 @@ from .policy import RotationPolicy, RotationStatus, RotationStrategy, RotationSt
 from .exceptions import RotationFailedError, RotationNotAllowedError
 from .secret_gen import generate_strong_secret
 from modules.security import TrustLevel
+import logging
+logger = logging.getLogger(__name__)
 
 
 class RotationExecutor:
@@ -246,4 +248,5 @@ class RotationExecutor:
             )
         except Exception as e:
             # Continue even if audit fails
+            logger.debug("executor.rollback_rotation: unexpected error (suppressed): %s", e)
             pass

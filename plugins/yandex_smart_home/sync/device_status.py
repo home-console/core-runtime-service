@@ -7,23 +7,23 @@ from typing import Any, Dict, Optional, Tuple
 import asyncio
 import time
 
-from core.runtime.operation_context import operation
+from sdk import operation
 from ..clients.api_client import YandexAPIClient
 
 
 class DeviceStatusChecker:
     """Класс для проверки онлайн статуса устройств."""
 
-    def __init__(self, runtime: Any, plugin_name: str):
+    def __init__(self, plugin: Any, plugin_name: str):
         """Инициализация проверяющего статус.
 
         Args:
-            runtime: экземпляр Runtime
+            plugin: SDK-first facade (BasePlugin)
             plugin_name: имя плагина для логирования
         """
-        self.runtime = runtime
+        self.plugin = plugin
         self.plugin_name = plugin_name
-        self.api_client = YandexAPIClient(runtime, plugin_name)
+        self.api_client = YandexAPIClient(plugin, plugin_name)
 
     async def check_devices_online(self) -> Dict[str, Any]:
         """Проверить онлайн статус всех устройств через Яндекс API.
@@ -31,15 +31,15 @@ class DeviceStatusChecker:
         Returns:
             Словарь с результатами проверки
         """
-        async with operation("yandex.check_online", self.plugin_name, self.runtime):
+        async with operation("yandex.check_online", self.plugin_name, self.plugin):
             return await self._check_devices_online_impl()
     
     async def _check_devices_online_impl(self) -> Dict[str, Any]:
         """Реализация проверки онлайн статуса."""
         # Получаем список всех внутренних устройств с маппингами
         try:
-            devices = await self.runtime.call_service("devices.list")
-            mappings = await self.runtime.call_service("devices.list_mappings")
+            devices = await self.plugin.call_service("devices.list")
+            mappings = await self.plugin.call_service("devices.list_mappings")
         except Exception as e:
             raise RuntimeError(f"Ошибка получения списка устройств: {e}")
 
@@ -66,7 +66,7 @@ class DeviceStatusChecker:
                 state = device_info.get("state", "").lower()
                 is_online = state == "online"
                 try:
-                    await self.runtime.call_service(
+                    await self.plugin.call_service(
                         "logger.log",
                         level="debug",
                         message=f"Device {external_id} status: {state}",
@@ -80,7 +80,7 @@ class DeviceStatusChecker:
             except RuntimeError as e:
                 error_msg = str(e)
                 try:
-                    await self.runtime.call_service(
+                    await self.plugin.call_service(
                         "logger.log",
                         level="error",
                         message=f"Ошибка проверки устройства {external_id}: {error_msg}",
@@ -93,7 +93,7 @@ class DeviceStatusChecker:
             except Exception as e:
                 error_msg = f"Неожиданная ошибка для {external_id}: {e}"
                 try:
-                    await self.runtime.call_service(
+                    await self.plugin.call_service(
                         "logger.log",
                         level="error",
                         message=error_msg,
@@ -106,7 +106,7 @@ class DeviceStatusChecker:
 
         external_ids_to_check = list(external_to_internal.keys())
         try:
-            await self.runtime.call_service(
+            await self.plugin.call_service(
                 "logger.log",
                 level="info",
                 message=f"Starting online status check for {len(external_ids_to_check)} devices",
@@ -141,7 +141,7 @@ class DeviceStatusChecker:
             error_msg = f"Критическая ошибка при проверке устройств: {e}"
             errors.append(error_msg)
             try:
-                await self.runtime.call_service(
+                await self.plugin.call_service(
                     "logger.log",
                     level="error",
                     message=error_msg,
@@ -185,7 +185,7 @@ class DeviceStatusChecker:
                 device["online"] = bool(is_online)
                 device["updated_at"] = now
 
-                await self.runtime.call_service(
+                await self.plugin.call_service(
                     "devices.update_device_fields",
                     device_id,
                     {
@@ -203,7 +203,7 @@ class DeviceStatusChecker:
                 errors.append(f"Ошибка обновления устройства {device_id}: {e}")
 
         try:
-            await self.runtime.call_service(
+            await self.plugin.call_service(
                 "logger.log",
                 level="info",
                 message=f"Online status check completed: {checked} checked, {online_count} online, {offline_count} offline",

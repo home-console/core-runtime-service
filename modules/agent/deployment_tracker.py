@@ -8,6 +8,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Dict, List, Optional
+import logging
+logger = logging.getLogger(__name__)
 
 
 class DeploymentStatus(str, Enum):
@@ -94,7 +96,7 @@ class DeploymentTracker:
             try:
                 await self._db.insert("deployments", deployment.to_dict())
             except Exception:
-                pass
+                logger.warning("Unhandled exception", exc_info=True)
 
         return deployment
 
@@ -162,7 +164,7 @@ class DeploymentTracker:
                     deployment.to_dict(),
                 )
             except Exception:
-                pass
+                logger.warning("Unhandled exception", exc_info=True)
 
         return True
 

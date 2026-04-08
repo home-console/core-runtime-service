@@ -21,8 +21,6 @@ def register_admin_core_http_endpoints(http_registry: Any) -> None:
         ("/admin/v1/inspector/ws", "admin.v1.ws", "Inspector: list WebSocket endpoints"),
         ("/admin/v1/inspector/events", "admin.v1.events", "Inspector: list event subscriptions"),
         ("/admin/v1/inspector/storage", "admin.v1.storage", "Inspector: list storage namespaces"),
-        ("/admin/v1/inspector/state", "admin.v1.state", "Inspector: get all state"),
-        ("/admin/v1/inspector/state/keys", "admin.v1.state.keys", "Inspector: list state keys"),
         ("/admin/v1/inspector/operations", "admin.v1.inspector.operations", "Inspector: available operation types"),
         ("/admin/v1/inspector/executions", "admin.v1.inspector.executions", "Inspector: list execution traces"),
         ("/admin/v1/inspector/auth", "admin.v1.inspector.auth", "Inspector: auth flows (OAuth/device auth, etc.)"),
@@ -55,13 +53,7 @@ def register_admin_core_http_endpoints(http_registry: Any) -> None:
             method="GET",
             path="/admin/v1/marketplace/catalog",
             service="admin.v1.marketplace.catalog",
-            description="Marketplace: список плагинов (один файл catalog.json, ссылки на репо)",
-        ),
-        HttpEndpoint(
-            method="GET",
-            path="/admin/v1/inspector/state/{key}",
-            service="admin.v1.state.get",
-            description="Inspector: get state value by key",
+            description="Marketplace: список интеграций (из manifest’ов плагинов)",
         ),
         HttpEndpoint(
             method="GET",

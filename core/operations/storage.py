@@ -4,17 +4,22 @@ OperationStorage - персистентность операций.
 Отвечает за сохранение и загрузку операций из storage.
 """
 
+import logging
 import time
 import uuid
 from contextlib import asynccontextmanager
 from typing import Optional, List, Any, Tuple
 
+from core.adapters.storage_errors import STORAGE_BOUNDARY_ERRORS
+from core.exception_groups import BEST_EFFORT_BACKGROUND_ERRORS
 from core.operations.models import (
     Attempt,
     AttemptStatus,
     Operation,
     OperationInitiator,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class OperationStorage:
@@ -126,7 +131,17 @@ class OperationStorage:
         """
         try:
             keys = await self.runtime.storage.list_keys("operations")
-        except Exception:
+        except STORAGE_BOUNDARY_ERRORS:
+            logger.warning(
+                "OperationStorage.list: storage boundary error, returning empty",
+                exc_info=True,
+            )
+            return []
+        except BEST_EFFORT_BACKGROUND_ERRORS:
+            logger.warning(
+                "OperationStorage.list: unexpected error, returning empty",
+                exc_info=True,
+            )
             return []
         
         # Fetch all and sort by created_at descending
@@ -136,8 +151,18 @@ class OperationStorage:
                 data = await self.runtime.storage.get("operations", key)
                 if data:
                     operations.append(Operation.from_dict(data))
-            except Exception:
-                pass
+            except STORAGE_BOUNDARY_ERRORS:
+                logger.debug(
+                    "OperationStorage.list: skip key %r (storage boundary)",
+                    key,
+                    exc_info=True,
+                )
+            except BEST_EFFORT_BACKGROUND_ERRORS:
+                logger.warning(
+                    "OperationStorage.list: skip key %r (unexpected)",
+                    key,
+                    exc_info=True,
+                )
         
         # Sort by created_at descending
         operations.sort(key=lambda op: op.created_at, reverse=True)
@@ -172,8 +197,18 @@ class OperationStorage:
                 if data.get("operation_id") != operation_id:
                     continue
                 attempts.append(Attempt.from_dict(data))
-            except Exception:
-                continue
+            except STORAGE_BOUNDARY_ERRORS:
+                logger.debug(
+                    "OperationStorage.get_attempts: skip key %r (storage boundary)",
+                    key,
+                    exc_info=True,
+                )
+            except BEST_EFFORT_BACKGROUND_ERRORS:
+                logger.warning(
+                    "OperationStorage.get_attempts: skip key %r (unexpected)",
+                    key,
+                    exc_info=True,
+                )
 
         attempts.sort(key=lambda a: a.attempt_index)
         return attempts

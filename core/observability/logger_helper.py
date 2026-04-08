@@ -24,8 +24,14 @@ LoggerModule всегда доступен (приложение регистр�
 Реальная логика логирования находится в modules/logger/module.py.
 """
 
+import logging
 import sys
 from typing import Optional, Any
+
+from core.adapters.storage_errors import STORAGE_BOUNDARY_ERRORS
+from core.exception_groups import LOGGING_HELPER_ERRORS
+
+_stdlog = logging.getLogger(__name__)
 
 
 async def log(runtime: Optional[Any], level: str, message: str, **context: Any) -> None:
@@ -54,9 +60,16 @@ async def log(runtime: Optional[Any], level: str, message: str, **context: Any) 
                 **context
             )
             return
-        except Exception:
-            # Если service_registry недоступен - fallback на print
-            pass
+        except STORAGE_BOUNDARY_ERRORS:
+            _stdlog.debug(
+                "log(): logger.log failed (storage boundary), using stderr fallback",
+                exc_info=True,
+            )
+        except LOGGING_HELPER_ERRORS:
+            _stdlog.debug(
+                "log(): logger.log failed, using stderr fallback",
+                exc_info=True,
+            )
     
     # Fallback только для случаев до инициализации runtime
     log_message = f"[{level.upper()}] {message}"

@@ -13,6 +13,12 @@ from core.kernel.plugin_sandbox import PluginSandbox
 from core.kernel.context import KernelContext
 from core.kernel.integration_registry import IntegrationRegistry, IntegrationFlag
 from core.kernel.plugin_infrastructure import PluginInfrastructure
+from core.kernel.plugin_contract import (
+    PluginManifest,
+    PluginDependencies,
+    PluginContext,
+    PluginRegistry as ContractPluginRegistry,
+)
 
 __all__ = [
     'PluginState',
@@ -26,4 +32,8 @@ __all__ = [
     'IntegrationRegistry',
     'IntegrationFlag',
     'PluginInfrastructure',
+    'PluginManifest',
+    'PluginDependencies',
+    'PluginContext',
+    'ContractPluginRegistry',
 ]

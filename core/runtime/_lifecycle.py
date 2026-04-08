@@ -11,11 +11,16 @@ RuntimeLifecycleMixin — lifecycle management для CoreRuntime.
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
-from typing import Any, Awaitable, Callable, Dict, Optional, cast
+from typing import Any, Awaitable, Callable, Dict, List, Optional, cast
 
+from core.adapters.storage_errors import STORAGE_BOUNDARY_ERRORS
 from core.dependency.models import RuntimeIntegrityError
+from core.exception_groups import BEST_EFFORT_BACKGROUND_ERRORS, LOGGING_HELPER_ERRORS
 from core.observability.logger_helper import info, warning
+
+_lifecycle_log = logging.getLogger(__name__)
 
 
 class RuntimeLifecycleMixin:
@@ -27,14 +32,14 @@ class RuntimeLifecycleMixin:
     _running: bool
     _start_time: Optional[float]
     _worker_task: Optional[asyncio.Task]  # type: ignore[type-arg]
-    critical_state_prefixes: list[str]
-    dependency_resolver: Any
+    # App-provided state hydration callback (вместо critical_state_prefixes)
+    _state_hydration_callback: Optional[Callable[[], Awaitable[List[str]]]] = None
+    plugins: Any
     event_bus: Any
     event_validation_middleware_factory: Any
     module_manager: Any
     plugin_manager: Any
-    runtime_health_check: Any
-    runtime_metrics_collector: Any
+    monitor: Any
     service_registry: Any
     state_engine: Any
     storage: Any
@@ -82,7 +87,9 @@ class RuntimeLifecycleMixin:
                     f"RUNTIME: transport runner for '{module_name}' returned",
                     component="runtime",
                 )
-            except Exception as e:
+            except asyncio.CancelledError:
+                raise
+            except BEST_EFFORT_BACKGROUND_ERRORS as e:
                 await warning(
                     self,
                     f"Ошибка transport runner '{module_name}': {e}",
@@ -112,45 +119,60 @@ class RuntimeLifecycleMixin:
         """
         Гидратировать критичные данные из persistent storage в StateEngine.
 
-        Восстанавливает в StateEngine данные из app-defined namespaces
-        для быстрого доступа при старте.
+        Делегирует app-layer решение о том какие namespaces гидратировать.
+        App предоставляет callback который возвращает список namespaces для гидратации.
         """
-        critical_prefixes = self.critical_state_prefixes
-        if not critical_prefixes:
+        # Делегируем app-layer решение о том что гидратировать.
+        # Если callback не предоставлен — гидратация пропускается.
+        if self._state_hydration_callback is None:
             return
 
         try:
-            all_namespaces = await self.storage.list_namespaces()
-
-            for namespace in all_namespaces:
-                is_critical = any(
-                    namespace.startswith(prefix) for prefix in critical_prefixes
-                )
-
-                if is_critical:
-                    hydrated_count = 0
-                    try:
-                        async for key, value in self.storage.iter_namespace(namespace):
-                            state_key = f"{namespace}.{key}"
-                            await self.state_engine.set(state_key, value)
-                            hydrated_count += 1
-                    except Exception as e:
-                        await warning(
-                            self,
-                            f"Ошибка при гидратации namespace '{namespace}': {e}",
-                            component="runtime",
-                        )
-
-                    if hydrated_count > 0:
-                        await info(
-                            self,
-                            f"Гидратирован namespace '{namespace}' ({hydrated_count} ключей)",
-                            component="runtime",
-                        )
-        except Exception as e:
+            namespaces_to_hydrate = await self._state_hydration_callback()
+            for namespace in namespaces_to_hydrate:
+                await self._hydrate_namespace(namespace)
+        except asyncio.CancelledError:
+            raise
+        except STORAGE_BOUNDARY_ERRORS as e:
             await warning(
                 self,
-                f"Ошибка гидратации critical state: {e}. Система продолжит работу, но может быть медленнее.",
+                f"Ошибка storage в callback гидратации state: {e}. Система продолжит работу.",
+                component="runtime",
+            )
+        except BEST_EFFORT_BACKGROUND_ERRORS as e:
+            await warning(
+                self,
+                f"Ошибка callback гидратации state: {e}. Система продолжит работу.",
+                component="runtime",
+            )
+
+    async def _hydrate_namespace(self, namespace: str) -> None:
+        """Гидратировать один namespace в StateEngine."""
+        try:
+            hydrated_count = 0
+            async for key, value in self.storage.iter_namespace(namespace):
+                state_key = f"{namespace}.{key}"
+                await self.state_engine.set(state_key, value)
+                hydrated_count += 1
+            
+            if hydrated_count > 0:
+                await info(
+                    self,
+                    f"Гидратирован namespace '{namespace}' ({hydrated_count} ключей)",
+                    component="runtime",
+                )
+        except STORAGE_BOUNDARY_ERRORS as e:
+            await warning(
+                self,
+                f"Ошибка storage при гидратации namespace '{namespace}': {e}",
+                component="runtime",
+            )
+        except asyncio.CancelledError:
+            raise
+        except BEST_EFFORT_BACKGROUND_ERRORS as e:
+            await warning(
+                self,
+                f"Ошибка при гидратации namespace '{namespace}': {e}",
                 component="runtime",
             )
 
@@ -213,7 +235,7 @@ class RuntimeLifecycleMixin:
             if plugins:
                 await info(self, f"Плагины запущены: {plugins}", component="runtime")
 
-            integrity_errors = self.dependency_resolver.validate_runtime_integrity()
+            integrity_errors = self.plugins.integrity_checker.check_runtime_integrity()
             if integrity_errors:
                 raise RuntimeIntegrityError(integrity_errors)
 
@@ -229,16 +251,27 @@ class RuntimeLifecycleMixin:
                 self._worker_task = asyncio.create_task(self.worker.start())
                 self.worker._task = self._worker_task
 
-        except Exception as e:
+        except RuntimeIntegrityError:
             try:
                 await self.module_manager.stop_all()
-            except Exception as stop_error:
+            except BEST_EFFORT_BACKGROUND_ERRORS as stop_error:
                 await warning(
                     self,
                     f"Ошибка при остановке модулей после ошибки старта: {stop_error}",
                     component="runtime",
                 )
             raise
+        except BEST_EFFORT_BACKGROUND_ERRORS as e:
+            try:
+                await self.module_manager.stop_all()
+            except BEST_EFFORT_BACKGROUND_ERRORS as stop_error:
+                await warning(
+                    self,
+                    f"Ошибка при остановке модулей после ошибки старта: {stop_error}",
+                    component="runtime",
+                )
+            # Re-raise original exception with context
+            raise RuntimeError(f"Failed to start runtime: {e}") from e
 
     async def stop(self) -> None:
         """
@@ -279,8 +312,11 @@ class RuntimeLifecycleMixin:
                     f"Timeout ({timeout}s) при остановке runtime, принудительное завершение",
                     component="runtime",
                 )
-            except Exception:
-                pass
+            except LOGGING_HELPER_ERRORS:
+                _lifecycle_log.debug(
+                    "stop(): warning() failed during shutdown timeout path",
+                    exc_info=True,
+                )
             self._running = False
             raise
 
@@ -306,29 +342,7 @@ class RuntimeLifecycleMixin:
         Returns:
             Словарь с результатами проверки здоровья компонентов
         """
-        # Делегируем мониторингу
-        if hasattr(self, "monitor"):
-            return await self.monitor.health_check()
-
-        # Fallback для обратной совместимости
-        collector = getattr(self, "runtime_health_check", None)
-        if callable(collector):
-            return await collector(self)
-
-        checks: Dict[str, Any] = {}
-        try:
-            await self.storage.get("health_check", "test")
-            checks["storage"] = "healthy"
-            status = "healthy"
-        except Exception as exc:
-            checks["storage"] = "unhealthy"
-            checks["storage_error"] = str(exc)
-            status = "unhealthy"
-        return {
-            "status": status,
-            "uptime": getattr(self, "_start_time", None) and time.time() - self._start_time or 0,
-            "checks": checks,
-        }
+        return await self.monitor.health_check()
 
     async def get_metrics(self) -> Dict[str, Any]:
         """
@@ -337,26 +351,4 @@ class RuntimeLifecycleMixin:
         Returns:
             Словарь с метриками плагинов, модулей, сервисов и storage
         """
-        # Делегируем мониторингу
-        if hasattr(self, "monitor"):
-            return await self.monitor.get_metrics()
-
-        # Fallback для обратной совместимости
-        collector = getattr(self, "runtime_metrics_collector", None)
-        if callable(collector):
-            return await collector(self)
-
-        metrics: Dict[str, Any] = {
-            "uptime": getattr(self, "_start_time", None) and time.time() - self._start_time or 0,
-            "plugins": {},
-            "modules": {},
-            "services": {},
-            "storage": {},
-            "http_endpoints": {},
-        }
-        try:
-            await self.storage.get("metrics", "test")
-            metrics["storage"] = {"available": True}
-        except Exception as exc:
-            metrics["storage"] = {"available": False, "error": str(exc)}
-        return metrics
+        return await self.monitor.get_metrics()

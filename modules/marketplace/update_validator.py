@@ -156,7 +156,8 @@ class PluginUpdateValidator:
                 plugin = pm._plugins.get(plugin_name)
                 if not plugin:
                     unmet.append(dep)
-            except Exception:
+            except Exception as e:
+                logger.warning("update_validator._check_dependencies: unexpected error: %s", e, exc_info=True)
                 unmet.append(dep)
         
         return unmet
@@ -185,7 +186,8 @@ class PluginUpdateValidator:
                 
                 if not other_providers:
                     unavailable.add(cap)
-            except Exception:
+            except Exception as e:
+                logger.warning("update_validator._check_capability_alternatives: unexpected error: %s", e, exc_info=True)
                 unavailable.add(cap)
         
         return unavailable

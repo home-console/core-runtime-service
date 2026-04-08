@@ -1,3 +1,4 @@
+import logging
 """
 Authorization Policy Layer — единая точка авторизационных проверок.
 
@@ -16,6 +17,7 @@ Authorization Policy Layer — единая точка авторизацион�
 from typing import Optional, Dict, Any, Set
 import asyncio
 from modules.api.auth import RequestContext
+logger = logging.getLogger(__name__)
 
 
 class AuthorizationError(Exception):
@@ -53,14 +55,14 @@ ACTION_SCOPE_MAP: Dict[str, str] = {
     "presence.set": "presence.write",
     "presence.get": "presence.read",
     
-    # OAuth Yandex
-    "oauth_yandex.get_status": "oauth.read",
-    "oauth_yandex.get_authorize_url": "oauth.read",
-    "oauth_yandex.configure": "oauth.write",
-    "oauth_yandex.exchange_code": "oauth.write",
-    "oauth_yandex.validate": "oauth.read",
-    "oauth_yandex.get_tokens": "oauth.read",
-    "oauth_yandex.set_tokens": "oauth.write",
+    # OAuth (provider-agnostic)
+    "oauth.get_status": "oauth.read",
+    "oauth.get_authorize_url": "oauth.read",
+    "oauth.configure": "oauth.write",
+    "oauth.exchange_code": "oauth.write",
+    "oauth.validate_token": "oauth.read",
+    "oauth.get_tokens": "oauth.read",
+    "oauth.set_tokens": "oauth.write",
     
     # Auth management
     "admin.auth.create_api_key": "admin.*",
@@ -93,7 +95,7 @@ ACTION_SCOPE_MAP: Dict[str, str] = {
     "admin.v1.credentials.terminal_ws": "admin.write",
     "admin.v1.credentials.terminal_sessions": "admin.read",
     "admin.v1.credentials.terminal_session_close": "admin.write",
-    "admin.v1.state": "admin.read",
+    # NOTE: admin.v1.state* inspector endpoints/services removed (legacy state surface).
     "admin.v1.integrations": "admin.read",
     "admin.v1.inspector.auth": "admin.read",
 
@@ -139,8 +141,6 @@ ACTION_SCOPE_MAP: Dict[str, str] = {
     "admin.v1.inspector.integrations": "admin.read",
     "admin.v1.inspector.inventory": "admin.read",
     "admin.v1.inspector.system_health": "admin.read",
-    "admin.v1.state.keys": "admin.read",
-    "admin.v1.state.get": "admin.read",
     "admin.v1.marketplace.catalog": "admin.read",
 
     # Admin operations (CRUD)
@@ -176,7 +176,7 @@ def check(ctx: Optional[RequestContext], action: str, resource: Optional[Dict[st
         True если разрешено, False если запрещено
     
     Правила проверки действия:
-    - Если ctx is None → False (кроме admin.auth.create_api_key при отсутствии ключей и oauth_yandex.*)
+    - Если ctx is None → False (кроме admin.auth.create_api_key при отсутствии ключей и oauth-provider.*)
     - Если is_admin=True → True (полный доступ)
     - Если action начинается с "admin." → требуется "admin.*"
     - Иначе проверяем mapping: action → required scope
@@ -207,13 +207,13 @@ def check(ctx: Optional[RequestContext], action: str, resource: Optional[Dict[st
         return True
     
     # Специальный случай: OAuth эндпоинты публичные (не требуют авторизации)
-    # Они используются для настройки OAuth до авторизации
-    if action.startswith("oauth_yandex."):
+    # Используются для настройки OAuth до авторизации
+    if action.startswith("oauth."):
         return True
     
-    # Специальный случай: yandex_device_auth эндпоинты публичные
-    # Они используются для OAuth авторизации пользователя в Яндекс
-    if action.startswith("yandex_device_auth."):
+    # Специальный случай: device-auth эндпоинты публичные
+    # Используются для OAuth авторизации пользователя в конкретном провайдере
+    if action.startswith("device_auth."):
         return True
 
     # Креды пользователя: доступны любому авторизованному пользователю (свои креды)
@@ -374,10 +374,10 @@ def require(ctx: Optional[RequestContext], action: str, resource: Optional[Dict[
                         ))
                 except Exception:
                     # Если не удалось залогировать, не падаем
-                    pass
+                    logger.warning("Unhandled exception", exc_info=True)
             except Exception:
                 # Игнорируем ошибки audit logging
-                pass
+                logger.warning("Unhandled exception", exc_info=True)
         
         raise AuthorizationError(f"Authorization failed for action: {action}")
 

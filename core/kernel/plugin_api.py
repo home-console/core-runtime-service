@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Awaitable, Callable, Optional
 
+from sdk.operations_events import OPERATION_READY_EVENT_TYPE, build_operation_ready_payload
+
 
 class PluginAPI:
     """
@@ -67,6 +69,11 @@ class PluginAPI:
 
     async def publish_event(self, event_type: str, payload: dict[str, Any]) -> None:
         await self._event_bus.publish(event_type, payload)
+
+    async def publish_operation_ready(self, operation_id: str, **extra: Any) -> None:
+        """Поставить операцию в очередь OperationWorker (событие G1, см. sdk.operations_events)."""
+        payload = build_operation_ready_payload(operation_id, **extra)
+        await self._event_bus.publish(OPERATION_READY_EVENT_TYPE, payload)
 
     async def subscribe_event(
         self,

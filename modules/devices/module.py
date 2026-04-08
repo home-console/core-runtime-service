@@ -5,9 +5,17 @@ DevicesModule — встроенный модуль управления уст�
 при создании CoreRuntime через ModuleManager.
 """
 
+import asyncio
+import logging
+import os
+import time
+from typing import Any, Optional
+
 from core.runtime.runtime_module import RuntimeModule
 
 from . import handlers, services
+
+logger = logging.getLogger(__name__)
 
 
 class DevicesModule(RuntimeModule):
@@ -17,6 +25,14 @@ class DevicesModule(RuntimeModule):
     Регистрирует сервисы для работы с устройствами и подписывается
     на события внешних устройств.
     """
+
+    def __init__(self, runtime: Any):
+        super().__init__(runtime)
+        # Used to warn when external.* publishers are not producing events.
+        self._external_state_received_at: Optional[float] = None
+        self._external_discovered_received_at: Optional[float] = None
+        self._external_publish_watchdog_task: Optional[asyncio.Task[None]] = None
+        self._external_publish_watchdog_stop: Optional[asyncio.Event] = None
 
     @property
     def name(self) -> str:
@@ -85,10 +101,8 @@ class DevicesModule(RuntimeModule):
             except Exception:
                 # If service_registry doesn't implement has_service for some reason,
                 # fall back to attempting registration and catching ValueError below.
+                logger.debug("module.register: unexpected error (suppressed)", exc_info=True)
                 pass
-
-            async def _wrapper(*args, _func=func, **kwargs):
-                return await _func(self.runtime, *args, **kwargs)
 
             try:
                 meta = acl_meta.get(name, {})
@@ -99,7 +113,7 @@ class DevicesModule(RuntimeModule):
                     storage = (
                         self.context.storage
                         if hasattr(self, "context") and self.context
-                        else self.runtime.storage
+                        else self.context.storage
                     )
 
                     async def _preload(args, kwargs, _storage=storage):
@@ -114,30 +128,26 @@ class DevicesModule(RuntimeModule):
 
                     preload_resource = _preload
 
-                if hasattr(self.context.services, "register_with_acl"):
-                    await self.context.services.register_with_acl(
-                        name,
-                        _wrapper,
-                        resource=meta.get("resource"),
-                        admin_only=bool(meta.get("admin_only", False)),
-                        filter_result=bool(meta.get("filter_result", False)),
-                        enforce_result=bool(meta.get("enforce_result", False)),
-                        preload_resource=preload_resource,
-                        inject_owner_param=meta.get("inject_owner_param"),
-                    )
-                else:
-                    # Fallback: older ServiceRegistry without ACL support
-                    await self.context.services.register(name, _wrapper)
+                await self.register_runtime_service(
+                    name,
+                    func,
+                    resource=meta.get("resource"),
+                    admin_only=bool(meta.get("admin_only", False)),
+                    filter_result=bool(meta.get("filter_result", False)),
+                    enforce_result=bool(meta.get("enforce_result", False)),
+                    preload_resource=preload_resource,
+                    inject_owner_param=meta.get("inject_owner_param"),
+                )
                 self._registered_services.append(name)
             except ValueError:
                 # already registered concurrently — skip
                 continue
 
         # Подписка на события
-        await self.runtime.event_bus.subscribe(
+        await self.context.event_bus.subscribe(
             "external.device_state_reported", self._handle_external_state
         )
-        await self.runtime.event_bus.subscribe(
+        await self.context.event_bus.subscribe(
             "external.device_discovered", self._handle_external_device_discovered
         )
 
@@ -160,17 +170,56 @@ class DevicesModule(RuntimeModule):
         except Exception as e:
             # Логируем но не ломаем старт модуля
             try:
-                service_registry = self.runtime.kernel_context.get_service(
-                    "service_registry"
-                )
-                await service_registry.call(
+                await self.context.services.call(
                     "logger.log",
                     level="warning",
                     message=f"Failed to start pending cleaner: {e}",
                     module="devices",
                 )
             except Exception:
-                pass
+                logger.warning("Unhandled exception", exc_info=True)
+
+        # Watchdog: if no external.* events appear shortly after startup,
+        # it likely means publisher plugins are not loaded or not producing data.
+        try:
+            self._external_publish_watchdog_stop = asyncio.Event()
+            self._external_publish_watchdog_task = asyncio.create_task(
+                self._external_publish_watchdog()
+            )
+        except Exception:
+            # Never block startup on watchdog issues.
+            logger.debug("module.start: unexpected error (suppressed)", exc_info=True)
+            pass
+
+    async def _external_publish_watchdog(self) -> None:
+        delay_s = float(
+            os.getenv("EXTERNAL_EVENTS_PUBLISHER_WARN_DELAY_SECONDS", "5.0")
+        )
+        stop_event = self._external_publish_watchdog_stop
+        if stop_event is None:
+            return
+
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=delay_s)
+            return  # stopped
+        except asyncio.CancelledError:
+            return  # task cancelled during runtime/module shutdown
+        except asyncio.TimeoutError:
+            pass  # no events seen during delay window
+
+        if self._external_state_received_at is None:
+            logger.warning(
+                "No publications for external.device_state_reported observed for %.1fs after startup. "
+                "Check that publisher plugins are loaded and producing events.",
+                delay_s,
+            )
+
+        if self._external_discovered_received_at is None:
+            logger.warning(
+                "No publications for external.device_discovered observed for %.1fs after startup. "
+                "Check that publisher plugins are loaded and producing events.",
+                delay_s,
+            )
 
     async def stop(self) -> None:
         """
@@ -180,32 +229,44 @@ class DevicesModule(RuntimeModule):
         """
         # Отписка от событий
         try:
-            await self.runtime.event_bus.unsubscribe(
+            await self.context.event_bus.unsubscribe(
                 "external.device_state_reported", self._handle_external_state
             )
         except Exception:
-            pass
+            logger.warning("Unhandled exception", exc_info=True)
 
         try:
-            await self.runtime.event_bus.unsubscribe(
+            await self.context.event_bus.unsubscribe(
                 "external.device_discovered", self._handle_external_device_discovered
             )
         except Exception:
-            pass
+            logger.warning("Unhandled exception", exc_info=True)
+
+        # Stop watchdog task (prevents "Task destroyed while pending" in tests).
+        if self._external_publish_watchdog_stop is not None:
+            self._external_publish_watchdog_stop.set()
+        if self._external_publish_watchdog_task is not None:
+            self._external_publish_watchdog_task.cancel()
+            try:
+                await self._external_publish_watchdog_task
+            except asyncio.CancelledError:
+                pass
 
         # Отмена регистрации сервисов
         for service_name in getattr(self, "_registered_services", []):
             try:
                 await self.context.services.unregister(service_name)
             except Exception:
-                pass
+                logger.warning("Unhandled exception", exc_info=True)
 
     async def _handle_external_state(self, event_type: str, data: dict) -> None:
         """Обработчик события external.device_state_reported."""
+        self._external_state_received_at = time.time()
         await handlers.handle_external_state(self.runtime, data)
 
     async def _handle_external_device_discovered(
         self, event_type: str, data: dict
     ) -> None:
         """Обработчик события external.device_discovered."""
+        self._external_discovered_received_at = time.time()
         await handlers.handle_external_device_discovered(self.runtime, data)

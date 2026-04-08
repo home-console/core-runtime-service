@@ -251,15 +251,3 @@ class MetricsRegistry:
             self._gauges.clear()
             self._histograms.clear()
             self._init_builtin_metrics()
-
-
-# Global singleton instance
-_metrics_registry: Optional[MetricsRegistry] = None
-
-
-def get_metrics_registry() -> MetricsRegistry:
-    """Get global metrics registry (lazy initialization)."""
-    global _metrics_registry
-    if _metrics_registry is None:
-        _metrics_registry = MetricsRegistry()
-    return _metrics_registry

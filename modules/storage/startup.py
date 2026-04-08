@@ -18,6 +18,8 @@ from modules.storage.exceptions import (
     StorageCorruptionError,
     StorageRollbackDetected,
 )
+import logging
+logger = logging.getLogger(__name__)
 
 
 class StorageStartupChecker:
@@ -158,17 +160,19 @@ class StorageStartupChecker:
         # Check for tmpfs for SQLite (bad!)
         if self.storage_type == 'sqlite':
             db_dir = Path(self.db_path).parent.resolve()
-            try:
-                with open("/proc/mounts", "r") as f:
-                    mounts_content = f.read()
-                    if "tmpfs" in mounts_content:
-                        for line in mounts_content.split('\n'):
-                            if "tmpfs" in line and str(db_dir) in line:
-                                print(f"  ❌ FATAL: Database on tmpfs: {line}")
-                                print("     Data will be LOST on reboot!")
-                                sys.exit(1)
-            except Exception:
-                pass  # /proc не доступен на macOS и некоторых систем
+            # /proc/mounts only exists on Linux; skip on macOS/Windows
+            if os.path.exists("/proc/mounts"):
+                try:
+                    with open("/proc/mounts", "r") as f:
+                        mounts_content = f.read()
+                        if "tmpfs" in mounts_content:
+                            for line in mounts_content.split('\n'):
+                                if "tmpfs" in line and str(db_dir) in line:
+                                    print(f"  ❌ FATAL: Database on tmpfs: {line}")
+                                    print("     Data will be LOST on reboot!")
+                                    sys.exit(1)
+                except Exception:
+                    logger.warning("Unhandled exception", exc_info=True)
         
         print("  ✅ Filesystem OK\n")
         return True
@@ -195,6 +199,10 @@ class StorageStartupChecker:
     
     def _check_docker_overlayfs(self) -> None:
         """Проверить Docker overlayfs проблемы."""
+        # /proc/mounts only exists on Linux; skip on macOS/Windows
+        if not os.path.exists("/proc/mounts"):
+            return
+        
         try:
             with open("/proc/mounts", "r") as f:
                 mounts = f.read()
@@ -206,7 +214,7 @@ class StorageStartupChecker:
                         print(f"     This can cause durability issues.")
                         print(f"     Use named volumes instead: -v homeconsole_data:/data")
         except Exception:
-            pass  # /proc не доступен на некоторых системах
+            logger.warning("Unhandled exception", exc_info=True)
 
 
 class StorageInitializer:

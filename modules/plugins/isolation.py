@@ -12,16 +12,16 @@ SECURITY P0: Плагины НЕ должны иметь прямой досту
 
 Пример:
     # В plugin_manager при загрузке плагина:
-    proxy = StorageProxy(runtime.storage, namespace="oauth_yandex")
+    proxy = StorageProxy(runtime.storage, namespace="oauth_provider")
     plugin.storage = proxy
     
     # В плагине:
     await self.storage.put("tokens", {"access": "..."})
-    # Реально сохраняется как "oauth_yandex:tokens"
+    # Реально сохраняется как "oauth_provider:tokens"
     
     # Плагин НЕ может:
-    await self.storage.put("oauth_google:tokens", ...)  # Forbidden
-    await self.storage.get("oauth_google:tokens")        # Forbidden
+    await self.storage.put("oauth_other:tokens", ...)  # Forbidden
+    await self.storage.get("oauth_other:tokens")        # Forbidden
 """
 
 from typing import Any, List, Optional
@@ -58,7 +58,7 @@ class StorageProxy:
         
         Args:
             storage: Real storage backend (CoreStorage)
-            namespace: Plugin namespace (e.g., "oauth_yandex")
+            namespace: Plugin namespace (e.g., "oauth_provider")
             
         Raises:
             ValueError: If namespace is invalid
@@ -77,7 +77,7 @@ class StorageProxy:
             key: User-provided key
             
         Returns:
-            Namespaced key (e.g., "oauth_yandex:tokens")
+            Namespaced key (e.g., "oauth_provider:tokens")
             
         Raises:
             ForbiddenError: If key tries to escape namespace

@@ -23,6 +23,16 @@ from core.operations.models import (
 )
 from core.operations.registry import OperationHandlerRegistry
 from core.operations.storage import OperationStorage
+from core.operations.worker_dependencies import WorkerDependencies
+from core.operations.dedup_contract import (
+    DEFAULT_DEDUP_TTL_SECONDS,
+    DEDUP_STORAGE_NAMESPACE,
+    OPERATION_READY_EVENT_TYPE,
+    PROCESSED_EVENT_KEY_PREFIX,
+    PROCESSED_OPERATION_KEY_PREFIX,
+    storage_key_for_event,
+    storage_key_for_operation,
+)
 
 # Re-export для обратной совместимости
 __all__ = [
@@ -35,10 +45,20 @@ __all__ = [
     "TERMINAL_STATUSES",
     # Component
     "OperationsComponent",
+    # Dependencies
+    "WorkerDependencies",
     # Manager
     "OperationManager",
     # Internal components (для расширенного использования)
     "OperationHandlerRegistry",
     "OperationExecutor",
     "OperationStorage",
+    # Dedup / at-least-once contract (G1)
+    "DEFAULT_DEDUP_TTL_SECONDS",
+    "DEDUP_STORAGE_NAMESPACE",
+    "OPERATION_READY_EVENT_TYPE",
+    "PROCESSED_EVENT_KEY_PREFIX",
+    "PROCESSED_OPERATION_KEY_PREFIX",
+    "storage_key_for_event",
+    "storage_key_for_operation",
 ]

@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from core.adapters.storage_errors import STORAGE_BOUNDARY_ERRORS
 from modules.marketplace.semver import VersionResolver, VersionConstraintError
 
 logger = logging.getLogger(__name__)
@@ -129,7 +130,7 @@ class RegistryClient:
             import urllib.parse
             parsed = urllib.parse.urlparse(url)
             hostname = parsed.hostname
-        except Exception as e:
+        except (TypeError, ValueError) as e:
             raise RegistrySecurityError(f"Invalid URL: {e}")
         
         if not hostname:
@@ -180,12 +181,29 @@ class RegistryClient:
         logger.info(f"Fetching registry index from {self._registry_url}")
         try:
             index_data = await self._fetch_remote_index()
-        except Exception as e:
-            # Try to use stale cache on network error
+        except RegistryError as e:
             if self._cache_path.exists():
-                logger.warning(f"Failed to fetch registry, using stale cache: {e}")
+                logger.warning(
+                    "Failed to fetch registry, using stale cache: %s", e, exc_info=True
+                )
                 return self._load_cached_index()
-            raise RegistryError(f"Failed to fetch registry: {e}")
+            raise
+        except (OSError, asyncio.TimeoutError) as e:
+            if self._cache_path.exists():
+                logger.warning(
+                    "Failed to fetch registry (IO/timeout), using stale cache: %s",
+                    e,
+                    exc_info=True,
+                )
+                return self._load_cached_index()
+            raise RegistryError(f"Failed to fetch registry: {e}") from e
+        except Exception as e:
+            if self._cache_path.exists():
+                logger.warning(
+                    "Failed to fetch registry, using stale cache: %s", e, exc_info=True
+                )
+                return self._load_cached_index()
+            raise RegistryError(f"Failed to fetch registry: {e}") from e
         
         # Validate and parse
         index = self._parse_and_validate_index(index_data)
@@ -388,7 +406,7 @@ class RegistryClient:
         try:
             with open(self._cache_time_path, 'r') as f:
                 cache_time = float(f.read().strip())
-        except Exception:
+        except (OSError, ValueError):
             return False
         
         age = time.time() - cache_time
@@ -410,8 +428,10 @@ class RegistryClient:
             try:
                 with open(registry_version_path, 'r') as f:
                     return int(f.read().strip())
-            except Exception:
-                pass
+            except (OSError, ValueError):
+                logger.debug(
+                    "_load_cached_registry_version: read failed", exc_info=True
+                )
         return None
     
     def _save_cache(self, data: Dict[str, Any]):
@@ -428,8 +448,12 @@ class RegistryClient:
                 with open(self._registry_version_path, 'w') as f:
                     f.write(str(registry_version))
                 self._cached_registry_version = registry_version
+        except STORAGE_BOUNDARY_ERRORS:
+            logger.warning(
+                "RegistryClient._save_cache: cache write boundary", exc_info=True
+            )
         except Exception as e:
-            logger.warning(f"Failed to save cache: {e}")
+            logger.warning("Failed to save cache: %s", e, exc_info=True)
     
     async def resolve(self,
                      plugin_name: str,

@@ -21,8 +21,8 @@ from .device_session import AuthResult, YandexDeviceSession
 class AuthMethod(ABC):
     """Абстрактный метод авторизации."""
     
-    def __init__(self, runtime: Any, api_client: Any):
-        self.runtime = runtime
+    def __init__(self, plugin: Any, api_client: Any):
+        self.plugin = plugin
         self.api_client = api_client
     
     @abstractmethod
@@ -87,8 +87,14 @@ class QRAuthMethod(AuthMethod):
     
     async def _log(self, level: str, message: str, **ctx):
         try:
-            await self.runtime.call_service("logger.log", level=level, message=message, plugin="yandex_device_auth", context=ctx or None)
-        except:
+            await self.plugin.call_service(
+                "logger.log",
+                level=level,
+                message=message,
+                plugin="yandex_device_auth",
+                context=ctx or None,
+            )
+        except Exception:
             pass
 
 

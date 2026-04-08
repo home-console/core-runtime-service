@@ -80,7 +80,7 @@ python3 main.py
 
 4. **Включить использование реального API:**
    ```python
-   await runtime.storage.set("yandex", "use_real_api", {"enabled": True})
+   await self.storage_set("yandex", "use_real_api", {"enabled": True})
    ```
 
 5. **Синхронизировать устройства:**
@@ -153,12 +153,15 @@ curl http://localhost:8000/oauth/yandex/cookies
 ```
 yandex_smart_home/
 ├── plugin.py                     # Главный плагин
-├── api_client.py                 # OAuth API клиент
-├── yandex_quasar_ws.py          # Quasar WebSocket (cookies!)
-├── device_sync.py                # Синхронизация устройств
-├── device_status.py              # Проверка статуса
+├── clients/
+│   ├── api_client.py             # Quasar HTTP API клиент (cookies!)
+│   └── yandex_quasar_ws.py       # Quasar WebSocket (cookies!)
+├── sync/
+│   ├── device_sync.py            # Синхронизация устройств
+│   └── device_status.py          # Проверка статуса
 ├── command_handler.py            # Обработка команд
-├── device_transformer.py         # Трансформация данных
+├── transformers/
+│   └── device_transformer.py     # Трансформация данных
 └── docs/
     ├── QUASAR_CHEATSHEET.md     # Быстрая справка
     ├── QUASAR_WEBSOCKET.md      # Руководство

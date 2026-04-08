@@ -3,11 +3,20 @@
 
 Минимальные настройки.
 Extensibility: modules_config, plugins_dir, orchestration_backend.
+
+Security конфигурация (CORS/CSRF/CSP/cookies) вынесена в security_config.py.
 """
 
-import os
-from dataclasses import dataclass
-from typing import List, Optional
+from dataclasses import dataclass, field
+from typing import List, Mapping, Optional
+
+from core.runtime.security_config import SecurityConfig
+
+
+def _get_security_attr(config: SecurityConfig | None, name: str, default: object) -> object:
+    if config is None:
+        return default
+    return getattr(config, name, default)
 
 
 @dataclass
@@ -56,37 +65,16 @@ class Config:
     # Окно времени в секундах
     rate_limit_window: int = 60
 
-    # Security / Environment
+    # Environment
     # "development" | "production"
     env: str = "development"
-
-    # Proxy / network trust
-    # Если True — доверяем X-Forwarded-For / X-Real-IP (только если вы реально стоите за trusted reverse proxy).
-    # Если False — используем только request.client.host.
-    trust_proxy_headers: bool = False
-
-    # CORS
-    # В production обязательно ограничить домены.
-    cors_allowed_origins: Optional[List[str]] = None
-
-    # CSRF protection (для cookie-based auth)
-    csrf_enabled: bool = True
-    csrf_cookie_name: str = "csrf_token"
-    csrf_header_name: str = "X-CSRF-Token"
-
-    # Cookies
-    # В production обычно: secure=True, samesite="strict|lax", domain=None/your-domain
-    cookies_secure: Optional[bool] = None  # None => auto (https => True)
-    cookies_samesite: str = "lax"  # "lax" | "strict" | "none"
-    cookies_domain: Optional[str] = "localhost"
-
-    # Security headers / CSP
-    # "relaxed" (dev) | "strict" (prod)
-    csp_mode: str = "relaxed"
 
     # Logging
     # "text" | "json"
     log_format: str = "text"
+
+    # Security configuration (вынесено из core)
+    security_config: Optional[SecurityConfig] = None
 
     # Extensibility: модули и плагины из конфига (override hardcoded lists)
     # RUNTIME_MODULES: comma-separated "name" or "name:required" (e.g. "api:true,admin:true,agent:false")
@@ -180,29 +168,35 @@ class Config:
         # Значение определяется в dataclass и в from_env (парсер возвращает
         # bool), поэтому явная проверка типа здесь избыточна.
 
-        # cors_allowed_origins
-        if self.cors_allowed_origins is None:
-            # Default для dev; в development любой localhost:* доп. разрешается через LocalhostCORSMiddleware
-            self.cors_allowed_origins = [
+        # security_config compatibility
+        security_cfg = self.security_config
+        cors_allowed_origins = _get_security_attr(security_cfg, "cors_allowed_origins", None)
+        if cors_allowed_origins is None:
+            default_origins = [
                 "http://localhost:3000",
                 "http://127.0.0.1:3000",
             ]
+            if security_cfg is not None:
+                security_cfg.cors_allowed_origins = list(default_origins)
 
-        # csrf config
-        if not self.csrf_cookie_name:
+        csrf_cookie_name = str(_get_security_attr(security_cfg, "csrf_cookie_name", "csrf_token"))
+        if not csrf_cookie_name:
             raise ValueError("csrf_cookie_name must be non-empty string")
-        if not self.csrf_header_name:
+
+        csrf_header_name = str(_get_security_attr(security_cfg, "csrf_header_name", "X-CSRF-Token"))
+        if not csrf_header_name:
             raise ValueError("csrf_header_name must be non-empty string")
 
-        # cookies_samesite
-        if self.cookies_samesite not in ("lax", "strict", "none"):
+        cookies_samesite = str(_get_security_attr(security_cfg, "cookies_samesite", "lax")).lower()
+        if cookies_samesite not in ("lax", "strict", "none"):
             raise ValueError("cookies_samesite must be one of: lax, strict, none")
-        # allow empty string => None for domain
-        if self.cookies_domain == "":
-            self.cookies_domain = None
 
-        # csp_mode
-        if self.csp_mode not in ("relaxed", "strict"):
+        cookies_domain = _get_security_attr(security_cfg, "cookies_domain", None)
+        if cookies_domain == "" and security_cfg is not None:
+            security_cfg.cookies_domain = None
+
+        csp_mode = str(_get_security_attr(security_cfg, "csp_mode", "relaxed")).lower()
+        if csp_mode not in ("relaxed", "strict"):
             raise ValueError("csp_mode must be 'relaxed' or 'strict'")
 
         # log_format
@@ -217,7 +211,7 @@ class Config:
             raise ValueError("module_path_prefix must be non-empty string")
 
     @classmethod
-    def from_env(cls) -> "Config":
+    def from_env(cls, env: Mapping[str, str] | None = None) -> "Config":
         """
         Создать конфигурацию из переменных окружения.
 
@@ -230,62 +224,45 @@ class Config:
         Raises:
             ValueError: если конфигурация невалидна
         """
-        cors_raw = os.getenv("RUNTIME_CORS_ALLOWED_ORIGINS")
-        cors_allowed = None
-        if cors_raw:
-            cors_allowed = [x.strip() for x in cors_raw.split(",") if x.strip()]
+        # Security config вынесен в отдельный класс
+        security_config = SecurityConfig.from_env(env)
+
+        if env is None:
+            # Keep the dependency at the boundary: only this helper reads process env.
+            import os
+
+            env = os.environ
 
         config = cls(
-            storage_type=os.getenv("RUNTIME_STORAGE_TYPE", "sqlite"),
-            db_path=os.getenv("RUNTIME_DB_PATH", "data/runtime.db"),
-            pg_host=os.getenv("RUNTIME_PG_HOST", "localhost"),
-            pg_port=int(os.getenv("RUNTIME_PG_PORT", "5432")),
-            pg_database=os.getenv("RUNTIME_PG_DATABASE", "homeconsole"),
-            pg_user=os.getenv("RUNTIME_PG_USER", "postgres"),
-            pg_password=os.getenv("RUNTIME_PG_PASSWORD", ""),
-            pg_dsn=os.getenv("RUNTIME_PG_DSN"),
-            shutdown_timeout=int(os.getenv("RUNTIME_SHUTDOWN_TIMEOUT", "10")),
+            storage_type=env.get("RUNTIME_STORAGE_TYPE", "sqlite"),
+            db_path=env.get("RUNTIME_DB_PATH", "data/runtime.db"),
+            pg_host=env.get("RUNTIME_PG_HOST", "localhost"),
+            pg_port=int(env.get("RUNTIME_PG_PORT", "5432")),
+            pg_database=env.get("RUNTIME_PG_DATABASE", "homeconsole"),
+            pg_user=env.get("RUNTIME_PG_USER", "postgres"),
+            pg_password=env.get("RUNTIME_PG_PASSWORD", ""),
+            pg_dsn=env.get("RUNTIME_PG_DSN"),
+            shutdown_timeout=int(env.get("RUNTIME_SHUTDOWN_TIMEOUT", "10")),
             service_call_timeout=float(
-                os.getenv("RUNTIME_SERVICE_CALL_TIMEOUT", "30.0")
+                env.get("RUNTIME_SERVICE_CALL_TIMEOUT", "30.0")
             ),
-            rate_limiting_enabled=os.getenv(
-                "RUNTIME_RATE_LIMITING_ENABLED", "true"
-            ).lower()
+            rate_limiting_enabled=env.get("RUNTIME_RATE_LIMITING_ENABLED", "true").lower()
             == "true",
-            rate_limit_requests=int(os.getenv("RUNTIME_RATE_LIMIT_REQUESTS", "100")),
-            rate_limit_window=int(os.getenv("RUNTIME_RATE_LIMIT_WINDOW", "60")),
-            env=os.getenv("RUNTIME_ENV", "development").lower(),
-            trust_proxy_headers=os.getenv(
-                "RUNTIME_TRUST_PROXY_HEADERS", "false"
-            ).lower()
-            == "true",
-            cors_allowed_origins=cors_allowed
-            if cors_allowed is not None
-            else ["http://localhost:3000", "http://127.0.0.1:3000"],
-            csrf_enabled=os.getenv("RUNTIME_CSRF_ENABLED", "true").lower() == "true",
-            csrf_cookie_name=os.getenv("RUNTIME_CSRF_COOKIE_NAME", "csrf_token"),
-            csrf_header_name=os.getenv("RUNTIME_CSRF_HEADER_NAME", "X-CSRF-Token"),
-            cookies_secure=(
-                None
-                if os.getenv("RUNTIME_COOKIES_SECURE") is None
-                else os.getenv("RUNTIME_COOKIES_SECURE", "true").lower() == "true"
-            ),
-            cookies_samesite=os.getenv("RUNTIME_COOKIES_SAMESITE", "lax").lower(),
-            cookies_domain=os.getenv("RUNTIME_COOKIES_DOMAIN", "localhost"),
-            csp_mode=os.getenv("RUNTIME_CSP_MODE", "relaxed").lower(),
-            log_format=os.getenv("RUNTIME_LOG_FORMAT", "text").lower(),
+            rate_limit_requests=int(env.get("RUNTIME_RATE_LIMIT_REQUESTS", "100")),
+            rate_limit_window=int(env.get("RUNTIME_RATE_LIMIT_WINDOW", "60")),
+            env=env.get("RUNTIME_ENV", "development").lower(),
+            log_format=env.get("RUNTIME_LOG_FORMAT", "text").lower(),
+            security_config=security_config,
             # Storage v3: Dual-mode configuration
-            storage_mode=os.getenv("RUNTIME_STORAGE_MODE", "single").lower(),
-            vault_storage_type=os.getenv("RUNTIME_VAULT_STORAGE_TYPE"),
-            vault_db_path=os.getenv("RUNTIME_VAULT_DB_PATH"),
-            vault_pg_dsn=os.getenv("RUNTIME_VAULT_PG_DSN"),
+            storage_mode=env.get("RUNTIME_STORAGE_MODE", "single").lower(),
+            vault_storage_type=env.get("RUNTIME_VAULT_STORAGE_TYPE"),
+            vault_db_path=env.get("RUNTIME_VAULT_DB_PATH"),
+            vault_pg_dsn=env.get("RUNTIME_VAULT_PG_DSN"),
             # Extensibility
-            modules_config=os.getenv("RUNTIME_MODULES"),
-            plugins_dir=os.getenv("RUNTIME_PLUGINS_DIR"),
-            orchestration_backend=os.getenv(
-                "RUNTIME_ORCHESTRATION_BACKEND", "docker"
-            ).lower(),
-            module_path_prefix=os.getenv("RUNTIME_MODULE_PATH_PREFIX", "modules"),
+            modules_config=env.get("RUNTIME_MODULES"),
+            plugins_dir=env.get("RUNTIME_PLUGINS_DIR"),
+            orchestration_backend=env.get("RUNTIME_ORCHESTRATION_BACKEND", "docker").lower(),
+            module_path_prefix=env.get("RUNTIME_MODULE_PATH_PREFIX", "modules"),
         )
         config.validate()
         return config

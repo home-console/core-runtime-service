@@ -13,6 +13,8 @@ from core.observability.logger_helper import info as log_info
 
 from modules.credentials import CredentialRepository
 from modules.ssh.ssh_execution_service import SSHExecutionService
+import logging
+logger = logging.getLogger(__name__)
 
 CredentialWithSecret = Tuple[Any, bytes]
 
@@ -100,7 +102,8 @@ class AgentDeployService:
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
                 s.connect(("8.8.8.8", 80))
                 return s.getsockname()[0]
-        except Exception:
+        except Exception as e:
+            logger.warning("deploy_service._get_lan_ip: failed: %s", e, exc_info=True)
             return "127.0.0.1"
 
     async def deploy(

@@ -2,6 +2,11 @@
 Authentication constants — namespaces, limits, policies.
 """
 
+from core.adapters.storage_errors import STORAGE_BOUNDARY_ERRORS
+
+# Алиас для auth-модулей (тот же кортеж, что в core.adapters.storage_errors)
+AUTH_STORAGE_BOUNDARY_ERRORS = STORAGE_BOUNDARY_ERRORS
+
 # Storage namespaces
 AUTH_API_KEYS_NAMESPACE = "auth_api_keys"
 AUTH_SESSIONS_NAMESPACE = "auth_sessions"

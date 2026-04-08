@@ -12,7 +12,10 @@ from .constants import (
     AUTH_REFRESH_TOKENS_NAMESPACE,
     AUTH_REVOKED_NAMESPACE,
     AUTH_SESSIONS_NAMESPACE,
+    AUTH_STORAGE_BOUNDARY_ERRORS,
 )
+import logging
+logger = logging.getLogger(__name__)
 
 
 async def revoke_api_key(runtime: Any, api_key: str) -> None:
@@ -32,8 +35,8 @@ async def revoke_api_key(runtime: Any, api_key: str) -> None:
         # Удаляем из активных ключей
         try:
             await runtime.storage.delete(AUTH_API_KEYS_NAMESPACE, api_key)
-        except Exception:
-            pass
+        except AUTH_STORAGE_BOUNDARY_ERRORS:
+            logger.warning("revoke_api_key: active key delete failed", exc_info=True)
 
         # Логируем
         await audit_log_auth_event(
@@ -44,16 +47,28 @@ async def revoke_api_key(runtime: Any, api_key: str) -> None:
             success=True,
         )
 
-    except Exception as e:
+    except AUTH_STORAGE_BOUNDARY_ERRORS as e:
+        logger.warning("revoke_api_key storage error: %s", e, exc_info=True)
         try:
-            await runtime.kernel_context.get_service("service_registry").call(
+            await runtime.service_registry.call(
                 "logger.log",
                 level="error",
                 message=f"Error revoking API key: {e}",
                 module="api",
             )
         except Exception:
-            pass
+            logger.warning("logger.log service call failed", exc_info=True)
+    except Exception as e:
+        logger.exception("revoke_api_key unexpected: %s", e)
+        try:
+            await runtime.service_registry.call(
+                "logger.log",
+                level="error",
+                message=f"Error revoking API key: {e}",
+                module="api",
+            )
+        except Exception:
+            logger.warning("logger.log service call failed", exc_info=True)
 
 
 async def revoke_session(runtime: Any, session_id: str) -> None:
@@ -73,8 +88,8 @@ async def revoke_session(runtime: Any, session_id: str) -> None:
         # Удаляем из активных сессий
         try:
             await runtime.storage.delete(AUTH_SESSIONS_NAMESPACE, session_id)
-        except Exception:
-            pass
+        except AUTH_STORAGE_BOUNDARY_ERRORS:
+            logger.warning("revoke_session: active session delete failed", exc_info=True)
 
         # Логируем
         await audit_log_auth_event(
@@ -85,16 +100,28 @@ async def revoke_session(runtime: Any, session_id: str) -> None:
             success=True,
         )
 
-    except Exception as e:
+    except AUTH_STORAGE_BOUNDARY_ERRORS as e:
+        logger.warning("revoke_session storage error: %s", e, exc_info=True)
         try:
-            await runtime.kernel_context.get_service("service_registry").call(
+            await runtime.service_registry.call(
                 "logger.log",
                 level="error",
                 message=f"Error revoking session: {e}",
                 module="api",
             )
         except Exception:
-            pass
+            logger.warning("logger.log service call failed", exc_info=True)
+    except Exception as e:
+        logger.exception("revoke_session unexpected: %s", e)
+        try:
+            await runtime.service_registry.call(
+                "logger.log",
+                level="error",
+                message=f"Error revoking session: {e}",
+                module="api",
+            )
+        except Exception:
+            logger.warning("logger.log service call failed", exc_info=True)
 
 
 async def revoke_refresh_token(runtime: Any, refresh_token: str) -> None:
@@ -114,8 +141,8 @@ async def revoke_refresh_token(runtime: Any, refresh_token: str) -> None:
         # Удаляем из активных токенов
         try:
             await runtime.storage.delete(AUTH_REFRESH_TOKENS_NAMESPACE, refresh_token)
-        except Exception:
-            pass
+        except AUTH_STORAGE_BOUNDARY_ERRORS:
+            logger.warning("revoke_refresh_token: active token delete failed", exc_info=True)
 
         # Audit logging
         await audit_log_auth_event(
@@ -126,16 +153,28 @@ async def revoke_refresh_token(runtime: Any, refresh_token: str) -> None:
             success=True,
         )
 
-    except Exception as e:
+    except AUTH_STORAGE_BOUNDARY_ERRORS as e:
+        logger.warning("revoke_refresh_token storage error: %s", e, exc_info=True)
         try:
-            await runtime.kernel_context.get_service("service_registry").call(
+            await runtime.service_registry.call(
                 "logger.log",
                 level="error",
                 message=f"Error revoking refresh token: {e}",
                 module="api",
             )
         except Exception:
-            pass
+            logger.warning("logger.log service call failed", exc_info=True)
+    except Exception as e:
+        logger.exception("revoke_refresh_token unexpected: %s", e)
+        try:
+            await runtime.service_registry.call(
+                "logger.log",
+                level="error",
+                message=f"Error revoking refresh token: {e}",
+                module="api",
+            )
+        except Exception:
+            logger.warning("logger.log service call failed", exc_info=True)
 
 
 async def is_revoked(runtime: Any, identifier: str, revoke_type: str) -> bool:
@@ -168,6 +207,12 @@ async def is_revoked(runtime: Any, identifier: str, revoke_type: str) -> bool:
 
         return True
 
+    except AUTH_STORAGE_BOUNDARY_ERRORS:
+        logger.debug(
+            "is_revoked: storage error, fail-closed",
+            exc_info=True,
+        )
+        return True
     except Exception:
-        # Fail-closed: если revocation check недоступен, запрещаем доступ.
+        logger.exception("is_revoked: unexpected error, fail-closed")
         return True

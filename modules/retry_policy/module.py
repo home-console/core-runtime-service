@@ -4,6 +4,7 @@ import time
 from typing import Any
 
 from core.operations.models import Operation, OperationStatus
+from sdk.operations_events import OPERATION_READY_EVENT_TYPE, build_operation_ready_payload
 from core.runtime.runtime_module import RuntimeModule
 
 from modules.hooks.system import (
@@ -79,11 +80,8 @@ class RetryPolicyModule(RuntimeModule):
             publish = getattr(event_bus, "publish", None)
             if callable(publish):
                 await publish(
-                    "operation_ready",
-                    {
-                        "type": "operation_ready",
-                        "operation_id": operation.operation_id,
-                    },
+                    OPERATION_READY_EVENT_TYPE,
+                    build_operation_ready_payload(operation.operation_id),
                 )
         return SystemHookResult(
             allow=True,

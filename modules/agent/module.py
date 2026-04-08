@@ -71,6 +71,9 @@ class AgentControlPlaneModule(RuntimeModule):
         - Initialize MTLSCertificateAuthority
         - Register HTTP endpoints
         """
+        if self.runtime is None:
+            raise RuntimeError("AgentModule requires full runtime (not RuntimeContext)")
+
         # Use SecretStore from runtime if already set (main/bootstrap), otherwise create
         secret_store = getattr(self.runtime, "secret_store", None)
         if secret_store is None:
@@ -82,7 +85,7 @@ class AgentControlPlaneModule(RuntimeModule):
                 storage = (
                     self.context.storage
                     if hasattr(self, "context") and self.context
-                    else self.runtime.storage
+                    else self.context.storage
                 )
                 backend = getattr(
                     getattr(storage, "_storage", storage), "_adapter", None
@@ -100,6 +103,19 @@ class AgentControlPlaneModule(RuntimeModule):
                 await secret_store.open_with_passphrase(passphrase)
             except RuntimeError:
                 # Salt doesn't exist yet — first-time initialization
+                await secret_store.initialize(passphrase)
+            except Exception as e:
+                # Decryption failed (e.g., InvalidTag) — vault was recreated or passphrase changed
+                logger.warning(
+                    "[agent] Cannot decrypt stored credentials (%s). Resetting agent CA.",
+                    e
+                )
+                # Clear old encrypted data and reinitialize
+                try:
+                    await secret_store.delete("agent:ca:private_key")
+                    await secret_store.delete("agent:ca:certificate")
+                except Exception:
+                    pass  # Keys may not exist yet
                 await secret_store.initialize(passphrase)
             self.runtime.secret_store = secret_store
 
@@ -149,95 +165,46 @@ class AgentControlPlaneModule(RuntimeModule):
 
         self.runtime.agent_log_store = AgentLogStore()
 
-        # Обёртка для admin-хендлеров, которым нужен runtime первым аргументом
-        def wrap_agent(fn):
-            return lambda *args, **kw: fn(self.runtime, *args, **kw)
+        # Register admin.* agent services with a unified helper.
+        # Admin access is required for all of these endpoints.
+        async def _reg(service_name: str, fn: Any) -> None:
+            await self.register_runtime_service(
+                service_name,
+                fn,
+                admin_only=True,
+                resource="agent",
+            )
 
-        # Register services with service registry
-        await self.context.services.register(
-            "admin.agent.create_enrollment_token",
-            wrap_agent(admin_agent_create_enrollment_token),
-        )
-        await self.context.services.register(
-            "admin.agent.generate_bootstrap_token",
-            wrap_agent(admin_agent_generate_bootstrap_token),
-        )
-        await self.context.services.register(
-            "admin.agent.enroll_agent",
-            wrap_agent(admin_agent_enroll_agent),
-        )
-        await self.context.services.register(
-            "admin.agent.list_agents",
-            wrap_agent(admin_agent_list_agents),
-        )
-        await self.context.services.register(
-            "admin.agent.get_agent",
-            wrap_agent(admin_agent_get_agent),
-        )
-        await self.context.services.register(
-            "admin.agent.deregister_agent",
-            wrap_agent(admin_agent_deregister_agent),
-        )
-        await self.context.services.register(
+        await _reg("admin.agent.create_enrollment_token", admin_agent_create_enrollment_token)
+        await _reg("admin.agent.generate_bootstrap_token", admin_agent_generate_bootstrap_token)
+        await _reg("admin.agent.enroll_agent", admin_agent_enroll_agent)
+        await _reg("admin.agent.list_agents", admin_agent_list_agents)
+        await _reg("admin.agent.get_agent", admin_agent_get_agent)
+        await _reg("admin.agent.deregister_agent", admin_agent_deregister_agent)
+        await _reg(
             "admin.agent.list_agents_providing_capability",
-            wrap_agent(admin_agent_list_agents_providing_capability),
+            admin_agent_list_agents_providing_capability,
         )
 
         # ==== Deployment Services (TASK 1.1) ====
-        await self.context.services.register(
-            "admin.agent.deploy",
-            wrap_agent(admin_agent_deploy),
-        )
-        await self.context.services.register(
-            "admin.agent.get_deployment_status",
-            wrap_agent(admin_agent_get_deployment_status),
-        )
-        await self.context.services.register(
-            "admin.agent.get_deployment_metrics",
-            wrap_agent(admin_agent_get_deployment_metrics),
-        )
-        await self.context.services.register(
-            "admin.agent.heartbeat",
-            wrap_agent(admin_agent_heartbeat),
-        )
+        await _reg("admin.agent.deploy", admin_agent_deploy)
+        await _reg("admin.agent.get_deployment_status", admin_agent_get_deployment_status)
+        await _reg("admin.agent.get_deployment_metrics", admin_agent_get_deployment_metrics)
+        await _reg("admin.agent.heartbeat", admin_agent_heartbeat)
 
         # ==== Heartbeat Monitoring Services (TASK 1.3) ====
-        await self.context.services.register(
-            "admin.agent.get_heartbeat_status",
-            wrap_agent(admin_agent_get_heartbeat_status),
-        )
-        await self.context.services.register(
-            "admin.agent.check_agents_health",
-            wrap_agent(admin_agent_check_agents_health),
-        )
-        await self.context.services.register(
-            "admin.agent.list_online_agents",
-            wrap_agent(admin_agent_list_online_agents),
-        )
+        await _reg("admin.agent.get_heartbeat_status", admin_agent_get_heartbeat_status)
+        await _reg("admin.agent.check_agents_health", admin_agent_check_agents_health)
+        await _reg("admin.agent.list_online_agents", admin_agent_list_online_agents)
 
         # ==== Download Services (TASK 2.2) ====
-        await self.context.services.register(
-            "admin.agent.download_checksum",
-            wrap_agent(admin_agent_download_checksum),
-        )
-        await self.context.services.register(
-            "admin.agent.download_binary",
-            wrap_agent(admin_agent_download_binary),
-        )
+        await _reg("admin.agent.download_checksum", admin_agent_download_checksum)
+        await _reg("admin.agent.download_binary", admin_agent_download_binary)
 
         # ==== Logs + Status Services (TASK 3.1 / 3.2) ====
-        await self.context.services.register(
-            "admin.agent.submit_logs",
-            wrap_agent(admin_agent_submit_logs),
-        )
-        await self.context.services.register(
-            "admin.agent.get_logs",
-            wrap_agent(admin_agent_get_logs),
-        )
-        await self.context.services.register(
-            "admin.agent.get_status",
-            wrap_agent(admin_agent_get_status),
-        )
+        await _reg("admin.agent.submit_logs", admin_agent_submit_logs)
+        await _reg("admin.agent.get_logs", admin_agent_get_logs)
+        await _reg("admin.agent.get_status", admin_agent_get_status)
 
         # Register HTTP endpoints for Agent Control Plane
         # Enrollment endpoints

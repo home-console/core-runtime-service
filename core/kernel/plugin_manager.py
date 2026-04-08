@@ -24,25 +24,37 @@ from core.kernel.plugin_registry import PluginRegistry, PluginState
 from core.kernel.plugin_lifecycle import PluginLifecycleManager
 from core.kernel.plugin_loader import PluginManifestLoader
 from core.kernel.integration_registry import IntegrationFlag
+from core.exception_groups import BEST_EFFORT_BACKGROUND_ERRORS
 
 if TYPE_CHECKING:
     from core.runtime.runtime import CoreRuntime
+import logging
+logger = logging.getLogger(__name__)
 
 
 class PluginManager:
     """
     Facade для управления lifecycle плагинов.
-    
+
     Делегирует работу специализированным компонентам:
     - PluginRegistry: хранение и query
     - PluginLifecycleManager: lifecycle операции
     - PluginManifestLoader: загрузка манифестов
     """
-    
-    def __init__(self, runtime: Optional["CoreRuntime"] = None):
+
+    def __init__(
+        self,
+        runtime: Optional["CoreRuntime"] = None,
+        capability_registry: Optional[Any] = None,
+    ):
         self._runtime = runtime
+        self._capability_registry = capability_registry
         self._registry = PluginRegistry()
-        self._lifecycle = PluginLifecycleManager(self._registry, runtime)
+        self._lifecycle = PluginLifecycleManager(
+            self._registry,
+            runtime,
+            capability_registry=capability_registry,
+        )
 
     @property
     def _plugin_lock(self):
@@ -56,6 +68,13 @@ class PluginManager:
     def _states(self):
         return self._registry._states
     
+    def _resolve_plugins_dir(self) -> Optional[Path]:
+        """Получить plugins_dir из runtime config. Возвращает None если не сконфигурировано."""
+        config = getattr(self._runtime, "_config", None)
+        plugins_dir_str = getattr(config, "plugins_dir", None) if config is not None else None
+        if not plugins_dir_str:
+            return None
+        return Path(plugins_dir_str).expanduser()
     async def load_plugin(self, plugin: BasePlugin) -> None:
         await self._lifecycle.load_plugin(plugin)
     
@@ -98,6 +117,10 @@ class PluginManager:
     
     def list_plugins(self) -> list[str]:
         return self._registry.list_plugins()
+
+    def get_loaded_plugins(self) -> list[tuple[str, BasePlugin]]:
+        """Список загруженных плагинов для policy/integrity проверок."""
+        return list(self._plugins.items())
     
     async def load_plugin_by_name(
         self,
@@ -109,8 +132,10 @@ class PluginManager:
             return True
         
         if plugins_dir is None:
-            plugins_dir = Path(__file__).parent.parent.parent / "plugins"
-        
+            plugins_dir = self._resolve_plugins_dir()
+        if plugins_dir is None:
+            return False
+
         plugin_dir = plugins_dir / plugin_name
         if not plugin_dir.is_dir():
             return False
@@ -147,9 +172,8 @@ class PluginManager:
         logger_func: Optional[Callable[..., Awaitable[None]]] = None,
     ) -> None:
         if plugins_dir is None:
-            plugins_dir = Path(__file__).parent.parent.parent / "plugins"
-        
-        if not plugins_dir.exists() or not plugins_dir.is_dir():
+            plugins_dir = self._resolve_plugins_dir()
+        if plugins_dir is None or not plugins_dir.exists() or not plugins_dir.is_dir():
             return
         
         actual_logger_func: Callable[..., Awaitable[None]] = logger_func if logger_func is not None else warning
@@ -177,7 +201,7 @@ class PluginManager:
             dependencies = manifest.get("dependencies", [])
             loaded_plugins = await self._registry.list_plugins()
             missing_deps = [dep for dep in dependencies if dep not in loaded_plugins]
-            
+
             if missing_deps:
                 await actual_logger_func(
                     self._runtime,
@@ -185,7 +209,22 @@ class PluginManager:
                     component="plugin_manager",
                 )
                 continue
-            
+
+            # Предупреждение: зависимость загружена, но находится в состоянии ERROR
+            errored_deps = []
+            for dep in dependencies:
+                dep_state = await self._registry.get_plugin_state(dep)
+                if dep_state == PluginState.ERROR:
+                    errored_deps.append(dep)
+            if errored_deps:
+                await actual_logger_func(
+                    self._runtime,
+                    f"Предупреждение: плагин '{plugin_name}' загружается, "
+                    f"но зависимости {errored_deps} находятся в состоянии ERROR — "
+                    f"функциональность может быть деградирована",
+                    component="plugin_manager",
+                )
+
             await self._load_plugin_from_manifest(manifest, plugin_dir, actual_logger_func)
 
     async def _load_plugin_from_manifest(
@@ -259,5 +298,13 @@ class PluginManager:
                 description=plugin_description or metadata.description,
                 integration_type=integration_type,
             )
-        except Exception:
-            pass
+        except (AttributeError, KeyError, RuntimeError, TypeError, ValueError):
+            logger.debug(
+                "plugin_manager._detect_and_register_integration: expected integration error (suppressed)",
+                exc_info=True,
+            )
+        except BEST_EFFORT_BACKGROUND_ERRORS:
+            logger.warning(
+                "plugin_manager._detect_and_register_integration: unexpected error (suppressed)",
+                exc_info=True,
+            )

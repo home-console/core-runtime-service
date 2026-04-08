@@ -23,10 +23,7 @@ async def handle_device_set_state(params: Dict[str, Any], context: Any) -> Dict[
     if not runtime:
         raise RuntimeError("Runtime not available in context")
 
-    ctx = runtime.kernel_context
-    services = ctx.get_service("service_registry")
-
-    result = await services.call(
+    result = await runtime.service_registry.call(
         "devices.set_state",
         device_id,
         state,
@@ -53,10 +50,7 @@ async def handle_device_mapping_create(params: Dict[str, Any], context: Any) -> 
     if not runtime:
         raise RuntimeError("Runtime not available in context")
 
-    ctx = runtime.kernel_context
-    services = ctx.get_service("service_registry")
-
-    result = await services.call(
+    result = await runtime.service_registry.call(
         "devices.create_mapping",
         external_id,
         internal_id,
@@ -78,10 +72,7 @@ async def handle_device_mapping_delete(params: Dict[str, Any], context: Any) -> 
     if not runtime:
         raise RuntimeError("Runtime not available in context")
 
-    ctx = runtime.kernel_context
-    services = ctx.get_service("service_registry")
-
-    result = await services.call(
+    result = await runtime.service_registry.call(
         "devices.delete_mapping",
         external_id,
     )
@@ -99,10 +90,7 @@ async def handle_device_mapping_auto(params: Dict[str, Any], context: Any) -> Di
     if not runtime:
         raise RuntimeError("Runtime not available in context")
 
-    ctx = runtime.kernel_context
-    services = ctx.get_service("service_registry")
-
-    result = await services.call(
+    result = await runtime.service_registry.call(
         "devices.auto_map_external",
         provider,
     )

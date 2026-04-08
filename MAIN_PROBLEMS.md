@@ -1,356 +1,236 @@
-# Глобальные архитектурные проблемы ядра
+# Глобальные архитектурные проблемы ядра (`core/`)
 
-Дата актуализации: 2026-03-30
-Объект анализа: `core/` (execution kernel)
-Верифицировано по коду (Claude Sonnet 4.6)
+**Актуализация:** 2026-04-06  
+**Объект:** каталог `core/` (runtime, kernel, operations, messaging, adapters).  
+**Метрики:** пересчитаны по рабочей копии репозитория (не зафиксированы в CI).
 
----
+**Связанные документы**
 
-## 1. Краткая сводка
-
-Ядро существенно продвинуто по сравнению с legacy-версией (Waves 4-6), но сохраняет системные архитектурные риски:
-
-- Высокая концентрация ответственности в runtime/kernel слоях (God Object CoreRuntime).
-- Незавершённая граница `core` vs app (`core/orchestration/` не удалён).
-- Высокая доля динамических контрактов (`getattr`, `__dict__`, `importlib`, mutation классов/свойств).
-- Непоследовательная модель ошибок (исключения + `{"ok": False}` + массовое подавление).
-- Глобальные синглтоны (metrics, rate_limiter, operation context) ухудшают предсказуемость и тестируемость.
+| Документ | Назначение |
+|----------|------------|
+| [modules_plugins_problems.md](modules_plugins_problems.md) | Граница modules ↔ plugins, сервисы, контракты |
 
 ---
 
-## 2. Объективные метрики
+## Оглавление
 
-- Python-кода в `core`: 12,360 строк.
-- Крупнейшие файлы в core:
-  - `core/kernel/plugin_lifecycle.py`: 569 LOC
-  - `core/audit/events.py`: 559 LOC
-  - `core/adapters/sqlite_adapter.py`: 461 LOC
-  - `core/messaging.py`: 452 LOC
-  - `core/orchestration/docker_backend.py`: 448 LOC ← **должен быть удалён** (перенесён в app)
-  - `core/kernel/base_plugin.py`: 427 LOC
-  - `core/service/registry.py`: 416 LOC
-  - `core/dependency/resolver.py`: 411 LOC
-  - `core/operations/worker.py`: 406 LOC
-  - `core/module.py`: 397 LOC
-- Вхождений `except Exception`: 82.
-- Вхождений `print(...)` в `core`: 14.
-- Вхождений `os.getenv(...)` в `core`: 34.
-- Вхождений мутации `sys.modules` в `core`: 1 (plugin_loader — приемлемо после фикса sys.path).
-- Вызовов `asyncio.create_subprocess_exec(...)` в `core`: 9 (в core/orchestration/ — подлежит удалению).
+1. [За 60 секунд](#1-за-60-секунд)  
+2. [Метрики](#2-метрики)  
+3. [Открытые проблемы](#3-открытые-проблемы)  
+4. [Приоритеты](#4-приоритеты)  
+5. [Рекомендуемые шаги](#5-рекомендуемые-шаги)  
+6. [Реестр закрытых пунктов](#6-реестр-закрытых-пунктов)  
+7. [Архив решений (подробности)](#7-архив-решений-подробности)
 
 ---
 
-## 3. Актуальные проблемы архитектуры
+## 1. За 60 секунд
 
-От критичных к средним. Все пункты верифицированы по коду на 2026-03-30.
+- После волн 4–6 ядро **существенно разгружено**: удалён `core/orchestration/` (оркестрация в `app/orchestration/`), `CoreRuntime` декомпозирован, `InMemoryEventBus` и `PluginLifecycleManager` разнесены по компонентам, плагин-лоадер и operation worker получили более явные контракты.
+- **Стало лучше (D1 закрыт):** в `core/` устранён `except Exception` (метрика — 0), введены allowlist-группы ошибок и инварианты по `asyncio.CancelledError`; от регрессий защищает тест `tests/test_core_exception_policy.py`.
+- **По-прежнему системные риски:** смешение моделей ошибок и **многоуровневые boundary-политики**, **динамические контракты** (`getattr`, соглашения об имёновании), **глобальные accessor’ы** метрик/лимитов/operation context (частично компенсированы `RuntimeContext`, legacy остаётся), **сложность plugin lifecycle / hot-reload**.
+- **At-least-once / dedup:** контракт формализован (**G1** закрыт): `core/operations/dedup_contract.py`, ADR `docs/adr/001-dedup-at-least-once-contract.md`, контракт события `docs/event_contracts/operation_ready.md`.
 
-### A. Нарушения границ слоя ядра (Core Boundary Drift)
+---
 
-**A1. `core/orchestration/` не удалён после переноса в `app/orchestration/`** ✅ **ИСПРАВЛЕНО** (2026-03-30)
-- Evidence: `core/orchestration/docker_backend.py`, `core/orchestration/service.py`
-- Проблема: `app/orchestration/` создан (Wave 6), но оригиналы в core остались. Два источника истины.
-- Риск: путаница при импортах, старый код продолжает быть частью core.
-- Действие: удалить `core/orchestration/docker_backend.py` и `core/orchestration/service.py`.
-- **Решение:** Файлы `core/orchestration/` удалены. `core/runtime/runtime.py` обновлён для импорта из `app.orchestration` через TYPE_CHECKING.
+## 2. Метрики
 
-**A2. CORS/CSRF/CSP конфигурация живёт в core**
-- Evidence: `core/runtime/config.py:233`, `core/runtime/config.py:265`, `core/runtime/config.py:275`
-- Проблема: параметры web-edge безопасности принадлежат app-layer, не минимальному kernel.
-- Риск: усложнение переносимости ядра в headless-сценариях.
+*Пересчёт 2026-04-06.*
 
-**A3. CoreRuntime хранит app-level extension hooks**
-- Evidence: `core/runtime/runtime.py:121`, `core/runtime/runtime.py:123`
-- Проблема: поля для app-level фабрик/прокси в ядре.
-- Риск: нарушение инверсии зависимостей, drift к сервис-локатору.
+| Метрика | Значение |
+|---------|----------|
+| Строк Python в `core/` | ~14 700 |
+| Строк с подстрокой `except Exception` (`rg`, все вхождения в строке) | 0 |
+| Вхождений `os.getenv(` в `core/` | 0 |
+| Вхождений мутации `sys.modules` (кроме ожидаемой регистрации модулей плагина) | см. `plugin_loader` |
 
-**A4. Гидратация app-defined префиксов состояния в lifecycle ядра**
-- Evidence: `core/runtime/runtime.py:136`, `core/runtime/_lifecycle.py:114`
-- Проблема: ядро принимает решение по boot-time восстановлению данных на основе внешних namespace-конвенций.
-- Риск: скрытая доменная политика в core start-пути.
+**Крупнейшие файлы `core/` (LOC):**
 
-### B. Монолитность и высокая связность
+1. `core/audit/events.py` — 559  
+2. `core/operations/worker.py` — 464  
+3. `core/kernel/base_plugin.py` — 464  
+4. `core/adapters/sqlite_adapter.py` — 461  
+5. `core/kernel/plugin_lifecycle.py` — 438  
+6. `core/service/registry.py` — 416  
+7. `core/module.py` — 380  
+8. `core/runtime/_lifecycle.py` — 455  
+9. `core/runtime/runtime.py` — 373  
+10. `core/kernel/plugin_loader.py` — 357  
 
-**B1. `CoreRuntime` как God Object / композиционный центр всего ядра** ✅ **ИСПРАВЛЕНО** (2026-03-30)
-- Evidence: `core/runtime/runtime.py:39-160`
-- Проблема: единая точка с 12+ подсистемами: event bus, operations, plugin manager, module manager, storage, HTTP, capability, security, state engine.
-- Риск: дорогие изменения, каскад регрессий, сложный lifecycle.
-- **Решение:** Проведена декомпозиция на 5 специализированных компонентов:
-  1. `CoreServices` — базовые сервисы (storage, vault, event_bus, service_registry, state_engine, http)
-  2. `CapabilityComponent` — security и capabilities
-  3. `PluginInfrastructure` — плагины и модули (plugin_manager, module_manager, dependency_resolver, integrations)
-  4. `OperationsComponent` — операции и execution (manager, worker, execution_controller)
-  5. `RuntimeMonitor` — monitoring, health checks, metrics
-  - `CoreRuntime.__init__` сокращён с ~70 строк до ~20
-  - Обратная совместимость сохранена через property-методы
+> Папки **`core/orchestration/`** в дереве **нет** (перенос в `app/orchestration/`). Упоминания `docker_backend` в контексте **core** в этом документе считаются устаревшими; реализация — в app-слое.
 
-**B2. `PluginLifecycleManager` перегружен (lifecycle + storage metadata + orchestration + reload)**
-- Evidence: `core/kernel/plugin_lifecycle.py:1`, `:172`, `:315`
-- Проблема: 4-5 зон ответственности в одном классе (569 LOC).
-- Риск: SRP-нарушение, сложные тесты, неочевидные инварианты.
+---
 
-**B3. `InMemoryEventBus` совмещает pub/sub, persistence, claim-lease, middleware и replay**
-- Evidence: `core/messaging.py:113`, `:130`, `:312`
-- Проблема: тяжёлый центр событийной шины с разнородной логикой (452 LOC).
-- Риск: сложно гарантировать корректную доставку и консистентность семантик.
+## 3. Открытые проблемы
 
-**B4. `DependencyResolver` совмещает integrity-check и lifecycle-policy**
-- Evidence: `core/dependency/resolver.py:35`, `:203`, `:293`
-- Проблема: resolver выходит за рамки "проверки целостности runtime" в lifecycle-decisions.
-- Риск: размытие границ между ядром и orchestration/domain governance.
+Ниже только то, что **по смыслу ещё не закрыто** или требует **дальнейшей формализации**. Закрытые пункты — в [§6](#6-реестр-закрытых-пунктов).
 
-**B5. `ModuleManager` слишком широкий**
-- Evidence: `core/module.py:176`, `:298`, `:305`
-- Проблема: discovery + import + instance + lifecycle + fallback-логирование в одном компоненте.
-- Риск: хрупкость при развитии модульной модели.
+### A. Границы ядра
 
-### C. Динамические и хрупкие контракты
+*(все пункты раздела закрыты; см. [§6](#6-реестр-закрытых-пунктов))*
 
-**C1. Runtime mutation класса плагина через `setattr(type(...))`**
-- Evidence: `core/kernel/plugin_loader.py:268`
-- Проблема: модификация class-level поведения во время загрузки.
-- Риск: побочные эффекты между экземплярами и перезагрузками.
+### B. Монолитность и связность
 
-**C2. Инъекция runtime-полей в plugin instance через `setattr`**
-- Evidence: `core/kernel/plugin_loader.py:250`, `:252`
-- Проблема: неформализованный скрытый контракт метаданных/зависимостей.
-- Риск: ошибки совместимости, слабая типобезопасность.
+*(все пункты раздела закрыты; см. [§6](#6-реестр-закрытых-пунктов))*
 
-**C3. `OperationWorker` читает контракт через `__dict__` и `getattr`**
-- Evidence: `core/operations/worker.py:62`, `:69`, `:83`
-- Проблема: нет формального интерфейса зависимостей.
-- Риск: latent bugs при рефакторинге runtime-полей.
+### C. Динамические контракты
 
-**C4. Прямой доступ к private/internal полям других компонентов** ✅ **ИСПРАВЛЕНО** (2026-03-30)
-- Evidence: `core/operations/worker.py:313`, `:319` (обращение к `operations._storage`)
-- Проблема: нарушение инкапсуляции.
-- Риск: сильная связность, хрупкие инварианты.
-- **Решение:** Добавлены публичные методы в `OperationManager`: `persist_operation()`, `ensure_attempt_created()`, `try_claim_attempt()`, `get_attempt()`, `persist_attempt()`, `get_executor()`. `OperationWorker` обновлён для использования публичного API вместо прямого доступа к `_storage` и `_executor`.
+*(все пункты раздела закрыты; см. [§6](#6-реестр-закрытых-пунктов))*
 
-**C5. Сигнатуры EventBus подписки неоднородны**
-- Evidence: `core/messaging.py:344`, `:365`
-- Проблема: адаптеры, wildcard, completed-awaitable — разные модели в одном API.
-- Риск: когнитивная сложность, ошибки интеграции.
+### D. Ошибки и наблюдаемость
 
-**C6. String-based backend detection в EventBus**
-- Evidence: `core/messaging.py:316`, `:322` — `"sqlite" in adapter_name`
-- Проблема: строковая эвристика вместо capability/protocol.
-- Риск: ломкость при переименовании/замене адаптеров.
-
-**C7. Динамический импорт модулей по naming convention**
-- Evidence: `core/module.py:298`, `:305`
-- Проблема: неявная связь имени модуля и class-name правила.
-- Риск: слабая диагностика, ошибки обнаружения.
-
-**C8. `PluginRuntimeFacade` не проксирует критические методы** ← СЛОМАНО СЕЙЧАС
-- Методы `register_http()` и `register_operation_handler()` отсутствуют в facade.
-- Плагины, вызывающие эти методы, упадут при `on_load`.
-
-**C9. `kernel_context` Optional без None-guard** ← СЛОМАНО СЕЙЧАС
-- 30+ мест в runtime обращаются к `kernel_context` без проверки None.
-- Падение при рефакторинге или None-инициализации.
-
-### D. Модель ошибок и наблюдаемость
-
-**D1. Высокая плотность broad exception handling** ← P0
-- Evidence: `core/runtime/_lifecycle.py:235`, `core/kernel/plugin_loader.py:323`, `core/dependency/resolver.py:53`, `core/module.py:325`
-- 82 вхождения `except Exception` — системное подавление специфики ошибок.
-- Риск: деградация диагностики, скрытые дефекты в production.
-
-**D2. Silent failures — подавление без сигнализации**
-- Evidence: `core/kernel/plugin_loader.py:114`, `:205`, `core/runtime/operation_context.py:105`
-- `except Exception: pass` — ошибки теряются полностью.
-- Риск: неотлаживаемые production-сбои.
-
-**D3. Mixed error model: исключения + `{"ok": False}` dict + строки**
-- Evidence: `core/orchestration/docker_backend.py:120`, `:125`; `core/dependency/resolver.py:78`
-- Нет единого error contract.
-- Риск: неоднозначное поведение клиентов.
-
-**D4. Fallback на `print()` и `traceback.print_exc()` в core** ✅ **ИСПРАВЛЕНО** (2026-03-30)
-- Evidence: `core/module.py:176`, `:213`, `:259`; `core/runtime/_lifecycle.py:93`
-- Bypass observability pipeline.
-- Риск: потеря контекста, шум в stderr, нарушение единого лог-контракта.
-- **Решение:** Все `print()` в коде core заменены на `logger.exception()` и `logger.warning()`. `traceback.print_exc()` удалён из `_lifecycle.py`. Легитимный fallback в `logger_helper.py` сохранён (для случаев до инициализации runtime).
-
+*(пункты раздела закрыты; см. [§6](#6-реестр-закрытых-пунктов))*
+ 
 ### E. Глобальное состояние
 
-**E1. Глобальный singleton registry метрик**
-- Evidence: `core/observability/metrics.py:257-260`
-- Shared mutable state на процесс, нет injectable альтернативы.
+*(все пункты раздела закрыты; см. [§6](#6-реестр-закрытых-пунктов))*
 
-**E2. Глобальный singleton rate limiter**
-- Evidence: `core/observability/rate_limiter.py:112-115`
-- Некорректная изоляция tenant/runtime.
+### F. Plugin lifecycle
 
-**E3. Глобальный provider operation context**
-- Evidence: `core/runtime/operation_context.py:22-29`
-- Race/scope проблемы при нескольких runtime/тестовых окружениях.
+**F2. Метаданные плагинов и схема storage** — **закрыто (2026-04-06)**  
+- **Сделано:** введён явный контракт хранения метаданных: `core/kernel/plugin_metadata_storage_contract.py` (namespace, schema_version, нормализация), `PluginStorageManager` пишет/читает только по контракту.  
+- **Тест:** `tests/test_plugin_metadata_storage_contract.py`.
 
-### F. Plugin lifecycle риски
+**F3. Hot reload** — **закрыто (2026-04-06)**  
+- `importlib.reload` в `core/` отсутствует (reload = stop→unload→load fresh→start).  
+- Хрупкая эвристика `Path(__file__).parent.parent.parent / "plugins"` удалена из `plugin_lifecycle.py` и `plugin_manager.py`; вместо неё — `_resolve_plugins_dir()` из `Config.plugins_dir`; при отсутствии конфига — `ValueError` / graceful return.
 
-**F1. Сильная связь plugin lifecycle с orchestration внутри core**
-- Evidence: `core/kernel/plugin_lifecycle.py:172`, `:243`
-- Трудно отделить in-process plugin lifecycle от infra orchestration.
+**F4. Backward-compat shims в горячих путях** — **закрыто (2026-04-06)**  
+- **Удалено:** `DependencyResolver` facade (`core/dependency/resolver.py`) и все его использования в core/tests; остались только явные компоненты `DependencyIntegrityChecker` и `PluginLifecyclePolicy`.  
+- **Переведено:** app-layer мониторинг больше не использует `runtime.runtime_health_check` / `runtime.runtime_metrics_collector`; теперь делегаты устанавливаются через `runtime.monitor.*_delegate`. Fallback-ветки в `core/runtime/_lifecycle.py` удалены.  
+- **Упрощено:** `OperationWorker` больше не дублирует проверку “обработано ли событие” через event_bus — только централизованный `DedupLayer` + claim через event bus.
 
-**F2. Metadata плагинов "зашита" в lifecycle manager**
-- Evidence: `core/kernel/plugin_lifecycle.py:315`, `:360`
-- Storage schema (`plugins.metadata`) жёстко связана с lifecycle.
+### G. Исполнение операций и событий
 
-**F3. Hot reload через `importlib.reload` и path-эвристику**
-- Evidence: `core/kernel/plugin_lifecycle.py:449`, `:516`
-- Горячая перезагрузка хрупка, непредсказуемое состояние модулей после reload.
+**G1. At-least-once и единый dedup-контракт** — **закрыто (2026-04-05)**  
+- **Код:** `core/operations/dedup_contract.py` — namespace, префиксы ключей, TTL, `OPERATION_READY_EVENT_TYPE`, билдеры ключей; `DedupLayer` и издатели события используют только этот контракт.  
+- **Документация:** [docs/adr/001-dedup-at-least-once-contract.md](docs/adr/001-dedup-at-least-once-contract.md), [docs/event_contracts/operation_ready.md](docs/event_contracts/operation_ready.md); TypedDict `OperationReadyPayload` в `core/events_schemas.py`.  
+- **Тесты:** `tests/test_dedup_contract.py` (регрессия формата ключей).
 
-**F4. Backward-compat shims в production-пути**
-- Evidence: `core/orchestration/service.py:228`, `core/runtime/config.py:32`
-- Временные ветки совместимости закреплены в runtime.
+### H. Конфигурация и переносимость
 
-### G. Event/Operation execution
+**H1. Высокая env-зависимость ядра** — **закрыто (2026-04-06)**  
+- **Сделано:** в `core/` устранён `os.getenv` (парсинг env сосредоточен в boundary-хелперах `Config.from_env(env=...)` и `SecurityConfig.from_env(env=...)`, с возможностью передать mapping; плагинный helper читает `os.environ` локально).  
+- **Метрика:** вхождений `os.getenv(` в `core/` — **0** (см. §2).
 
-**G1. At-least-once без централизованного dedup** ← P0 по последствиям
-- Evidence: `core/operations/worker.py:203`, `core/messaging.py:177`
-- Элементы dedup есть, но сквозной гарантийный контракт не унифицирован.
-- Риск: повторные side effects при сбоях (webhook, команды, внешние вызовы).
+**H2–H3. Docker / path-эвристики / subprocess** — **закрыто (2026-04-06)**  
+- **Сделано:** platform/CLI детали и orchestration-реализация вынесены в app-layer (`app/orchestration/`); ядро не содержит Docker-кода и не принимает решений об окружении.  
+- **Evidence:** `core/orchestration/` отсутствует; сборка orchestration происходит в `app/bootstrap.py` (а также CLI в `app/console.py`).
 
-**G2. `asyncio.gather` без backpressure-политики**
-- Evidence: `core/messaging.py:411` — `return_exceptions=True` без управления нагрузкой.
-- Риск: cascading overload при burst-событиях.
+### I. Capability protocol
 
-**G3. Operation context делает app-level вызовы**
-- Evidence: `core/runtime/operation_context.py:94`, `:107`, `:124`
-- Context helper становится app-aware (вызывает сервисы логгера).
-- Риск: скрытая зависимость ядра от наличия/поведения определённых сервисов.
-
-### H. Конфигурация и portability
-
-**H1. Высокая env-зависимость ядра**
-- Evidence: `core/runtime/config.py:233`, `:284` — 34 вхождения `os.getenv` в core.
-- Риск: нестабильность поведения между окружениями, сложность тестирования.
-
-**H2. `DockerOrchestrationBackend._find_project_root` — path-эвристика**
-- Evidence: `core/orchestration/docker_backend.py:39` (файл подлежит удалению вместе с переносом)
-- Поиск корня проекта по набору папок — non-deterministic в CI/mono-repo.
-
-**H3. Docker CLI через subprocess вместо типизированного порта**
-- Evidence: `core/orchestration/docker_backend.py:64`, `:425` (файл подлежит удалению)
-- Парсинг stderr/stdout как API, platform-specific сбои.
+**I1. `ProviderMetadata`: `__post_init__`-нормализация Optional полей** — **закрыто (2026-04-06)**  
+- **Сделано:** `timeouts`/`capabilities` переведены на `field(default_factory=...)`, `__post_init__` удалён; типы больше не “врут” про `Optional`.  
+- **Файл:** `core/capability/protocol.py`.
 
 ---
 
-## 4. Приоритетная матрица
+## 4. Приоритеты
 
-```
-P0 (архитектурный риск платформы — чинить первым):
-  ✅ B1 (God Object CoreRuntime) — ИСПРАВЛЕНО 2026-03-30
-  D1 (82x except Exception)
-  G1 (at-least-once без dedup)
-  C8 (PluginFacade — методы сломаны, плагины падают)
-  ✅ A1 (core/orchestration/ не удалён) — ИСПРАВЛЕНО 2026-03-30
-  ✅ C4 (доступ к _storage) — ИСПРАВЛЕНО 2026-03-30
-  ✅ D4 (print/traceback в core) — ИСПРАВЛЕНО 2026-03-30
+| Уровень | Смысл | Открытые ориентиры |
+|---------|--------|---------------------|
+| **P0** | Риск для корректности/диагностики платформы | — |
+| **P1** | Структурный долг, связность | — |
+| **P2** | Когнитивная сложность, переносимость | — |
 
-P1 (высокий приоритет):
-  A2, A3, B2, B3, B4, C1, C2, C3, C9, D2, D3, E1, E2, E3, F1, F2, G2
-
-P2 (средний приоритет):
-  A4, B5, C5, C6, C7, F3, F4, G3, H1, H2, H3
-```
+Ранее в документе фигурировала формулировка «P0 16/16 закрыто» — она **противоречила** оставшимся пунктам и вводила в заблуждение. Актуальная матрица — таблица выше; закрытые идентификаторы — в [§6](#6-реестр-закрытых-пунктов).
 
 ---
 
-## 5. Рекомендуемая программа исправления
+## 5. Рекомендуемые шаги
 
-**Волна A — Boundary Hardening (Wave 7):**
-- Удалить `core/orchestration/docker_backend.py` и `core/orchestration/service.py`.
-- Убрать global singletons (metrics, rate_limiter, operation_context) → явный DI.
-- Добавить `register_http()` / `register_operation_handler()` в PluginRuntimeFacade.
-- None-guard для `kernel_context` во всех 30+ местах.
-
-**Волна B — Contract Hardening (Wave 8):**
-- Убрать class-level mutation из plugin loader (C1, C2).
-- Ввести строгие протоколы для OperationWorker вместо `__dict__`/`getattr` (C3).
-- Запретить прямой доступ к private полям других подсистем (C4).
-- Унифицировать error contract (единый Result type или exception hierarchy).
-
-**Волна C — Error/Observability Unification (Wave 8):**
-- Сократить `except Exception`, запретить silent `pass` в критичных путях.
-- Удалить `print()`/`traceback.print_exc()` из core.
-- Configuration object injection (убрать `os.getenv` из core).
-
-**Волна D — Decomposition (Wave 9):**
-- Декомпозировать `PluginLifecycleManager`, `InMemoryEventBus`, `DependencyResolver`, `ModuleManager`.
-- Упростить `CoreRuntime` до orchestration-free kernel coordinator.
-- Dedup layer для at-least-once operations.
-- Безопасный hot-reload без `importlib.reload`.
+1. **F3:** заменить path-эвристику в `plugin_lifecycle.py:reload_plugin` на явный `plugins_dir` из конфига (убрать `Path(__file__).parent.parent.parent`).  
+2. **Метрики:** периодически обновлять §2 скриптом (или CI job) чтобы не копить расхождение с кодом.
 
 ---
 
----
+## 6. Реестр закрытых пунктов
 
-## ✅ Выполнено
+Компактная фиксация; детали — [§7](#7-архив-решений-подробности).
 
-Задачи удалены из активного списка. Зафиксировано для истории.
-
----
-
-### ✅ Удаление core/orchestration/ после переноса в app (2026-03-30)
-
-**Изначальная проблема:**
-`core/orchestration/` не удалён после переноса в `app/orchestration/`. Два источника истины, риск путаницы при импортах.
-
-**Что сделано:**
-- Файлы `core/orchestration/docker_backend.py` и `core/orchestration/service.py` удалены.
-- `core/runtime/runtime.py` обновлён для импорта из `app.orchestration` через TYPE_CHECKING.
-- Граница ядра закрыта — оркестрация полностью в app-layer.
-
----
-
-### ✅ Устранение print() и traceback.print_exc() из core (2026-03-30)
-
-**Изначальная проблема:**
-14 вхождений `print()` и `traceback.print_exc()` в core — bypass observability pipeline.
-
-**Что сделано:**
-- `core/module.py`: 4 `print()` заменены на `logger.exception()`.
-- `core/adapters/sqlite_adapter.py`: 2 `print()` заменены на `logger.warning()`.
-- `core/runtime/_lifecycle.py`: `traceback.print_exc()` удалён.
-- Легитимный fallback в `logger_helper.py` сохранён (для случаев до инициализации runtime).
-- `print()` в docstring сохранены (как примеры использования API).
-
----
-
-### ✅ Запрет доступа к private полям (нарушение инкапсуляции) (2026-03-30)
-
-**Изначальная проблема:**
-`OperationWorker` напрямую обращался к `operations._storage` и `operations._executor` — нарушение инкапсуляции.
-
-**Что сделано:**
-- Добавлены публичные методы в `OperationManager`: `persist_operation()`, `ensure_attempt_created()`, `try_claim_attempt()`, `get_attempt()`, `persist_attempt()`, `get_executor()`.
-- `OperationWorker` обновлён для использования публичного API.
-- Прямой доступ к `_storage` и `_executor` из worker устранён.
-
----
-
-### ✅ Вынос оркестрации из CoreRuntime как явная зависимость (2026-03-30, ЗАВЕРШЕНО)
-
-**Изначальная проблема:**
-`CoreRuntime` сам собирал orchestration backend — знал про Docker-реализацию и был platform-composition слоем. Нарушение золотого правила политики ядра.
-
-**Что реально сделано:**
-- `orchestration_service` теперь является инжектируемым параметром `CoreRuntime.__init__(orchestration_service: Optional[OrchestrationService] = None)`.
-- `app/orchestration/` создан с `DockerOrchestrationBackend` и `OrchestrationService` — правильное место для этого кода.
-- `CoreRuntime` использует `TYPE_CHECKING` import — нет runtime-зависимости от Docker-реализации.
-- Метод `_build_default_orchestration_service()` удалён из ядра.
-- **2026-03-30:** `core/orchestration/` полностью удалён. Задача завершена.
+| ID | Тема | Период |
+|----|------|--------|
+| A1 | Удаление `core/orchestration/`, импорты через `app.orchestration` | 2026-03-30 |
+| A2 | CORS/CSRF/CSP вынесены в `SecurityConfig` | 2026-03-30 |
+| A3 | App extension hooks → `AppExtensionConfig` | 2026-03-30 |
+| A4 | Гидратация state: app-layer callback вместо `critical_state_prefixes` как core-политики (legacy fallback сохранён) | 2026-04-06 |
+| B1 | Декомпозиция `CoreRuntime` (CoreServices, компоненты) | 2026-03-30 |
+| B2 | Выделение `PluginStorageManager` / `PluginOrchestrationManager` | 2026-03-30 |
+| B3 | Выделение `EventBusStorageManager` / `EventBusClaimManager` | 2026-03-30 |
+| B4 | `DependencyResolver` стал facade: integrity-check и lifecycle-policy вынесены в отдельные компоненты (`integrity_checker`, `lifecycle_policy`) | 2026-04-06 |
+| B5 | `ModuleManager` разгружен: discovery и dependency-ordering делегированы в `ModuleDiscovery`/`ModuleDependencySorter` | 2026-04-06 |
+| C1–C2 | `PluginContext` / manifest вместо мутации класса и скрытой инъекции | 2026-03-30 |
+| C3 | `WorkerDependencies` вместо разбора через `__dict__` | 2026-03-30 |
+| C4 | Публичный API `OperationManager` вместо `_storage` / `_executor` | 2026-03-30 |
+| C8 | `PluginRuntimeFacade`: `register_http`, `register_operation_handler` | ранее |
+| C9 | Инициализация `kernel_context` в `CoreRuntime.__init__` | ранее |
+| C6 | EventBus: удалены string-based эвристики backend detection (feature/capability detection вместо `"sqlite" in ...`) | 2026-04-06 |
+| C7 | ModuleDiscovery: логирование стратегии resolution, warning на camelCase fallback, `list_available_modules()` в ошибке | 2026-04-06 |
+| C6-glob | EventBus: глобальный `_event_handler_semaphore` перенесён в per-instance `InMemoryEventBus._handler_semaphore` | 2026-04-06 |
+| C5 | EventBus: нормализованы обработчики подписок (typed/simple для конкретных event_type и wildcard), unsubscribe работает с исходным handler | 2026-04-06 |
+| F1 | Plugin lifecycle: orchestration вынесена за менеджер/порт; lifecycle не решает container-details и не читает orchestration_service напрямую | 2026-04-06 |
+| F2 | Plugin metadata storage: контракт `plugins.metadata` (schema_version + нормализация) и тест; `PluginStorageManager` больше не держит “свободный dict” | 2026-04-06 |
+| F3 | Hot reload: эвристика `Path(__file__).parent.parent.parent` удалена из `plugin_lifecycle.py` и `plugin_manager.py`; явный `_resolve_plugins_dir()` из `Config.plugins_dir` | 2026-04-06 |
+| I1 | Capability protocol: `ProviderMetadata` использует `default_factory` вместо `__post_init__`-нормализации Optional | 2026-04-06 |
+| F4-hydration | State hydration: удалён `_hydrate_critical_state_legacy()`; только app-layer callback | 2026-04-06 |
+| H2–H3 | Environment/orchestration: Docker/path/subprocess вынесены в app-layer (`app/orchestration`, CLI); ядро не содержит platform-логики | 2026-04-06 |
+| D2 | Замена голого `except: pass` на логирование | 2026-03-30 |
+| D3 | Тип `Result` / `Err` в resolver (и совместимость) | 2026-03-30 |
+| D4 | Уход от `print` / `traceback.print_exc` в пользу логгера | 2026-03-30 |
+| D1 | Исключения в `core/`: устранён `except Exception`, введены allowlist-группы и правила `CancelledError`; добавлен guard-тест, предотвращающий регрессии (`tests/test_core_exception_policy.py`) | 2026-04-06 |
+| G2 | Семафор / ограничение параллелизма обработчиков событий | 2026-03-30 |
+| G3 | `OperationLogger` protocol, ядро не зовёт `logger.log` напрямую | 2026-03-30 |
+| G1 | Единый dedup/at-least-once контракт: `dedup_contract`, ADR 001, `operation_ready` contract | 2026-04-05 |
+| E1–E3 | Глобальные синглтоны `MetricsRegistry`/`PluginRateLimiter` удалены; DI через `RuntimeContext`; `get_*()` accessor'ы полностью убраны | 2026-04-04 |
+| PR-3 | Все silent `except Exception` в модулях и handlers получили `logger.warning/error(..., exc_info=True)` | 2026-04-04 |
+| PR-4 | SDK-фасад: плагины импортируют `from sdk.plugin_ext import BasePlugin` вместо `core.kernel.*`; `sdk/http.py`, `sdk/operation.py`, `sdk/events.py` | 2026-04-04 |
+| PR-5 | `client-manager-plugin`: все `os.getenv()` централизованы в `Settings` dataclass + `get_settings()` | 2026-04-04 |
+| PR-6 | Модули переведены с `self.runtime.*` на `self.context.*` (operations, storage, service_registry, capability_registry, event_bus); `event_bus` добавлен в `RuntimeContext` | 2026-04-04 |
+| — | Capability registry: аргументы `register_provider`, consumers, `start_plugin` | 2026-04-02 |
+| — | Подпись `BasePlugin` в тестах (`runtime_or_context`) | 2026-04-02 |
+| — | `OperationsComponent.execute()` для обратной совместимости | 2026-04-02 |
+| — | Загрузка плагинов без мутации `sys.path` (`spec_from_file_location`) | 2026-03-29 |
 
 ---
 
-### ✅ Устранение мутации `sys.path` при загрузке плагинов (2026-03-29)
+## 7. Архив решений (подробности)
 
-**Изначальная проблема:**
-Глобальное изменение import resolution через `sys.path` во время загрузки плагина. Race-condition при параллельных операциях, трудноуловимые конфликты импортов.
+### Удаление `core/orchestration/`
 
-**Что сделано:**
-- `plugin_loader` теперь использует `importlib.util.spec_from_file_location` для явной загрузки модуля по пути — `sys.path` не мутируется.
-- Модули регистрируются в `sys.modules` — это норма, необходимо для корректной работы импортов внутри плагина.
+После переноса в `app/orchestration/` дублирующие файлы в core удалены; `CoreRuntime` не тянет Docker-реализацию на уровне импорта (TYPE_CHECKING / инъекция сервиса).
 
-**Статус:** полностью закрыто. `sys.modules` мутация остаётся и это правильно.
+### Наблюдаемость в core
+
+`print` и `traceback.print_exc` в рабочих путях заменены на логирование; исключение — легитимный fallback до инициализации логгера.
+
+### D1: нормализация обработки исключений в `core/` (2026-04-06)
+
+- Политика: **не использовать** широкие `except Exception` в рабочих путях; допустимы только защитные boundary, где ошибка **логируется** с контекстом и runtime **продолжает работу** (graceful degradation).
+- Для ожидаемых классов ошибок на границе выделены allowlist-группы:
+  - `core/adapters/storage_errors.py`: `STORAGE_BOUNDARY_ERRORS`
+  - `core/exception_groups.py`: `PLUGIN_INTROSPECTION_ERRORS` (единая группа вместо локальных дублей)
+- Инварианты:
+  - `asyncio.CancelledError` **не глотается** (пробрасывается)
+  - неожиданные исключения помечаются как **unexpected** и логируются с `exc_info=True`
+- Guard: тест `tests/test_core_exception_policy.py` запрещает `except Exception` / `except:` / `except BaseException` в `core/` и требует корректное обращение с `CancelledError`.
+- Метрика: строк с подстрокой `except Exception` в `core/` — **0** (см. §2).
+
+### Инкапсуляция operations
+
+`OperationWorker` переведён на публичные методы `OperationManager` вместо доступа к `_storage` / `_executor`.
+
+### Декомпозиция God Object и шины событий
+
+`CoreRuntime` собирается из компонентов; event bus и plugin lifecycle разбиты на меньшие классы с делегированием (см. реестр B1–B3).
+
+### Плагины: контекст и лоадер
+
+Вместо `setattr` на класс плагина — формализованный контекст и манифест; загрузка модуля по файлу без изменения `sys.path`.
+
+### Capability system (2026-04-02)
+
+Исправлены передача `capability_registry`, порядок аргументов `register_provider`, регистрация consumers и проверки при `start_plugin` (см. тесты capability).
+
+---
+
+*Конец документа.*

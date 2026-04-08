@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional
 import os
 import time
 
+from core.adapters.storage_errors import STORAGE_BOUNDARY_ERRORS
 from modules.api.auth import (
     create_api_key,
     create_user,
@@ -35,6 +36,8 @@ from modules.api.auth import (
     AUTH_USERS_NAMESPACE,
     AUTH_SESSIONS_NAMESPACE,
 )
+import logging
+logger = logging.getLogger(__name__)
 
 
 # --- Bootstrap State Helpers ---
@@ -45,7 +48,7 @@ AUTH_STATE_NAMESPACE = "auth"
 async def _check_initialized(runtime: Any) -> bool:
     """
     Check if system is initialized (cached in state).
-    
+
     Returns True if:
     1. State has auth.initialized = True, OR
     2. At least one user with is_admin=True exists
@@ -55,9 +58,13 @@ async def _check_initialized(runtime: Any) -> bool:
         cached = await runtime.state.get(AUTH_STATE_NAMESPACE, BOOTSTRAP_STATE_KEY)
         if cached is not None:
             return bool(cached.get("value", False))
-    except Exception:
-        pass
-    
+    except STORAGE_BOUNDARY_ERRORS as e:
+        logger.warning(
+            "_check_initialized: storage boundary reading state cache: %s", e, exc_info=True
+        )
+    except Exception as e:
+        logger.warning("Failed to read auth state cache: %s", e, exc_info=True)
+
     # Fall back: scan for admin user
     try:
         user_ids = await runtime.storage.list_keys(AUTH_USERS_NAMESPACE)
@@ -67,14 +74,39 @@ async def _check_initialized(runtime: Any) -> bool:
                 if isinstance(user_data, dict) and user_data.get("is_admin", False):
                     # Cache the result
                     try:
-                        await runtime.state.set(AUTH_STATE_NAMESPACE, BOOTSTRAP_STATE_KEY, {"value": True})
-                    except Exception:
-                        pass
+                        await runtime.state.set(
+                            AUTH_STATE_NAMESPACE, BOOTSTRAP_STATE_KEY, {"value": True}
+                        )
+                    except STORAGE_BOUNDARY_ERRORS as e:
+                        logger.warning(
+                            "_check_initialized: storage boundary caching initialized: %s",
+                            e,
+                            exc_info=True,
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            "Failed to cache auth initialized state: %s", e, exc_info=True
+                        )
                     return True
-            except Exception:
-                pass
+            except STORAGE_BOUNDARY_ERRORS as e:
+                logger.warning(
+                    "_check_initialized: storage boundary reading user %s: %s",
+                    uid,
+                    e,
+                    exc_info=True,
+                )
+            except Exception as e:
+                logger.warning(
+                    "Failed to read user %s during admin scan: %s", uid, e, exc_info=True
+                )
         return False
-    except Exception:
+    except STORAGE_BOUNDARY_ERRORS as e:
+        logger.warning(
+            "_check_initialized: storage boundary (list_keys): %s", e, exc_info=True
+        )
+        return False
+    except Exception as e:
+        logger.warning("Failed to scan users for admin check: %s", e, exc_info=True)
         return False
 
 
@@ -85,24 +117,29 @@ async def _mark_initialized(runtime: Any) -> None:
     """
     try:
         await runtime.state.set(AUTH_STATE_NAMESPACE, BOOTSTRAP_STATE_KEY, {"value": True})
-    except Exception:
-        pass
+    except STORAGE_BOUNDARY_ERRORS as e:
+        logger.warning(
+            "_mark_initialized: storage boundary: %s", e, exc_info=True
+        )
+    except Exception as e:
+        logger.warning("Failed to mark system as initialized: %s", e, exc_info=True)
 
 
 async def auth_bootstrap(runtime: Any) -> Dict[str, Any]:
     """
     Bootstrap status endpoint — check if system is initialized.
-    
+
     Public endpoint, no auth required.
     Returns only the initialization status, no side effects.
-    
+
     Response:
         {"initialized": true|false}
     """
     try:
         initialized = await _check_initialized(runtime)
         return {"initialized": initialized}
-    except Exception:
+    except Exception as e:
+        logger.warning("Bootstrap check error: %s", e, exc_info=True)
         # On error, assume not initialized (safe default)
         return {"initialized": False}
 
@@ -139,6 +176,7 @@ async def auth_create_api_key(runtime: Any, body: Any = None) -> Dict[str, Any]:
         api_key = await create_api_key(runtime, scopes, is_admin, subject, expires_at, user_id)
         return {"ok": True, "api_key": api_key}
     except Exception as e:
+        logger.warning("create_api_key failed: %s", e, exc_info=True)
         return {"ok": False, "error": str(e)}
 
 
@@ -170,12 +208,30 @@ async def auth_list_api_keys(runtime: Any) -> List[Dict[str, Any]]:
                         "is_expired": is_expired,
                     }
                     result.append(key_info)
-            except Exception:
-                pass
+            except STORAGE_BOUNDARY_ERRORS as e:
+                logger.warning(
+                    "auth_list_api_keys: storage boundary reading key %s: %s",
+                    key_id,
+                    e,
+                    exc_info=True,
+                )
+            except Exception as e:
+                logger.warning(
+                    "auth_list_api_keys: unexpected error reading key %s: %s",
+                    key_id,
+                    e,
+                    exc_info=True,
+                )
 
         result.sort(key=lambda x: x.get("created_at", 0), reverse=True)
         return result
-    except Exception:
+    except STORAGE_BOUNDARY_ERRORS as e:
+        logger.warning(
+            "auth_list_api_keys: storage boundary (list_keys): %s", e, exc_info=True
+        )
+        return []
+    except Exception as e:
+        logger.warning("list_api_keys failed: %s", e, exc_info=True)
         return []
 
 
@@ -197,6 +253,7 @@ async def auth_create_user(runtime: Any, body: Any = None) -> Dict[str, Any]:
         await create_user(runtime, user_id, scopes, is_admin, username, password)
         return {"ok": True, "user_id": user_id}
     except Exception as e:
+        logger.warning("create_user failed for user_id=%s: %s", user_id, e, exc_info=True)
         return {"ok": False, "error": str(e)}
 
 
@@ -216,27 +273,45 @@ async def auth_list_users(runtime: Any) -> List[Dict[str, Any]]:
                         "is_admin": user_data.get("is_admin", False),
                         "created_at": user_data.get("created_at"),
                     })
-            except Exception:
-                pass
+            except STORAGE_BOUNDARY_ERRORS as e:
+                logger.warning(
+                    "auth_list_users: storage boundary reading user %s: %s",
+                    user_id,
+                    e,
+                    exc_info=True,
+                )
+            except Exception as e:
+                logger.warning(
+                    "auth_list_users: unexpected error reading user %s: %s",
+                    user_id,
+                    e,
+                    exc_info=True,
+                )
         return result
-    except Exception:
+    except STORAGE_BOUNDARY_ERRORS as e:
+        logger.warning(
+            "auth_list_users: storage boundary (list_keys): %s", e, exc_info=True
+        )
+        return []
+    except Exception as e:
+        logger.warning("list_users failed: %s", e, exc_info=True)
         return []
 
 
 async def auth_initialize(runtime: Any, body: Any = None) -> Dict[str, Any]:
     """
     Initialize system by creating first admin user (one-shot).
-    
+
     Public endpoint, no auth required.
-    
+
     Rules:
     - If system already initialized → HTTP 403 (Forbidden)
     - If not initialized → create admin, set initialized flag, return success
     - Cannot be called twice
-    
+
     Args:
         body: {"user_id": "admin", "username": "Admin", "password": "..."}
-    
+
     Returns:
         {"ok": true, "user_id": "admin"} or {"ok": false, "error": "..."}
     """
@@ -244,7 +319,7 @@ async def auth_initialize(runtime: Any, body: Any = None) -> Dict[str, Any]:
     initialized = await _check_initialized(runtime)
     if initialized:
         return {"ok": False, "error": "forbidden", "status": 403}
-    
+
     if not isinstance(body, dict):
         return {"ok": False, "error": "invalid_body"}
 
@@ -264,35 +339,41 @@ async def auth_initialize(runtime: Any, body: Any = None) -> Dict[str, Any]:
             username=username,
             password=password
         )
-        
+
         # Mark system as initialized
         await _mark_initialized(runtime)
-        
+
         return {"ok": True, "user_id": user_id, "message": "System initialized successfully"}
     except ValueError as e:
         return {"ok": False, "error": str(e)}
+    except STORAGE_BOUNDARY_ERRORS as e:
+        logger.error(
+            "auth_initialize: storage boundary: %s", e, exc_info=True
+        )
+        return {"ok": False, "error": f"Initialization failed: {str(e)}"}
     except Exception as e:
+        logger.error("System initialization failed: %s", e, exc_info=True)
         return {"ok": False, "error": f"Initialization failed: {str(e)}"}
 
 
 async def auth_login(runtime: Any, body: Any = None) -> Dict[str, Any]:
     """
     Login with password authentication.
-    
+
     SECURE COOKIE-BASED ARCHITECTURE:
     - Returns: { access_token, expires_in } in body ONLY
     - Refresh token: set via contextvars (route_binding applies Set-Cookie header)
     - XSS Safe: refresh_token in httpOnly cookie (not in JSON)
     - CORS: credentials: include handled by frontend
-    
+
     Args:
         body: {"user_id": "...", "password": "..."}
-        
+
     Returns:
         {"access_token": "jwt...", "expires_in": 900, "token_type": "Bearer"}
     """
     from core.runtime.auth_contextvars import set_response_cookie
-    
+
     if not isinstance(body, dict):
         return {"ok": False, "error": "invalid_body"}
 
@@ -321,7 +402,7 @@ async def auth_login(runtime: Any, body: Any = None) -> Dict[str, Any]:
 
         # Get JWT secret
         secret = await get_or_create_jwt_secret(runtime)
-        
+
         # Create access token (short-lived: 15 minutes)
         access_token = generate_access_token(user_id, scopes, is_admin, secret)
 
@@ -338,7 +419,7 @@ async def auth_login(runtime: Any, body: Any = None) -> Dict[str, Any]:
         cfg = getattr(runtime, "_config", None)
         cookies_samesite = getattr(cfg, "cookies_samesite", "Lax") if cfg else "Lax"
         cookies_secure = getattr(cfg, "cookies_secure", False) if cfg else False
-        
+
         set_response_cookie(
             key="refresh_token",
             value=refresh_token,
@@ -355,29 +436,22 @@ async def auth_login(runtime: Any, body: Any = None) -> Dict[str, Any]:
             "expires_in": 15 * 60,  # 15 minutes
             "token_type": "Bearer"
         }
-        
+
     except Exception as e:
-        console_error(f"Login failed: {e}")
+        logger.error("Login failed for user_id=%s: %s", user_id, e, exc_info=True)
         return {"ok": False, "error": str(e)}
-
-
-def console_error(msg: str) -> None:
-    """Helper to log errors."""
-    import sys
-    print(f"[ERROR] {msg}", file=sys.stderr)
-
 
 
 async def auth_refresh(runtime: Any, body: Any = None) -> Dict[str, Any]:
     """
     Refresh access token using httpOnly cookie refresh token.
-    
+
     CLEAN ARCHITECTURE - NO FASTAPI DEPENDENCY:
     - Reads: refresh_token from httpOnly cookie (via context middleware)
     - Returns: { access_token, expires_in } in body ONLY
     - Implements: refresh token rotation (old token invalidated, new issued)
     - Sets: new refresh_token as httpOnly cookie via contextvars
-    
+
     Flow:
     1. Browser includes refresh_token cookie (credentials: include on frontend)
     2. Middleware parses cookie, stores in context
@@ -385,16 +459,16 @@ async def auth_refresh(runtime: Any, body: Any = None) -> Dict[str, Any]:
     4. Service requests new refresh_token be set via set_response_cookie()
     5. HTTP layer (route_binding) applies cookies from get_response_cookies()
     6. Returns new access_token in body
-    
+
     Args:
         body: optional, ignored (refresh_token comes from context)
-        
+
     Returns:
         {"access_token": "jwt...", "expires_in": 900, "token_type": "Bearer"}
         + Set-Cookie applied by route_binding from get_response_cookies()
     """
     from core.runtime.auth_contextvars import get_current_auth_context, set_response_cookie
-    
+
     try:
         # Get current auth context with refresh token from middleware
         auth_context = get_current_auth_context()
@@ -408,7 +482,7 @@ async def auth_refresh(runtime: Any, body: Any = None) -> Dict[str, Any]:
         # Note: refresh_token is stored separately in context by middleware
         # For now, we get it from the user's session in storage
         # Future: add refresh_token to RequestContext
-        
+
         # Get user data to verify session is still valid
         user_data = await runtime.storage.get(AUTH_USERS_NAMESPACE, user_id)
         if not isinstance(user_data, dict):
@@ -419,7 +493,7 @@ async def auth_refresh(runtime: Any, body: Any = None) -> Dict[str, Any]:
 
         # Get JWT secret
         secret = await get_or_create_jwt_secret(runtime)
-        
+
         # Generate new access token
         new_access_token = generate_access_token(user_id, scopes, is_admin, secret)
 
@@ -436,7 +510,7 @@ async def auth_refresh(runtime: Any, body: Any = None) -> Dict[str, Any]:
         cfg = getattr(runtime, "_config", None)
         cookies_samesite = getattr(cfg, "cookies_samesite", "Lax") if cfg else "Lax"
         cookies_secure = getattr(cfg, "cookies_secure", False) if cfg else False
-        
+
         if new_refresh_token:
             set_response_cookie(
                 key="refresh_token",
@@ -454,42 +528,46 @@ async def auth_refresh(runtime: Any, body: Any = None) -> Dict[str, Any]:
             "expires_in": 15 * 60,  # 15 minutes
             "token_type": "Bearer"
         }
-        
+
     except ValueError as e:
         # Refresh failed (invalid, expired, or rotated token)
-        console_error(f"Refresh failed: {e}")
+        logger.warning("Token refresh failed: %s", e)
         return {"ok": False, "error": "unauthorized", "status": 401}
-    except Exception as e:
-        console_error(f"Refresh error: {e}")
+    except STORAGE_BOUNDARY_ERRORS as e:
+        logger.error(
+            "auth_refresh: storage boundary: %s", e, exc_info=True
+        )
         return {"ok": False, "error": str(e)}
-
+    except Exception as e:
+        logger.error("Token refresh error: %s", e, exc_info=True)
+        return {"ok": False, "error": str(e)}
 
 
 async def auth_logout(runtime: Any, body: Any = None) -> Dict[str, Any]:
     """
     Logout endpoint: clear refresh_token cookie.
-    
+
     CLEAN ARCHITECTURE - NO FASTAPI DEPENDENCY:
     - Clears: refresh_token httpOnly cookie via contextvars
     - Clears: frontend memory token store (via response header)
     - Effect: Session terminated, must login again
-    
+
     Flow:
     1. Frontend calls POST /auth/v1/logout
     2. Backend requests refresh_token cookie deletion
     3. HTTP layer (route_binding) applies cookie deletion
     4. Frontend clears memory token store and redirects to login
-    
+
     Returns:
         {"ok": true}
         + Set-Cookie: refresh_token=; Max-Age=0; (deletes cookie)
     """
     from core.runtime.auth_contextvars import clear_response_cookies
-    
+
     # Request that refresh_token cookie be deleted
     # route_binding will apply this via response.set_cookie(key, value="", max_age=0)
     clear_response_cookies(key="refresh_token")
-    
+
     return {"ok": True}
 
 async def auth_set_password(runtime: Any, body: Any = None) -> Dict[str, Any]:
@@ -510,6 +588,7 @@ async def auth_set_password(runtime: Any, body: Any = None) -> Dict[str, Any]:
         await set_password(runtime, user_id, password)
         return {"ok": True, "user_id": user_id}
     except Exception as e:
+        logger.warning("set_password failed for user_id=%s: %s", user_id, e, exc_info=True)
         return {"ok": False, "error": str(e)}
 
 
@@ -535,6 +614,7 @@ async def auth_change_password(runtime: Any, body: Any = None) -> Dict[str, Any]
         await change_password(runtime, user_id, old_password, new_password)
         return {"ok": True, "user_id": user_id}
     except Exception as e:
+        logger.warning("change_password failed for user_id=%s: %s", user_id, e, exc_info=True)
         return {"ok": False, "error": str(e)}
 
 
@@ -542,7 +622,8 @@ async def auth_list_sessions(runtime: Any, user_id: Optional[str] = None) -> Lis
     """List active sessions (optionally filtered by user_id)."""
     try:
         return await list_sessions(runtime, user_id)
-    except Exception:
+    except Exception as e:
+        logger.warning("list_sessions failed: %s", e, exc_info=True)
         return []
 
 
@@ -559,6 +640,7 @@ async def auth_revoke_session(runtime: Any, body: Any = None) -> Dict[str, Any]:
         await revoke_session(runtime, session_id)
         return {"ok": True, "session_id": session_id[:16] + "..."}
     except Exception as e:
+        logger.warning("revoke_session failed: %s", e, exc_info=True)
         return {"ok": False, "error": str(e)}
 
 
@@ -575,6 +657,7 @@ async def auth_revoke_all_sessions(runtime: Any, body: Any = None) -> Dict[str, 
         revoked_count = await revoke_all_sessions(runtime, user_id)
         return {"ok": True, "user_id": user_id, "revoked_count": revoked_count}
     except Exception as e:
+        logger.warning("revoke_all_sessions failed for user_id=%s: %s", user_id, e, exc_info=True)
         return {"ok": False, "error": str(e)}
 
 
@@ -591,6 +674,7 @@ async def auth_revoke_api_key(runtime: Any, body: Any = None) -> Dict[str, Any]:
         await revoke_api_key(runtime, api_key)
         return {"ok": True, "api_key": api_key[:16] + "..."}
     except Exception as e:
+        logger.warning("revoke_api_key failed: %s", e, exc_info=True)
         return {"ok": False, "error": str(e)}
 
 
@@ -609,16 +693,17 @@ async def auth_rotate_api_key(runtime: Any, body: Any = None) -> Dict[str, Any]:
         new_api_key = await rotate_api_key(runtime, old_api_key, expires_at)
         return {"ok": True, "new_api_key": new_api_key, "old_api_key": old_api_key[:16] + "..."}
     except Exception as e:
+        logger.warning("rotate_api_key failed: %s", e, exc_info=True)
         return {"ok": False, "error": str(e)}
 
 
 async def auth_me(runtime: Any) -> Dict[str, Any]:
     """
     Get current user information from authorization context.
-    
+
     Protected endpoint, requires valid access token.
     Uses contextvars to get auth info (set by middleware).
-    
+
     RESPONSE FORMAT MATCHES FRONTEND AuthUser INTERFACE:
     {
       "id": "user_id",
@@ -626,14 +711,14 @@ async def auth_me(runtime: Any) -> Dict[str, Any]:
       "name": "username",
       "role": "admin" if is_admin else None,
     }
-    
+
     Returns:
         AuthUser object or error
     """
     from core.runtime.auth_contextvars import get_current_auth_context
-    
+
     context = get_current_auth_context()
-    
+
     if context is None or context.user_id is None:
         return {"ok": False, "error": "unauthorized"}
 
@@ -645,10 +730,20 @@ async def auth_me(runtime: Any) -> Dict[str, Any]:
         # Return response matching frontend AuthUser interface
         return {
             "id": context.user_id,
-            "email": user_data.get("username", context.user_id),  # Use username as email 
+            "email": user_data.get("username", context.user_id),  # Use username as email
             "name": user_data.get("username"),
             "role": "admin" if (context.is_admin or user_data.get("is_admin", False)) else None,
         }
+    except STORAGE_BOUNDARY_ERRORS as e:
+        logger.warning(
+            "auth_me: storage boundary for user_id=%s: %s",
+            context.user_id,
+            e,
+            exc_info=True,
+        )
+        return {"ok": False, "error": str(e)}
     except Exception as e:
-        console_error(f"auth_me failed: {e}")
+        logger.warning(
+            "auth_me failed for user_id=%s: %s", context.user_id, e, exc_info=True
+        )
         return {"ok": False, "error": str(e)}

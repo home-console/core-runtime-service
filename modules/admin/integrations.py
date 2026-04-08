@@ -5,6 +5,8 @@ Moved from AdminModule for architectural clarity.
 Behavior is unchanged.
 """
 from typing import Any, Dict, List
+import logging
+logger = logging.getLogger(__name__)
 
 
 async def admin_v1_integrations(runtime: Any) -> List[Dict[str, Any]]:
@@ -17,6 +19,7 @@ async def admin_v1_integrations(runtime: Any) -> List[Dict[str, Any]]:
         try:
             state_val = getattr(plugin_state, "value", str(plugin_state)) if plugin_state else None
         except Exception:
+            logger.debug("integrations.admin_v1_integrations: error (using fallback value)", exc_info=True)
             state_val = str(plugin_state) if plugin_state else None
 
         result.append({

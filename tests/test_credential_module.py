@@ -105,6 +105,82 @@ class TestCredentialModuleRegistration:
                 f"Operation {op} not registered"
 
 
+class TestCredentialModuleSecurityStartup:
+    """Tests for fail-closed startup of credential security components."""
+
+    @pytest.mark.asyncio
+    async def test_fail_closed_and_rollback_on_component_start_failure(self):
+        runtime = MockRuntime()
+        module = CredentialModule(runtime)
+
+        abuse_detector = MagicMock()
+        abuse_detector.start = AsyncMock(return_value=None)
+        abuse_detector.stop = AsyncMock(return_value=None)
+
+        mfa_service = MagicMock()
+        mfa_service.start = AsyncMock(side_effect=RuntimeError("mfa failed"))
+        mfa_service.stop = AsyncMock(return_value=None)
+
+        risk_engine = MagicMock()
+        risk_engine.start = AsyncMock(return_value=None)
+        risk_engine.stop = AsyncMock(return_value=None)
+
+        trust_engine = MagicMock()
+        trust_engine.start = MagicMock(return_value=None)
+        trust_engine.stop = AsyncMock(return_value=None)
+
+        module._abuse_detector = abuse_detector
+        module._mfa_service = mfa_service
+        module._risk_engine = risk_engine
+        module._trust_engine = trust_engine
+
+        with pytest.raises(RuntimeError, match="Failed to start credential security components"):
+            await module._start_security_components_or_fail()
+
+        abuse_detector.start.assert_awaited_once()
+        mfa_service.start.assert_awaited_once()
+
+        # Rollback should stop already-started components.
+        abuse_detector.stop.assert_awaited_once()
+
+        # Components after failure point must not start.
+        risk_engine.start.assert_not_awaited()
+        trust_engine.start.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_security_components_start_success(self):
+        runtime = MockRuntime()
+        module = CredentialModule(runtime)
+
+        abuse_detector = MagicMock()
+        abuse_detector.start = AsyncMock(return_value=None)
+        abuse_detector.stop = AsyncMock(return_value=None)
+
+        mfa_service = MagicMock()
+        mfa_service.start = AsyncMock(return_value=None)
+        mfa_service.stop = AsyncMock(return_value=None)
+
+        risk_engine = MagicMock()
+        risk_engine.start = AsyncMock(return_value=None)
+        risk_engine.stop = AsyncMock(return_value=None)
+
+        trust_engine = MagicMock()
+        trust_engine.start = MagicMock(return_value=None)
+        trust_engine.stop = AsyncMock(return_value=None)
+
+        module._abuse_detector = abuse_detector
+        module._mfa_service = mfa_service
+        module._risk_engine = risk_engine
+        module._trust_engine = trust_engine
+
+        await module._start_security_components_or_fail()
+
+        abuse_detector.start.assert_awaited_once()
+        mfa_service.start.assert_awaited_once()
+        risk_engine.start.assert_awaited_once()
+        trust_engine.start.assert_called_once()
+
+
 class TestCredentialServiceCreate:
     """Tests for create operation."""
 

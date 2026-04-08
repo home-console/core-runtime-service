@@ -13,7 +13,7 @@ Protocol versions and contracts are immutable by design.
 """
 
 from typing import TypedDict, Optional, List, Dict, Any
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 import time
 
@@ -149,17 +149,11 @@ class ProviderMetadata:
     provider_version: Optional[str] = None  # e.g., "1.2.0"
     health: Optional[ProviderHealthStatus] = None
     remote_config: Optional[Dict[str, Any]] = None
-    timeouts: Optional[Dict[str, float]] = None  # capability -> timeout_seconds
-    capabilities: Optional[List[str]] = None     # Manifest: capabilities this provider supports
+    timeouts: Dict[str, float] = field(default_factory=dict)  # capability -> timeout_seconds
+    capabilities: List[str] = field(default_factory=list)     # Manifest: capabilities this provider supports
     execution_mode: str = "in_process"  # in_process | process | container | remote
     process_config: Optional[Dict[str, Any]] = None  # Process execution config
     container_config: Optional[Dict[str, Any]] = None  # Container execution config
-    
-    def __post_init__(self):
-        if self.timeouts is None:
-            self.timeouts = {}
-        if self.capabilities is None:
-            self.capabilities = []
     
     def is_compatible_with_protocol(self, core_version: int = PROTOCOL_VERSION) -> bool:
         """Check if provider uses compatible protocol version."""

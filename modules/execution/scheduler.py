@@ -4,7 +4,11 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, Dict, Literal, Optional
 from uuid import uuid4
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from core.adapters.storage_errors import STORAGE_BOUNDARY_ERRORS
+import logging
+logger = logging.getLogger(__name__)
 
 ScheduleTriggerType = Literal["delay", "interval", "cron"]
 
@@ -125,7 +129,11 @@ class ExecutionSchedule:
                     last_run_at=self.last_run_at,
                     now=now,
                 )
-            except Exception:
+            except (ValueError, TypeError, ZoneInfoNotFoundError):
+                logger.debug(
+                    "ExecutionSchedule.ensure_next_run_at: invalid cron/timezone",
+                    exc_info=True,
+                )
                 # Некорректное cron-выражение — отключаем расписание.
                 self.enabled = False
                 self.next_run_at = None
@@ -162,7 +170,11 @@ class ExecutionSchedule:
                     last_run_at=now,
                     now=now,
                 )
-            except Exception:
+            except (ValueError, TypeError, ZoneInfoNotFoundError):
+                logger.debug(
+                    "ExecutionSchedule.compute_next_after_run: invalid cron/timezone",
+                    exc_info=True,
+                )
                 self.enabled = False
                 self.next_run_at = None
         else:
@@ -179,11 +191,13 @@ def _parse_datetime(value: Any) -> datetime:
         try:
             dt = datetime.fromisoformat(value)
             return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
-        except Exception:
+        except (ValueError, TypeError):
             try:
                 return datetime.fromtimestamp(float(value), tz=UTC)
-            except Exception:
-                pass
+            except (ValueError, TypeError, OSError, OverflowError):
+                logger.debug(
+                    "_parse_datetime: could not parse string %r", value, exc_info=True
+                )
     return datetime.now(UTC)
 
 
@@ -242,7 +256,7 @@ def compute_next_run(
             step = int(minute_field[2:])
             if step <= 0:
                 raise ValueError
-        except Exception:
+        except (ValueError, TypeError):
             raise ValueError(
                 f"Invalid minute step in cron expression: {cron_expr}"
             ) from None
@@ -251,14 +265,14 @@ def compute_next_run(
             exact_minute = int(minute_field)
             if not (0 <= exact_minute < 60):
                 raise ValueError
-        except Exception:
+        except (ValueError, TypeError):
             raise ValueError(
                 f"Invalid minute field in cron expression: {cron_expr}"
             ) from None
 
     try:
         tz = ZoneInfo(timezone)
-    except Exception:
+    except ZoneInfoNotFoundError:
         raise ValueError(f"Invalid timezone for cron expression: {timezone}") from None
 
     base = last_run_at or now
@@ -315,7 +329,18 @@ class ExecutionScheduler:
         key = f"{self._prefix}{sched.schedule_id}"
         data = sched.to_dict()
         # Сериализуем datetime в ISO строки для JSON-совместимого хранения
-        await storage.set(self._ns, key, data)
+        try:
+            await storage.set(self._ns, key, data)
+        except STORAGE_BOUNDARY_ERRORS:
+            logger.warning(
+                "ExecutionScheduler.save_schedule: storage.set boundary", exc_info=True
+            )
+            raise
+        except Exception:
+            logger.warning(
+                "ExecutionScheduler.save_schedule: storage.set failed", exc_info=True
+            )
+            raise
 
     async def _load_schedule(self, schedule_id: str) -> Optional[ExecutionSchedule]:
         """Загружает одно расписание по id."""
@@ -325,7 +350,19 @@ class ExecutionScheduler:
         key = f"{self._prefix}{schedule_id}"
         try:
             data = await storage.get(self._ns, key)
+        except STORAGE_BOUNDARY_ERRORS:
+            logger.debug(
+                "ExecutionScheduler._load_schedule: storage boundary id=%s",
+                schedule_id,
+                exc_info=True,
+            )
+            return None
         except Exception:
+            logger.debug(
+                "ExecutionScheduler._load_schedule: load failed id=%s",
+                schedule_id,
+                exc_info=True,
+            )
             return None
         if not isinstance(data, dict):
             return None
@@ -342,7 +379,13 @@ class ExecutionScheduler:
             return
         try:
             keys = await storage.list_keys(self._ns)
+        except STORAGE_BOUNDARY_ERRORS:
+            logger.debug(
+                "ExecutionScheduler.tick: list_keys storage boundary", exc_info=True
+            )
+            return
         except Exception:
+            logger.debug("ExecutionScheduler.tick: list_keys failed", exc_info=True)
             return
         schedule_keys = [k for k in keys if k.startswith(self._prefix)]
         for key in schedule_keys:
@@ -365,6 +408,11 @@ class ExecutionScheduler:
                     context=dict(sched.context),
                 )
             except Exception:
+                logger.warning(
+                    "ExecutionScheduler.tick: execute_operation raised type=%s",
+                    sched.operation_type,
+                    exc_info=True,
+                )
                 # Не отмечаем запуск успешным и оставляем schedule доступным для retry на следующем tick.
                 continue
             sched.run_count += 1

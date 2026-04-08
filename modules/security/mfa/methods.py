@@ -13,6 +13,8 @@ from dataclasses import dataclass
 
 from modules.security.mfa.totp import verify_totp
 from modules.security.mfa.exceptions import MFAFailed, MFANotConfigured
+import logging
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -94,7 +96,8 @@ class TOTPMethod(MFAMethod):
         try:
             data = await secret_store.get(self.NAMESPACE, user_id)
             return data is not None and data.get("method") == "totp"
-        except Exception:
+        except Exception as e:
+            logger.warning("methods.is_configured: failed, returning False: %s", e, exc_info=True)
             return False
     
     async def verify(
@@ -149,6 +152,7 @@ class TOTPMethod(MFAMethod):
                     reason="totp_secret_corrupted",
                 )
         except Exception as e:
+            logger.warning("methods.verify: failed: %s", e, exc_info=True)
             return MFAVerificationResult(
                 success=False,
                 method_used=self.method_name,
@@ -167,6 +171,7 @@ class TOTPMethod(MFAMethod):
                 reason=None if is_valid else "invalid_code",
             )
         except Exception as e:
+            logger.warning("methods.verify: failed: %s", e, exc_info=True)
             return MFAVerificationResult(
                 success=False,
                 method_used=self.method_name,
@@ -196,7 +201,8 @@ class WebAuthnMethod(MFAMethod):
         try:
             data = await secret_store.get("mfa.secrets.webauthn", user_id)
             return data is not None
-        except Exception:
+        except Exception as e:
+            logger.warning("methods.is_configured: failed, returning False: %s", e, exc_info=True)
             return False
 
     async def verify(
@@ -232,7 +238,8 @@ class PasskeyMethod(MFAMethod):
         try:
             data = await secret_store.get("mfa.secrets.passkey", user_id)
             return data is not None
-        except Exception:
+        except Exception as e:
+            logger.warning("methods.is_configured: failed, returning False: %s", e, exc_info=True)
             return False
 
     async def verify(

@@ -17,6 +17,8 @@ from typing import Optional
 from urllib.parse import urlparse
 
 from core.exceptions import BadRequestError
+import logging
+logger = logging.getLogger(__name__)
 
 # TTL для DNS кэша: 30 сек — баланс между производительностью и защитой от DNS rebinding
 _DNS_CACHE_TTL_SEC = 30.0
@@ -83,7 +85,8 @@ def _resolve_host_ips(host: str) -> tuple[str, ...]:
 
     try:
         infos = socket.getaddrinfo(host, None)
-    except Exception:
+    except Exception as e:
+        logger.warning("url_validator._resolve_host_ips: failed to retrieve data: %s", e, exc_info=True)
         return tuple()
     ips: list[str] = []
     for family, _socktype, _proto, _canonname, sockaddr in infos:
@@ -93,6 +96,7 @@ def _resolve_host_ips(host: str) -> tuple[str, ...]:
             elif family == socket.AF_INET6:
                 ips.append(sockaddr[0])
         except Exception:
+            logger.debug("url_validator._resolve_host_ips: error processing item (skipping)", exc_info=True)
             continue
     result = tuple(sorted(set(ips)))
     with _dns_cache_lock:
@@ -119,7 +123,8 @@ def is_allowed_scheme(url: str) -> bool:
             return False
         
         return True
-    except Exception:
+    except Exception as e:
+        logger.warning("url_validator.is_allowed_scheme: failed, returning False: %s", e, exc_info=True)
         return False
 
 

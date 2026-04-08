@@ -13,26 +13,26 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 
 
-async def get_access_token(runtime: Any) -> str:
+async def get_access_token(plugin: Any) -> str:
     """
     Получить валидный OAuth access_token для Яндекса (capability oauth:yandex).
 
     Сейчас делегирует в oauth_yandex.get_access_token.
     При отсутствии провайдера вызов упадёт предсказуемо.
     """
-    return await runtime.call_service("oauth_yandex.get_access_token")
+    return await plugin.call_service("oauth_yandex.get_access_token")
 
 
-async def get_status(runtime: Any) -> Dict[str, Any]:
+async def get_status(plugin: Any) -> Dict[str, Any]:
     """
     Получить статус авторизации (capability oauth:yandex).
 
     Сейчас делегирует в oauth_yandex.get_status.
     """
-    return await runtime.call_service("oauth_yandex.get_status")
+    return await plugin.call_service("oauth_yandex.get_status")
 
 
-async def get_cookies(runtime: Any) -> Optional[Dict[str, str]]:
+async def get_cookies(plugin: Any) -> Optional[Dict[str, str]]:
     """
     Получить cookies сессии для Quasar API (capability yandex:session_cookies).
 
@@ -41,10 +41,10 @@ async def get_cookies(runtime: Any) -> Optional[Dict[str, str]]:
     """
     # 1. device_auth: сессия + storage
     try:
-        if await runtime.has_service("yandex_device_auth.get_session"):
-            session = await runtime.call_service("yandex_device_auth.get_session")
+        if await plugin.has_service("yandex_device_auth.get_session"):
+            session = await plugin.call_service("yandex_device_auth.get_session")
             if isinstance(session, dict) and session.get("linked"):
-                stored = await runtime.storage_get("yandex", "cookies")
+                stored = await plugin.storage_get("yandex", "cookies")
                 if isinstance(stored, dict) and stored:
                     return stored
     except Exception:
@@ -52,8 +52,8 @@ async def get_cookies(runtime: Any) -> Optional[Dict[str, str]]:
 
     # 2. oauth_yandex.get_cookies
     try:
-        if await runtime.has_service("oauth_yandex.get_cookies"):
-            cookies = await runtime.call_service("oauth_yandex.get_cookies")
+        if await plugin.has_service("oauth_yandex.get_cookies"):
+            cookies = await plugin.call_service("oauth_yandex.get_cookies")
             if isinstance(cookies, dict) and cookies:
                 return cookies
     except Exception:
@@ -61,7 +61,7 @@ async def get_cookies(runtime: Any) -> Optional[Dict[str, str]]:
 
     # 3. storage fallback
     try:
-        stored = await runtime.storage_get("yandex", "cookies")
+        stored = await plugin.storage_get("yandex", "cookies")
         if isinstance(stored, dict) and stored:
             return stored
     except Exception:

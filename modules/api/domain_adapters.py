@@ -12,6 +12,8 @@
 from typing import Any, Dict, Optional
 
 from fastapi import Request
+import logging
+logger = logging.getLogger(__name__)
 
 
 class DomainAdapter:
@@ -99,8 +101,7 @@ class DevicesAdapter(DomainAdapter):
             return None
 
         try:
-            services = runtime.kernel_context.get_service("service_registry")
-            device = await services.call("devices.get", device_id)
+            device = await runtime.service_registry.call("devices.get", device_id)
             if isinstance(device, dict):
                 resource: Dict[str, Any] = {}
                 if "owner_id" in device:
@@ -111,6 +112,7 @@ class DevicesAdapter(DomainAdapter):
         except Exception:
             # Если не удалось получить device, возвращаем None
             # route_binding обработает это как отсутствие resource
+            logger.debug("domain_adapters.extract_resource: unexpected error (suppressed)", exc_info=True)
             pass
 
         return None
@@ -151,11 +153,12 @@ class AuthAdapter(DomainAdapter):
                         )
                         resource["allow_first_key"] = True
                     except Exception:
+                        logger.debug("domain_adapters.extract_resource: error (using fallback value)", exc_info=True)
                         keys_retry = await runtime.storage.list_keys("auth_api_keys")
                         if len(keys_retry) == 0:
                             resource["allow_first_key"] = True
             except Exception:
-                pass
+                logger.warning("Unhandled exception", exc_info=True)
 
         # Self-service endpoints: извлекаем user_id из body
         if service_name in [
@@ -168,6 +171,7 @@ class AuthAdapter(DomainAdapter):
                 try:
                     body = await request.json()
                 except Exception:
+                    logger.debug("domain_adapters.extract_resource: error (using fallback value)", exc_info=True)
                     body = None
 
             if isinstance(body, dict):
@@ -206,6 +210,7 @@ class AuthAdapter(DomainAdapter):
                 try:
                     body = await request.json()
                 except Exception:
+                    logger.debug("domain_adapters.extract_params: error (using fallback value)", exc_info=True)
                     body = None
 
             if isinstance(body, dict):
@@ -279,14 +284,14 @@ class OAuthAdapter(DomainAdapter):
         params.update(query_params)
 
         if body and isinstance(body, dict):
-            if service_name == "oauth_yandex.configure":
+            if service_name == "oauth.configure":
                 # Перепаковываем body в отдельные параметры
                 params["client_id"] = body.get("client_id", "")
                 params["client_secret"] = body.get("client_secret", "")
                 params["redirect_uri"] = body.get("redirect_uri", "")
                 if "scope" in body:
                     params["scope"] = body.get("scope")
-            elif service_name == "oauth_yandex.exchange_code":
+            elif service_name == "oauth.exchange_code":
                 # Перепаковываем code из body
                 params["code"] = body.get("code", "")
             else:

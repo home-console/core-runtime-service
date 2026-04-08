@@ -1,5 +1,7 @@
+import logging
 from typing import Any, Dict, List, Optional
 import time
+logger = logging.getLogger(__name__)
 
 # Константа для определения online статуса устройства
 DEVICE_ONLINE_TIMEOUT = 300  # секунд (5 минут)
@@ -239,7 +241,7 @@ async def set_state(runtime, device_id: str, state: Dict[str, Any]) -> Dict[str,
             external_id = k
             break
 
-    await runtime.kernel_context.emit(
+    await runtime.event_bus.publish(
         "internal.device_command_requested",
         {
             "internal_id": device_id,
@@ -311,27 +313,31 @@ async def create_mapping(runtime, external_id: str, internal_id: str) -> Dict[st
             "devices_external_pending_state", external_id
         )
     except Exception:
+        logger.debug("services.create_mapping: error (using fallback value)", exc_info=True)
         pending = None
 
     if pending is not None:
         try:
-            await runtime.kernel_context.emit(
+            from core.events_schemas import ExternalDeviceStateReportedPayload
+
+            payload: ExternalDeviceStateReportedPayload = {
+                "external_id": external_id,
+                "state": pending,
+                "source": "replay",
+            }
+            await runtime.event_bus.publish(
                 "external.device_state_reported",
-                {
-                    "external_id": external_id,
-                    "state": pending,
-                    "source": "replay",
-                },
+                payload,
             )
         except Exception:
             # best-effort replay; mapping creation should still succeed
-            pass
+            logger.warning("Unhandled exception", exc_info=True)
         try:
             await runtime.storage.delete(
                 "devices_external_pending_state", external_id
             )
         except Exception:
-            pass
+            logger.warning("Unhandled exception", exc_info=True)
 
     return {"ok": True, "external_id": external_id, "internal_id": internal_id}
 
@@ -480,7 +486,7 @@ async def auto_map_external(runtime, provider: Optional[str] = None) -> Dict[str
 
                 # Вызываем update_device_fields через service_registry
                 try:
-                    await runtime.kernel_context.get_service("service_registry").call(
+                    await runtime.service_registry.call(
                         "devices.update_device_fields",
                         internal_id,
                         {
@@ -490,13 +496,14 @@ async def auto_map_external(runtime, provider: Optional[str] = None) -> Dict[str
                     )
                 except Exception:
                     # Ошибку логируем но продолжаем - устройство всё равно создано
-                    pass
+                    logger.warning("Unhandled exception", exc_info=True)
 
         try:
             dev = await runtime.storage.get("devices", internal_id)
             if not dev:
                 raise
         except Exception as ce:
+            logger.warning("services.auto_map_external: unexpected error: %s", ce, exc_info=True)
             errors.append(f"create_failed:{ext_id}:{ce}")
             continue
 
@@ -517,7 +524,7 @@ async def auto_map_external(runtime, provider: Optional[str] = None) -> Dict[str
                 )
 
                 # Применяем через update_device_fields
-                await runtime.kernel_context.get_service("service_registry").call(
+                await runtime.service_registry.call(
                     "devices.update_device_fields",
                     internal_id,
                     {"state": device_state},
@@ -527,11 +534,11 @@ async def auto_map_external(runtime, provider: Optional[str] = None) -> Dict[str
                 try:
                     await runtime.storage.delete("devices_external_pending_state", ext_id)
                 except Exception:
-                    pass
+                    logger.warning("Unhandled exception", exc_info=True)
         except Exception:
             # Ошибку при обработке pending state игнорируем
             # устройство уже создано и будет обновлено через WebSocket позже
-            pass
+            logger.warning("Unhandled exception", exc_info=True)
         
         created += 1
 
@@ -652,7 +659,7 @@ async def update_device_fields(runtime, device_id: str, updates: Dict[str, Any])
                     state_diff[key] = {"old": old_val, "new": new_val}
         
         if state_diff or old_online != new_online:
-            await runtime.kernel_context.get_service("service_registry").call(
+            await runtime.service_registry.call(
                 "logger.log",
                 level="debug",
                 message=f"[DEVICE_WRITE] Fields updated",
@@ -680,11 +687,11 @@ async def update_device_fields(runtime, device_id: str, updates: Dict[str, Any])
             },
         )
     except Exception:
-        pass
+        logger.warning("Unhandled exception", exc_info=True)
     
     # DEBUG: log final state after save
     try:
-        await runtime.kernel_context.get_service("service_registry").call(
+        await runtime.service_registry.call(
             "logger.log",
             level="debug",
             message=f"[update_device_fields] Device state updated and saved",
@@ -694,6 +701,6 @@ async def update_device_fields(runtime, device_id: str, updates: Dict[str, Any])
             },
         )
     except Exception:
-        pass
+        logger.warning("Unhandled exception", exc_info=True)
     
     return device

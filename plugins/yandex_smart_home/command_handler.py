@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from core.runtime.operation_context import operation
+from sdk import operation
 from .clients import YandexAPIClient
 from .transformers.device_transformer import DeviceTransformer
 from .oauth_provider import get_status as oauth_get_status, get_cookies as oauth_get_cookies
@@ -15,28 +15,28 @@ from .oauth_provider import get_status as oauth_get_status, get_cookies as oauth
 class CommandHandler:
     """Класс для обработки команд управления устройствами."""
 
-    def __init__(self, runtime: Any, plugin_name: str, tasks: set, quasar_ws: Any = None):
+    def __init__(self, plugin: Any, plugin_name: str, tasks: set, quasar_ws: Any = None):
         """Инициализация обработчика команд.
 
         Args:
-            runtime: экземпляр Runtime
+            plugin: SDK-first facade (BasePlugin)
             plugin_name: имя плагина для логирования
             tasks: множество для отслеживания фоновых задач
             quasar_ws: экземпляр YandexQuasarWS для проверки активности WebSocket
         """
-        self.runtime = runtime
+        self.plugin = plugin
         self.plugin_name = plugin_name
         self.tasks = tasks
-        self.api_client = YandexAPIClient(runtime, plugin_name)
+        self.api_client = YandexAPIClient(plugin, plugin_name)
         self.quasar_ws = quasar_ws  # WebSocket клиент для проверки активности
 
     async def _log(self, level: str, message: str, context: dict | None = None) -> None:
-        """Helper to log via runtime.call_service, swallowing errors.
+        """Helper to log via plugin.call_service, swallowing errors.
 
         Use this to reduce repetitive try/except around logger calls.
         """
         try:
-            await self.runtime.call_service(
+            await self.plugin.call_service(
                 "logger.log",
                 level=level,
                 message=message,
@@ -52,7 +52,7 @@ class CommandHandler:
         if not internal_id:
             return None
         try:
-            mappings = await self.runtime.call_service("devices.list_mappings")
+            mappings = await self.plugin.call_service("devices.list_mappings")
             if isinstance(mappings, list):
                 for mapping in mappings:
                     if isinstance(mapping, dict) and mapping.get("internal_id") == internal_id:
@@ -68,14 +68,14 @@ class CommandHandler:
         """
         oauth_authorized = False
         try:
-            status = await oauth_get_status(self.runtime)
+            status = await oauth_get_status(self.plugin)
             oauth_authorized = bool(status and status.get("authorized"))
         except Exception:
             pass
 
         session_cookies = False
         try:
-            cookies = await oauth_get_cookies(self.runtime)
+            cookies = await oauth_get_cookies(self.plugin)
             session_cookies = bool(cookies and isinstance(cookies, dict) and len(cookies) > 0)
         except Exception:
             pass

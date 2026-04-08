@@ -107,6 +107,8 @@ class ExecutionRouter:
             raise ExecutionRouterError(f"Unknown execution mode: {exec_mode!r}")
 
         # Пытаемся использовать ExecutionControllerImpl если доступен
+        if self.runtime is None:
+            raise ExecutionRouterError("ExecutionRouter requires runtime")
         controller = self.runtime.execution_controller
 
         if controller is not None:

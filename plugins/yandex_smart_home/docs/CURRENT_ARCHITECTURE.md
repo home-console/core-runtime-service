@@ -96,7 +96,7 @@ Keys:
    → сохраняет в storage yandex/cookies
 
 3. Quasar WebSocket использует:
-   cookies = await runtime.service_registry.call("oauth_yandex.get_cookies")
+   cookies = await self.call_service("oauth_yandex.get_cookies")
 ```
 
 ---

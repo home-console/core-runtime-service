@@ -5,6 +5,8 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from core.runtime.auth_contextvars import get_current_auth_context
 from core.exceptions import ForbiddenError, NotFoundError
+import logging
+logger = logging.getLogger(__name__)
 
 
 class Policy(ABC):
@@ -49,6 +51,7 @@ class DevicePolicy(Policy):
                 self.enforce(ctx, item)
                 result.append(item)
             except Exception:
+                logger.debug("engine.filter: error processing item (skipping)", exc_info=True)
                 continue
         return result
 
@@ -66,7 +69,8 @@ class DevicePolicy(Policy):
                 return True
             scopes = getattr(ctx, "scopes", set()) or set()
             return ("admin.*" in scopes) or ("*" in scopes)
-        except Exception:
+        except Exception as e:
+            logger.warning("engine._is_privileged: failed, returning False: %s", e, exc_info=True)
             return False
 
 
@@ -103,7 +107,8 @@ class AdminOnlyPolicy(Policy):
                 return True
             scopes = getattr(ctx, "scopes", set()) or set()
             return ("admin.*" in scopes) or ("*" in scopes)
-        except Exception:
+        except Exception as e:
+            logger.warning("engine._is_privileged: failed, returning False: %s", e, exc_info=True)
             return False
 
 
@@ -171,7 +176,8 @@ class PolicyEngine:
                 return True
             scopes = getattr(ctx, "scopes", set()) or set()
             return ("admin.*" in scopes) or ("*" in scopes)
-        except Exception:
+        except Exception as e:
+            logger.warning("engine._is_privileged: failed, returning False: %s", e, exc_info=True)
             return False
 
     def current_context(self) -> Any:

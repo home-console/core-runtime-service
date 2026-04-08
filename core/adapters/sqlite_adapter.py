@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, AsyncIterator, Callable, Optional
 
 from core.adapters.storage_errors import StorageCorruptionError
+from core.exception_groups import BEST_EFFORT_BACKGROUND_ERRORS
 
 from .storage_adapter import StorageAdapter
 
@@ -117,8 +118,11 @@ class SQLiteAdapter(StorageAdapter):
                                 "[SQLiteAdapter] Database may be on Docker overlayfs. "
                                 "This can cause durability issues. Consider using named volumes."
                             )
-                except Exception:
-                    pass
+                except OSError:
+                    logger.debug(
+                        "sqlite_adapter._get_connection: /proc/mounts check failed (suppressed)",
+                        exc_info=True,
+                    )
 
         return self._local.conn
 
@@ -294,7 +298,7 @@ class SQLiteAdapter(StorageAdapter):
                 result = sync_fn(conn, self)
                 conn.commit()
                 return result
-            except Exception:
+            except BEST_EFFORT_BACKGROUND_ERRORS:
                 conn.rollback()
                 raise
 
@@ -365,7 +369,7 @@ class SQLiteAdapter(StorageAdapter):
             yield
             # Коммитим транзакцию
             await asyncio.to_thread(_commit_sync)
-        except Exception:
+        except BEST_EFFORT_BACKGROUND_ERRORS:
             # Откатываем транзакцию при ошибке
             await asyncio.to_thread(_rollback_sync)
             raise

@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, UTC
 from typing import Any, Dict, Literal, Optional
+import logging
+logger = logging.getLogger(__name__)
 
 
 ExecutionBackendId = Literal["in_process", "process", "container"]
@@ -100,7 +102,7 @@ def _parse_datetime(value: Any) -> datetime:
             try:
                 return datetime.fromtimestamp(float(value), tz=UTC)
             except Exception:
-                pass
+                logger.warning("Unhandled exception", exc_info=True)
     # В крайнем случае — "сейчас", чтобы не падать из-за старых/битых данных
     return datetime.now(UTC)
 

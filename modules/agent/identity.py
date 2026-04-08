@@ -14,6 +14,8 @@ from typing import Any, Dict, cast
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
+import logging
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -116,7 +118,8 @@ class AgentKeyManager:
             )
             public_key.verify(signature, message)
             return True
-        except Exception:
+        except Exception as e:
+            logger.warning("identity.verify_signature: failed, returning False: %s", e, exc_info=True)
             return False
 
 

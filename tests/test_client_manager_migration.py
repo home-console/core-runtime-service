@@ -18,9 +18,9 @@ from core.runtime.state_engine import StateEngine
 from modules.storage.port import CoreStoragePort
 from tests.conftest import InMemoryStorageAdapter
 
-# Добавляем путь к client-manager-service plugin'у
+# Добавляем путь к client-manager-plugin
 CLIENT_MANAGER_PATH = (
-    Path(__file__).parent.parent / "plugins" / "client-manager-service"
+    Path(__file__).parent.parent / "plugins" / "client-manager-plugin"
 )
 if str(CLIENT_MANAGER_PATH) not in sys.path:
     sys.path.insert(0, str(CLIENT_MANAGER_PATH))

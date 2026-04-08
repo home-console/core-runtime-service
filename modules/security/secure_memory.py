@@ -1,3 +1,4 @@
+import logging
 """
 Linux Secure Memory Buffer.
 
@@ -16,6 +17,7 @@ import ctypes.util
 import sys
 from typing import Optional
 import copy
+logger = logging.getLogger(__name__)
 
 # Linux constants
 MADV_DONTDUMP = 16  # Don't include in core dump
@@ -137,7 +139,7 @@ class SecureBuffer:
             try:
                 _libc.munlock(self._ptr, ctypes.c_size_t(self._size))
             except Exception:
-                pass
+                logger.warning("Unhandled exception", exc_info=True)
             raise RuntimeError(
                 f"madvise(MADV_DONTDUMP) failed: errno={errno}. "
                 f"System may not support DONTDUMP."
@@ -188,7 +190,7 @@ class SecureBuffer:
         try:
             self.close()
         except Exception:
-            pass
+            logger.warning("Unhandled exception", exc_info=True)
     
     # ──────────────────────────────────────────────────────────
     # Block serialization and copying

@@ -5,7 +5,7 @@ from core.capability.component import CapabilityComponent
 
 
 class CapabilitySecurityError(Exception):
-    """Compatibility exception for legacy imports."""
+    """Raised when a capability security check fails."""
 
 
 __all__ = ["CapabilityRegistry", "CapabilityComponent", "CapabilitySecurityError"]

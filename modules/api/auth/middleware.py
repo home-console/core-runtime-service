@@ -1,3 +1,4 @@
+import logging
 """
 Authentication middleware — FastAPI middleware для проверки авторизации.
 """
@@ -14,6 +15,7 @@ from .rate_limiting import rate_limit_check
 from .audit import audit_log_auth_event
 from .middleware_helpers import apply_rate_limiting, log_auth_result
 from .contextvars import set_current_request_context
+logger = logging.getLogger(__name__)
 
 
 async def get_request_context(request: Request) -> Optional[RequestContext]:
@@ -167,7 +169,7 @@ async def require_auth_middleware(request: Request, call_next):
             # Логируем только для не-auth endpoints, чтобы не засорять логи
             if not is_auth_endpoint and runtime:
                 try:
-                    await runtime.kernel_context.get_service("service_registry").call(
+                    await runtime.service_registry.call(
                         "logger.log",
                         level="warning",
                         message="JWT validation failed, will try API key",
@@ -176,7 +178,7 @@ async def require_auth_middleware(request: Request, call_next):
                         path=str(request.url.path)
                     )
                 except Exception:
-                    pass
+                    logger.warning("Unhandled exception", exc_info=True)
             context = None
     
     # Приоритет 2: API Key из Authorization header (если JWT не сработал или не найден)
@@ -196,6 +198,7 @@ async def require_auth_middleware(request: Request, call_next):
                     if rate_limit_response:
                         return rate_limit_response
             except Exception:
+                logger.debug("middleware.require_auth_middleware: error (using fallback value)", exc_info=True)
                 context = None
     
     # Приоритет 3: Session из Cookie (если JWT и API Key не сработали)
@@ -214,6 +217,7 @@ async def require_auth_middleware(request: Request, call_next):
                 if rate_limit_response:
                     return rate_limit_response
             except Exception:
+                logger.debug("middleware.require_auth_middleware: error (using fallback value)", exc_info=True)
                 context = None
 
     # Приоритет 4: refresh_token cookie для POST /auth/v1/refresh (восстановление сессии после перезагрузки страницы)
@@ -233,6 +237,7 @@ async def require_auth_middleware(request: Request, call_next):
                         identifier = context["user_id"]
                         auth_source = "refresh_token"
             except Exception:
+                logger.debug("middleware.require_auth_middleware: error (using fallback value)", exc_info=True)
                 context = None
 
     # CSRF protection (только для cookie-based auth, только для state-changing методов)
@@ -249,6 +254,7 @@ async def require_auth_middleware(request: Request, call_next):
                 try:
                     method = request.scope.get("method") if hasattr(request, "scope") else "GET"
                 except Exception:
+                    logger.debug("middleware.require_auth_middleware: error (using fallback value)", exc_info=True)
                     method = "GET"
             unsafe_method = str(method).upper() in ("POST", "PUT", "PATCH", "DELETE")
             cookie_based = (auth_source == "session") or (auth_source == "jwt" and jwt_from_cookie)

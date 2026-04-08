@@ -35,19 +35,19 @@ class YandexAccountSession:
     expires_at: Optional[float] = None
 
     @staticmethod
-    async def save_atomic(runtime: Any, tokens: Dict[str, Any], cookies: Dict[str, str]) -> None:
+    async def save_atomic(plugin: Any, tokens: Dict[str, Any], cookies: Dict[str, str]) -> None:
         """Атомарная запись токенов и cookies.
 
         Реализуется как последовательная запись в два ключа. В случае ошибок
         запись считается неуспешной. Публикует событие `yandex.login.linked`.
         """
         # Сохраняем токены
-        await runtime.storage_set("oauth_yandex", "tokens", tokens)
+        await plugin.storage_set("oauth_yandex", "tokens", tokens)
         # Сохраняем cookies
-        await runtime.storage_set("yandex", "cookies", cookies)
+        await plugin.storage_set("yandex", "cookies", cookies)
         # Публикуем событие
         with _suppress():
-            await runtime.publish_event("yandex.login.linked", {
+            await plugin.publish_event("yandex.login.linked", {
                 "authorized": True,
                 "expires_at": tokens.get("expires_at"),
                 "cookies_present": True,
@@ -71,8 +71,8 @@ class EmbeddedWebViewLogin:
     - вернуть `(code, cookies)`
     """
 
-    def __init__(self, runtime: Any) -> None:
-        self.runtime = runtime
+    def __init__(self, plugin: Any) -> None:
+        self.plugin = plugin
 
     async def start(self, authorize_url: str, timeout_sec: int = 180) -> Tuple[str, Dict[str, str]]:
         """Запустить WebView, выполнить login и вернуть code+cookies.
@@ -91,8 +91,8 @@ class PyQtWebViewLogin(EmbeddedWebViewLogin):
     если библиотека недоступна.
     """
 
-    def __init__(self, runtime: Any) -> None:
-        super().__init__(runtime)
+    def __init__(self, plugin: Any) -> None:
+        super().__init__(plugin)
         try:
             import PyQt6  # noqa: F401
             import PyQt6.QtCore  # noqa: F401
@@ -115,14 +115,14 @@ class PyQtWebViewLogin(EmbeddedWebViewLogin):
 class OAuthTokenManager:
     """Обмен кода на токены через сервисы плагина oauth_yandex."""
 
-    def __init__(self, runtime: Any):
-        self.runtime = runtime
+    def __init__(self, plugin: Any):
+        self.plugin = plugin
 
     async def exchange_code(self, code: str) -> Dict[str, Any]:
         # Используем уже существующий сервис плагина
-        result = await self.runtime.call_service("oauth_yandex.exchange_code", code=code)
+        result = await self.plugin.call_service("oauth_yandex.exchange_code", code=code)
         # Загружаем сохранённые токены для агрегирования
-        tokens = await self.runtime.storage_get("oauth_yandex", "tokens")
+        tokens = await self.plugin.storage_get("oauth_yandex", "tokens")
         if isinstance(tokens, dict):
             return tokens
         return {}
@@ -131,14 +131,14 @@ class OAuthTokenManager:
 class SessionCookieManager:
     """Сохранение cookies для Quasar API."""
 
-    def __init__(self, runtime: Any):
-        self.runtime = runtime
+    def __init__(self, plugin: Any):
+        self.plugin = plugin
 
     async def save_cookies(self, cookies: Dict[str, str]) -> None:
-        await self.runtime.storage_set("yandex", "cookies", cookies)
+        await self.plugin.storage_set("yandex", "cookies", cookies)
 
     async def get_cookies(self) -> Optional[Dict[str, str]]:
-        data = await self.runtime.storage_get("yandex", "cookies")
+        data = await self.plugin.storage_get("yandex", "cookies")
         return data if isinstance(data, dict) else None
 
 
@@ -149,8 +149,8 @@ class YandexLoginService:
     на токены и сохраняет всё атомарно. Предоставляет статус процесса.
     """
 
-    def __init__(self, runtime: Any):
-        self.runtime = runtime
+    def __init__(self, plugin: Any):
+        self.plugin = plugin
         self._status: Dict[str, Any] = {"state": "idle"}
 
     async def start(self) -> Dict[str, Any]:
@@ -158,16 +158,16 @@ class YandexLoginService:
 
         Возвращает быстрый ответ со статусом. Детали можно получать через `status()`.
         """
-        config = await self.runtime.storage_get("oauth_yandex", "config")
+        config = await self.plugin.storage_get("oauth_yandex", "config")
         if not config:
             raise ValueError("OAuth не настроен. Вызовите oauth_yandex.configure сначала.")
 
         authorize_url = self._build_authorize_url(config)
 
         # Выбираем реализацию WebView
-        webview = PyQtWebViewLogin(self.runtime)
-        token_mgr = OAuthTokenManager(self.runtime)
-        cookie_mgr = SessionCookieManager(self.runtime)
+        webview = PyQtWebViewLogin(self.plugin)
+        token_mgr = OAuthTokenManager(self.plugin)
+        cookie_mgr = SessionCookieManager(self.plugin)
 
         self._status = {"state": "in_progress"}
         try:
@@ -186,7 +186,7 @@ class YandexLoginService:
         await cookie_mgr.save_cookies(cookies)
 
         # Атомарная запись + событие
-        await YandexAccountSession.save_atomic(self.runtime, tokens, cookies)
+        await YandexAccountSession.save_atomic(self.plugin, tokens, cookies)
 
         expires_at = tokens.get("expires_at")
         self._status = {"state": "linked", "expires_at": expires_at}
@@ -195,10 +195,10 @@ class YandexLoginService:
     async def status(self) -> Dict[str, Any]:
         """Текущий статус логина/аккаунта."""
         # Проверяем сохранённые токены
-        tokens = await self.runtime.storage_get("oauth_yandex", "tokens")
-        cookies = await self.runtime.storage_get("yandex", "cookies")
+        tokens = await self.plugin.storage_get("oauth_yandex", "tokens")
+        cookies = await self.plugin.storage_get("yandex", "cookies")
 
-        configured = await self.runtime.storage_get("oauth_yandex", "config") is not None
+        configured = await self.plugin.storage_get("oauth_yandex", "config") is not None
         authorized = isinstance(tokens, dict) and "access_token" in tokens
         cookies_ok = isinstance(cookies, dict) and "Session_id" in cookies and "yandexuid" in cookies
 

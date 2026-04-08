@@ -10,9 +10,7 @@ used by the kernel and modules:
 - RBAC / MFA / risk / trust policy engines
 """
 
-from importlib import util as importlib_util
-from pathlib import Path
-
+from .check_env import check_security_env
 from .crypto import (
     MASTER_KEY_SIZE,
     DEK_SIZE,
@@ -60,45 +58,16 @@ from .trust import TrustAction, TrustConfig, TrustConfigs, TrustDecision, TrustE
 from .vault_hardening import HardeningStatus, VaultHardening
 from .vault_session import SessionExpiredError, VaultLockedError, VaultSession
 
+# Re-export from sdk.security for backward compatibility
+from sdk.security import (
+    SENSITIVE_KEYS,
+    TokenEncryption,
+    sanitize_for_logging,
+    sanitize_headers,
+)
 
-def _load_legacy_security_helpers():
-    legacy_path = Path(__file__).resolve().parents[1] / "security.py"
-    spec = importlib_util.spec_from_file_location("_core_security_legacy", legacy_path)
-    if spec is None or spec.loader is None:
-        return None
-    module = importlib_util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-_legacy_security = _load_legacy_security_helpers()
-
-# Keep re-exported TOTP helpers and MFA enums referenced so Pylance treats
-# them as part of the public facade rather than dead imports.
-_ = (generate_totp, verify_totp, MFAMethodNotSupported)
-
-if _legacy_security is not None:
-    sanitize_for_logging = _legacy_security.sanitize_for_logging
-    sanitize_headers = _legacy_security.sanitize_headers
-    TokenEncryption = _legacy_security.TokenEncryption
-    CSRFProtection = _legacy_security.CSRFProtection
-    check_security_env = _legacy_security.check_security_env
-else:
-    def sanitize_for_logging(data, mask="***REDACTED***"):
-        if isinstance(data, dict):
-            return {k: (mask if any(s in k.lower() for s in ["password", "token", "secret", "key"]) else sanitize_for_logging(v, mask)) for k, v in data.items()}
-        if isinstance(data, (list, tuple)):
-            return type(data)(sanitize_for_logging(item, mask) for item in data)
-        return data
-
-    def sanitize_headers(headers):
-        return sanitize_for_logging(headers)
-
-    TokenEncryption = None
-    CSRFProtection = None
-
-    def check_security_env():
-        return {"ok": True, "warnings": []}
+# Re-export CSRF from api.csrf_protection for backward compatibility
+from modules.api.csrf_protection import CSRFProtection
 
 
 __all__ = [

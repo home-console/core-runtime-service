@@ -7,6 +7,7 @@ Behavior is unchanged.
 from typing import Any, Dict, List, Optional
 import time
 
+from core.adapters.storage_errors import STORAGE_BOUNDARY_ERRORS
 from modules.api.auth import (
     create_api_key,
     create_user,
@@ -27,6 +28,8 @@ from modules.api.auth import (
     AUTH_USERS_NAMESPACE,
     AUTH_SESSIONS_NAMESPACE,
 )
+import logging
+logger = logging.getLogger(__name__)
 
 
 async def admin_auth_create_api_key(runtime: Any, body: Any = None) -> Dict[str, Any]:
@@ -44,6 +47,7 @@ async def admin_auth_create_api_key(runtime: Any, body: Any = None) -> Dict[str,
         api_key = await create_api_key(runtime, scopes, is_admin, subject, expires_at, user_id)
         return {"ok": True, "api_key": api_key}
     except Exception as e:
+        logger.warning("admin_auth_create_api_key failed: %s", e, exc_info=True)
         return {"ok": False, "error": str(e)}
 
 
@@ -75,12 +79,30 @@ async def admin_auth_list_api_keys(runtime: Any) -> List[Dict[str, Any]]:
                         "is_expired": is_expired,
                     }
                     result.append(key_info)
-            except Exception:
-                pass
+            except STORAGE_BOUNDARY_ERRORS as e:
+                logger.warning(
+                    "admin_auth_list_api_keys: storage boundary reading key %s: %s",
+                    key_id,
+                    e,
+                    exc_info=True,
+                )
+            except Exception as e:
+                logger.warning(
+                    "admin_auth_list_api_keys: unexpected error reading key %s: %s",
+                    key_id,
+                    e,
+                    exc_info=True,
+                )
 
         result.sort(key=lambda x: x.get("created_at", 0), reverse=True)
         return result
-    except Exception:
+    except STORAGE_BOUNDARY_ERRORS as e:
+        logger.warning(
+            "admin_auth_list_api_keys: storage boundary (list_keys): %s", e, exc_info=True
+        )
+        return []
+    except Exception as e:
+        logger.warning("admin_auth_list_api_keys failed: %s", e, exc_info=True)
         return []
 
 
@@ -102,6 +124,7 @@ async def admin_auth_create_user(runtime: Any, body: Any = None) -> Dict[str, An
         await create_user(runtime, user_id, scopes, is_admin, username, password)
         return {"ok": True, "user_id": user_id}
     except Exception as e:
+        logger.warning("admin_auth_create_user failed for user_id=%s: %s", user_id, e, exc_info=True)
         return {"ok": False, "error": str(e)}
 
 
@@ -121,10 +144,28 @@ async def admin_auth_list_users(runtime: Any) -> List[Dict[str, Any]]:
                         "is_admin": user_data.get("is_admin", False),
                         "created_at": user_data.get("created_at"),
                     })
-            except Exception:
-                pass
+            except STORAGE_BOUNDARY_ERRORS as e:
+                logger.warning(
+                    "admin_auth_list_users: storage boundary reading user %s: %s",
+                    user_id,
+                    e,
+                    exc_info=True,
+                )
+            except Exception as e:
+                logger.warning(
+                    "admin_auth_list_users: unexpected error reading user %s: %s",
+                    user_id,
+                    e,
+                    exc_info=True,
+                )
         return result
-    except Exception:
+    except STORAGE_BOUNDARY_ERRORS as e:
+        logger.warning(
+            "admin_auth_list_users: storage boundary (list_keys): %s", e, exc_info=True
+        )
+        return []
+    except Exception as e:
+        logger.warning("admin_auth_list_users failed: %s", e, exc_info=True)
         return []
 
 
@@ -149,8 +190,20 @@ async def admin_auth_initialize(runtime: Any, body: Any = None) -> Dict[str, Any
                 if isinstance(user_data, dict) and user_data.get("is_admin", False):
                     has_admin = True
                     break
-            except Exception:
-                pass
+            except STORAGE_BOUNDARY_ERRORS as e:
+                logger.warning(
+                    "admin_auth_initialize: storage boundary reading user %s: %s",
+                    uid,
+                    e,
+                    exc_info=True,
+                )
+            except Exception as e:
+                logger.warning(
+                    "admin_auth_initialize: unexpected error reading user %s: %s",
+                    uid,
+                    e,
+                    exc_info=True,
+                )
 
         if has_admin:
             return {"ok": False, "error": "System already initialized. Admin user exists."}
@@ -167,7 +220,13 @@ async def admin_auth_initialize(runtime: Any, body: Any = None) -> Dict[str, Any
         return {"ok": True, "user_id": user_id, "message": "System initialized successfully"}
     except ValueError as e:
         return {"ok": False, "error": str(e)}
+    except STORAGE_BOUNDARY_ERRORS as e:
+        logger.error(
+            "System initialization failed (storage boundary): %s", e, exc_info=True
+        )
+        return {"ok": False, "error": f"Initialization failed: {str(e)}"}
     except Exception as e:
+        logger.error("System initialization failed: %s", e, exc_info=True)
         return {"ok": False, "error": f"Initialization failed: {str(e)}"}
 
 
@@ -263,6 +322,7 @@ async def admin_auth_login(runtime: Any, body: Any = None, request: Any = None, 
             "token_type": "Bearer"
         }
     except Exception as e:
+        logger.error("Login failed for user_id=%s: %s", user_id, e, exc_info=True)
         return {"ok": False, "error": str(e)}
 
 
@@ -341,8 +401,15 @@ async def admin_auth_refresh(runtime: Any, body: Any = None, request: Any = None
 
         return result
     except ValueError as e:
+        logger.warning("Token refresh failed: %s", e)
+        return {"ok": False, "error": str(e)}
+    except STORAGE_BOUNDARY_ERRORS as e:
+        logger.error(
+            "Token refresh error (storage boundary): %s", e, exc_info=True
+        )
         return {"ok": False, "error": str(e)}
     except Exception as e:
+        logger.error("Token refresh error: %s", e, exc_info=True)
         return {"ok": False, "error": str(e)}
 
 
@@ -364,6 +431,7 @@ async def admin_auth_set_password(runtime: Any, body: Any = None) -> Dict[str, A
         await set_password(runtime, user_id, password)
         return {"ok": True, "user_id": user_id}
     except Exception as e:
+        logger.warning("admin_auth_set_password failed for user_id=%s: %s", user_id, e, exc_info=True)
         return {"ok": False, "error": str(e)}
 
 
@@ -389,6 +457,7 @@ async def admin_auth_change_password(runtime: Any, body: Any = None) -> Dict[str
         await change_password(runtime, user_id, old_password, new_password)
         return {"ok": True, "user_id": user_id}
     except Exception as e:
+        logger.warning("admin_auth_change_password failed for user_id=%s: %s", user_id, e, exc_info=True)
         return {"ok": False, "error": str(e)}
 
 
@@ -396,7 +465,8 @@ async def admin_auth_list_sessions(runtime: Any, user_id: Optional[str] = None) 
     """List active sessions (optionally filtered by user_id)."""
     try:
         return await list_sessions(runtime, user_id)
-    except Exception:
+    except Exception as e:
+        logger.warning("admin_auth_list_sessions failed: %s", e, exc_info=True)
         return []
 
 
@@ -413,6 +483,7 @@ async def admin_auth_revoke_session(runtime: Any, body: Any = None) -> Dict[str,
         await revoke_session(runtime, session_id)
         return {"ok": True, "session_id": session_id[:16] + "..."}
     except Exception as e:
+        logger.warning("admin_auth_revoke_session failed: %s", e, exc_info=True)
         return {"ok": False, "error": str(e)}
 
 
@@ -429,6 +500,7 @@ async def admin_auth_revoke_all_sessions(runtime: Any, body: Any = None) -> Dict
         revoked_count = await revoke_all_sessions(runtime, user_id)
         return {"ok": True, "user_id": user_id, "revoked_count": revoked_count}
     except Exception as e:
+        logger.warning("admin_auth_revoke_all_sessions failed for user_id=%s: %s", user_id, e, exc_info=True)
         return {"ok": False, "error": str(e)}
 
 
@@ -445,6 +517,7 @@ async def admin_auth_revoke_api_key(runtime: Any, body: Any = None) -> Dict[str,
         await revoke_api_key(runtime, api_key)
         return {"ok": True, "api_key": api_key[:16] + "..."}
     except Exception as e:
+        logger.warning("admin_auth_revoke_api_key failed: %s", e, exc_info=True)
         return {"ok": False, "error": str(e)}
 
 
@@ -463,6 +536,7 @@ async def admin_auth_rotate_api_key(runtime: Any, body: Any = None) -> Dict[str,
         new_api_key = await rotate_api_key(runtime, old_api_key, expires_at)
         return {"ok": True, "new_api_key": new_api_key, "old_api_key": old_api_key[:16] + "..."}
     except Exception as e:
+        logger.warning("admin_auth_rotate_api_key failed: %s", e, exc_info=True)
         return {"ok": False, "error": str(e)}
 
 
@@ -480,13 +554,29 @@ async def admin_auth_me(runtime: Any, request: Any = None) -> Dict[str, Any]:
                 if isinstance(user_data, dict) and user_data.get("is_admin", False):
                     has_admin = True
                     break
-            except Exception:
-                pass
+            except STORAGE_BOUNDARY_ERRORS as e:
+                logger.warning(
+                    "admin_auth_me: storage boundary reading user %s: %s",
+                    user_id,
+                    e,
+                    exc_info=True,
+                )
+            except Exception as e:
+                logger.warning(
+                    "admin_auth_me: unexpected error reading user %s: %s",
+                    user_id,
+                    e,
+                    exc_info=True,
+                )
 
         if not has_admin:
             return {"ok": False, "needs_initialization": True, "error": "System not initialized"}
-    except Exception:
-        pass
+    except STORAGE_BOUNDARY_ERRORS as e:
+        logger.warning(
+            "admin_auth_me: storage boundary (admin scan): %s", e, exc_info=True
+        )
+    except Exception as e:
+        logger.warning("Failed to check admin status: %s", e, exc_info=True)
 
     from modules.api.auth.middleware import get_request_context
     context = await get_request_context(request)
@@ -508,5 +598,16 @@ async def admin_auth_me(runtime: Any, request: Any = None) -> Dict[str, Any]:
             "created_at": user_data.get("created_at"),
             "source": context.source,
         }
+    except STORAGE_BOUNDARY_ERRORS as e:
+        logger.warning(
+            "admin_auth_me: storage boundary loading user %s: %s",
+            context.user_id,
+            e,
+            exc_info=True,
+        )
+        return {"ok": False, "error": str(e)}
     except Exception as e:
+        logger.warning(
+            "admin_auth_me failed for user_id=%s: %s", context.user_id, e, exc_info=True
+        )
         return {"ok": False, "error": str(e)}

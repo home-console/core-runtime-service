@@ -1,3 +1,4 @@
+import logging
 """
 Password management — хеширование, валидация и управление паролями.
 """
@@ -18,6 +19,7 @@ from .users import validate_user_exists
 from .audit import audit_log_auth_event
 from .constants import AUTH_USERS_NAMESPACE
 from .sessions import revoke_all_sessions
+logger = logging.getLogger(__name__)
 
 
 def hash_password(password: str) -> str:
@@ -48,7 +50,8 @@ def verify_password(password: str, password_hash: str) -> bool:
     """
     try:
         return bcrypt.checkpw(password.encode('utf-8'), password_hash.encode('utf-8'))
-    except Exception:
+    except Exception as e:
+        logger.warning("passwords.verify_password: failed, returning False: %s", e, exc_info=True)
         return False
 
 
@@ -207,7 +210,7 @@ async def change_password(runtime: Any, user_id: str, old_password: str, new_pas
     try:
         await revoke_all_sessions(runtime, user_id)
     except Exception:
-        pass
+        logger.warning("Unhandled exception", exc_info=True)
 
 
 async def verify_user_password(runtime: Any, user_id: str, password: str) -> bool:
@@ -232,5 +235,6 @@ async def verify_user_password(runtime: Any, user_id: str, password: str) -> boo
             return False
         
         return verify_password(password, password_hash)
-    except Exception:
+    except Exception as e:
+        logger.warning("passwords.verify_user_password: failed, returning False: %s", e, exc_info=True)
         return False

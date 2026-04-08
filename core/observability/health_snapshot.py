@@ -7,9 +7,14 @@ Provides comprehensive view of system state:
 - provider status
 """
 
+import logging
 from dataclasses import dataclass, asdict
-from typing import Dict, List, Optional, Any
 from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+
+from core.exception_groups import BEST_EFFORT_BACKGROUND_ERRORS
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -99,12 +104,18 @@ class HealthSnapshotCollector:
     def __init__(self, runtime: Any):
         """Initialize collector."""
         self.runtime = runtime
-    
+        # Metrics registry injected from runtime (no global singleton)
+        self._metrics = getattr(runtime, "_metrics_registry", None)
+
     def collect(self) -> HealthSnapshot:
         """Collect current system health snapshot."""
-        from core.observability.metrics import get_metrics_registry
+        # Use injected metrics registry if available
+        metrics = self._metrics
+        if metrics is None:
+            # Fallback: create new registry (shouldn't happen in normal operation)
+            from core.observability.metrics import MetricsRegistry
+            metrics = MetricsRegistry()
         
-        metrics = get_metrics_registry()
         all_metrics = metrics.get_all_metrics()
         
         # Extract metrics
@@ -168,8 +179,18 @@ class HealthSnapshotCollector:
                     )
                 
                 snapshot.provider_status_summary = provider_statuses
-            except Exception:
-                pass  # Failed to collect provider status
+            except BEST_EFFORT_BACKGROUND_ERRORS as e:
+                if isinstance(e, (TypeError, KeyError, AttributeError, ValueError)):
+                    logger.debug(
+                        "HealthSnapshot: provider status (introspection): %s",
+                        e,
+                        exc_info=True,
+                    )
+                else:
+                    logger.debug(
+                        "HealthSnapshot: failed to collect provider status (unexpected)",
+                        exc_info=True,
+                    )
         
         # Collect execution modes
         try:
@@ -181,7 +202,17 @@ class HealthSnapshotCollector:
                             meta = plugin_instance.metadata
                             mode = getattr(meta, 'execution_mode', 'in_process')
                             snapshot.execution_modes[mode] = snapshot.execution_modes.get(mode, 0) + 1
-        except Exception:
-            pass  # Failed to collect execution modes
+        except BEST_EFFORT_BACKGROUND_ERRORS as e:
+            if isinstance(e, (TypeError, KeyError, AttributeError, ValueError)):
+                logger.debug(
+                    "HealthSnapshot: execution modes (introspection): %s",
+                    e,
+                    exc_info=True,
+                )
+            else:
+                logger.debug(
+                    "HealthSnapshot: failed to collect execution modes (unexpected)",
+                    exc_info=True,
+                )
         
         return snapshot

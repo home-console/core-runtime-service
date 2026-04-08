@@ -16,7 +16,6 @@ from core.observability.metrics import (
     Counter,
     Gauge,
     Histogram,
-    get_metrics_registry,
 )
 from core.observability.health_snapshot import (
     HealthSnapshot,
@@ -285,34 +284,38 @@ class TestHealthSnapshot:
 
 class TestHealthSnapshotCollector:
     """Test HealthSnapshotCollector."""
-    
+
     @pytest.mark.asyncio
     async def test_collector_collect(self):
         """Test collector gathers metrics."""
-        # Create mock runtime
+        # Create mock runtime with metrics registry
+        from core.observability.metrics import MetricsRegistry
         mock_runtime = MagicMock()
         mock_runtime.capability_registry = None
         mock_runtime.plugin_manager = MagicMock()
         mock_runtime.plugin_manager._plugins = {}
-        
+        mock_runtime._metrics_registry = MetricsRegistry()
+
         collector = HealthSnapshotCollector(mock_runtime)
         snapshot = collector.collect()
-        
+
         assert snapshot is not None
         assert snapshot.timestamp is not None
         assert snapshot.total_operations >= 0
-    
+
     @pytest.mark.asyncio
     async def test_collector_calculates_failed_rate(self):
         """Test collector calculates failure rate."""
+        # Create mock runtime with metrics registry
+        from core.observability.metrics import MetricsRegistry
         mock_runtime = MagicMock()
         mock_runtime.capability_registry = None
         mock_runtime.plugin_manager = MagicMock()
         mock_runtime.plugin_manager._plugins = {}
+        mock_runtime._metrics_registry = MetricsRegistry()
         
         # Increment some metrics
-        from core.observability.metrics import get_metrics_registry
-        metrics = get_metrics_registry()
+        metrics = mock_runtime._metrics_registry
         metrics.increment_counter("operations_total")
         metrics.increment_counter("operations_total")
         metrics.increment_counter("operations_failed_total")
@@ -325,23 +328,45 @@ class TestHealthSnapshotCollector:
         assert snapshot.failed_rate >= 0
 
 
-class TestMetricsGlobalSingleton:
-    """Test global metrics registry singleton."""
-    
-    def test_global_registry_singleton(self):
-        """Test get_metrics_registry returns same instance."""
-        reg1 = get_metrics_registry()
-        reg2 = get_metrics_registry()
+class TestMetricsDependencyInjection:
+    """Test metrics registry dependency injection (no global singleton)."""
+
+    def test_metrics_registry_not_singleton(self):
+        """Test MetricsRegistry можно создать несколько экземпляров (не singleton)."""
+        from core.observability.metrics import MetricsRegistry
         
-        assert reg1 is reg2
-    
-    def test_global_registry_increments_persist(self):
-        """Test increments persist across calls."""
-        reg1 = get_metrics_registry()
-        reg1.increment_counter("test_metric")
+        reg1 = MetricsRegistry()
+        reg2 = MetricsRegistry()
         
-        reg2 = get_metrics_registry()
-        assert reg2.counter("test_metric").get() >= 1
+        # Это разные экземпляры (не singleton)
+        assert reg1 is not reg2
+        
+        # Но оба работают
+        reg1.increment_counter("test_counter")
+        reg2.increment_counter("test_counter")
+        
+        all_metrics1 = reg1.get_all_metrics()
+        all_metrics2 = reg2.get_all_metrics()
+        
+        assert all_metrics1["counters"]["test_counter"]["value"] == 1
+        assert all_metrics2["counters"]["test_counter"]["value"] == 1
+
+    def test_metrics_registry_injected_in_runtime(self):
+        """Test MetricsRegistry injected in runtime."""
+        from core.observability.metrics import MetricsRegistry
+        from core.runtime.runtime import CoreRuntime
+        from modules.storage.port import CoreStoragePort
+        from core.runtime.state_engine import StateEngine
+        from tests.conftest import InMemoryStorageAdapter
+        
+        adapter = InMemoryStorageAdapter()
+        state_engine = StateEngine()
+        storage = CoreStoragePort(adapter, state_engine)
+        runtime = CoreRuntime(storage)
+        
+        # Runtime должен иметь metrics registry
+        assert hasattr(runtime, '_metrics_registry')
+        assert isinstance(runtime._metrics_registry, MetricsRegistry)
 
 
 if __name__ == "__main__":

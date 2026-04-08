@@ -16,6 +16,8 @@ import sys
 from typing import Any, Dict
 
 from .adapter import ExecutionAdapter, ExecutionEnvelope, default_handlers
+import logging
+logger = logging.getLogger(__name__)
 
 
 def _read_stdin_json() -> Dict[str, Any]:
@@ -66,6 +68,7 @@ def main() -> int:
         return 1
     except Exception as e:
         # stdout должен быть валидным JSON даже при ошибках парсинга/ввода
+        logger.warning("homeconsole_runner.main: unexpected error: %s", e, exc_info=True)
         _write_stdout_json(
             {
                 "status": "error",

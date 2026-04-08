@@ -8,7 +8,6 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, List, Optional, Set
 import asyncio
 import contextlib
-import inspect
 import json
 import random
 import time
@@ -29,10 +28,10 @@ class YandexQuasarWS:
     Использует cookies, НЕ OAuth token.
     """
 
-    def __init__(self, runtime: Any, plugin_name: str):
-        self.runtime = runtime
+    def __init__(self, plugin: Any, plugin_name: str):
+        self.plugin = plugin
         self.plugin_name = plugin_name
-        self.api_client = YandexAPIClient(runtime, plugin_name)
+        self.api_client = YandexAPIClient(plugin, plugin_name)
         self._session: Optional[aiohttp.ClientSession] = None
         self._ws: Optional[aiohttp.ClientWebSocketResponse] = None
         self._runner: Optional[asyncio.Task] = None
@@ -360,7 +359,7 @@ class YandexQuasarWS:
         # DEBUG 2B: Log raw device payload
         try:
             ws_timestamp = time.time()
-            await self.runtime.storage_set(
+            await self.plugin.storage_set(
                 "yandex_debug_ws_raw",
                 f"{device_id}_{int(ws_timestamp * 1000)}",
                 {
@@ -395,7 +394,7 @@ class YandexQuasarWS:
         
         # DEBUG 2C: Log extracted state
         try:
-            await self.runtime.storage_set(
+            await self.plugin.storage_set(
                 "yandex_debug_ws_parsed",
                 f"{device_id}_{int(ws_timestamp * 1000)}",
                 {
@@ -456,7 +455,7 @@ class YandexQuasarWS:
             state=state,
         )
         try:
-            await self.runtime.publish_event("external.device_state_reported", payload)
+            await self.plugin.publish_event("external.device_state_reported", payload)
             await self._log(
                 "debug",
                 f"State update published successfully",
@@ -472,7 +471,7 @@ class YandexQuasarWS:
         for cb in list(self._subscribers.get(device_id, [])):
             try:
                 result = cb(payload)
-                if inspect.iscoroutine(result):
+                if asyncio.iscoroutine(result):
                     asyncio.create_task(result)
             except Exception:
                 continue
@@ -493,14 +492,14 @@ class YandexQuasarWS:
         return jar
 
     async def _load_cookies(self) -> Optional[Dict[str, str]]:
-        cookies = await oauth_get_cookies(self.runtime)
+        cookies = await oauth_get_cookies(self.plugin)
         if cookies:
             await self._log("debug", "Loaded cookies via oauth_provider", cookie_count=len(cookies))
         return cookies
 
     async def _log(self, level: str, message: str, **context: Any) -> None:
         with contextlib.suppress(Exception):
-            await self.runtime.call_service(
+            await self.plugin.call_service(
                 "logger.log",
                 level=level,
                 message=message,

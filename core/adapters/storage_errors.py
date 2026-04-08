@@ -1,5 +1,9 @@
 """Core storage errors: security, configuration, and integrity exceptions."""
 
+from __future__ import annotations
+
+import json
+
 
 class StorageSecurityError(Exception):
     """Storage security violation."""
@@ -37,6 +41,22 @@ class StorageTamperDetected(RuntimeError):
     pass
 
 
+# Ожидаемые сбои storage/JSON на границе модулей (inspector, agent, API glue)
+STORAGE_BOUNDARY_ERRORS: tuple[type[BaseException], ...] = (
+    OSError,
+    ValueError,
+    TypeError,
+    KeyError,
+    json.JSONDecodeError,
+    StorageCorruptionError,
+    StorageRollbackDetected,
+    StorageTamperDetected,
+    StorageConfigurationError,
+    StorageSecurityError,
+    NamespaceViolationError,
+)
+
+
 __all__ = [
     "StorageSecurityError",
     "StorageConfigurationError",
@@ -44,4 +64,5 @@ __all__ = [
     "StorageCorruptionError",
     "StorageRollbackDetected",
     "StorageTamperDetected",
+    "STORAGE_BOUNDARY_ERRORS",
 ]

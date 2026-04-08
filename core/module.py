@@ -1,39 +1,51 @@
 """
-Module Manager — runtime built-in modules manager .
+Module Manager — runtime built-in modules manager.
 
 Управляет жизненным циклом RuntimeModule:
-- обнаружение и регистрация модулей
+- регистрация модулей
 - запуск/остановка модулей
 - гарантия уникальности имён
+
+Делегирует работу специализированным компонентам:
+- ModuleDiscovery — обнаружение и создание экземпляров
+- ModuleDependencySorter — сортировка по зависимостям
+
+КОНТРАКТ:
+- Плагины не должны использовать ModuleManager напрямую
+- Модули регистрируются через register_module_specs из bootstrap
 """
 
 from typing import Any, Dict, List, Optional
-import sys
-import importlib
-import importlib.util
 import logging
 
-from dataclasses import dataclass
-
+from core.module_spec import ModuleSpec
 from core.runtime.runtime_module import RuntimeModule
+from core.module_discovery import ModuleDiscovery
+from core.module_dependency_sorter import ModuleDependencySorter
 from core.observability.logger_helper import error as log_error
+from core.exception_groups import BEST_EFFORT_BACKGROUND_ERRORS, LOGGING_HELPER_ERRORS
 
 logger = logging.getLogger(__name__)
 
-
-@dataclass
-class ModuleSpec:
-    """Спецификация модуля с флагом обязательности. Используется на уровне приложения (bootstrap)."""
-    name: str
-    required: bool = True
+# Re-export sub-components so callers can import from core.module or directly
+__all__ = [
+    "ModuleManager",
+    "ModuleSpec",
+    "ModuleDiscovery",
+    "ModuleDependencySorter",
+]
 
 
 class ModuleManager:
     """
     Менеджер встроенных модулей Runtime.
-
+    
     Управляет экземплярами RuntimeModule, гарантирует уникальность имён,
     обеспечивает идемпотентность регистрации.
+    
+    Делегирует работу:
+    - ModuleDiscovery — обнаружение и создание экземпляров
+    - ModuleDependencySorter — топологическая сортировка
     """
 
     def __init__(self, runtime: Optional[Any] = None, *, module_path_prefix: str = "modules"):
@@ -42,12 +54,15 @@ class ModuleManager:
         
         Args:
             runtime: опциональный экземпляр CoreRuntime для логирования
+            module_path_prefix: префикс пути для импорта модулей
         """
         self._modules: Dict[str, RuntimeModule] = {}
         self._runtime = runtime
-        self._module_path_prefix = module_path_prefix or "modules"
-        # Имена модулей, помеченных как required при последнем register_module_specs (задаётся приложением)
         self._required_names: set = set()
+        
+        # Делегирование специализированным компонентам
+        self._discovery = ModuleDiscovery(module_path_prefix=module_path_prefix)
+        self._sorter = ModuleDependencySorter()
 
     async def register(self, module: RuntimeModule) -> None:
         """
@@ -162,11 +177,12 @@ class ModuleManager:
             is_required = module.name in self._required_names
             try:
                 await module.start()
-            except Exception as e:
+            except BEST_EFFORT_BACKGROUND_ERRORS as e:
                 if is_required:
                     failed_required.append((module.name, str(e)))
                 else:
                     # Для OPTIONAL модулей логируем, но не останавливаем runtime
+                    # Exception handling is intentional for optional modules
                     try:
                         await log_error(
                             self._runtime,
@@ -174,7 +190,7 @@ class ModuleManager:
                             component="module_manager",
                             module=module.name
                         )
-                    except Exception:
+                    except LOGGING_HELPER_ERRORS:
                         # Fallback на logging если logger недоступен
                         logger.exception(
                             "[ModuleManager] Ошибка при запуске optional модуля '%s': %s",
@@ -204,7 +220,7 @@ class ModuleManager:
         for module in self._modules.values():
             try:
                 await module.stop()
-            except Exception as e:
+            except BEST_EFFORT_BACKGROUND_ERRORS as e:
                 # Не ломаем остановку других модулей при ошибке одного
                 # Логируем ошибку для отладки
                 try:
@@ -214,7 +230,7 @@ class ModuleManager:
                         component="module_manager",
                         module=module.name
                     )
-                except Exception:
+                except LOGGING_HELPER_ERRORS:
                     # Fallback на logging если logger недоступен
                     logger.exception(
                         "[ModuleManager] Ошибка при остановке модуля '%s': %s",
@@ -245,6 +261,9 @@ class ModuleManager:
         Raises:
             RuntimeError: если REQUIRED модуль не найден или не зарегистрировался
         """
+        # Ensure deterministic module order based on declared dependencies.
+        specs = self._order_specs_by_dependencies(specs)
+
         self._required_names = {s.name for s in specs if s.required}
         failed_required = []
 
@@ -264,12 +283,12 @@ class ModuleManager:
                             component="module_manager",
                             module=module_spec.name
                         )
-                    except Exception:
+                    except LOGGING_HELPER_ERRORS:
                         logger.exception(
                             "[ModuleManager] Ошибка при регистрации optional модуля '%s': %s",
                             module_spec.name, e
                         )
-            except Exception as e:
+            except BEST_EFFORT_BACKGROUND_ERRORS as e:
                 if module_spec.required:
                     failed_required.append((module_spec.name, f"Unexpected error: {e}"))
                 else:
@@ -280,7 +299,7 @@ class ModuleManager:
                             component="module_manager",
                             module=module_spec.name
                         )
-                    except Exception:
+                    except LOGGING_HELPER_ERRORS:
                         logger.exception(
                             "[ModuleManager] Неожиданная ошибка при регистрации optional модуля '%s': %s",
                             module_spec.name, e
@@ -295,118 +314,67 @@ class ModuleManager:
                 f"Runtime cannot start without required modules."
             )
 
-    async def _discover_module(self, module_name: str) -> Optional[type]:
+    def _order_specs_by_dependencies(
+        self, specs: List[ModuleSpec]
+    ) -> List[ModuleSpec]:
         """
-        Обнаруживает класс RuntimeModule по имени модуля.
+        Переставить specs так, чтобы зависимости гарантировали корректный порядок.
         
-        Изолированный метод для будущего расширения (например, RemoteModuleManager).
-        
-        Args:
-            module_name: имя модуля (например, "automation")
-            
-        Returns:
-            класс RuntimeModule или None если не найден
-            
-        Raises:
-            RuntimeError: если модуль найден, но класс не является RuntimeModule
-        """
-        module_path = f"{self._module_path_prefix}.{module_name}"
-        spec = importlib.util.find_spec(module_path)
-        if spec is None:
-            return None
-
-        try:
-            # Все модули экспортируют класс через __init__.py
-            module = importlib.import_module(module_path)
-            # Преобразуем имя модуля в camelCase для имени класса
-            # Например: "request_logger" -> "RequestLogger"
-            parts = module_name.split("_")
-            camel_case_name = "".join(part.capitalize() for part in parts)
-            module_class_name = f"{camel_case_name}Module"
-            module_class = getattr(module, module_class_name, None)
-
-            if module_class is None:
-                return None
-                
-            if not issubclass(module_class, RuntimeModule):
-                raise RuntimeError(
-                    f"Module class '{module_class_name}' in '{module_path}' "
-                    f"is not a subclass of RuntimeModule"
-                )
-
-            return module_class
-        except ImportError as e:
-            raise RuntimeError(f"Failed to import module '{module_path}': {e}")
-        except Exception as e:
-            raise RuntimeError(f"Unexpected error discovering module '{module_name}': {e}")
-
-    async def _create_module_instance(self, runtime: Any, module_class: type) -> RuntimeModule:
-        """
-        Создаёт экземпляр RuntimeModule.
-        
-        Изолированный метод для будущего расширения (например, RemoteModuleManager).
+        Делегирует ModuleDependencySorter.
         
         Args:
-            runtime: экземпляр CoreRuntime
-            module_class: класс RuntimeModule
+            specs: список спецификаций модулей
             
         Returns:
-            экземпляр RuntimeModule
+            Отсортированный список спецификаций
             
         Raises:
-            RuntimeError: если создание экземпляра не удалось
+            RuntimeError: если обнаружен цикл или неразрешённая зависимость
         """
-        try:
-            # Передаём runtime, RuntimeModule сам создаст context если нужно
-            # Это обеспечивает обратную совместимость
-            return module_class(runtime)
-        except Exception as e:
-            raise RuntimeError(f"Failed to create module instance: {e}")
+        return self._sorter.order_by_dependencies(specs)
 
     async def _register_module_by_name(self, runtime: Any, module_name: str, required: bool = True) -> None:
         """
-        Регистрирует модуль по имени (обнаружение и создание экземпляра).
-
+        Зарегистрировать модуль по имени (обнаружение и создание экземпляра).
+        
+        Делегирует ModuleDiscovery для обнаружения/создания, затем регистрирует локально.
+        
         Args:
             runtime: экземпляр CoreRuntime
-            module_name: имя модуля (например, "automation")
+            module_name: имя модуля
             required: является ли модуль обязательным
-
+            
         Raises:
-            RuntimeError: если required=True и модуль не найден, не импортирован или не является RuntimeModule
+            RuntimeError: если required=True и модуль не найден/не создан
         """
-        # Обнаружение модуля (изолированный метод для будущего remote-модулей)
-        module_class = await self._discover_module(module_name)
+        # Делегируем обнаружение и создание
+        module_instance = await self._discovery.register_module_by_name(
+            runtime=runtime,
+            module_name=module_name,
+            required=required
+        )
         
-        if module_class is None:
-            if required:
-                raise RuntimeError(
-                    f"Required module '{module_name}' not found. "
-                    f"Expected module at '{self._module_path_prefix}.{module_name}' "
-                    f"with class '{module_name.capitalize()}Module'"
-                )
-            # Для optional модулей просто возвращаемся
+        if module_instance is None:
+            # Optional module not found - that's OK
             return
-
-        # Создание экземпляра (изолированный метод для будущего remote-модулей)
-        try:
-            module_instance = await self._create_module_instance(runtime, module_class)
-        except RuntimeError:
-            # Пробрасываем RuntimeError дальше
-            raise
-        except Exception as e:
-            if required:
-                raise RuntimeError(f"Failed to create instance of required module '{module_name}': {e}")
-            # Для optional модулей игнорируем ошибки создания
-            return
-
-        # Регистрация модуля
+        
+        # Регистрируем локально
         try:
             await self.register(module_instance)
         except ValueError as e:
             # Двойная регистрация - это уже обработано в register()
             raise RuntimeError(f"Module '{module_name}' registration failed: {e}")
-        except Exception as e:
+        except (RuntimeError, TypeError, AttributeError, ValueError) as e:
             if required:
                 raise RuntimeError(f"Failed to register required module '{module_name}': {e}")
-            # Для optional модулей игнорируем ошибки регистрации
+            return
+        except BEST_EFFORT_BACKGROUND_ERRORS as e:
+            logger.warning(
+                "ModuleManager._register_module_by_name: unexpected registration error for '%s': %s",
+                module_name,
+                e,
+                exc_info=True,
+            )
+            if required:
+                raise RuntimeError(f"Failed to register required module '{module_name}': {e}")
+            return

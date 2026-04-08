@@ -39,6 +39,21 @@ plugins/yandex_device_auth/
 
 ---
 
+## Inspector / UI (auth flows)
+
+UI читает состояние авторизации через Inspector:
+
+- `GET /admin/v1/inspector/auth` → `{ "auth_flows": [...] }`
+
+Источник истины для auth-flows — **storage**:
+
+- namespace: `inspector`
+- key: `auth_flows`
+
+Плагин `yandex_device_auth` обновляет flow `id="yandex-device"` в этом ключе.
+
+---
+
 ## Методы авторизации
 
 ### 1. QR-код (рекомендуется)
@@ -208,7 +223,7 @@ Cookies для совместимости с Quasar:
 ```python
 async def on_start(self):
     # Подписываемся на событие
-    self.runtime.event_bus.subscribe(
+    await self.subscribe_event(
         "yandex.device_auth.linked",
         self._on_device_linked
     )
@@ -231,15 +246,15 @@ async def _on_device_linked(self, event):
 async def _load_cookies(self):
     # 1. Проверяем device_auth
     try:
-        session = await self.runtime.storage.get("yandex", "device_auth/session")
+        session = await self.storage_get("yandex", "device_auth/session")
         if session and session.get("cookies"):
             return session["cookies"]
     except: pass
     
     # 2. Fallback на oauth_yandex
     try:
-        if await self.runtime.service_registry.has_service("oauth_yandex.get_cookies"):
-            cookies = await self.runtime.service_registry.call("oauth_yandex.get_cookies")
+        if await self.has_service("oauth_yandex.get_cookies"):
+            cookies = await self.call_service("oauth_yandex.get_cookies")
             if cookies:
                 return cookies
     except: pass

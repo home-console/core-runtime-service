@@ -18,6 +18,8 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional, Sequence
 
 from ..backend import OperationResult
+import logging
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -40,7 +42,8 @@ class ContainerBackend:
     def _get_policy_overrides(self, context: Dict[str, Any]) -> Dict[str, Any]:
         try:
             return (context or {}).get("_execution_policy") or {}
-        except Exception:
+        except Exception as e:
+            logger.warning("container._get_policy_overrides: failed to retrieve data: %s", e, exc_info=True)
             return {}
 
     def _resolve_image(self, context: Dict[str, Any]) -> str:
@@ -53,7 +56,7 @@ class ContainerBackend:
             if isinstance(img, str) and img.strip():
                 return img.strip()
         except Exception:
-            pass
+            logger.warning("Unhandled exception", exc_info=True)
         return self._cfg.image
 
     async def execute(
@@ -87,6 +90,7 @@ class ContainerBackend:
         try:
             env["OPERATION_CONTEXT"] = json.dumps(ctx, ensure_ascii=False)
         except Exception:
+            logger.debug("container.execute: error (using fallback value)", exc_info=True)
             env["OPERATION_CONTEXT"] = "{}"
 
         cmd = [
@@ -118,6 +122,7 @@ class ContainerBackend:
                 backend="container",
             )
         except Exception as e:
+            logger.warning("container.execute: failed: %s", e, exc_info=True)
             return OperationResult(
                 ok=False,
                 error={"code": "container_spawn_failed", "message": str(e), "type": type(e).__name__},
@@ -141,7 +146,7 @@ class ContainerBackend:
                 try:
                     proc.kill()
                 except Exception:
-                    pass
+                    logger.warning("Unhandled exception", exc_info=True)
                 return OperationResult(
                     ok=False,
                     error={"code": "timeout", "message": "Container execution timed out"},
@@ -150,6 +155,7 @@ class ContainerBackend:
                     timed_out=True,
                 )
             except Exception as e:
+                logger.warning("container.execute: failed: %s", e, exc_info=True)
                 return OperationResult(
                     ok=False,
                     error={"code": "container_io_failed", "message": str(e), "type": type(e).__name__},
@@ -174,6 +180,7 @@ class ContainerBackend:
             try:
                 res = json.loads(stdout_text) if stdout_text else {}
             except Exception as e:
+                logger.warning("container.execute: failed: %s", e, exc_info=True)
                 return OperationResult(
                     ok=False,
                     error={
