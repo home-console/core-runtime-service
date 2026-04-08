@@ -159,6 +159,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=".",
         help="Path to core-runtime-service root (defaults to current directory).",
     )
+    # Backward-compatible flag: older callers/tests pass --enforce.
+    # This guard always enforces; the flag is a no-op.
+    parser.add_argument(
+        "--enforce",
+        action="store_true",
+        help="(deprecated/no-op) Guard is always enforced; kept for compatibility.",
+    )
     parser.add_argument(
         "--include-tests",
         action="store_true",
