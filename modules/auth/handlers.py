@@ -16,6 +16,7 @@ import os
 import time
 
 from core.adapters.storage_errors import STORAGE_BOUNDARY_ERRORS
+from core.exceptions import BadRequestError, ForbiddenError, UnauthorizedError
 from modules.api.auth import (
     create_api_key,
     create_user,
@@ -53,9 +54,10 @@ async def _check_initialized(runtime: Any) -> bool:
     1. State has auth.initialized = True, OR
     2. At least one user with is_admin=True exists
     """
+    state_key = f"{AUTH_STATE_NAMESPACE}.{BOOTSTRAP_STATE_KEY}"
     try:
         # Check state cache first
-        cached = await runtime.state.get(AUTH_STATE_NAMESPACE, BOOTSTRAP_STATE_KEY)
+        cached = await runtime.state.get(state_key)
         if cached is not None:
             return bool(cached.get("value", False))
     except STORAGE_BOUNDARY_ERRORS as e:
@@ -64,6 +66,18 @@ async def _check_initialized(runtime: Any) -> bool:
         )
     except Exception as e:
         logger.warning("Failed to read auth state cache: %s", e, exc_info=True)
+
+    # Fast path: persistent flag in storage (survives restarts)
+    try:
+        stored = await runtime.storage.get("auth_config", BOOTSTRAP_STATE_KEY)
+        if isinstance(stored, dict):
+            return bool(stored.get("value", False))
+    except STORAGE_BOUNDARY_ERRORS as e:
+        logger.warning(
+            "_check_initialized: storage boundary reading persistent flag: %s", e, exc_info=True
+        )
+    except Exception as e:
+        logger.warning("Failed to read persistent auth initialized flag: %s", e, exc_info=True)
 
     # Fall back: scan for admin user
     try:
@@ -74,9 +88,7 @@ async def _check_initialized(runtime: Any) -> bool:
                 if isinstance(user_data, dict) and user_data.get("is_admin", False):
                     # Cache the result
                     try:
-                        await runtime.state.set(
-                            AUTH_STATE_NAMESPACE, BOOTSTRAP_STATE_KEY, {"value": True}
-                        )
+                        await runtime.state.set(state_key, {"value": True})
                     except STORAGE_BOUNDARY_ERRORS as e:
                         logger.warning(
                             "_check_initialized: storage boundary caching initialized: %s",
@@ -115,14 +127,25 @@ async def _mark_initialized(runtime: Any) -> None:
     Mark system as initialized in state.
     Called after successfully creating first admin.
     """
+    state_key = f"{AUTH_STATE_NAMESPACE}.{BOOTSTRAP_STATE_KEY}"
     try:
-        await runtime.state.set(AUTH_STATE_NAMESPACE, BOOTSTRAP_STATE_KEY, {"value": True})
+        await runtime.state.set(state_key, {"value": True})
     except STORAGE_BOUNDARY_ERRORS as e:
         logger.warning(
             "_mark_initialized: storage boundary: %s", e, exc_info=True
         )
     except Exception as e:
         logger.warning("Failed to mark system as initialized: %s", e, exc_info=True)
+
+    # Also persist the flag so bootstrap remains correct after restart.
+    try:
+        await runtime.storage.set("auth_config", BOOTSTRAP_STATE_KEY, {"value": True})
+    except STORAGE_BOUNDARY_ERRORS as e:
+        logger.warning(
+            "_mark_initialized: storage boundary persisting flag: %s", e, exc_info=True
+        )
+    except Exception as e:
+        logger.warning("Failed to persist auth initialized flag: %s", e, exc_info=True)
 
 
 async def auth_bootstrap(runtime: Any) -> Dict[str, Any]:
@@ -164,7 +187,7 @@ async def auth_dev_credentials(runtime: Any) -> Dict[str, Any]:
 async def auth_create_api_key(runtime: Any, body: Any = None) -> Dict[str, Any]:
     """Create new API key."""
     if not isinstance(body, dict):
-        return {"ok": False, "error": "invalid_body"}
+        raise BadRequestError("invalid_body")
 
     scopes = body.get("scopes", [])
     is_admin = body.get("is_admin", False)
@@ -177,7 +200,7 @@ async def auth_create_api_key(runtime: Any, body: Any = None) -> Dict[str, Any]:
         return {"ok": True, "api_key": api_key}
     except Exception as e:
         logger.warning("create_api_key failed: %s", e, exc_info=True)
-        return {"ok": False, "error": str(e)}
+        raise BadRequestError(str(e))
 
 
 async def auth_list_api_keys(runtime: Any) -> List[Dict[str, Any]]:
@@ -238,11 +261,11 @@ async def auth_list_api_keys(runtime: Any) -> List[Dict[str, Any]]:
 async def auth_create_user(runtime: Any, body: Any = None) -> Dict[str, Any]:
     """Create new user."""
     if not isinstance(body, dict):
-        return {"ok": False, "error": "invalid_body"}
+        raise BadRequestError("invalid_body")
 
     user_id = body.get("user_id")
     if not user_id:
-        return {"ok": False, "error": "user_id required"}
+        raise BadRequestError("user_id required")
 
     scopes = body.get("scopes", [])
     is_admin = body.get("is_admin", False)
@@ -254,7 +277,7 @@ async def auth_create_user(runtime: Any, body: Any = None) -> Dict[str, Any]:
         return {"ok": True, "user_id": user_id}
     except Exception as e:
         logger.warning("create_user failed for user_id=%s: %s", user_id, e, exc_info=True)
-        return {"ok": False, "error": str(e)}
+        raise BadRequestError(str(e))
 
 
 async def auth_list_users(runtime: Any) -> List[Dict[str, Any]]:
@@ -318,17 +341,17 @@ async def auth_initialize(runtime: Any, body: Any = None) -> Dict[str, Any]:
     # Check if already initialized
     initialized = await _check_initialized(runtime)
     if initialized:
-        return {"ok": False, "error": "forbidden", "status": 403}
+        raise ForbiddenError("System already initialized")
 
     if not isinstance(body, dict):
-        return {"ok": False, "error": "invalid_body"}
+        raise BadRequestError("invalid_body")
 
     user_id = body.get("user_id", "admin")
     username = body.get("username", "Administrator")
     password = body.get("password")
 
     if not password:
-        return {"ok": False, "error": "password required"}
+        raise BadRequestError("password required")
 
     try:
         await create_user(
@@ -345,15 +368,15 @@ async def auth_initialize(runtime: Any, body: Any = None) -> Dict[str, Any]:
 
         return {"ok": True, "user_id": user_id, "message": "System initialized successfully"}
     except ValueError as e:
-        return {"ok": False, "error": str(e)}
+        raise BadRequestError(str(e))
     except STORAGE_BOUNDARY_ERRORS as e:
         logger.error(
             "auth_initialize: storage boundary: %s", e, exc_info=True
         )
-        return {"ok": False, "error": f"Initialization failed: {str(e)}"}
+        raise BadRequestError(f"Initialization failed: {str(e)}")
     except Exception as e:
         logger.error("System initialization failed: %s", e, exc_info=True)
-        return {"ok": False, "error": f"Initialization failed: {str(e)}"}
+        raise BadRequestError(f"Initialization failed: {str(e)}")
 
 
 async def auth_login(runtime: Any, body: Any = None) -> Dict[str, Any]:
@@ -375,27 +398,27 @@ async def auth_login(runtime: Any, body: Any = None) -> Dict[str, Any]:
     from core.runtime.auth_contextvars import set_response_cookie
 
     if not isinstance(body, dict):
-        return {"ok": False, "error": "invalid_body"}
+        raise BadRequestError("invalid_body")
 
     user_id = body.get("user_id")
     password = body.get("password")
 
     if not user_id:
-        return {"ok": False, "error": "user_id required"}
+        raise BadRequestError("user_id required")
 
     if not password:
-        return {"ok": False, "error": "password required"}
+        raise BadRequestError("password required")
 
     if not await validate_user_exists(runtime, user_id):
-        return {"ok": False, "error": "invalid_credentials"}
+        raise UnauthorizedError("invalid_credentials")
 
     if not await verify_user_password(runtime, user_id, password):
-        return {"ok": False, "error": "invalid_credentials"}
+        raise UnauthorizedError("invalid_credentials")
 
     try:
         user_data = await runtime.storage.get(AUTH_USERS_NAMESPACE, user_id)
         if not isinstance(user_data, dict):
-            return {"ok": False, "error": "user data not found"}
+            raise UnauthorizedError("invalid_credentials")
 
         scopes = user_data.get("scopes", [])
         is_admin = user_data.get("is_admin", False)
@@ -439,7 +462,7 @@ async def auth_login(runtime: Any, body: Any = None) -> Dict[str, Any]:
 
     except Exception as e:
         logger.error("Login failed for user_id=%s: %s", user_id, e, exc_info=True)
-        return {"ok": False, "error": str(e)}
+        raise BadRequestError(str(e))
 
 
 async def auth_refresh(runtime: Any, body: Any = None) -> Dict[str, Any]:
@@ -473,11 +496,11 @@ async def auth_refresh(runtime: Any, body: Any = None) -> Dict[str, Any]:
         # Get current auth context with refresh token from middleware
         auth_context = get_current_auth_context()
         if not auth_context:
-            return {"ok": False, "error": "unauthorized", "status": 401}
+            raise UnauthorizedError("unauthorized")
 
         user_id = auth_context.get("user_id")
         if not user_id:
-            return {"ok": False, "error": "unauthorized", "status": 401}
+            raise UnauthorizedError("unauthorized")
 
         # Note: refresh_token is stored separately in context by middleware
         # For now, we get it from the user's session in storage
@@ -486,7 +509,7 @@ async def auth_refresh(runtime: Any, body: Any = None) -> Dict[str, Any]:
         # Get user data to verify session is still valid
         user_data = await runtime.storage.get(AUTH_USERS_NAMESPACE, user_id)
         if not isinstance(user_data, dict):
-            return {"ok": False, "error": "unauthorized", "status": 401}
+            raise UnauthorizedError("unauthorized")
 
         scopes = user_data.get("scopes", [])
         is_admin = user_data.get("is_admin", False)
@@ -532,15 +555,15 @@ async def auth_refresh(runtime: Any, body: Any = None) -> Dict[str, Any]:
     except ValueError as e:
         # Refresh failed (invalid, expired, or rotated token)
         logger.warning("Token refresh failed: %s", e)
-        return {"ok": False, "error": "unauthorized", "status": 401}
+        raise UnauthorizedError("unauthorized")
     except STORAGE_BOUNDARY_ERRORS as e:
         logger.error(
             "auth_refresh: storage boundary: %s", e, exc_info=True
         )
-        return {"ok": False, "error": str(e)}
+        raise BadRequestError(str(e))
     except Exception as e:
         logger.error("Token refresh error: %s", e, exc_info=True)
-        return {"ok": False, "error": str(e)}
+        raise BadRequestError(str(e))
 
 
 async def auth_logout(runtime: Any, body: Any = None) -> Dict[str, Any]:
@@ -573,49 +596,49 @@ async def auth_logout(runtime: Any, body: Any = None) -> Dict[str, Any]:
 async def auth_set_password(runtime: Any, body: Any = None) -> Dict[str, Any]:
     """Set password for user."""
     if not isinstance(body, dict):
-        return {"ok": False, "error": "invalid_body"}
+        raise BadRequestError("invalid_body")
 
     user_id = body.get("user_id")
     password = body.get("password")
 
     if not user_id:
-        return {"ok": False, "error": "user_id required"}
+        raise BadRequestError("user_id required")
 
     if not password:
-        return {"ok": False, "error": "password required"}
+        raise BadRequestError("password required")
 
     try:
         await set_password(runtime, user_id, password)
         return {"ok": True, "user_id": user_id}
     except Exception as e:
         logger.warning("set_password failed for user_id=%s: %s", user_id, e, exc_info=True)
-        return {"ok": False, "error": str(e)}
+        raise BadRequestError(str(e))
 
 
 async def auth_change_password(runtime: Any, body: Any = None) -> Dict[str, Any]:
     """Change password for user (requires old password)."""
     if not isinstance(body, dict):
-        return {"ok": False, "error": "invalid_body"}
+        raise BadRequestError("invalid_body")
 
     user_id = body.get("user_id")
     old_password = body.get("old_password")
     new_password = body.get("new_password")
 
     if not user_id:
-        return {"ok": False, "error": "user_id required"}
+        raise BadRequestError("user_id required")
 
     if not old_password:
-        return {"ok": False, "error": "old_password required"}
+        raise BadRequestError("old_password required")
 
     if not new_password:
-        return {"ok": False, "error": "new_password required"}
+        raise BadRequestError("new_password required")
 
     try:
         await change_password(runtime, user_id, old_password, new_password)
         return {"ok": True, "user_id": user_id}
     except Exception as e:
         logger.warning("change_password failed for user_id=%s: %s", user_id, e, exc_info=True)
-        return {"ok": False, "error": str(e)}
+        raise BadRequestError(str(e))
 
 
 async def auth_list_sessions(runtime: Any, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -630,71 +653,71 @@ async def auth_list_sessions(runtime: Any, user_id: Optional[str] = None) -> Lis
 async def auth_revoke_session(runtime: Any, body: Any = None) -> Dict[str, Any]:
     """Revoke a specific session."""
     if not isinstance(body, dict):
-        return {"ok": False, "error": "invalid_body"}
+        raise BadRequestError("invalid_body")
 
     session_id = body.get("session_id")
     if not session_id:
-        return {"ok": False, "error": "session_id required"}
+        raise BadRequestError("session_id required")
 
     try:
         await revoke_session(runtime, session_id)
         return {"ok": True, "session_id": session_id[:16] + "..."}
     except Exception as e:
         logger.warning("revoke_session failed: %s", e, exc_info=True)
-        return {"ok": False, "error": str(e)}
+        raise BadRequestError(str(e))
 
 
 async def auth_revoke_all_sessions(runtime: Any, body: Any = None) -> Dict[str, Any]:
     """Revoke all sessions for a user."""
     if not isinstance(body, dict):
-        return {"ok": False, "error": "invalid_body"}
+        raise BadRequestError("invalid_body")
 
     user_id = body.get("user_id")
     if not user_id:
-        return {"ok": False, "error": "user_id required"}
+        raise BadRequestError("user_id required")
 
     try:
         revoked_count = await revoke_all_sessions(runtime, user_id)
         return {"ok": True, "user_id": user_id, "revoked_count": revoked_count}
     except Exception as e:
         logger.warning("revoke_all_sessions failed for user_id=%s: %s", user_id, e, exc_info=True)
-        return {"ok": False, "error": str(e)}
+        raise BadRequestError(str(e))
 
 
 async def auth_revoke_api_key(runtime: Any, body: Any = None) -> Dict[str, Any]:
     """Revoke an API key."""
     if not isinstance(body, dict):
-        return {"ok": False, "error": "invalid_body"}
+        raise BadRequestError("invalid_body")
 
     api_key = body.get("api_key")
     if not api_key:
-        return {"ok": False, "error": "api_key required"}
+        raise BadRequestError("api_key required")
 
     try:
         await revoke_api_key(runtime, api_key)
         return {"ok": True, "api_key": api_key[:16] + "..."}
     except Exception as e:
         logger.warning("revoke_api_key failed: %s", e, exc_info=True)
-        return {"ok": False, "error": str(e)}
+        raise BadRequestError(str(e))
 
 
 async def auth_rotate_api_key(runtime: Any, body: Any = None) -> Dict[str, Any]:
     """Rotate an API key (create new, revoke old)."""
     if not isinstance(body, dict):
-        return {"ok": False, "error": "invalid_body"}
+        raise BadRequestError("invalid_body")
 
     old_api_key = body.get("old_api_key")
     expires_at = body.get("expires_at")
 
     if not old_api_key:
-        return {"ok": False, "error": "old_api_key required"}
+        raise BadRequestError("old_api_key required")
 
     try:
         new_api_key = await rotate_api_key(runtime, old_api_key, expires_at)
         return {"ok": True, "new_api_key": new_api_key, "old_api_key": old_api_key[:16] + "..."}
     except Exception as e:
         logger.warning("rotate_api_key failed: %s", e, exc_info=True)
-        return {"ok": False, "error": str(e)}
+        raise BadRequestError(str(e))
 
 
 async def auth_me(runtime: Any) -> Dict[str, Any]:
@@ -720,12 +743,12 @@ async def auth_me(runtime: Any) -> Dict[str, Any]:
     context = get_current_auth_context()
 
     if context is None or context.user_id is None:
-        return {"ok": False, "error": "unauthorized"}
+        raise UnauthorizedError("unauthorized")
 
     try:
         user_data = await runtime.storage.get(AUTH_USERS_NAMESPACE, context.user_id)
         if not isinstance(user_data, dict):
-            return {"ok": False, "error": "user_not_found"}
+            raise UnauthorizedError("user_not_found")
 
         # Return response matching frontend AuthUser interface
         return {
@@ -741,9 +764,9 @@ async def auth_me(runtime: Any) -> Dict[str, Any]:
             e,
             exc_info=True,
         )
-        return {"ok": False, "error": str(e)}
+        raise BadRequestError(str(e))
     except Exception as e:
         logger.warning(
             "auth_me failed for user_id=%s: %s", context.user_id, e, exc_info=True
         )
-        return {"ok": False, "error": str(e)}
+        raise BadRequestError(str(e))
