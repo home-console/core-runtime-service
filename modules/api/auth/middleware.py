@@ -75,13 +75,19 @@ async def require_auth_middleware(request: Request, call_next):
     # Проверяем, является ли это auth endpoint (требует специального rate limiting)
     # Auth endpoints: login, create_api_key, refresh_token, и другие операции аутентификации
     request_path = str(request.url.path)
+    # IMPORTANT: /auth/v1/me is a read-only profile endpoint and may be called
+    # frequently by the frontend (polling/hooks/retries). It must NOT be treated
+    # as a brute-force surface; keep it under general API rate limiting instead.
     is_auth_endpoint = (
-        request_path.startswith("/admin/v1/auth/") or
-        request_path.startswith("/admin/auth/") or
-        (request_path.startswith("/auth/") and not request_path.startswith("/auth/v1/bootstrap")) or
-        "login" in request_path.lower() or
-        "create_api_key" in request_path.lower() or
-        "refresh" in request_path.lower()
+        request_path.startswith("/admin/v1/auth/")
+        or request_path.startswith("/admin/auth/")
+        or request_path in (
+            "/auth/v1/login",
+            "/auth/v1/initialize",
+            "/auth/v1/refresh",
+            "/auth/v1/logout",
+        )
+        or "create_api_key" in request_path.lower()
     )
     
     # Rate limiting для auth endpoints (до попытки авторизации)
@@ -92,10 +98,13 @@ async def require_auth_middleware(request: Request, call_next):
         if hasattr(runtime, "_config") and runtime._config:
             rate_limiting_enabled = getattr(runtime._config, "rate_limiting_enabled", True)
         
-        # DEBUG MODE: Allow disabling rate limiting ONLY when explicitly enabled.
-        # Safe default: rate limiting stays ON unless DEBUG_MODE is set to a truthy value.
+        # DEBUG MODE: allow disabling rate limiting for local development.
+        # We support both DEBUG_MODE and DEBUG (legacy) flags.
         import os
-        debug_mode = os.getenv("DEBUG_MODE", "").lower() in ("1", "true", "yes", "on")
+        debug_mode = (
+            os.getenv("DEBUG_MODE", "").lower() in ("1", "true", "yes", "on")
+            or os.getenv("DEBUG", "").lower() in ("1", "true", "yes", "on")
+        )
         if debug_mode:
             rate_limiting_enabled = False
         

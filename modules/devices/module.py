@@ -195,6 +195,8 @@ class DevicesModule(RuntimeModule):
         delay_s = float(
             os.getenv("EXTERNAL_EVENTS_PUBLISHER_WARN_DELAY_SECONDS", "5.0")
         )
+        if delay_s <= 0:
+            return
         stop_event = self._external_publish_watchdog_stop
         if stop_event is None:
             return

@@ -34,6 +34,9 @@ ACTION_SCOPE_MAP: Dict[str, str] = {
     "devices.list": "devices.read",
     "devices.get": "devices.read",
     "devices.set_state": "devices.write",
+    # Product API (BFF) — user-facing endpoints delegate to devices.*
+    "product_api.v1.devices.list": "devices.read",
+    "product_api.v1.devices.get": "devices.read",
     "product_api.v1.devices.set_state": "devices.write",
     "product_api.v1.devices.get_external": "devices.read",
     "devices.list_external": "devices.read",
