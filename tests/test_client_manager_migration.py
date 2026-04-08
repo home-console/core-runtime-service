@@ -22,6 +22,11 @@ from tests.conftest import InMemoryStorageAdapter
 CLIENT_MANAGER_PATH = (
     Path(__file__).parent.parent / "plugins" / "client-manager-plugin"
 )
+if not (CLIENT_MANAGER_PATH / "plugin.py").exists():
+    pytest.skip(
+        "client-manager-plugin not present in this repo checkout",
+        allow_module_level=True,
+    )
 if str(CLIENT_MANAGER_PATH) not in sys.path:
     sys.path.insert(0, str(CLIENT_MANAGER_PATH))
 

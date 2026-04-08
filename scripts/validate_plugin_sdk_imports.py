@@ -75,6 +75,43 @@ def _format_import_stmt(node: ast.AST) -> str:
     return node.__class__.__name__
 
 
+def _plugin_root_for(path: Path, *, root: Path) -> Path | None:
+    try:
+        rel = path.relative_to(root)
+    except ValueError:
+        return None
+    parts = rel.parts
+    if len(parts) < 2:
+        return None
+    if parts[0] != "plugins":
+        return None
+    # Ignore plugins/__init__.py and other files directly under plugins/
+    if len(parts) == 2 and parts[1].endswith(".py"):
+        return None
+    return root / "plugins" / parts[1]
+
+
+def _local_toplevel_modules(plugin_root: Path) -> set[str]:
+    """
+    Top-level modules that exist *inside the plugin directory*.
+
+    Example: plugins/foo/app/ exists => `from app.config import ...` should be allowed,
+    because it's local to the plugin, not project-level `app/`.
+    """
+    names: set[str] = set()
+    if not plugin_root.exists():
+        return names
+    for child in plugin_root.iterdir():
+        if child.name.startswith("."):
+            continue
+        if child.is_dir():
+            if (child / "__init__.py").exists():
+                names.add(child.name)
+        elif child.is_file() and child.suffix == ".py":
+            names.add(child.stem)
+    return names
+
+
 def _find_violations_in_file(path: Path, *, root: Path) -> list[ImportViolation]:
     try:
         src = path.read_text(encoding="utf-8")
@@ -82,6 +119,8 @@ def _find_violations_in_file(path: Path, *, root: Path) -> list[ImportViolation]
         src = path.read_text(encoding="utf-8", errors="replace")
 
     rel = path.relative_to(root)
+    plugin_root = _plugin_root_for(path, root=root)
+    local_toplevel = _local_toplevel_modules(plugin_root) if plugin_root else set()
 
     try:
         tree = ast.parse(src, filename=str(path))
@@ -102,7 +141,7 @@ def _find_violations_in_file(path: Path, *, root: Path) -> list[ImportViolation]
         if isinstance(node, ast.Import):
             for alias in node.names:
                 top = _top_level_name(alias.name)
-                if top in BANNED_TOP_LEVEL_IMPORTS:
+                if top in BANNED_TOP_LEVEL_IMPORTS and top not in local_toplevel:
                     violations.append(
                         ImportViolation(
                             path=rel,
@@ -117,7 +156,7 @@ def _find_violations_in_file(path: Path, *, root: Path) -> list[ImportViolation]
             if node.level and node.level > 0:
                 continue
             top = _top_level_name(node.module)
-            if top in BANNED_TOP_LEVEL_IMPORTS:
+            if top in BANNED_TOP_LEVEL_IMPORTS and top not in local_toplevel:
                 violations.append(
                     ImportViolation(
                         path=rel,

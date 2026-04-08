@@ -13,6 +13,7 @@ Manages:
 import asyncio
 import json
 import logging
+import os
 import re
 import time
 from dataclasses import dataclass
@@ -91,7 +92,11 @@ class RegistryClient:
         
         # Setup cache directory
         if cache_dir is None:
-            cache_dir = Path.home() / ".homeconsole" / "marketplace" / "cache"
+            base = os.environ.get("HOMECONSOLE_HOME")
+            if base:
+                cache_dir = Path(base) / "marketplace" / "cache"
+            else:
+                cache_dir = Path.cwd() / "data" / "homeconsole" / "marketplace" / "cache"
         self._cache_dir = Path(cache_dir)
         self._cache_dir.mkdir(parents=True, exist_ok=True)
         

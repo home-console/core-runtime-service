@@ -5,6 +5,7 @@ Canonical security-domain implementation.
 """
 
 import json
+import os
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from enum import Enum
@@ -30,7 +31,13 @@ class TrustStore:
 
     def __init__(self, trust_dir: Optional[Path] = None):
         if trust_dir is None:
-            trust_dir = Path.home() / ".homeconsole" / "trust"
+            # Default to workspace-local storage to keep tests and dev runs isolated.
+            # Can be overridden by passing trust_dir explicitly.
+            base = os.environ.get("HOMECONSOLE_HOME")
+            if base:
+                trust_dir = Path(base) / "trust"
+            else:
+                trust_dir = Path.cwd() / "data" / "homeconsole" / "trust"
 
         self.trust_dir = trust_dir
         self.keys_file = trust_dir / "keys.json"

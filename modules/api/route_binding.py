@@ -45,11 +45,13 @@ PUBLIC_WS_SERVICES = {
 }
 
 
-def _normalize_api_result(result: Any) -> Dict[str, Any]:
+def _normalize_api_result(result: Any) -> Any:
     """
-    Canonical API response contract for service results:
-    - if service already returns {"ok": ...} dict - preserve it
-    - otherwise wrap raw payload into {"ok": True, "result": ...}
+    Normalize successful results.
+
+    Policy:
+    - If service explicitly returns an {"ok": ...} envelope, preserve it (backward-compatible).
+    - Otherwise wrap the raw payload into the canonical envelope.
     """
     if isinstance(result, dict) and "ok" in result:
         return result
@@ -526,6 +528,12 @@ def _make_api_handler(runtime: Any, endpoint: Any):
         except Exception:
             logger.warning("apply response cookies failed", exc_info=True)
 
+        # Service-level handlers may return {"ok": False, "error": "...", "status": <http_status>}
+        # Preserve backward-compatible payload contract but honor HTTP status codes.
+        if isinstance(result, dict):
+            status = result.get("status")
+            if isinstance(status, int) and 100 <= status <= 599:
+                response.status_code = status
         return _normalize_api_result(result)
 
     # Формируем сигнатуру handler'а для FastAPI
