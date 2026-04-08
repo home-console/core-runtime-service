@@ -51,7 +51,7 @@ OperationWorker использует `payload["id"]` для:
 
 Каноническое определение строки — **`sdk.operations_events.OPERATION_READY_EVENT_TYPE`**; ядро реэкспортирует её через `core.operations.dedup_contract`.
 
-Плагины (только импорт `sdk`): `build_operation_ready_payload`, либо готовый метод **`publish_operation_ready(operation_id, **extra)`** на `BasePlugin` / `PluginAPI` / `PluginRuntimeFacade` — без дублирования строк и без доступа к `core`.
+Плагины (только импорт `sdk`): `build_operation_ready_payload`, либо готовый метод **`BasePlugin.publish_operation_ready(operation_id, **extra)`** — без дублирования строк и без доступа к `core`.
 
 ## Последствия
 

@@ -181,6 +181,24 @@ def scan_plugins_forbidden_runtime_usage(root: Path) -> list[UsageViolation]:
                 return False
             if not FORBIDDEN_ANY_CONTEXT_ATTR:
                 return False
+            # Allow: self.context.operation_context (and deeper chains).
+            # Ban: direct reads of self.context / plugin.context.
+            if node.attr == "context":
+                parent = getattr(node, "parent", None)
+                if isinstance(parent, ast.Attribute) and parent.attr == "operation_context":
+                    return False
+            # Allow the minimal safe surface for correlation/observability:
+            # self.context.operation_context (and deeper chains) are OK.
+            # We still ban all other direct `self.context` uses.
+            if node.attr == "operation_context":
+                base = node.value
+                if (
+                    isinstance(base, ast.Attribute)
+                    and base.attr == "context"
+                    and isinstance(base.value, ast.Name)
+                    and base.value.id in {"self", "plugin"}
+                ):
+                    return False
             # self.context OR plugin.context
             if node.attr != "context":
                 return False
@@ -294,6 +312,13 @@ def scan_plugins_forbidden_runtime_usage(root: Path) -> list[UsageViolation]:
         class _Visitor(ast.NodeVisitor):
             def __init__(self) -> None:
                 self._in_type_checking = 0
+
+            def generic_visit(self, node: ast.AST) -> None:
+                # Attach parent links for small context-aware exceptions
+                # (e.g. allow `self.context.operation_context` only).
+                for child in ast.iter_child_nodes(node):
+                    setattr(child, "parent", node)
+                super().generic_visit(node)
 
             def visit_Import(self, node: ast.Import) -> None:
                 if self._in_type_checking:

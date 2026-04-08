@@ -7,7 +7,6 @@ from typing import Any, Dict, Optional, Tuple
 import asyncio
 import time
 
-from sdk import operation
 from ..clients.api_client import YandexAPIClient
 
 
@@ -31,7 +30,9 @@ class DeviceStatusChecker:
         Returns:
             Словарь с результатами проверки
         """
-        async with operation("yandex.check_online", self.plugin_name, self.plugin):
+        async with self.plugin.context.operation_context.operation(
+            "yandex.check_online", self.plugin_name
+        ):
             return await self._check_devices_online_impl()
     
     async def _check_devices_online_impl(self) -> Dict[str, Any]:

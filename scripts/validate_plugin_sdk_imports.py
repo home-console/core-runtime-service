@@ -1,189 +1,178 @@
+#!/usr/bin/env python3
+"""
+Plugin SDK import guard (AST-based).
+
+Goal: plugins must not import internal runtime layers directly.
+
+Validates Python files under plugins/**.py and fails if any file imports:
+  - core
+  - modules
+  - app
+  - plugins
+
+By default plugins/test/** is excluded (can be enabled via --include-tests).
+"""
+
 from __future__ import annotations
 
 import argparse
 import ast
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Sequence
 
 
-FORBIDDEN_TOPLEVEL = {"core", "modules", "app"}
+BANNED_TOP_LEVEL_IMPORTS: set[str] = {"core", "modules", "app", "plugins"}
 
 
 @dataclass(frozen=True)
 class ImportViolation:
-    path: str
-    lineno: int
+    path: Path
+    line: int
+    col: int
+    imported: str
     statement: str
-    target: str
 
 
-def _iter_python_files(plugins_dir: Path) -> Iterable[Path]:
-    for p in sorted(plugins_dir.rglob("*.py")):
-        rel = p.relative_to(plugins_dir).as_posix()
-        parts = rel.split("/")
-
-        # Exclude dedicated test plugins directory: plugins/test/**
-        if parts and parts[0] == "test":
-            continue
-
-        # Exclude any tests inside a plugin (e.g. plugins/foo/tests/**)
-        if "tests" in parts:
-            continue
-
-        # Exclude standalone test modules inside a plugin (e.g. test_*.py, *_test.py)
-        if p.name.startswith("test_") or p.name.endswith("_test.py"):
-            continue
-        yield p
-
-
-def _plugin_root_for(path: Path, plugins_dir: Path) -> Path | None:
-    try:
-        rel = path.relative_to(plugins_dir)
-    except ValueError:
-        return None
-    parts = rel.parts
-    if not parts:
-        return None
-    # Ignore plugins/__init__.py and other files directly under plugins/
-    if len(parts) == 1 and parts[0].endswith(".py"):
-        return None
-    return plugins_dir / parts[0]
-
-
-def _local_toplevel_modules(plugin_root: Path) -> set[str]:
-    """
-    Возвращает имена top-level модулей, которые *локально* существуют у плагина.
-
-    Это важно, потому что некоторые плагины (например client-manager-plugin) имеют
-    свой пакет `app/` и импортируют `app.*` как внутренности плагина, а не project-level `app/`.
-    """
-    names: set[str] = set()
-    if not plugin_root.exists():
-        return names
-    for child in plugin_root.iterdir():
-        if child.name.startswith("."):
-            continue
-        if child.is_dir():
-            if (child / "__init__.py").exists():
-                names.add(child.name)
-        elif child.is_file() and child.suffix == ".py":
-            names.add(child.stem)
-    return names
-
-
-def _extract_import_targets(node: ast.AST) -> list[str]:
-    targets: list[str] = []
-    if isinstance(node, ast.Import):
-        for alias in node.names:
-            if alias.name:
-                targets.append(alias.name)
-    elif isinstance(node, ast.ImportFrom):
-        if node.level and node.level > 0:
-            return []
-        if node.module:
-            targets.append(node.module)
-    return targets
-
-
-def scan_plugins_forbidden_imports(root: Path) -> list[ImportViolation]:
+def _iter_plugin_py_files(root: Path, *, include_tests: bool) -> Iterable[Path]:
     plugins_dir = root / "plugins"
     if not plugins_dir.exists():
         return []
 
+    for p in plugins_dir.rglob("*.py"):
+        rel = p.relative_to(root)
+        if not include_tests:
+            # Dedicated test plugins
+            if rel.parts[:2] == ("plugins", "test"):
+                continue
+            # Per-plugin test packages (plugins/foo/tests/**)
+            if len(rel.parts) >= 3 and rel.parts[0] == "plugins" and rel.parts[2] == "tests":
+                continue
+            # Standalone test modules inside plugin trees
+            if p.name.startswith("test_") or p.name.endswith("_test.py"):
+                continue
+        yield p
+
+
+def _top_level_name(module: str | None) -> str | None:
+    if not module:
+        return None
+    return module.split(".", 1)[0]
+
+
+def _format_import_stmt(node: ast.AST) -> str:
+    try:
+        if isinstance(node, ast.Import):
+            names = ", ".join(n.name for n in node.names)
+            return f"import {names}"
+        if isinstance(node, ast.ImportFrom):
+            dots = "." * node.level
+            mod = node.module or ""
+            names = ", ".join(n.name for n in node.names)
+            return f"from {dots}{mod} import {names}"
+    except Exception:
+        pass
+    return node.__class__.__name__
+
+
+def _find_violations_in_file(path: Path, *, root: Path) -> list[ImportViolation]:
+    try:
+        src = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        src = path.read_text(encoding="utf-8", errors="replace")
+
+    rel = path.relative_to(root)
+
+    try:
+        tree = ast.parse(src, filename=str(path))
+    except SyntaxError as e:
+        return [
+            ImportViolation(
+                path=rel,
+                line=getattr(e, "lineno", 1) or 1,
+                col=getattr(e, "offset", 0) or 0,
+                imported="(syntax error)",
+                statement=str(e).strip(),
+            )
+        ]
+
     violations: list[ImportViolation] = []
-    local_cache: dict[Path, set[str]] = {}
 
-    for path in _iter_python_files(plugins_dir):
-        plugin_root = _plugin_root_for(path, plugins_dir)
-        if plugin_root is None:
-            continue
-        if plugin_root not in local_cache:
-            local_cache[plugin_root] = _local_toplevel_modules(plugin_root)
-        local_toplevel = local_cache[plugin_root]
-
-        content = path.read_text(encoding="utf-8")
-        try:
-            tree = ast.parse(content, filename=str(path))
-        except SyntaxError:
-            # If plugin file cannot be parsed, this should be handled elsewhere; don't mask it here.
-            continue
-
-        lines = content.splitlines()
-
-        def _is_type_checking_test(test: ast.expr) -> bool:
-            # if TYPE_CHECKING:
-            if isinstance(test, ast.Name) and test.id == "TYPE_CHECKING":
-                return True
-            # if typing.TYPE_CHECKING:
-            if isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING":
-                return True
-            return False
-
-        class _Visitor(ast.NodeVisitor):
-            def __init__(self) -> None:
-                self._in_type_checking = 0
-
-            def visit_If(self, node: ast.If) -> None:
-                if _is_type_checking_test(node.test):
-                    self._in_type_checking += 1
-                    for stmt in node.body:
-                        self.visit(stmt)
-                    self._in_type_checking -= 1
-                    for stmt in node.orelse:
-                        self.visit(stmt)
-                    return
-                self.generic_visit(node)
-
-            def visit_Import(self, node: ast.Import) -> None:
-                if self._in_type_checking:
-                    return
-                self._check(node)
-
-            def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
-                if self._in_type_checking:
-                    return
-                self._check(node)
-
-            def _check(self, node: ast.AST) -> None:
-                lineno = getattr(node, "lineno", 1)
-                line = lines[lineno - 1] if 1 <= lineno <= len(lines) else ""
-                for target in _extract_import_targets(node):
-                    top = target.split(".", 1)[0]
-                    if top not in FORBIDDEN_TOPLEVEL:
-                        continue
-                    if top in local_toplevel:
-                        continue
-                    stmt = ast.get_source_segment(content, node) or line.strip()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                top = _top_level_name(alias.name)
+                if top in BANNED_TOP_LEVEL_IMPORTS:
                     violations.append(
                         ImportViolation(
-                            path=str(path.relative_to(root)),
-                            lineno=lineno,
-                            statement=stmt.strip(),
-                            target=target,
+                            path=rel,
+                            line=node.lineno,
+                            col=node.col_offset,
+                            imported=alias.name,
+                            statement=_format_import_stmt(node),
                         )
                     )
-
-        _Visitor().visit(tree)
+        elif isinstance(node, ast.ImportFrom):
+            # relative imports inside plugins are OK; we only block absolute banned roots
+            if node.level and node.level > 0:
+                continue
+            top = _top_level_name(node.module)
+            if top in BANNED_TOP_LEVEL_IMPORTS:
+                violations.append(
+                    ImportViolation(
+                        path=rel,
+                        line=node.lineno,
+                        col=node.col_offset,
+                        imported=node.module or top or "",
+                        statement=_format_import_stmt(node),
+                    )
+                )
 
     return violations
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Validate that plugins import only sdk (no core/modules/app).")
-    parser.add_argument("--root", default=".", help="Repo root directory")
-    parser.add_argument("--enforce", action="store_true", help="Exit with non-zero code on violations")
-    args = parser.parse_args(argv)
+def _print_report(violations: Sequence[ImportViolation]) -> None:
+    if not violations:
+        print("OK: no forbidden imports detected in plugins.")
+        return
+
+    print("FAIL: detected forbidden imports in plugins/*")
+    print()
+
+    by_file: dict[Path, list[ImportViolation]] = {}
+    for v in violations:
+        by_file.setdefault(v.path, []).append(v)
+
+    for path in sorted(by_file.keys()):
+        print(f"- {path}")
+        for v in sorted(by_file[path], key=lambda x: (x.line, x.col, x.imported)):
+            print(f"  - {v.line}:{v.col}  {v.statement}")
+        print()
+
+    print("Banned top-level imports:", ", ".join(sorted(BANNED_TOP_LEVEL_IMPORTS)))
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Validate Plugin SDK import rules (AST-based).")
+    parser.add_argument(
+        "--root",
+        default=".",
+        help="Path to core-runtime-service root (defaults to current directory).",
+    )
+    parser.add_argument(
+        "--include-tests",
+        action="store_true",
+        help="Also validate plugins/test/** (excluded by default).",
+    )
+    args = parser.parse_args(list(argv) if argv is not None else None)
 
     root = Path(args.root).resolve()
-    violations = scan_plugins_forbidden_imports(root)
-    if violations:
-        msg = "Forbidden imports detected in plugins/:\n" + "\n".join(
-            f"- {v.path}:{v.lineno}: {v.target}  ({v.statement})" for v in violations
-        )
-        print(msg)
-        return 1 if args.enforce else 0
-    return 0
+    violations: list[ImportViolation] = []
+    for p in _iter_plugin_py_files(root, include_tests=bool(args.include_tests)):
+        violations.extend(_find_violations_in_file(p, root=root))
+
+    _print_report(violations)
+    return 0 if not violations else 1
 
 
 if __name__ == "__main__":

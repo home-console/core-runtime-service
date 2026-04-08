@@ -105,9 +105,17 @@ class _ImportCollector:
 
     def collect(self) -> list[ImportViolation]:
         module_name = _module_name_from_path(self.root, self.file_path)
-        tree = ast.parse(
-            self.file_path.read_text(encoding="utf-8"), filename=str(self.file_path)
-        )
+        try:
+            tree = ast.parse(
+                self.file_path.read_text(encoding="utf-8"), filename=str(self.file_path)
+            )
+        except SyntaxError as e:
+            raise SyntaxError(
+                f"Failed to parse {self.file_path}. "
+                "This repo targets Python 3.11+. "
+                "If you are running on macOS system Python (3.9), switch to Python 3.11+. "
+                f"Original error: {e}"
+            ) from e
         self._visit(tree, module_name, in_type_checking=False)
         return self.imports
 

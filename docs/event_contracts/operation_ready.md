@@ -34,13 +34,12 @@
 
 - `modules/admin/operations.py` — `_publish_operation_ready` (`sdk.operations_events.build_operation_ready_payload`)
 - `modules/retry_policy/module.py` — повторная постановка при retry
-- **Плагины:** `await self.publish_operation_ready(operation_id)` или
-  `await self.runtime.api.publish_operation_ready(operation_id)` — без ручной сборки payload и без импорта `core`.
+- **Плагины:** `await self.publish_operation_ready(operation_id)` — без ручной сборки payload и без импорта `core` (плагины не используют `runtime.*` напрямую).
 
 ## SDK (плагины)
 
 - `sdk.operations_events.OPERATION_READY_EVENT_TYPE`, `build_operation_ready_payload`
-- `BasePlugin.publish_operation_ready` / `PluginAPI.publish_operation_ready`
+- `BasePlugin.publish_operation_ready`
 
 ## Поведение OperationWorker
 

@@ -813,7 +813,7 @@ class YandexAPIClient:
             from yarl import URL
         except ImportError:
             raise RuntimeError("Требуется yarl для Quasar API")
-        cookies = await oauth_get_cookies(self.runtime) or {}
+        cookies = await oauth_get_cookies(self.plugin) or {}
         if not cookies:
             raise RuntimeError("Cookies required for Quasar. Use device auth or set cookies.")
         jar = self._quasar_cookie_jar(cookies)
@@ -909,7 +909,7 @@ class YandexAPIClient:
             raise RuntimeError("Требуется установить aiohttp и yarl для Quasar API")
 
         # Capability yandex:session_cookies — единая точка через фасад oauth_provider
-        cookies = await oauth_get_cookies(self.runtime) or {}
+        cookies = await oauth_get_cookies(self.plugin) or {}
 
         if not cookies:
             raise RuntimeError("Cookies required for Quasar API. Configure capability yandex:session_cookies (device auth or OAuth with cookies).")

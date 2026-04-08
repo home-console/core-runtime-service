@@ -8,7 +8,6 @@ from __future__ import annotations
 import time
 from typing import Any, Dict, List
 
-from sdk import operation
 from ..clients.api_client import YandexAPIClient
 from ..transformers.device_transformer import DeviceTransformer
 
@@ -59,7 +58,9 @@ class DeviceSync:
             # Real API не настроен — тихий ранний выход без создания operation-записи.
             return []
 
-        async with operation("yandex.sync_devices", self.plugin_name, self.plugin):
+        async with self.plugin.context.operation_context.operation(
+            "yandex.sync_devices", self.plugin_name
+        ):
             return await self._sync_devices_impl()
 
     async def _sync_devices_impl(self) -> List[Dict[str, Any]]:

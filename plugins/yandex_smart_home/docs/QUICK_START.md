@@ -52,8 +52,8 @@ if config:  # If OAuth already configured
     )
     
     endpoints = UnifiedYandexAuthEndpoints(self.unified_auth)
-    # Регистрируйте HTTP через SDK путь (PluginAPI), а не через внутренности registry/app.
-    # Например: self.register_http_endpoint(HttpEndpoint(...))
+    # Регистрируйте HTTP только через SDK helper `BasePlugin.register_http_endpoint(...)`,
+    # без прямого доступа к runtime internals.
     endpoints.register_routes(self.context.http)
 ```
 

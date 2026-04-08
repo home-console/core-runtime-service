@@ -231,7 +231,7 @@ class YandexSmartHomeRealPlugin(BasePlugin):
 
     async def _get_cookies(self):
         """Получить cookies через capability yandex:session_cookies (фасад oauth_provider)."""
-        return await oauth_get_cookies(self.runtime)
+        return await oauth_get_cookies(self)
 
     async def on_stop(self) -> None:
         """Остановка: логируем завершение."""

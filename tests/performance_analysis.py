@@ -693,10 +693,6 @@ def main():
     # Save reports
     base_path = Path(__file__).parent.parent
     
-    perf_path = base_path / "performance_report.md"
-    perf_path.write_text(perf_report.summary())
-    print(f"\n✓ Performance report saved to: {perf_path}")
-    
     threat_path = base_path / "threat_analysis.md"
     threat_path.write_text(threat_report)
     print(f"✓ Threat analysis saved to: {threat_path}")

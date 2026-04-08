@@ -85,10 +85,6 @@ if python3 tests/performance_analysis.py; then
     echo ""
     
     # Check generated files
-    if [ -f "performance_report.md" ]; then
-        echo -e "${GREEN}✓${NC} Performance report: performance_report.md"
-    fi
-    
     if [ -f "threat_analysis.md" ]; then
         echo -e "${GREEN}✓${NC} Threat analysis: threat_analysis.md"
     fi
@@ -108,7 +104,6 @@ echo ""
 echo "Generated Reports:"
 echo "  • Chaos validation guide"
 echo "  • Deliverables summary"
-echo "  • performance_report.md — Performance metrics"
 echo "  • threat_analysis.md — Threat gap analysis"
 echo ""
 echo "Expected Maturity Score: 8.0+/10"

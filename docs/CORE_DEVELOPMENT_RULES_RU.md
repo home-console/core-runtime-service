@@ -23,7 +23,7 @@
 ## 3. Где живет логика
 - `modules` — единственный источник бизнес-логики.
 - `app/bootstrap` — только composition/wiring.
-- `plugins` — только через API-границу (`BasePlugin` helpers / `runtime.api` / thin runtime methods).
+- `plugins` — только через API-границу (`sdk.BasePlugin` helpers и другие публичные поверхности `sdk.*`; без прямого `runtime.*`).
 
 ## 4. Правила переносимости ядра на другой ЯП
 - В ядре только явные контракты и примитивы, без Python-магии.

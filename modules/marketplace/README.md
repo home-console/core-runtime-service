@@ -123,7 +123,7 @@ my-plugin/
 ### plugin.py Example
 
 ```python
-from core.kernel.base_plugin import BasePlugin
+from sdk.plugin_ext import BasePlugin
 
 
 class MyPlugin(BasePlugin):

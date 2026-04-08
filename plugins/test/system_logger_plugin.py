@@ -59,4 +59,4 @@ class SystemLoggerPlugin(BasePlugin):
         """Выгрузка плагина - очистка ссылок."""
         await super().on_unload()
         # LoggerModule управляет своей выгрузкой через ModuleManager
-        self.runtime = None
+        self._runtime = None

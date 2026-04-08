@@ -5,7 +5,7 @@ Execution platform with strict separation:
 - `modules` — all business logic (hooks, actions, policies)
 - `plugins` — extension layer
 
-For plugin authors, kernel exposes a thin runtime contract (`runtime.api`) to keep plugin code decoupled from internal runtime objects.
+For plugin authors, kernel exposes the **Plugin SDK** (`sdk.*`) to keep plugin code decoupled from internal runtime objects (no direct `runtime.*` usage in plugins).
 
 ## Inspector data surfaces
 
@@ -22,5 +22,15 @@ For plugin authors, kernel exposes a thin runtime contract (`runtime.api`) to ke
 
 ## Local Architecture Guard
 ```bash
-python3 scripts/validate_architecture_rules.py --root .
+scripts/py_venv.sh -- scripts/validate_architecture_rules.py --root .
+```
+
+## Local Plugin SDK Guard
+```bash
+python3 scripts/validate_plugin_sdk_imports.py --root .
+```
+
+## Local Test Run
+```bash
+scripts/py_venv.sh -- -m pytest -q
 ```

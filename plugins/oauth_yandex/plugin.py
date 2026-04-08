@@ -305,9 +305,9 @@ class OAuthYandexPlugin(BasePlugin):
                 ValueError: если code не указан
                 RuntimeError: если обмен не удался
             """
-            from sdk import operation
-
-            async with operation("oauth.exchange_code", self.metadata.name, self.runtime):
+            async with self.context.operation_context.operation(
+                "oauth.exchange_code", self.metadata.name
+            ):
                 if not code:
                     raise ValueError("code обязателен")
                 
@@ -638,9 +638,10 @@ class OAuthYandexPlugin(BasePlugin):
                                 # Если новый токен тоже истек, продолжаем обновление
                         
                         # Пытаемся обновить (только если токен не был обновлен другим запросом)
-                        from sdk import operation
                         try:
-                            async with operation("oauth.refresh_token", self.metadata.name, self.runtime):
+                            async with self.context.operation_context.operation(
+                                "oauth.refresh_token", self.metadata.name
+                            ):
                                 new_token = await _refresh_access_token()
                             return new_token
                         except OAuthReauthRequired:
@@ -653,7 +654,9 @@ class OAuthYandexPlugin(BasePlugin):
                             # Retry once for network errors only
                             if isinstance(e, (aiohttp.ClientError, asyncio.TimeoutError)):
                                 try:
-                                    async with operation("oauth.refresh_token", self.metadata.name, self.runtime):
+                                    async with self.context.operation_context.operation(
+                                        "oauth.refresh_token", self.metadata.name
+                                    ):
                                         new_token = await _refresh_access_token()
                                     return new_token
                                 except OAuthReauthRequired:
@@ -1033,4 +1036,5 @@ class OAuthYandexPlugin(BasePlugin):
         except Exception:
             pass
 
-        self.runtime = None
+        # runtime — opaque; сбрасываем внутреннюю ссылку без трогания runtime-surface
+        self._runtime = None

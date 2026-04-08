@@ -6,7 +6,6 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from sdk import operation
 from .clients import YandexAPIClient
 from .transformers.device_transformer import DeviceTransformer
 from .oauth_provider import get_status as oauth_get_status, get_cookies as oauth_get_cookies
@@ -95,7 +94,9 @@ class CommandHandler:
         Args:
             data: данные команды
         """
-        async with operation("yandex.send_device_command", self.plugin_name, self.runtime):
+        async with self.plugin.context.operation_context.operation(
+            "yandex.send_device_command", self.plugin_name
+        ):
             await self._log(
                 "debug",
                 "yandex_smart_home: received internal.device_command_requested",
@@ -146,7 +147,7 @@ class CommandHandler:
                 from .commands.send import send_command
 
                 await send_command(
-                    self.runtime,
+                    self.plugin,
                     self.api_client,
                     self.plugin_name,
                     external_id,
@@ -158,7 +159,7 @@ class CommandHandler:
                 from .commands.flow import handle_post_send
 
                 await handle_post_send(
-                    self.runtime,
+                    self.plugin,
                     self.tasks,
                     self.api_client,
                     self.plugin_name,
@@ -195,7 +196,7 @@ class CommandHandler:
         from .commands.operations import poll_and_publish
 
         await poll_and_publish(
-            self.runtime,
+            self.plugin,
             self.api_client,
             external_id,
             internal_id,
@@ -217,7 +218,7 @@ class CommandHandler:
         from .commands.operations import reset_pending_on_error
 
         await reset_pending_on_error(
-            self.runtime,
+            self.plugin,
             internal_id,
             external_id,
             error_reason,
