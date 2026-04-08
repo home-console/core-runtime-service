@@ -45,6 +45,20 @@ ACTION_SCOPE_MAP: Dict[str, str] = {
     "devices.create_mapping": "devices.write",
     "devices.delete_mapping": "devices.write",
     "devices.auto_map_external": "devices.write",
+
+    # Yandex Device Auth (plugin) — admin-only integration bootstrap
+    "device_auth.start": "admin.*",
+    "device_auth.status": "admin.*",
+    "device_auth.cookies": "admin.*",
+    "device_auth.get_session": "admin.*",
+    "device_auth.cancel": "admin.*",
+    "device_auth.unlink": "admin.*",
+    "yandex_device_auth.start": "admin.*",
+    "yandex_device_auth.status": "admin.*",
+    "yandex_device_auth.cookies": "admin.*",
+    "yandex_device_auth.get_session": "admin.*",
+    "yandex_device_auth.cancel": "admin.*",
+    "yandex_device_auth.unlink": "admin.*",
     
     # Automation
     "automation.trigger": "automation.write",
