@@ -166,13 +166,15 @@ class AuthModule(RuntimeModule):
             method="POST",
             path="/admin/v1/auth/password/set",
             service="admin.auth.set_password",
-            description="Set user password (admin only)"
+            description="Set user password (admin only)",
+            auth_config=EndpointAuthConfig(required_scopes=["admin.*"]),
         ))
         self.context.http.register(HttpEndpoint(
             method="POST",
             path="/admin/v1/auth/password/change",
             service="admin.auth.change_password",
-            description="Change own password"
+            description="Change own password",
+            auth_config=EndpointAuthConfig(required_scopes=["admin.*"]),
         ))
         
         # Session management endpoints
@@ -180,19 +182,22 @@ class AuthModule(RuntimeModule):
             method="GET",
             path="/admin/v1/auth/sessions",
             service="admin.auth.list_sessions",
-            description="List user sessions"
+            description="List user sessions",
+            auth_config=EndpointAuthConfig(required_scopes=["admin.*"]),
         ))
         self.context.http.register(HttpEndpoint(
             method="POST",
             path="/admin/v1/auth/sessions/revoke",
             service="admin.auth.revoke_session",
-            description="Revoke a session"
+            description="Revoke a session",
+            auth_config=EndpointAuthConfig(required_scopes=["admin.*"]),
         ))
         self.context.http.register(HttpEndpoint(
             method="POST",
             path="/admin/v1/auth/sessions/revoke-all",
             service="admin.auth.revoke_all_sessions",
-            description="Revoke all user sessions"
+            description="Revoke all user sessions",
+            auth_config=EndpointAuthConfig(required_scopes=["admin.*"]),
         ))
         
         # API key management endpoints
@@ -200,25 +205,29 @@ class AuthModule(RuntimeModule):
             method="POST",
             path="/admin/v1/auth/api-keys",
             service="admin.auth.create_api_key",
-            description="Create API key"
+            description="Create API key",
+            auth_config=EndpointAuthConfig(required_scopes=["admin.*"]),
         ))
         self.context.http.register(HttpEndpoint(
             method="GET",
             path="/admin/v1/auth/api-keys",
             service="admin.auth.list_api_keys",
-            description="List API keys"
+            description="List API keys",
+            auth_config=EndpointAuthConfig(required_scopes=["admin.*"]),
         ))
         self.context.http.register(HttpEndpoint(
             method="POST",
             path="/admin/v1/auth/api-keys/revoke",
             service="admin.auth.revoke_api_key",
-            description="Revoke API key"
+            description="Revoke API key",
+            auth_config=EndpointAuthConfig(required_scopes=["admin.*"]),
         ))
         self.context.http.register(HttpEndpoint(
             method="POST",
             path="/admin/v1/auth/api-keys/rotate",
             service="admin.auth.rotate_api_key",
-            description="Rotate API key"
+            description="Rotate API key",
+            auth_config=EndpointAuthConfig(required_scopes=["admin.*"]),
         ))
         
         # User management endpoints
@@ -226,13 +235,15 @@ class AuthModule(RuntimeModule):
             method="POST",
             path="/admin/v1/auth/users",
             service="admin.auth.create_user",
-            description="Create user"
+            description="Create user",
+            auth_config=EndpointAuthConfig(required_scopes=["admin.*"]),
         ))
         self.context.http.register(HttpEndpoint(
             method="GET",
             path="/admin/v1/auth/users",
             service="admin.auth.list_users",
-            description="List users"
+            description="List users",
+            auth_config=EndpointAuthConfig(required_scopes=["admin.*"]),
         ))
 
     async def start(self) -> None:

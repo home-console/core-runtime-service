@@ -80,6 +80,7 @@ class ProductApiModule(RuntimeModule):
                 path="/api/v1/devices",
                 service="product_api.v1.devices.list",
                 description="Product API: list devices (BFF → devices.list)",
+                auth_config=EndpointAuthConfig(required_scopes=["devices.read"]),
             )
         )
         self.context.http.register(
@@ -88,6 +89,7 @@ class ProductApiModule(RuntimeModule):
                 path="/api/v1/devices/{id}",
                 service="product_api.v1.devices.get",
                 description="Product API: get device by id (BFF → devices.get)",
+                auth_config=EndpointAuthConfig(required_scopes=["devices.read"]),
             )
         )
         self.context.http.register(
@@ -96,6 +98,7 @@ class ProductApiModule(RuntimeModule):
                 path="/api/v1/devices/{id}/state",
                 service="product_api.v1.devices.set_state",
                 description="Product API: set device state (BFF → devices.set_state)",
+                auth_config=EndpointAuthConfig(required_scopes=["devices.write"]),
             )
         )
         self.context.http.register(
@@ -104,6 +107,7 @@ class ProductApiModule(RuntimeModule):
                 path="/api/v1/devices/{id}/external",
                 service="product_api.v1.devices.get_external",
                 description="Product API: get external device payload for an internal device (BFF → devices.get_external_for_device)",
+                auth_config=EndpointAuthConfig(required_scopes=["devices.read"]),
             )
         )
 

@@ -6,7 +6,7 @@ AdminModule не знает про integrations; список интеграци
 """
 
 from core.runtime.runtime_module import RuntimeModule
-from core.http.models import HttpEndpoint
+from core.http.models import HttpEndpoint, EndpointAuthConfig
 
 
 class IntegrationsModule(RuntimeModule):
@@ -46,7 +46,8 @@ class IntegrationsModule(RuntimeModule):
             method="GET",
             path="/admin/v1/integrations",
             service="admin.v1.integrations",
-            description="List registered integrations (admin only)"
+            description="List registered integrations (admin only)",
+            auth_config=EndpointAuthConfig(required_scopes=["admin.read"]),
         ))
 
         # User endpoint
@@ -54,7 +55,8 @@ class IntegrationsModule(RuntimeModule):
             method="GET",
             path="/api/v1/user/integrations",
             service="user.v1.integrations",
-            description="List user integrations"
+            description="List user integrations",
+            auth_config=EndpointAuthConfig(required_scopes=["integrations.read"]),
         ))
 
     async def start(self) -> None:

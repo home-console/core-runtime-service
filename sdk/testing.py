@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
 from core.runtime.runtime_context import RuntimeContext
+from core.service.models import ServiceAuthConfig
 
 
 class Noop:
@@ -76,6 +77,8 @@ class PluginTestRuntime:
     async def register_service(
         self, name: str, func: Callable[..., Awaitable[Any]], **kwargs: Any
     ) -> None:
+        # auth_config ignored in test runtime (bookkeeping only)
+        _auth_config: ServiceAuthConfig | None = kwargs.get("auth_config")  # noqa: F841
         self.services[name] = func
         self.registered_services.add(name)
 

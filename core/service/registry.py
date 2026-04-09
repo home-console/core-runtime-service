@@ -16,7 +16,7 @@ from core.service._acl import (
     _default_acl_wrapper_builder,
     _default_policy_engine_factory,
 )
-from core.service.models import ServiceFunc, ServiceMiddleware
+from core.service.models import ServiceFunc, ServiceMiddleware, ServiceAuthConfig
 from core.service.service_executor import ServiceExecutor
 from core.service.service_router import ServiceRouter
 
@@ -52,6 +52,8 @@ class ServiceRegistry:
         # Словарь: service_name -> ACL метаданные
         # {"resource": "device", "admin_only": bool, "filter_result": bool}
         self._service_acl: dict[str, dict[str, Any]] = {}
+        # Словарь: service_name -> auth метаданные (public/required_scopes)
+        self._service_auth: dict[str, ServiceAuthConfig] = {}
         # Lock для thread-safety операций с _services
         self._lock = asyncio.Lock()
         # Глобальные middleware для всех вызовов сервисов.
@@ -102,7 +104,12 @@ class ServiceRegistry:
         )
 
     async def register(
-        self, service_name: str, func: ServiceFunc, version: Optional[str] = None
+        self,
+        service_name: str,
+        func: ServiceFunc,
+        version: Optional[str] = None,
+        *,
+        auth_config: Optional[ServiceAuthConfig] = None,
     ) -> None:
         """
         Зарегистрировать сервис.
@@ -133,6 +140,11 @@ class ServiceRegistry:
             self._router.register(versioned_name)
             # Сбрасываем ACL метаданные, если были
             self._service_acl.pop(versioned_name, None)
+            # Обновляем auth метаданные, если переданы
+            if auth_config is not None:
+                self._service_auth[versioned_name] = auth_config
+            else:
+                self._service_auth.pop(versioned_name, None)
 
     async def register_with_acl(
         self,
@@ -146,6 +158,7 @@ class ServiceRegistry:
         preload_resource: Optional[PreloadResourceFunc] = None,
         inject_owner_param: Optional[str] = None,
         version: Optional[str] = None,
+        auth_config: Optional[ServiceAuthConfig] = None,
     ) -> None:
         """
         Зарегистрировать сервис с ACL-метаданными.
@@ -170,7 +183,7 @@ class ServiceRegistry:
             inject_owner_param=inject_owner_param,
         )
 
-        await self.register(service_name, wrapped, version=version)
+        await self.register(service_name, wrapped, version=version, auth_config=auth_config)
         versioned_name = f"{service_name}.{version}" if version else service_name
         self._service_acl[versioned_name] = {
             "resource": resource,
@@ -221,6 +234,37 @@ class ServiceRegistry:
         async with self._lock:
             self._services.pop(service_name, None)
             self._router.unregister(service_name)
+            self._service_acl.pop(service_name, None)
+            self._service_auth.pop(service_name, None)
+
+    async def get_auth_config(self, service_name: str) -> Optional[ServiceAuthConfig]:
+        """
+        Получить декларативную auth конфигурацию сервиса (если задана при регистрации).
+        """
+        async with self._lock:
+            return self._service_auth.get(service_name)
+
+    async def set_auth_config(
+        self, service_name: str, auth_config: ServiceAuthConfig
+    ) -> None:
+        """
+        Установить или обноврить auth конфигурацию сервиса.
+
+        Используется для синхронизации auth из HttpEndpoint.auth_config
+        при регистрации HTTP/WS контрактов (Variant B: "Service auth
+        синхронизируется из endpoints").
+        """
+        async with self._lock:
+            self._service_auth[service_name] = auth_config
+
+    def get_auth_config_sync(self, service_name: str) -> Optional[ServiceAuthConfig]:
+        """
+        Sync variant for authz layer.
+
+        NOTE: authz.check() is synchronous. Reading a dict is atomic in CPython and
+        we treat this as best-effort metadata lookup (no mutation side effects).
+        """
+        return self._service_auth.get(service_name)
 
     async def call(self, service_name: str, *args: Any, **kwargs: Any) -> Any:
         """

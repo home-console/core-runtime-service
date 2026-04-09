@@ -7,6 +7,7 @@
 
 from core.kernel.base_plugin import BasePlugin, PluginMetadata
 from core.http import HttpEndpoint
+from core.http.models import EndpointAuthConfig
 from fastapi import WebSocket
 import json
 import logging
@@ -47,7 +48,8 @@ class ChatPluginExample(BasePlugin):
             service="chat_example.websocket",
             websocket=True,
             description="Простой WebSocket чат для демонстрации",
-            tags=["example", "websocket", "chat"]
+            tags=["example", "websocket", "chat"],
+            auth_config=EndpointAuthConfig(public=True),
         )
         self.runtime.http.register(ws_endpoint)
         

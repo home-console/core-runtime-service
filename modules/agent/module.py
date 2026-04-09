@@ -208,6 +208,9 @@ class AgentControlPlaneModule(RuntimeModule):
         await _reg("admin.agent.get_status", admin_agent_get_status)
 
         # Register HTTP endpoints for Agent Control Plane
+        _admin_read = EndpointAuthConfig(required_scopes=["admin.read"])
+        _admin_write = EndpointAuthConfig(required_scopes=["admin.write"])
+
         # Enrollment endpoints
         self.context.http.register(
             HttpEndpoint(
@@ -215,6 +218,7 @@ class AgentControlPlaneModule(RuntimeModule):
                 path="/admin/v1/agents/enrollment-token",
                 service="admin.agent.create_enrollment_token",
                 description="Create enrollment token for new agent",
+                auth_config=_admin_write,
             )
         )
 
@@ -225,6 +229,7 @@ class AgentControlPlaneModule(RuntimeModule):
                 path="/admin/v1/agents/bootstrap-token",
                 service="admin.agent.generate_bootstrap_token",
                 description="Generate one-time bootstrap enrollment token for installer",
+                auth_config=_admin_write,
             )
         )
 
@@ -234,6 +239,7 @@ class AgentControlPlaneModule(RuntimeModule):
                 path="/admin/v1/agents/enroll",
                 service="admin.agent.enroll_agent",
                 description="Enroll agent with enrollment token",
+                auth_config=_admin_write,
             )
         )
 
@@ -244,6 +250,7 @@ class AgentControlPlaneModule(RuntimeModule):
                 path="/admin/v1/agents",
                 service="admin.agent.list_agents",
                 description="List all registered agents",
+                auth_config=_admin_read,
             )
         )
 
@@ -253,6 +260,7 @@ class AgentControlPlaneModule(RuntimeModule):
                 path="/admin/v1/agents/{agent_id}",
                 service="admin.agent.get_agent",
                 description="Get agent details",
+                auth_config=_admin_read,
             )
         )
 
@@ -262,6 +270,7 @@ class AgentControlPlaneModule(RuntimeModule):
                 path="/admin/v1/agents/{agent_id}/deregister",
                 service="admin.agent.deregister_agent",
                 description="Deregister agent",
+                auth_config=_admin_write,
             )
         )
 
@@ -272,6 +281,7 @@ class AgentControlPlaneModule(RuntimeModule):
                 path="/admin/v1/agents/deploy",
                 service="admin.agent.deploy",
                 description="Deploy agent to remote host via SSH",
+                auth_config=_admin_write,
             )
         )
 
@@ -281,6 +291,7 @@ class AgentControlPlaneModule(RuntimeModule):
                 path="/admin/v1/deployments/{deployment_id}",
                 service="admin.agent.get_deployment_status",
                 description="Get agent deployment status",
+                auth_config=_admin_read,
             )
         )
 
@@ -290,6 +301,7 @@ class AgentControlPlaneModule(RuntimeModule):
                 path="/admin/v1/deployments",
                 service="admin.agent.get_deployment_metrics",
                 description="Get deployment metrics and statistics",
+                auth_config=_admin_read,
             )
         )
 
@@ -299,6 +311,7 @@ class AgentControlPlaneModule(RuntimeModule):
                 path="/admin/v1/agents/{agent_id}/heartbeat",
                 service="admin.agent.heartbeat",
                 description="Receive heartbeat from agent",
+                auth_config=_admin_write,
             )
         )
 
@@ -308,6 +321,7 @@ class AgentControlPlaneModule(RuntimeModule):
                 path="/admin/v1/agents/{agent_id}/heartbeat",
                 service="admin.agent.get_heartbeat_status",
                 description="Get heartbeat status for specific agent",
+                auth_config=_admin_read,
             )
         )
 
@@ -327,6 +341,7 @@ class AgentControlPlaneModule(RuntimeModule):
                 path="/admin/v1/agents/online",
                 service="admin.agent.list_online_agents",
                 description="List all currently online agents",
+                auth_config=_admin_read,
             )
         )
 
@@ -361,6 +376,7 @@ class AgentControlPlaneModule(RuntimeModule):
                 path="/admin/v1/agents/capabilities/{capability_id}",
                 service="admin.agent.list_agents_providing_capability",
                 description="List agents providing capability",
+                auth_config=_admin_read,
             )
         )
 
@@ -371,6 +387,7 @@ class AgentControlPlaneModule(RuntimeModule):
                 path="/admin/v1/agents/{agent_id}/logs",
                 service="admin.agent.submit_logs",
                 description="Agent pushes log entries to Core",
+                auth_config=_admin_write,
             )
         )
 
@@ -380,6 +397,7 @@ class AgentControlPlaneModule(RuntimeModule):
                 path="/admin/v1/agents/{agent_id}/logs",
                 service="admin.agent.get_logs",
                 description="Get stored logs for agent",
+                auth_config=_admin_read,
             )
         )
 
@@ -390,6 +408,7 @@ class AgentControlPlaneModule(RuntimeModule):
                 path="/admin/v1/agents/{agent_id}/status",
                 service="admin.agent.get_status",
                 description="Get real-time status of agent",
+                auth_config=_admin_read,
             )
         )
 

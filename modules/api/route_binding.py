@@ -36,13 +36,10 @@ from modules.api.domain_adapters import get_domain_adapter
 from modules.api.validation_models import validate_body_for_service
 
 from core.adapters.storage_errors import STORAGE_BOUNDARY_ERRORS
+from core.http.models import EndpointAuthConfig, HttpEndpoint
+from core.service.models import ServiceAuthConfig
 
 logger = logging.getLogger(__name__)
-
-PUBLIC_WS_SERVICES = {
-    # Agent channel uses its own auth/enrollment flow.
-    "client_manager.websocket",
-}
 
 
 def _normalize_api_result(result: Any) -> Any:
@@ -51,11 +48,50 @@ def _normalize_api_result(result: Any) -> Any:
 
     Policy:
     - If service explicitly returns an {"ok": ...} envelope, preserve it (backward-compatible).
-    - Otherwise wrap the raw payload into the canonical envelope.
+    - Otherwise wrap the raw payload into {"ok": True, "result": <payload>} to keep a stable API contract.
     """
     if isinstance(result, dict) and "ok" in result:
         return result
     return {"ok": True, "result": result}
+
+
+def _sync_endpoint_auth_to_service_registry(
+    runtime: Any, endpoints: list[HttpEndpoint]
+) -> None:
+    """
+    Phase 3 (Variant B): sync HttpEndpoint.auth_config → ServiceAuthConfig.
+
+    For each endpoint with auth_config, update the service registry's auth
+    metadata. This ensures WS endpoints and service-level auth lookups use
+    the same declarative auth as HTTP endpoints.
+    """
+    import asyncio
+
+    reg = getattr(runtime, "service_registry", None) or getattr(runtime, "services", None)
+    if reg is None:
+        return
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return  # No running loop — best effort sync
+
+    svc_set_auth = getattr(reg, "set_auth_config", None)
+    if not callable(svc_set_auth):
+        return
+
+    for ep in endpoints:
+        if ep.auth_config is not None:
+            svc_auth = ServiceAuthConfig(
+                public=ep.auth_config.public,
+                required_scopes=ep.auth_config.required_scopes,
+            )
+            try:
+                loop.run_until_complete(svc_set_auth(ep.service, svc_auth))
+            except Exception:
+                logger.debug(
+                    "sync auth for %s failed (best-effort, ignored)", ep.service
+                )
 
 
 def _normalize_api_error(
@@ -76,8 +112,29 @@ def bind_routes(runtime: Any, app: Any) -> None:
     """
     Bind all endpoints from runtime.http to the FastAPI app.
     Must be called AFTER module_manager.start_all() and plugin_manager.start_all().
+
+    Fail-closed: raises RuntimeError if any endpoint lacks auth_config.
+    Phase 3: syncs HttpEndpoint.auth_config → ServiceAuthConfig (Variant B).
     """
     endpoints = runtime.http.list()
+
+    # Phase 3 (Variant B): sync HttpEndpoint.auth_config → ServiceAuthConfig.
+    # This ensures WS endpoints and any service-level auth lookups see the
+    # declarative auth from HttpEndpoint registrations.
+    _sync_endpoint_auth_to_service_registry(runtime, endpoints)
+
+    # Phase 2: strict validation — every endpoint MUST have auth_config
+    missing_auth = [
+        f"{ep.method or 'WS'} {ep.path} (service={ep.service})"
+        for ep in endpoints
+        if ep.auth_config is None
+    ]
+    if missing_auth:
+        raise RuntimeError(
+            f"[ROUTE_BINDING] {len(missing_auth)} endpoint(s) registered without auth_config "
+            f"(fail-closed policy). Endpoints: {missing_auth}"
+        )
+
     # WebSocket endpoints (method=None) не попадают в api/webhook — только в ws_endpoints
     api_endpoints = [ep for ep in endpoints if ep.kind == "api" and not ep.websocket]
     webhook_endpoints = [
@@ -120,6 +177,7 @@ def bind_routes(runtime: Any, app: Any) -> None:
                 params=path_params,
                 ep_path=ep.path,
                 ep_service=ep.service,
+                ep_auth=ep.auth_config,
             ):
                 # Извлекаем параметры из URL
                 path = websocket.url.path
@@ -133,15 +191,9 @@ def bind_routes(runtime: Any, app: Any) -> None:
                         if i < len(parts):
                             param_values[param_name] = parts[i]
                 try:
-                    if ep_service == "admin.v1.ssh.ws":
-                        logger.info(
-                            "WebSocket connect attempt: service=%s path=%s session_id=%s has_query_token=%s",
-                            ep_service,
-                            websocket.url.path,
-                            param_values.get("session_id"),
-                            bool(websocket.query_params.get("token")),
-                        )
-                    if ep_service not in PUBLIC_WS_SERVICES:
+                    # Phase 3: declarative auth for WS — no more PUBLIC_WS_SERVICES
+                    is_public_ws = ep_auth is not None and ep_auth.public
+                    if not is_public_ws:
                         context = await _resolve_ws_context(runtime, websocket)
                         if context is None:
                             logger.warning(
@@ -209,53 +261,10 @@ def _make_api_handler(runtime: Any, endpoint: Any):
 
         # Декларативная конфигурация auth
         auth_config = endpoint.auth_config
+
+        # Phase 2: auth_config is guaranteed by bind_routes validation.
+        # If somehow None slips through, treat as protected (fail-closed).
         is_public = auth_config.public if auth_config else False
-
-        # DEBUG: логирование для публичных эндпоинтов
-        if "bootstrap" in endpoint.path or "initialize" in endpoint.path:
-            debug_runtime = getattr(request.app.state, "runtime", None) or runtime
-            if debug_runtime and hasattr(debug_runtime, "logger"):
-                try:
-                    await debug_runtime.service_registry.call(
-                        "logger.log",
-                        level="info",
-                        message=f"[ROUTE_BINDING] {endpoint.service} auth_config={auth_config} is_public={is_public}",
-                        component="auth_debug",
-                    )
-                except asyncio.CancelledError:
-                    raise
-                except Exception:
-                    logger.warning("logger.log (route_binding debug) failed", exc_info=True)
-
-        # Если не указана декларативная конфигурация, используем fallback на старую логику
-        # для обратной совместимости
-        if auth_config is None:
-            # Fallback: определяем публичные endpoints по списку (legacy)
-            public_endpoints = [
-                "auth.bootstrap",
-                "auth.dev_credentials",
-                "auth.initialize",
-                "auth.login",
-                "auth.refresh",
-                "auth.me",
-                "admin.auth.me",
-                "admin.auth.initialize",
-                "admin.auth.login",
-                "admin.auth.refresh",
-                "device_auth.start",
-                "device_auth.cookies",
-                "device_auth.status",
-                "device_auth.get_session",
-                "device_auth.cancel",
-                "oauth.get_status",
-                "oauth.get_authorize_url",
-                "oauth.configure",
-                "oauth.exchange_code",
-                "oauth.clear_tokens",
-                "yandex.login.start",
-                "yandex.login.status",
-            ]
-            is_public = endpoint.service in public_endpoints
 
         # Авторизация: проверяем доступ к действию
         resource: Optional[Dict[str, Any]] = None
@@ -327,7 +336,13 @@ def _make_api_handler(runtime: Any, endpoint: Any):
 
             # Проверяем авторизацию на действие
             try:
-                authz_require(context, endpoint.service, resource, runtime=runtime)
+                authz_require(
+                    context,
+                    endpoint.service,
+                    resource,
+                    runtime=runtime,
+                    endpoint_auth_config=auth_config,
+                )
             except AuthorizationError:
                 raise HTTPException(
                     status_code=401 if context is None else 403,
@@ -366,7 +381,11 @@ def _make_api_handler(runtime: Any, endpoint: Any):
                         # Проверяем доступ к ресурсу
                         try:
                             authz_require(
-                                context, endpoint.service, resource, runtime=runtime
+                                context,
+                                endpoint.service,
+                                resource,
+                                runtime=runtime,
+                                endpoint_auth_config=auth_config,
                             )
                         except AuthorizationError:
                             raise HTTPException(
@@ -600,9 +619,18 @@ def _make_webhook_handler(runtime: Any, endpoint: Any):
 
 
 def _make_ws_handler(runtime: Any, endpoint: Any):
+    """
+    Create WS handler with declarative auth.
+
+    Phase 3: uses endpoint.auth_config instead of PUBLIC_WS_SERVICES.
+    """
     async def ws_handler(websocket: WebSocket):
         try:
-            if endpoint.service not in PUBLIC_WS_SERVICES:
+            # Phase 3: declarative auth — no more PUBLIC_WS_SERVICES
+            auth_config = endpoint.auth_config
+            is_public_ws = auth_config is not None and auth_config.public
+
+            if not is_public_ws:
                 context = await _resolve_ws_context(runtime, websocket)
                 if context is None:
                     logger.warning(

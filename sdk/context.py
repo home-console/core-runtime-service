@@ -7,6 +7,7 @@ PluginRuntime — контракт среды выполнения плагин�
 
 from typing import Any, Awaitable, Callable, Optional, Protocol
 
+from core.service.models import ServiceAuthConfig
 
 class PluginAPI(Protocol):
     async def call_service(self, name: str, *args: Any, **kwargs: Any) -> Any: ...
@@ -27,6 +28,7 @@ class PluginAPI(Protocol):
         ] = None,
         inject_owner_param: Optional[str] = None,
         version: Optional[str] = None,
+        auth_config: Optional[ServiceAuthConfig] = None,
     ) -> None: ...
     async def unregister_service(self, name: str) -> None: ...
     def register_http(self, endpoint: Any) -> None: ...

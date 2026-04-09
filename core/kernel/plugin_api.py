@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Awaitable, Callable, Optional
 
 from sdk.operations_events import OPERATION_READY_EVENT_TYPE, build_operation_ready_payload
+from core.service.models import ServiceAuthConfig
 
 
 class PluginAPI:
@@ -47,6 +48,7 @@ class PluginAPI:
         preload_resource: Optional[Callable[[tuple, dict], Awaitable[Any]]] = None,
         inject_owner_param: Optional[str] = None,
         version: Optional[str] = None,
+        auth_config: Optional[ServiceAuthConfig] = None,
     ) -> None:
         register_with_acl = getattr(self._service_registry, "register_with_acl", None)
         if callable(register_with_acl):
@@ -60,9 +62,10 @@ class PluginAPI:
                 preload_resource=preload_resource,
                 inject_owner_param=inject_owner_param,
                 version=version,
+                auth_config=auth_config,
             )
             return
-        await self._service_registry.register(name, func, version=version)
+        await self._service_registry.register(name, func, version=version, auth_config=auth_config)
 
     async def unregister_service(self, name: str) -> None:
         await self._service_registry.unregister(name)

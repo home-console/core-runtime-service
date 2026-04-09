@@ -234,7 +234,9 @@ class YandexDeviceAuthService:
             
         except Exception as e:
             await self._log("error", f"Failed to check QR status: {e}")
-            return {"status": "pending"}
+            # Do not pretend "pending" when Yandex endpoints are failing (504, bad JSON, etc.).
+            # Frontend needs a real error to show actionable feedback.
+            return {"status": "error", "message": str(e)}
 
     async def get_account_status(self) -> Dict[str, Any]:
         """Get account status."""

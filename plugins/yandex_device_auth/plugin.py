@@ -27,6 +27,7 @@ Storage:
 from typing import Any, Dict, List, Optional
 
 from sdk.plugin_ext import BasePlugin, PluginMetadata
+from sdk import ServiceAuthConfig
 from .device_auth_service import YandexDeviceAuthService
 
 FLOW_ID_YANDEX_DEVICE = "yandex-device"
@@ -235,44 +236,101 @@ class YandexDeviceAuthPlugin(BasePlugin):
             """
             return await self.auth_service.get_account_status()
 
-        # Register services (ACL в ядре: операции с куками/сессией — admin_only при наличии ctx)
+        # Register services.
+        #
+        # Access control is enforced declaratively via ServiceAuthConfig (SDK-first):
+        # - yandex_device_auth.*: require integrations.yandex.*
+        # - device_auth.*: public (legacy direct HTTP surface used before login)
+        yandex_scoped = ServiceAuthConfig(public=False, required_scopes=["integrations.yandex.*"])
+        device_public = ServiceAuthConfig(public=True)
         await self.register_service(
-            "yandex_device_auth.start", start_device_auth, admin_only=True
+            "yandex_device_auth.start",
+            start_device_auth,
+            admin_only=False,
+            auth_config=yandex_scoped,
         )
-        await self.register_service("device_auth.start", start_device_auth, admin_only=True)
         await self.register_service(
-            "yandex_device_auth.status", check_qr_status, admin_only=True
+            "device_auth.start",
+            start_device_auth,
+            admin_only=False,
+            auth_config=device_public,
         )
-        await self.register_service("device_auth.status", check_qr_status, admin_only=True)
         await self.register_service(
-            "yandex_device_auth.cookies", save_cookies, admin_only=True
+            "yandex_device_auth.status",
+            check_qr_status,
+            admin_only=False,
+            auth_config=yandex_scoped,
         )
-        await self.register_service("device_auth.cookies", save_cookies, admin_only=True)
+        await self.register_service(
+            "device_auth.status",
+            check_qr_status,
+            admin_only=False,
+            auth_config=device_public,
+        )
+        await self.register_service(
+            "yandex_device_auth.cookies",
+            save_cookies,
+            admin_only=False,
+            auth_config=yandex_scoped,
+        )
+        await self.register_service(
+            "device_auth.cookies",
+            save_cookies,
+            admin_only=False,
+            auth_config=device_public,
+        )
         await self.register_service(
             "yandex_device_auth.get_account_status",
             get_account_status,
-            admin_only=True,
+            admin_only=False,
+            auth_config=yandex_scoped,
         )
         await self.register_service(
             "device_auth.get_account_status",
             get_account_status,
-            admin_only=True,
+            admin_only=False,
+            auth_config=device_public,
         )
         await self.register_service(
-            "yandex_device_auth.cancel", cancel_auth, admin_only=True
+            "yandex_device_auth.cancel",
+            cancel_auth,
+            admin_only=False,
+            auth_config=yandex_scoped,
         )
-        await self.register_service("device_auth.cancel", cancel_auth, admin_only=True)
         await self.register_service(
-            "yandex_device_auth.unlink", unlink_account, admin_only=True
+            "device_auth.cancel",
+            cancel_auth,
+            admin_only=False,
+            auth_config=device_public,
         )
-        await self.register_service("device_auth.unlink", unlink_account, admin_only=True)
         await self.register_service(
-            "yandex_device_auth.get_session", get_account_session, admin_only=True
+            "yandex_device_auth.unlink",
+            unlink_account,
+            admin_only=False,
+            auth_config=yandex_scoped,
         )
-        await self.register_service("device_auth.get_session", get_account_session, admin_only=True)
+        await self.register_service(
+            "device_auth.unlink",
+            unlink_account,
+            admin_only=False,
+            auth_config=device_public,
+        )
+        await self.register_service(
+            "yandex_device_auth.get_session",
+            get_account_session,
+            admin_only=False,
+            auth_config=yandex_scoped,
+        )
+        await self.register_service(
+            "device_auth.get_session",
+            get_account_session,
+            admin_only=False,
+            auth_config=device_public,
+        )
 
         # Register HTTP endpoints
         from sdk.http import HttpEndpoint
+        from sdk.http import EndpointAuthConfig
 
         try:
             self.register_http_endpoint(
@@ -281,6 +339,7 @@ class YandexDeviceAuthPlugin(BasePlugin):
                     path="/yandex/auth/device/start",
                     service="device_auth.start",
                     description="Start QR or password authorization",
+                    auth_config=EndpointAuthConfig(public=True),
                 )
             )
 
@@ -290,6 +349,7 @@ class YandexDeviceAuthPlugin(BasePlugin):
                     path="/yandex/auth/device/status",
                     service="device_auth.status",
                     description="Check QR confirmation status",
+                    auth_config=EndpointAuthConfig(public=True),
                 )
             )
 
@@ -299,6 +359,7 @@ class YandexDeviceAuthPlugin(BasePlugin):
                     path="/yandex/auth/device/cookies",
                     service="device_auth.cookies",
                     description="Save cookies from manual submission",
+                    auth_config=EndpointAuthConfig(public=True),
                 )
             )
 
@@ -308,6 +369,7 @@ class YandexDeviceAuthPlugin(BasePlugin):
                     path="/yandex/auth/device/session",
                     service="device_auth.get_session",
                     description="Get account session status",
+                    auth_config=EndpointAuthConfig(public=True),
                 )
             )
 
@@ -317,6 +379,7 @@ class YandexDeviceAuthPlugin(BasePlugin):
                     path="/yandex/auth/device/cancel",
                     service="device_auth.cancel",
                     description="Cancel ongoing authorization",
+                    auth_config=EndpointAuthConfig(public=True),
                 )
             )
 
@@ -326,6 +389,7 @@ class YandexDeviceAuthPlugin(BasePlugin):
                     path="/yandex/auth/device/unlink",
                     service="device_auth.unlink",
                     description="Unlink account",
+                    auth_config=EndpointAuthConfig(public=True),
                 )
             )
         except Exception:

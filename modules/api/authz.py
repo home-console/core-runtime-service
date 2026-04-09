@@ -7,17 +7,19 @@ Authorization Policy Layer — единая точка авторизацион�
 
 Архитектура:
 - Использует RequestContext из auth.py
-- Scope-based authorization (действие → scope)
+- Scope-based authorization (endpoint_auth_config / ServiceAuthConfig)
 - Resource-Based Authorization с ACL (ownership + shared_with)
 - Self-service проверки для auth операций
 - НЕ логирует
 - НЕ мутирует состояние
 """
 
-from typing import Optional, Dict, Any, Set
+from typing import Optional, Dict, Any, Set, Sequence
 import asyncio
 from modules.api.auth import RequestContext
 logger = logging.getLogger(__name__)
+from core.service.models import ServiceAuthConfig
+from core.http.models import EndpointAuthConfig
 
 
 class AuthorizationError(Exception):
@@ -25,160 +27,51 @@ class AuthorizationError(Exception):
     pass
 
 
-# Mapping: action → required scope
-# Формат scope: "namespace.action" (совместимо с существующим форматом scopes)
-# Action соответствует service_name из ServiceRegistry
-# Для read операций используется "namespace.read", для write - "namespace.write"
-ACTION_SCOPE_MAP: Dict[str, str] = {
-    # Devices
-    "devices.list": "devices.read",
-    "devices.get": "devices.read",
-    "devices.set_state": "devices.write",
-    # Product API (BFF) — user-facing endpoints delegate to devices.*
-    "product_api.v1.devices.list": "devices.read",
-    "product_api.v1.devices.get": "devices.read",
-    "product_api.v1.devices.set_state": "devices.write",
-    "product_api.v1.devices.get_external": "devices.read",
-    "devices.list_external": "devices.read",
-    "devices.list_mappings": "devices.read",
-    "devices.get_external_for_device": "devices.read",
-    "devices.create_mapping": "devices.write",
-    "devices.delete_mapping": "devices.write",
-    "devices.auto_map_external": "devices.write",
+def _service_auth_config_from_runtime(runtime: Optional[Any], action: str) -> Optional[ServiceAuthConfig]:
+    """
+    Получить декларативную auth_config для runtime-сервиса.
 
-    # Yandex Device Auth (plugin) — admin-only integration bootstrap
-    "device_auth.start": "admin.*",
-    "device_auth.status": "admin.*",
-    "device_auth.cookies": "admin.*",
-    "device_auth.get_session": "admin.*",
-    "device_auth.cancel": "admin.*",
-    "device_auth.unlink": "admin.*",
-    "yandex_device_auth.start": "admin.*",
-    "yandex_device_auth.status": "admin.*",
-    "yandex_device_auth.cookies": "admin.*",
-    "yandex_device_auth.get_session": "admin.*",
-    "yandex_device_auth.cancel": "admin.*",
-    "yandex_device_auth.unlink": "admin.*",
-    
-    # Automation
-    "automation.trigger": "automation.write",
-    "automation.list": "automation.read",
-    "automation.get": "automation.read",
-    "automation.create": "automation.write",
-    "automation.update": "automation.write",
-    "automation.delete": "automation.write",
-    
-    # Presence
-    "presence.set": "presence.write",
-    "presence.get": "presence.read",
-    
-    # OAuth (provider-agnostic)
-    "oauth.get_status": "oauth.read",
-    "oauth.get_authorize_url": "oauth.read",
-    "oauth.configure": "oauth.write",
-    "oauth.exchange_code": "oauth.write",
-    "oauth.validate_token": "oauth.read",
-    "oauth.get_tokens": "oauth.read",
-    "oauth.set_tokens": "oauth.write",
-    
-    # Auth management
-    "admin.auth.create_api_key": "admin.*",
-    "admin.auth.list_api_keys": "admin.*",
-    "admin.auth.create_user": "admin.*",
-    "admin.auth.list_users": "admin.*",
-    "admin.auth.set_password": "admin.*",  # Self-service проверка через resource
-    "admin.auth.change_password": "admin.*",  # Self-service проверка через resource
-    "admin.auth.list_sessions": "admin.*",  # Self-service проверка через resource
-    "admin.auth.revoke_session": "admin.*",
-    "admin.auth.revoke_all_sessions": "admin.*",  # Self-service проверка через resource
-    "admin.auth.revoke_api_key": "admin.*",
-    "admin.auth.rotate_api_key": "admin.*",
-    
-    # Admin v1 services (read-only инвентарь)
-    "admin.v1.runtime": "admin.read",
-    "admin.v1.plugins": "admin.read",
-    "admin.v1.services": "admin.read",
-    "admin.v1.http": "admin.read",
-    "admin.v1.events": "admin.read",
-    "admin.v1.storage": "admin.read",
-    "admin.v1.storage.get": "admin.read",
-    "admin.v1.credentials.list": "admin.read",
-    "admin.v1.credentials.get": "admin.read",
-    "admin.v1.credentials.get_secret": "admin.read",
-    "admin.v1.credentials.create": "admin.write",
-    "admin.v1.credentials.update": "admin.write",
-    "admin.v1.credentials.delete": "admin.write",
-    "admin.v1.credentials.connect": "admin.write",
-    "admin.v1.credentials.terminal_ws": "admin.write",
-    "admin.v1.credentials.terminal_sessions": "admin.read",
-    "admin.v1.credentials.terminal_session_close": "admin.write",
-    # NOTE: admin.v1.state* inspector endpoints/services removed (legacy state surface).
-    "admin.v1.integrations": "admin.read",
-    "admin.v1.inspector.auth": "admin.read",
+    runtime: CoreRuntime или facade, который содержит service_registry (или сам является service_registry).
+    """
+    if runtime is None:
+        return None
+    reg = getattr(runtime, "service_registry", None) or getattr(runtime, "services", None) or runtime
+    getter_sync = getattr(reg, "get_auth_config_sync", None)
+    if callable(getter_sync):
+        try:
+            return getter_sync(action)
+        except Exception:
+            return None
 
-    # Admin SSH terminal session manager
-    "admin.v1.ssh.sessions.create": "admin.write",
-    "admin.v1.ssh.sessions.list": "admin.read",
-    "admin.v1.ssh.sessions.close": "admin.write",
-    "admin.v1.ssh.ws": "admin.write",
-
-    # Agent deploy
-    "admin.agents.deploy": "admin.write",
-    "admin.v1.agents.terminal.start": "admin.write",
-    "admin.v1.agents.terminal.ws": "admin.write",
-    
-    # User v1 services (user-scoped operations)
-    "user.v1.integrations": "integrations.read",
-    "user.v1.credentials.list": "credentials.read",
-    "user.v1.credentials.get": "credentials.read",
-    "user.v1.credentials.get_secret": "credentials.read",
-    "user.v1.credentials.create": "credentials.write",
-    "user.v1.credentials.update": "credentials.write",
-    "user.v1.credentials.delete": "credentials.write",
-    "user.v1.credentials.connect": "credentials.write",
-    
-    # Admin basic services (legacy names removed — use admin.v1.* services)
-    # NOTE: legacy admin.* entries like "admin.list_plugins" and the
-    # admin.devices.* proxy services were removed to avoid dead/misleading
-    # mappings. Inspector read-only services live under admin.v1.*.
-
-    # Inspector — read-only (все inspector endpoints)
-    "admin.v1.inspector.operations": "admin.read",
-    "admin.v1.inspector.dashboard": "admin.read",
-    "admin.v1.inspector.plugins.discover": "admin.read",
-    "admin.v1.inspector.plugins.get": "admin.read",
-    "admin.v1.inspector.executions": "admin.read",
-    "admin.v1.inspector.executions.get": "admin.read",
-    "admin.v1.inspector.executions.retries": "admin.read",
-    "admin.v1.inspector.executions.tree": "admin.read",
-    "admin.v1.inspector.operations.executions": "admin.read",
-    "admin.v1.inspector.schedules": "admin.read",
-    "admin.v1.inspector.schedules.get": "admin.read",
-    "admin.v1.inspector.operations.schedules": "admin.read",
-    "admin.v1.inspector.integrations": "admin.read",
-    "admin.v1.inspector.inventory": "admin.read",
-    "admin.v1.inspector.system_health": "admin.read",
-    "admin.v1.marketplace.catalog": "admin.read",
-
-    # Admin operations (CRUD)
-    "admin.operations.create": "admin.write",
-    "admin.operations.list": "admin.read",
-    "admin.operations.get": "admin.read",
-    "admin.operations.cancel": "admin.write",
-    "admin.operations.retry": "admin.write",
-
-    # Admin devices proxy
-    "admin.v1.devices.list": "admin.read",
-    "admin.v1.devices.list_mappings": "admin.read",
-    "admin.v1.devices.get_external_for_device": "admin.read",
-    "admin.v1.devices.set_state": "admin.write",
-
-    # Admin (wildcard - все остальные admin.* действия требуют admin.*)
-    # Проверяется отдельно через action.startswith("admin.")
-}
+    # Backward-compatible fallback: async getter exists but we're in sync context.
+    # Do not attempt to bridge event loops here.
+    return None
 
 
-def check(ctx: Optional[RequestContext], action: str, resource: Optional[Dict[str, Any]] = None) -> bool:
+def _scope_satisfies(ctx_scopes: Set[str], required_scope: str) -> bool:
+    """
+    Проверка required_scope по текущей семантике scope-based auth:
+    - точное совпадение required_scope
+    - wildcard по namespace: "<namespace>.*"
+    - глобальный wildcard "*" проверяется снаружи (для единообразия логики)
+    """
+    if required_scope in ctx_scopes:
+        return True
+    if "." in required_scope:
+        namespace = required_scope.split(".", 1)[0]
+        if f"{namespace}.*" in ctx_scopes:
+            return True
+    return False
+
+
+def check(
+    ctx: Optional[RequestContext],
+    action: str,
+    resource: Optional[Dict[str, Any]] = None,
+    *,
+    runtime: Optional[Any] = None,
+    endpoint_auth_config: Optional[EndpointAuthConfig] = None,
+) -> bool:
     """
     Проверяет, разрешено ли выполнить действие.
     
@@ -210,35 +103,24 @@ def check(ctx: Optional[RequestContext], action: str, resource: Optional[Dict[st
     
     if resource is not None and not isinstance(resource, dict):
         return False
+    # Декларативная authz для HTTP endpoints (самый приоритетный источник правды).
+    if endpoint_auth_config is not None and endpoint_auth_config.public:
+        return True
+
     # Специальный случай: создание первого API key разрешено без авторизации
     # Проверяем через resource, который передаётся из handler
     if action == "admin.auth.create_api_key" and resource and resource.get("allow_first_key"):
         return True
     
-    # Специальный случай: создание первого админа - публичный endpoint
-    if action == "admin.auth.initialize":
-        return True
-    
-    # Специальный случай: /admin/v1/auth/me - публичный endpoint для проверки инициализации
-    if action == "admin.auth.me":
-        return True
-    
-    # Специальный случай: OAuth эндпоинты публичные (не требуют авторизации)
-    # Используются для настройки OAuth до авторизации
-    if action.startswith("oauth."):
-        return True
-    
-    # Специальный случай: device-auth эндпоинты публичные
-    # Используются для OAuth авторизации пользователя в конкретном провайдере
-    if action.startswith("device_auth."):
+    # Legacy public rules removed: declare public via EndpointAuthConfig/ServiceAuthConfig.
+
+    # Декларативная authz для сервисов (SDK-first).
+    svc_auth = _service_auth_config_from_runtime(runtime, action)
+    if svc_auth and svc_auth.public:
         return True
 
     # Креды пользователя: доступны любому авторизованному пользователю (свои креды)
     if action.startswith("user.v1.credentials.") and ctx and ctx.user_id:
-        return True
-    
-    # Специальный случай: login публичный (не требует авторизации)
-    if action == "admin.auth.login":
         return True
     
     # Нет контекста → нет доступа
@@ -255,43 +137,60 @@ def check(ctx: Optional[RequestContext], action: str, resource: Optional[Dict[st
     
     # Проверяем права на действие (scope-based)
     action_allowed = False
-    
-    # Административные действия требуют admin прав
-    # Сначала проверяем явные маппинги, затем fallback на admin.*
+
     if action.startswith("admin."):
-        # Проверяем, есть ли явный маппинг для этого действия
-        required_scope = ACTION_SCOPE_MAP.get(action)
-        if required_scope:
-            # Используем явный маппинг (например, "admin.read" или "admin.devices.read")
-            if required_scope in ctx.scopes:
-                action_allowed = True
-            elif "." in required_scope:
-                namespace = required_scope.split(".")[0]
-                namespace_wildcard = f"{namespace}.*"
-                if namespace_wildcard in ctx.scopes:
-                    action_allowed = True
-            action_allowed = action_allowed or has_wildcard_scope
+        # Phase 4: admin.* actions uniformly require "admin.*" (or "admin.read"/"admin.write" from endpoint_auth_config).
+        # All explicit admin endpoints now declare auth_config, so the fallback handles the rest.
+        required_scopes_from_endpoint: list[str] = []
+        if endpoint_auth_config and endpoint_auth_config.required_scopes:
+            required_scopes_from_endpoint = [
+                s
+                for s in endpoint_auth_config.required_scopes
+                if isinstance(s, str) and s
+            ]
+
+        if required_scopes_from_endpoint:
+            action_allowed = has_wildcard_scope or any(
+                _scope_satisfies(ctx.scopes, s) for s in required_scopes_from_endpoint
+            )
+        elif svc_auth and svc_auth.required_scopes:
+            required_scopes = [
+                s for s in svc_auth.required_scopes if isinstance(s, str) and s
+            ]
+            action_allowed = has_wildcard_scope or any(
+                _scope_satisfies(ctx.scopes, s) for s in required_scopes
+            ) if required_scopes else has_wildcard_scope
         else:
             # Fallback: все admin.* действия требуют admin.*
-            required_scope = "admin.*"
-            action_allowed = required_scope in ctx.scopes or has_wildcard_scope
+            action_allowed = "admin.*" in ctx.scopes or has_wildcard_scope
     else:
-        # Ищем required scope в mapping
-        required_scope = ACTION_SCOPE_MAP.get(action)
-        
-        # Если action не найден в mapping → доступ запрещён
-        if required_scope is None:
-            action_allowed = has_wildcard_scope
+        # Non-admin actions: use declarative auth_config (SDK-first).
+        required_scopes_from_endpoint = []
+        if endpoint_auth_config and endpoint_auth_config.required_scopes:
+            required_scopes_from_endpoint = [
+                s
+                for s in endpoint_auth_config.required_scopes
+                if isinstance(s, str) and s
+            ]
+
+        if required_scopes_from_endpoint:
+            action_allowed = has_wildcard_scope or any(
+                _scope_satisfies(ctx.scopes, s) for s in required_scopes_from_endpoint
+            )
+        elif svc_auth and svc_auth.required_scopes:
+            # OR-semantics: достаточно одного scope из списка.
+            required_scopes = [
+                s for s in svc_auth.required_scopes if isinstance(s, str) and s
+            ]
+            if not required_scopes:
+                action_allowed = has_wildcard_scope
+            else:
+                action_allowed = has_wildcard_scope or any(
+                    _scope_satisfies(ctx.scopes, s) for s in required_scopes
+                )
         else:
-            # Проверяем scopes
-            if required_scope in ctx.scopes:
-                action_allowed = True
-            elif "." in required_scope:
-                namespace = required_scope.split(".")[0]
-                namespace_wildcard = f"{namespace}.*"
-                if namespace_wildcard in ctx.scopes:
-                    action_allowed = True
-            action_allowed = action_allowed or has_wildcard_scope
+            # Phase 4: no ACTION_SCOPE_MAP fallback — fail-closed without wildcards.
+            action_allowed = has_wildcard_scope
     
     # Если нет прав на действие → запрещаем
     if not action_allowed:
@@ -331,7 +230,14 @@ def check(ctx: Optional[RequestContext], action: str, resource: Optional[Dict[st
     return True
 
 
-def require(ctx: Optional[RequestContext], action: str, resource: Optional[Dict[str, Any]] = None, runtime: Optional[Any] = None) -> None:
+def require(
+    ctx: Optional[RequestContext],
+    action: str,
+    resource: Optional[Dict[str, Any]] = None,
+    runtime: Optional[Any] = None,
+    *,
+    endpoint_auth_config: Optional[EndpointAuthConfig] = None,
+) -> None:
     """
     Требует разрешения на выполнение действия.
     
@@ -346,7 +252,13 @@ def require(ctx: Optional[RequestContext], action: str, resource: Optional[Dict[
     Raises:
         AuthorizationError: если доступ запрещён
     """
-    if not check(ctx, action, resource):
+    if not check(
+        ctx,
+        action,
+        resource,
+        runtime=runtime,
+        endpoint_auth_config=endpoint_auth_config,
+    ):
         # Audit logging отказов в авторизации
         if runtime:
             try:
@@ -401,16 +313,47 @@ def require(ctx: Optional[RequestContext], action: str, resource: Optional[Dict[
 
 def get_required_scope(action: str) -> Optional[str]:
     """
-    Возвращает required scope для действия.
-    
-    Используется для документирования и отладки.
-    
-    Args:
-        action: действие
-    
-    Returns:
-        Required scope или None если не найден
+    DEPRECATED: use get_required_scopes() instead.
+
+    Legacy single-scope lookup. Returns the first required scope or
+    "admin.*" for admin actions.
     """
+    scopes = get_required_scopes(action)
+    return scopes[0] if scopes else None
+
+
+def get_required_scopes(
+    action: str,
+    *,
+    runtime: Optional[Any] = None,
+    endpoint_auth_config: Optional[EndpointAuthConfig] = None,
+) -> Sequence[str]:
+    """
+    Возвращает required scopes для действия.
+
+    Используется для документирования, отладки и Inspector.
+
+    Приоритет источников:
+    1. endpoint_auth_config.required_scopes (если передан)
+    2. ServiceAuthConfig из service_registry (через runtime)
+    3. Fallback: "admin.*" для admin.* действий, иначе пусто
+
+    Args:
+        action: действие (например, "devices.get", "admin.v1.runtime")
+        runtime: опциональный CoreRuntime для lookup ServiceAuthConfig
+        endpoint_auth_config: опциональная декларативная auth конфигурация
+
+    Returns:
+        Список required scopes (может быть пустым)
+    """
+    if endpoint_auth_config and endpoint_auth_config.required_scopes:
+        return [s for s in endpoint_auth_config.required_scopes if isinstance(s, str) and s]
+
+    svc_auth = _service_auth_config_from_runtime(runtime, action)
+    if svc_auth and svc_auth.required_scopes:
+        return [s for s in svc_auth.required_scopes if isinstance(s, str) and s]
+
     if action.startswith("admin."):
-        return "admin.*"
-    return ACTION_SCOPE_MAP.get(action)
+        return ["admin.*"]
+
+    return []

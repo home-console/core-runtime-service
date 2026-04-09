@@ -332,7 +332,20 @@ class YandexPassportClient:
                 "https://mobileproxy.passport.yandex.net/1/bundle/account/short_info/?avatar_size=islands-300",
                 headers={"Authorization": f"OAuth {x_token}"},
             ) as resp:
-                data = await resp.json()
+                if resp.status != 200:
+                    body = await resp.text()
+                    logger.error(f"[Yandex] short_info failed: HTTP {resp.status}")
+                    logger.error(f"[Yandex] short_info body (first 200): {body[:200]}")
+                    return None
+
+                # mobileproxy sometimes returns missing/incorrect content-type even with JSON.
+                try:
+                    data = await resp.json(content_type=None)
+                except (aiohttp.ContentTypeError, json.JSONDecodeError) as e:
+                    body = await resp.text()
+                    logger.error(f"[Yandex] short_info invalid JSON: {e}")
+                    logger.error(f"[Yandex] short_info body (first 200): {body[:200]}")
+                    return None
 
                 if data.get("status") != "ok":
                     logger.error(f"[Yandex] Invalid x_token: {data}")

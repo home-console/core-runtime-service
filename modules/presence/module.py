@@ -8,7 +8,7 @@ PresenceModule — встроенный модуль отслеживания п
 from typing import Optional
 
 from core.runtime.runtime_module import RuntimeModule
-from core.http.models import HttpEndpoint
+from core.http.models import HttpEndpoint, EndpointAuthConfig
 from core.events_schemas import PresenceEnteredPayload, PresenceLeftPayload
 import logging
 logger = logging.getLogger(__name__)
@@ -33,23 +33,37 @@ class PresenceModule(RuntimeModule):
 
         Регистрирует сервис presence.set и HTTP endpoints.
         """
-        # Регистрация сервиса
+        # Регистрация сервисов
         await self.context.services.register("presence.set", self._set_service)
+
+        # Публичные HTTP ручки должны быть декларативны.
+        # Превращаем legacy "presence.set?home=true" в явные сервисы.
+        async def _enter(**kw):
+            return await self._set_service(True)
+
+        async def _leave(**kw):
+            return await self._set_service(False)
+
+        await self.context.services.register("presence.enter", _enter)
+        await self.context.services.register("presence.leave", _leave)
 
         # Регистрация HTTP контрактов
         try:
+            _presence_write = EndpointAuthConfig(required_scopes=["presence.write"])
             self.context.http.register(
                 HttpEndpoint(
                     method="POST",
                     path="/presence/enter",
-                    service="presence.set?home=true"
+                    service="presence.enter",
+                    auth_config=_presence_write,
                 )
             )
             self.context.http.register(
                 HttpEndpoint(
                     method="POST",
                     path="/presence/leave",
-                    service="presence.set?home=false"
+                    service="presence.leave",
+                    auth_config=_presence_write,
                 )
             )
         except Exception:
@@ -82,6 +96,8 @@ class PresenceModule(RuntimeModule):
         # Отмена регистрации сервиса
         try:
             await self.context.services.unregister("presence.set")
+            await self.context.services.unregister("presence.enter")
+            await self.context.services.unregister("presence.leave")
         except Exception:
             logger.warning("Unhandled exception", exc_info=True)
 

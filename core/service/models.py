@@ -4,12 +4,29 @@ Service Registry Models — middleware and type definitions .
 Декларативные модели для middleware и типизация функций-сервисов.
 """
 
-from typing import Any, Callable, Awaitable
+from dataclasses import dataclass
+from typing import Any, Callable, Awaitable, Optional, Sequence
 from abc import ABC, abstractmethod
 
 
 # Тип для сервисной функции
 ServiceFunc = Callable[..., Awaitable[Any]]
+
+
+@dataclass(frozen=True)
+class ServiceAuthConfig:
+    """
+    Декларативная конфигурация авторизации для runtime-сервиса.
+
+    Зачем:
+    - HTTP/WS маршруты и любые вызовы сервисов снаружи процесса должны
+      иметь единый источник правды о доступе.
+    - Плагины и модули должны объявлять доступ рядом с регистрацией сервиса,
+      чтобы не требовать ручных правок центрального authz mapping.
+    """
+
+    public: bool = False
+    required_scopes: Optional[Sequence[str]] = None
 
 
 class ServiceMiddleware(ABC):

@@ -24,6 +24,7 @@ from sdk.security import TokenEncryption, sanitize_for_logging, sanitize_headers
 from sdk.http import HttpEndpoint, EndpointAuthConfig, EndpointParamMapping
 from sdk.operation import operation
 from sdk.events import ExternalDeviceDiscoveredPayload
+from core.service.models import ServiceAuthConfig
 
 __all__ = [
     # Runtime context
@@ -37,6 +38,8 @@ __all__ = [
     "HttpEndpoint",
     "EndpointAuthConfig",
     "EndpointParamMapping",
+    # Service registry
+    "ServiceAuthConfig",
     # Security
     "TokenEncryption",
     "sanitize_for_logging",

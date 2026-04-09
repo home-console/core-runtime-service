@@ -37,6 +37,7 @@ from typing import (
 
 from core.runtime.runtime_context import RuntimeContext
 from core.service._acl import PreloadResourceFunc
+from core.service.models import ServiceAuthConfig
 
 # Тип для сервисной функции: async (*args, **kwargs) -> Any
 ServiceFunc = Callable[..., Awaitable[Any]]
@@ -134,6 +135,7 @@ class RuntimeModule(ABC):
         preload_resource: Optional[PreloadResourceFunc] = None,
         inject_owner_param: Optional[str] = None,
         version: Optional[str] = None,
+        auth_config: Optional[ServiceAuthConfig] = None,
     ) -> None:
         """
         Удобный helper для регистрации сервиса из модулей без копипасты.
@@ -162,10 +164,11 @@ class RuntimeModule(ABC):
                     preload_resource=preload_resource,
                     inject_owner_param=inject_owner_param,
                     version=version,
+                    auth_config=auth_config,
                 )
                 return
 
-            await reg.register(name, _wrapper, version=version)
+            await reg.register(name, _wrapper, version=version, auth_config=auth_config)
         except ValueError:
             # Service already registered (hot-reload / repeated test setup) — skip silently.
             pass
@@ -182,6 +185,7 @@ class RuntimeModule(ABC):
         preload_resource: Optional[PreloadResourceFunc] = None,
         inject_owner_param: Optional[str] = None,
         version: Optional[str] = None,
+        auth_config: Optional[ServiceAuthConfig] = None,
     ) -> None:
         """
         Удобный helper для регистрации сервиса из модулей, где доменный хендлер
@@ -207,10 +211,11 @@ class RuntimeModule(ABC):
                     preload_resource=preload_resource,
                     inject_owner_param=inject_owner_param,
                     version=version,
+                    auth_config=auth_config,
                 )
                 return
 
-            await reg.register(name, _wrapper, version=version)
+            await reg.register(name, _wrapper, version=version, auth_config=auth_config)
         except ValueError:
             # Service already registered (hot-reload / repeated test setup) — skip silently.
             pass
@@ -227,6 +232,7 @@ class RuntimeModule(ABC):
         preload_resource: Optional[PreloadResourceFunc] = None,
         inject_owner_param: Optional[str] = None,
         version: Optional[str] = None,
+        auth_config: Optional[ServiceAuthConfig] = None,
     ) -> None:
         """
         Зарегистрировать сервис "как есть" (без инъекции runtime/context в аргументы).
@@ -254,10 +260,11 @@ class RuntimeModule(ABC):
                     preload_resource=preload_resource,
                     inject_owner_param=inject_owner_param,
                     version=version,
+                    auth_config=auth_config,
                 )
                 return
 
-            await reg.register(name, _wrapper, version=version)
+            await reg.register(name, _wrapper, version=version, auth_config=auth_config)
         except ValueError:
             # Service already registered (hot-reload / repeated test setup) — skip silently.
             pass

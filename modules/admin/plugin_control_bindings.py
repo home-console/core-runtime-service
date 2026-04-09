@@ -5,7 +5,7 @@ import shutil
 from pathlib import Path
 from typing import Any, Optional
 
-from core.http.models import HttpEndpoint
+from core.http.models import HttpEndpoint, EndpointAuthConfig
 from app.orchestration import OrchestrationService
 
 logger = logging.getLogger(__name__)
@@ -224,16 +224,17 @@ async def register_plugin_control_bindings(
         logger.warning("Failed to register plugin control services: %s", e, exc_info=True)
 
     try:
+        _admin_write = EndpointAuthConfig(required_scopes=["admin.write"])
         for endpoint in [
-            HttpEndpoint(method="POST", path="/admin/v1/plugins/{name}/unload", service="admin.v1.plugins.unload", description="Unload plugin by name (admin only)"),
-            HttpEndpoint(method="POST", path="/admin/v1/plugins/{name}/reload", service="admin.v1.plugins.reload", description="Reload plugin by name (admin only)"),
-            HttpEndpoint(method="POST", path="/admin/v1/plugins/{name}/restart-container", service="admin.v1.plugins.restart_container", description="Restart plugin container by name (admin only)"),
-            HttpEndpoint(method="POST", path="/admin/v1/plugins/{name}/ensure-container", service="admin.v1.plugins.ensure_container", description="Ensure plugin container exists (build and create if needed, admin only)"),
-            HttpEndpoint(method="POST", path="/admin/v1/plugins/{name}/start", service="admin.v1.plugins.start", description="Start plugin by name (kernel: plugin_manager.start_plugin)"),
-            HttpEndpoint(method="POST", path="/admin/v1/plugins/{name}/stop", service="admin.v1.plugins.stop", description="Stop plugin by name (kernel: plugin_manager.stop_plugin)"),
-            HttpEndpoint(method="POST", path="/admin/v1/plugins/load", service="admin.v1.plugins.load_by_name", description="Load one plugin by name from plugins dir (kernel: load_plugin_by_name). Body: { name?, plugins_dir? }"),
-            HttpEndpoint(method="POST", path="/admin/v1/plugins/{name}/load", service="admin.v1.plugins.load_by_name", description="Load one plugin by name from path (kernel: load_plugin_by_name)"),
-            HttpEndpoint(method="POST", path="/admin/v1/plugins/auto-load", service="admin.v1.plugins.auto_load", description="Rescan plugins dir and load from manifests (kernel: auto_load_plugins). Body: { plugins_dir? }"),
+            HttpEndpoint(method="POST", path="/admin/v1/plugins/{name}/unload", service="admin.v1.plugins.unload", description="Unload plugin by name (admin only)", auth_config=_admin_write),
+            HttpEndpoint(method="POST", path="/admin/v1/plugins/{name}/reload", service="admin.v1.plugins.reload", description="Reload plugin by name (admin only)", auth_config=_admin_write),
+            HttpEndpoint(method="POST", path="/admin/v1/plugins/{name}/restart-container", service="admin.v1.plugins.restart_container", description="Restart plugin container by name (admin only)", auth_config=_admin_write),
+            HttpEndpoint(method="POST", path="/admin/v1/plugins/{name}/ensure-container", service="admin.v1.plugins.ensure_container", description="Ensure plugin container exists (build and create if needed, admin only)", auth_config=_admin_write),
+            HttpEndpoint(method="POST", path="/admin/v1/plugins/{name}/start", service="admin.v1.plugins.start", description="Start plugin by name (kernel: plugin_manager.start_plugin)", auth_config=_admin_write),
+            HttpEndpoint(method="POST", path="/admin/v1/plugins/{name}/stop", service="admin.v1.plugins.stop", description="Stop plugin by name (kernel: plugin_manager.stop_plugin)", auth_config=_admin_write),
+            HttpEndpoint(method="POST", path="/admin/v1/plugins/load", service="admin.v1.plugins.load_by_name", description="Load one plugin by name from plugins dir (kernel: load_plugin_by_name). Body: { name?, plugins_dir? }", auth_config=_admin_write),
+            HttpEndpoint(method="POST", path="/admin/v1/plugins/{name}/load", service="admin.v1.plugins.load_by_name", description="Load one plugin by name from path (kernel: load_plugin_by_name)", auth_config=_admin_write),
+            HttpEndpoint(method="POST", path="/admin/v1/plugins/auto-load", service="admin.v1.plugins.auto_load", description="Rescan plugins dir and load from manifests (kernel: auto_load_plugins). Body: { plugins_dir? }", auth_config=_admin_write),
         ]:
             context.http.register(endpoint)
     except Exception as e:

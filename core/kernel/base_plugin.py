@@ -20,6 +20,7 @@ from sdk.plugin import BasePlugin as SDKBasePlugin
 
 from core.runtime.runtime_context import RuntimeContext
 from core.service._acl import PreloadResourceFunc
+from core.service.models import ServiceAuthConfig
 import logging
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,7 @@ class SupportsPluginRuntimeAPI(Protocol):
         preload_resource: Optional[PreloadResourceFunc] = None,
         inject_owner_param: Optional[str] = None,
         version: Optional[str] = None,
+        auth_config: Optional[ServiceAuthConfig] = None,
     ) -> None: ...
 
     async def unregister_service(self, name: str) -> None: ...
@@ -211,6 +213,7 @@ class BasePlugin(SDKBasePlugin):
         preload_resource: Optional[PreloadResourceFunc] = None,
         inject_owner_param: Optional[str] = None,
         version: Optional[str] = None,
+        auth_config: Optional[ServiceAuthConfig] = None,
     ) -> None:
         """
         Удобный helper для регистрации сервисов в плагинах.
@@ -243,6 +246,7 @@ class BasePlugin(SDKBasePlugin):
             preload_resource=preload_resource,
             inject_owner_param=inject_owner_param,
             version=version,
+            auth_config=auth_config,
         )
 
     async def unregister_service(self, name: str) -> None:
