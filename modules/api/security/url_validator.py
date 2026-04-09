@@ -46,7 +46,7 @@ def is_private_ip(host: str) -> bool:
             ip_obj.is_loopback or 
             ip_obj.is_link_local or
             ip_obj.is_multicast or
-            ip_obj.is_reserved):
+            ip_obj.is_unspecified):
             return True
         
         return False

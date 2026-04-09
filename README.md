@@ -25,6 +25,22 @@ For plugin authors, kernel exposes the **Plugin SDK** (`sdk.*`) to keep plugin c
 scripts/py_venv.sh -- scripts/validate_architecture_rules.py --root .
 ```
 
+## Environment (.env)
+
+- **Template**: copy `.env.example` → `.env`
+- **Secrets**: generate `CSRF_SECRET` and `OAUTH_ENCRYPTION_KEY` locally (do not commit)
+
+```bash
+cp .env.example .env
+python3 -c "import secrets; print('CSRF_SECRET=' + secrets.token_hex(32))"
+python3 -c "import secrets; print('OAUTH_ENCRYPTION_KEY=' + secrets.token_hex(32))"
+```
+
+## Web dev auth (cookies + CORS)
+
+- **Recommended (dev)**: use Vite proxy (same-origin). Set `VITE_API_BASE_URL` to empty (or leave unset) so frontend calls `/auth`, `/api`, `/admin/v1` through the proxy.
+- **Direct cross-origin**: if frontend talks to `http://localhost:8000` directly, set `RUNTIME_CORS_ALLOWED_ORIGINS` and cookie flags in `.env` (see `.env.example`). Cookie-based refresh requires `credentials: 'include'`.
+
 ## Local Plugin SDK Guard
 ```bash
 python3 scripts/validate_plugin_sdk_imports.py --root .
