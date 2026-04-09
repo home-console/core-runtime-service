@@ -16,9 +16,7 @@ For plugin authors, kernel exposes the **Plugin SDK** (`sdk.*`) to keep plugin c
 
 ## Core Architecture Rules
 - Russian core policy (mandatory): [docs/CORE_KERNEL_POLICY_RU.md](docs/CORE_KERNEL_POLICY_RU.md)
-- Cleanup playbook: [PROJECT_CLEANUP_PLAYBOOK.md](PROJECT_CLEANUP_PLAYBOOK.md)
-- Main core backlog (source of truth): [MAIN_PROBLEMS.md](MAIN_PROBLEMS.md)
-- Modules/plugins boundary backlog: [modules_plugins_problems.md](modules_plugins_problems.md)
+- Development rules: [docs/CORE_DEVELOPMENT_RULES_RU.md](docs/CORE_DEVELOPMENT_RULES_RU.md)
 
 ## Local Architecture Guard
 ```bash
