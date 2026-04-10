@@ -7,6 +7,7 @@ HTTP (FastAPI/uvicorn) полностью в модуле api; Runtime вызы�
 
 import asyncio
 import os
+import sys
 from pathlib import Path
 
 from app.bootstrap import (
@@ -135,7 +136,7 @@ async def main() -> None:
         print("[Runtime] Storage закрыт")
     except Exception:
         pass
-    os._exit(0)
+    sys.exit(0)
 
 
 if __name__ == "__main__":

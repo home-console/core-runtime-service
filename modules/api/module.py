@@ -11,6 +11,7 @@ ApiModule — HTTP API Gateway (FastAPI + uvicorn).
 
 from typing import Any, Dict
 import os
+import sys
 import asyncio
 import signal
 from contextlib import nullcontext
@@ -232,7 +233,7 @@ class ApiModule(RuntimeModule):
             if sigint_count[0] == 1:
                 server.should_exit = True
             else:
-                os._exit(1)
+                sys.exit(1)
 
         try:
             if hasattr(loop, "add_signal_handler"):

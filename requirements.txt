@@ -14,7 +14,7 @@ pytest-reporter-html1
 
 # HTTP adapter dependencies (для плагина api_gateway)
 fastapi>=0.95.0
-uvicorn>=0.22.0
+uvicorn[standard]>=0.22.0
 aiohttp>=3.10.0
 httpx>=0.27.0
 
@@ -32,21 +32,19 @@ PyJWT>=2.8.0
 cryptography>=41.0.0  # Для алгоритмов JWT
 prometheus-client
 
-# QR code generation (для yandex_device_auth plugin)
-qrcode[pil]>=7.4.0
-
 # Network scanner (для network_scanner plugin)
 netifaces>=0.11.0
 
 # SSH connect (подключение к хосту по креду из БД)
 paramiko>=3.4.0
 
-uvicorn[standard]
-websockets
-wsproto
+# WebSocket dependencies (FastAPI + uvicorn WebSocket support)
+websockets>=12.0
+wsproto>=1.2.0
 
-
-
+# Pydantic для валидации моделей
+pydantic>=2.0.0
 pydantic_settings>=2.0.0
 
+# Linting
 ruff

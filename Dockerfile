@@ -1,28 +1,4 @@
-# Multi-stage build для Core Runtime
-
-# ============================================
-# Wave 1: Builder
-# ============================================
-FROM python:3.11-slim as builder
-
-WORKDIR /build
-
-# Install build dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    libpq-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy requirements
-COPY requirements.txt .
-
-# Build wheels
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
-    pip wheel --no-cache-dir --no-deps --wheel-dir /build/wheels -r requirements.txt
-
-# ============================================
-# Wave 2: Runtime
-# ============================================
+# Single-stage build для Core Runtime
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -33,16 +9,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first
+# Install Python dependencies
 COPY requirements.txt .
-
-# Install Python dependencies (directly from PyPI, not wheels - for dev we don't need optimization)
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY . .
 
-# Create data directory for SQLite (if needed)
+# Create data directory для SQLite (если нужно)
 RUN mkdir -p /data && chown -R nobody:nogroup /data
 
 # Health check

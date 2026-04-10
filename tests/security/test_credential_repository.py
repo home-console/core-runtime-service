@@ -123,7 +123,7 @@ class InMemoryStorageAdapter(StorageAdapter):
         subkey = ".".join(parts[1:])
         try:
             data = json.loads(value)
-        except:
+        except (json.JSONDecodeError, TypeError, ValueError):
             data = {"value": value}
         await self.set(namespace, subkey, data)
 

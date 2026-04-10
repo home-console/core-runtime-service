@@ -1,0 +1,36 @@
+# Version control
+.git/
+.github/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+
+# Test and coverage
+tests/
+report.html
+coverage.xml
+.coverage
+.pytest_cache/
+
+# Docs
+docs/
+*.md
+
+# Env files
+.env
+.env.*
+
+# Misc
+*.log
+*.tmp
