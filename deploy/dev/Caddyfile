@@ -1,0 +1,22 @@
+# Caddy config for dev stage
+# Reverse-proxies API → core-runtime:8000, serves frontend static files.
+
+{$DOMAIN:localhost} {
+	# Frontend static files
+	root * /srv
+	file_server
+
+	# API endpoints → core-runtime
+	handle /api/* /admin/* /auth/* /presence/* /media/* /oauth/* /yandex/* /ws/* {
+		reverse_proxy core-runtime:8000
+	}
+
+	# SPA fallback: everything else → index.html
+	@notfile {
+		not file
+	}
+	handle @notfile {
+		rewrite /* /index.html
+		file_server
+	}
+}

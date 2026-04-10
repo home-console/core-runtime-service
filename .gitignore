@@ -48,3 +48,5 @@ report.html
 # AI settings
 .claude/
 .continue/
+# Deploy dev stage
+deploy/dev/frontend/
