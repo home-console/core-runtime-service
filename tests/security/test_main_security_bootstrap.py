@@ -28,13 +28,13 @@ def test_validate_security_configuration_raises_on_invalid_env(monkeypatch):
 
 
 def test_resolve_secret_store_passphrase_returns_value(monkeypatch):
-    monkeypatch.setenv("AGENT_SECRET_STORE_PASSPHRASE", "strong-pass")
+    monkeypatch.setenv("RUNTIME_MASTER_KEY", "strong-pass")
 
     assert main_module._resolve_secret_store_passphrase() == "strong-pass"
 
 
 def test_resolve_secret_store_passphrase_raises_on_missing(monkeypatch):
-    monkeypatch.delenv("AGENT_SECRET_STORE_PASSPHRASE", raising=False)
+    monkeypatch.delenv("RUNTIME_MASTER_KEY", raising=False)
 
-    with pytest.raises(RuntimeError, match="AGENT_SECRET_STORE_PASSPHRASE is required"):
+    with pytest.raises(RuntimeError, match="RUNTIME_MASTER_KEY is required"):
         main_module._resolve_secret_store_passphrase()

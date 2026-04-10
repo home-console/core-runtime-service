@@ -9,6 +9,8 @@ import asyncio
 import os
 import sys
 from pathlib import Path
+import secrets
+from typing import Callable, Optional
 
 from app.bootstrap import (
     APP_MODULES,
@@ -48,6 +50,64 @@ def _load_dotenv() -> None:
 _load_dotenv()
 
 
+def _resolve_secret_store_passphrase() -> str:
+    """Получить master key для SecretStore без insecure fallback значения."""
+    passphrase = (os.getenv("RUNTIME_MASTER_KEY") or "").strip()
+    if not passphrase:
+        raise RuntimeError("RUNTIME_MASTER_KEY is required")
+    return passphrase
+
+
+async def _bootstrap_runtime_secrets(secret_store: object) -> None:
+    """
+    Ensure core runtime secrets exist in SecretStore, and expose them via env for legacy readers.
+
+    Goal: single external bootstrap secret (RUNTIME_MASTER_KEY). Everything else lives in SecretStore.
+    """
+    # Late imports to keep main.py light and avoid importing optional deps too early.
+    from sdk.security import TokenEncryption
+
+    async def _ensure_env_from_store(
+        env_key: str, store_key: str, generate: Optional[Callable[[], str]]
+    ) -> None:
+        current = (os.getenv(env_key) or "").strip()
+        if current:
+            return
+
+        val_bytes = await secret_store.get(store_key)  # type: ignore[attr-defined]
+        if val_bytes:
+            os.environ[env_key] = val_bytes.decode("utf-8")
+            return
+
+        if generate is None:
+            return
+
+        generated = generate()
+        os.environ[env_key] = generated
+        await secret_store.put(store_key, generated.encode("utf-8"))  # type: ignore[attr-defined]
+
+    # Required for admin CSRF protection.
+    await _ensure_env_from_store(
+        env_key="CSRF_SECRET",
+        store_key="runtime.csrf_secret",
+        generate=lambda: secrets.token_hex(32),
+    )
+
+    # Required for OAuth token encryption at rest (Fernet base64 key).
+    await _ensure_env_from_store(
+        env_key="OAUTH_ENCRYPTION_KEY",
+        store_key="runtime.oauth_encryption_key",
+        generate=TokenEncryption.generate_key,
+    )
+
+    # Optional: only needed if Yandex OAuth/plugins are used.
+    await _ensure_env_from_store(
+        env_key="YANDEX_CLIENT_SECRET",
+        store_key="yandex.client_secret",
+        generate=None,
+    )
+
+
 def _validate_security_configuration() -> None:
     """Fail-fast проверка обязательной security-конфигурации перед стартом runtime."""
     result = check_security_env()
@@ -56,16 +116,7 @@ def _validate_security_configuration() -> None:
         print(f"[Runtime][Security Warning] {warning}")
 
 
-def _resolve_secret_store_passphrase() -> str:
-    """Получить passphrase для SecretStore без insecure fallback значения."""
-    passphrase = (os.getenv("AGENT_SECRET_STORE_PASSPHRASE") or "").strip()
-    if not passphrase:
-        raise RuntimeError("AGENT_SECRET_STORE_PASSPHRASE is required")
-    return passphrase
-
-
 async def main() -> None:
-    _validate_security_configuration()
     config = Config.from_env()
     if config.storage_type == "sqlite":
         Path(config.db_path).parent.mkdir(parents=True, exist_ok=True)
@@ -109,10 +160,13 @@ async def main() -> None:
             else:
                 raise
         runtime.secret_store = secret_store
+        await _bootstrap_runtime_secrets(secret_store)
     except Exception as e:
         if getattr(config, "env", "production") == "production":
             raise
         print(f"[Runtime] SecretStore not available: {e}")
+
+    _validate_security_configuration()
 
     print(f"[Runtime] Storage mode: {config.storage_mode} ({config.storage_type})")
     if config.storage_mode == "dual":

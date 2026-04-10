@@ -26,12 +26,12 @@ scripts/py_venv.sh -- scripts/validate_architecture_rules.py --root .
 ## Environment (.env)
 
 - **Template**: copy `.env.example` → `.env`
-- **Secrets**: generate `CSRF_SECRET` and `OAUTH_ENCRYPTION_KEY` locally (do not commit)
+- **Secrets**: keep only one bootstrap secret externally: `RUNTIME_MASTER_KEY` (do not commit). Core will bootstrap other secrets into SecretStore on first start.
 
 ```bash
 cp .env.example .env
-python3 -c "import secrets; print('CSRF_SECRET=' + secrets.token_hex(32))"
-python3 -c "import secrets; print('OAUTH_ENCRYPTION_KEY=' + secrets.token_hex(32))"
+# Generate a strong passphrase for SecretStore bootstrap:
+python3 -c "import secrets; print('RUNTIME_MASTER_KEY=' + secrets.token_hex(32))"
 ```
 
 ## Web dev auth (cookies + CORS)

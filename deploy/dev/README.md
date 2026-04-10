@@ -56,7 +56,7 @@ docker compose -f deploy/dev/docker-compose.yml down
 ## Конфигурация
 
 `.env` в корне проекта — тот же файл, что для локальной разработки.
-Минимум: `CSRF_SECRET`, `OAUTH_ENCRYPTION_KEY`, `AGENT_SECRET_STORE_PASSPHRASE`.
+Минимум: `RUNTIME_MASTER_KEY` (всё остальное core положит в SecretStore при первом старте).
 
 ## Production заметки
 

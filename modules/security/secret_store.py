@@ -227,7 +227,7 @@ class SecretStore:
                 err_msg = str(e).strip() or type(e).__name__
                 raise ValueError(
                     f"Decryption failed for secret '{key}': {err_msg}. "
-                    "Typical cause: vault was recreated or passphrase changed (AGENT_SECRET_STORE_PASSPHRASE); re-add the credential secret."
+                    "Typical cause: vault was recreated or passphrase changed (RUNTIME_MASTER_KEY); re-add the credential secret."
                 ) from e
     
     async def delete(self, key: str) -> bool:

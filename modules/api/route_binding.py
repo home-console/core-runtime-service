@@ -87,7 +87,9 @@ def _sync_endpoint_auth_to_service_registry(
                 required_scopes=ep.auth_config.required_scopes,
             )
             try:
-                loop.run_until_complete(svc_set_auth(ep.service, svc_auth))
+                # Called while the loop is already running (FastAPI startup).
+                # Don't nest run_until_complete; schedule best-effort sync.
+                loop.create_task(svc_set_auth(ep.service, svc_auth))
             except Exception:
                 logger.debug(
                     "sync auth for %s failed (best-effort, ignored)", ep.service

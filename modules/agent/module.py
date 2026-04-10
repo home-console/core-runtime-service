@@ -97,9 +97,9 @@ class AgentControlPlaneModule(RuntimeModule):
                 )
             wrapper = SecretStoreStorageAdapter(backend)
             secret_store = SecretStore(wrapper)
-            passphrase = os.getenv(
-                "AGENT_SECRET_STORE_PASSPHRASE", "default-dev-passphrase"
-            )
+            passphrase = (os.getenv("RUNTIME_MASTER_KEY") or "").strip()
+            if not passphrase:
+                raise RuntimeError("RUNTIME_MASTER_KEY is required")
             try:
                 await secret_store.open_with_passphrase(passphrase)
             except RuntimeError:

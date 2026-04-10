@@ -14,7 +14,7 @@ CRASH SAFETY (Part A):
 
 import json
 from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator, Optional
+from typing import Any, AsyncIterator, Optional, TYPE_CHECKING
 
 try:
     import asyncpg
@@ -22,6 +22,10 @@ try:
     ASYNCPG_AVAILABLE = True
 except ImportError:
     ASYNCPG_AVAILABLE = False
+    asyncpg = None  # type: ignore[assignment]
+
+if TYPE_CHECKING:
+    import asyncpg as _asyncpg  # pragma: no cover
 
 from .storage_adapter import StorageAdapter
 from core.adapters.storage_errors import StorageCorruptionError
@@ -86,11 +90,12 @@ class PostgreSQLAdapter(StorageAdapter):
             safe_password = quote_plus(password) if password else ""
             self._dsn = f"postgresql://{user}:{safe_password}@{host}:{port}/{database}"
 
-        self._pool: Optional[asyncpg.Pool] = None
+        self._pool: Optional["_asyncpg.Pool"] = None
 
-    async def _get_pool(self) -> asyncpg.Pool:
+    async def _get_pool(self) -> "_asyncpg.Pool":
         """Создать или вернуть пул соединений."""
         if self._pool is None:
+            assert asyncpg is not None
             self._pool = await asyncpg.create_pool(self._dsn)
         return self._pool
 
