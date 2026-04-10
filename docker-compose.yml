@@ -1,0 +1,58 @@
+# Coolify-ready docker-compose
+#
+# Deploy:
+#   1. Build frontend:  cd ../platform-home-console && pnpm build:web
+#   2. Copy dist:       cp -r apps/web/dist ../core-runtime-service/frontend/
+#   3. Push & deploy via Coolify (auto-detects docker-compose.yml)
+#
+# Or local dev:
+#   docker compose up -d
+
+services:
+  core-runtime:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: core-runtime
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    volumes:
+      - core-data:/data
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/admin/v1/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - app
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: caddy
+    restart: unless-stopped
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./frontend:/srv:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    depends_on:
+      core-runtime:
+        condition: service_healthy
+    networks:
+      - app
+
+volumes:
+  core-data:
+  caddy-data:
+  caddy-config:
+
+networks:
+  app:
