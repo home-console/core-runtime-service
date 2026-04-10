@@ -59,7 +59,22 @@ class MonitoringModule:
         # Check storage if runtime available
         if self.runtime:
             try:
-                storage = self.context.storage
+                # Runtime can expose storage via different surfaces depending on integration.
+                # Try a few common ones (best-effort).
+                storage = None
+                runtime = self.runtime
+                if hasattr(runtime, "context") and getattr(runtime, "context", None) is not None:
+                    storage = getattr(runtime.context, "storage", None)
+                if storage is None:
+                    storage = getattr(runtime, "storage", None)
+                if storage is None:
+                    manager = getattr(runtime, "storage_manager", None)
+                    if manager is not None and hasattr(manager, "get_core"):
+                        storage = manager.get_core()
+
+                if storage is None:
+                    raise RuntimeError("storage not available on runtime")
+
                 await storage.get("health_check", "test")
                 checks["storage"] = "ok"
             except Exception as e:
