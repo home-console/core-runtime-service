@@ -1,0 +1,4 @@
+# Caddy со встроенным Caddyfile (без bind-mount файла — на Coolify иначе часто
+# появляется пустая директория Caddyfile и падение «directory onto a file»).
+FROM caddy:2-alpine
+COPY Caddyfile /etc/caddy/Caddyfile

@@ -36,11 +36,12 @@ services:
       - app
 
   caddy:
-    image: caddy:2-alpine
+    build:
+      context: .
+      dockerfile: Dockerfile.caddy
     container_name: caddy
     restart: unless-stopped
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./frontend:/srv:ro
       - caddy-data:/data
       - caddy-config:/config
