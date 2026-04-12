@@ -4,7 +4,7 @@
  *
  * Usage:
  *   k6 run tests/performance/k6_load_test.js
- *   BASE_URL=http://localhost:8000 k6 run tests/performance/k6_load_test.js
+ *   BASE_URL=http://localhost:18000 k6 run tests/performance/k6_load_test.js
  *   DURATION=60s VUS=50 k6 run tests/performance/k6_load_test.js
  *
  * Requires k6: https://k6.io/docs/getting-started/installation/
@@ -18,7 +18,7 @@ import { Counter, Rate, Trend } from "k6/metrics";
 // Configuration
 // ---------------------------------------------------------------------------
 
-const BASE_URL = __ENV.BASE_URL || "http://localhost:8000";
+const BASE_URL = __ENV.BASE_URL || "http://localhost:18000";
 const DURATION = __ENV.DURATION || "30s";
 const VUS = parseInt(__ENV.VUS) || 10;
 const RAMP_UP = __ENV.RAMP_UP || "5s";

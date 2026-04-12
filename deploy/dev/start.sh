@@ -3,7 +3,7 @@
 #
 # Usage:
 #   ./deploy/dev/start.sh              # with frontend
-#   ./deploy/dev/start.sh --no-ui      # core-runtime only (port 8000)
+#   ./deploy/dev/start.sh --no-ui      # core-runtime only (port 18000)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -13,9 +13,9 @@ FRONTEND_DIR="$SCRIPT_DIR/frontend"
 cd "$SCRIPT_DIR"
 
 if [[ "${1:-}" == "--no-ui" ]]; then
-    echo "▶ Starting core-runtime only (http://localhost:8000)"
+    echo "▶ Starting core-runtime only (http://localhost:18000)"
     docker compose -f docker-compose.yml up -d core-runtime
-    echo "✓ core-runtime running on http://localhost:8000"
+    echo "✓ core-runtime running on http://localhost:18000"
     exit 0
 fi
 
@@ -42,4 +42,4 @@ echo "  Frontend:  http://localhost"
 echo "  API:       http://localhost/api/v1/..."
 echo "  Admin:     http://localhost/admin/v1/..."
 echo "  Auth:      http://localhost/auth/v1/..."
-echo "  Core (direct): http://localhost:8000"
+echo "  Core (direct): http://localhost:18000"

@@ -27,6 +27,8 @@ services:
       - core-data:/data
     expose:
       - "8000"
+    ports:
+      - "18000:8000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/monitor/health"]
       interval: 10s
