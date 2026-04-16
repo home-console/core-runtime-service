@@ -11,6 +11,7 @@ Implements operations:
 """
 
 from typing import Dict, Any, List, Optional
+import inspect
 from core.runtime.runtime_module import RuntimeModule
 from modules.marketplace.services import MarketplaceService
 import logging
@@ -144,7 +145,9 @@ class MarketplaceModule(RuntimeModule):
             
             for op_name, description in operations:
                 try:
-                    cap_reg.register_provider(self._name, op_name)
+                    maybe_coro = cap_reg.register_provider(self._name, op_name)
+                    if inspect.isawaitable(maybe_coro):
+                        await maybe_coro
                 except Exception:
                     logger.debug(
                         "marketplace.start: register_provider skipped or failed op=%s",

@@ -49,7 +49,14 @@ class MarketplaceService:
         self.plugin_manager = runtime.plugin_manager
 
         # Initialize installer and transaction manager for atomic updates
-        plugins_dir = Path(runtime.config.get("plugins_dir", "plugins"))
+        plugins_dir_value = None
+        cfg = getattr(runtime, "config", None)
+        if cfg is not None:
+            # Real runtime uses Config object; tests often use dict.
+            plugins_dir_value = getattr(cfg, "plugins_dir", None)
+            if plugins_dir_value is None and isinstance(cfg, dict):
+                plugins_dir_value = cfg.get("plugins_dir")
+        plugins_dir = Path(str(plugins_dir_value or "plugins"))
         self.installer = MarketplaceInstaller(plugins_dir)
         self.transaction_mgr = UpdateTransactionManager(plugins_dir, runtime)
 

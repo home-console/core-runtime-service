@@ -20,9 +20,9 @@ services:
     environment:
       - LOG_LEVEL=${LOG_LEVEL:-info}
       # Run as non-root; keep SQLite DBs on the mounted /data volume.
-      - RUNTIME_DB_PATH=${RUNTIME_DB_PATH:-/data/runtime.db}
-      - RUNTIME_VAULT_DB_PATH=${RUNTIME_VAULT_DB_PATH:-/data/vault.db}
-      - RUNTIME_VAULT_SECRET_DB_PATH=${RUNTIME_VAULT_SECRET_DB_PATH:-/data/vault_secret.db}
+      - RUNTIME_DB_PATH=/data/runtime.db
+      - RUNTIME_VAULT_DB_PATH=/data/vault.db
+      - RUNTIME_VAULT_SECRET_DB_PATH=/data/vault_secret.db
     volumes:
       - core-data:/data
     expose:

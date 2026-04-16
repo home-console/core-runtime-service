@@ -35,6 +35,7 @@ APP_MODULES: list[ModuleSpec] = [
     ModuleSpec("admin", required=True),
     ModuleSpec("auth", required=True),
     ModuleSpec("operations", required=True),
+    ModuleSpec("marketplace", required=False, dependencies=["operations"]),
     ModuleSpec("agent", required=False),
     ModuleSpec("credentials", required=False),
     ModuleSpec("execution", required=True, dependencies=["operations"]),
