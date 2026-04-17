@@ -25,7 +25,10 @@ def check_security_env() -> Dict[str, List[str]]:
 
     yandex_client_secret = os.environ.get("YANDEX_CLIENT_SECRET")
     if not yandex_client_secret:
-        warnings.append("YANDEX_CLIENT_SECRET not set - using hardcoded secret (INSECURE)")
+        warnings.append(
+            "YANDEX_CLIENT_SECRET not set - Yandex OAuth plugins will be DISABLED until a proper client secret "
+            "is configured via environment. No hardcoded fallback is used."
+        )
 
     if errors:
         raise RuntimeError(

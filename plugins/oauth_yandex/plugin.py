@@ -123,20 +123,26 @@ class OAuthYandexPlugin(BasePlugin):
         """Encrypt and save tokens to storage.
         
         SECURITY P0: All token writes must go through this method.
+        SECURITY POLICY: Fail-closed — если шифрование недоступно, токены не сохраняем вообще.
         
         Args:
             tokens: Tokens dict to encrypt and save
         """
         from sdk.security import TokenEncryption
+        import logging
+
         try:
             encryptor = TokenEncryption.from_env()
             encrypted_blob = encryptor.encrypt(tokens)
             await self.storage_set(self.TOKEN_NAMESPACE, self.TOKEN_KEY, {"encrypted": encrypted_blob})
-        except RuntimeError:
-            # Encryption not configured - fallback to plaintext (log warning)
-            import logging
-            logging.warning("SECURITY: OAuth tokens stored in plaintext (OAUTH_ENCRYPTION_KEY not set)")
-            await self.storage_set(self.TOKEN_NAMESPACE, self.TOKEN_KEY, tokens)
+        except RuntimeError as e:
+            logging.error(
+                "SECURITY: OAUTH_ENCRYPTION_KEY not configured, cannot store OAuth tokens securely — "
+                "tokens WILL NOT be persisted. Set OAUTH_ENCRYPTION_KEY to enable OAuth token storage. "
+                "error=%s",
+                str(e),
+            )
+            # Fail-closed: не сохраняем токены в plaintext
     
     async def _get_http_session(self):
         """Получить HTTP session (обёрнутый для логирования, если доступен)."""
@@ -376,18 +382,8 @@ class OAuthYandexPlugin(BasePlugin):
                         except (ValueError, TypeError):
                             pass
 
-                # SECURITY P0: Encrypt tokens before storing
-                from sdk.security import TokenEncryption
-                try:
-                    encryptor = TokenEncryption.from_env()
-                    encrypted_blob = encryptor.encrypt(tokens_to_save)
-                    # Store encrypted blob instead of plaintext tokens
-                    await self.storage_set(self.TOKEN_NAMESPACE, self.TOKEN_KEY, {"encrypted": encrypted_blob})
-                except RuntimeError:
-                    # Encryption not configured - fallback to plaintext (log warning)
-                    import logging
-                    logging.warning("SECURITY: OAuth tokens stored in plaintext (OAUTH_ENCRYPTION_KEY not set)")
-                    await self.storage_set(self.TOKEN_NAMESPACE, self.TOKEN_KEY, tokens_to_save)
+                # SECURITY P0: Encrypt tokens before storing (fail-closed if encryption not available)
+                await self._encrypt_and_save_tokens(tokens_to_save)
 
                 # Публикуем событие линковки аккаунта (для UI/расширений)
                 try:
