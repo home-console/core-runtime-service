@@ -626,9 +626,14 @@ class MarketplaceService:
                             "available": new_version,
                         }
 
-                except Exception:
+                except Exception as e:
                     # Log but don't fail
-                    logger.warning("handle_check_updates: failed to check updates for plugin %s: %s", plugin_name, exc_info=True)
+                    logger.warning(
+                        "handle_check_updates: failed to check updates for plugin %s: %s",
+                        plugin_name,
+                        e,
+                        exc_info=True,
+                    )
 
             return {
                 "status": "success",
