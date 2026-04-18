@@ -8,6 +8,7 @@ Security конфигурация (CORS/CSRF/CSP/cookies) вынесена в se
 """
 
 from dataclasses import dataclass, field
+import re
 from typing import List, Mapping, Optional
 
 from core.runtime.security_config import SecurityConfig
@@ -105,6 +106,10 @@ class Config:
     # Marketplace
     # Default registry index URL (e.g. "https://marketplace.homeconsole.dev/registry/index.json")
     marketplace_registry_url: str = ""
+
+    # Runtime semver advertised by this deployment (used for compatibility checks like plugin min_runtime).
+    # NOTE: keep in sync with release tagging / deployment config.
+    runtime_version: str = "0.1.0"
 
     def validate(self) -> None:
         """
@@ -229,6 +234,15 @@ class Config:
         if not self.module_path_prefix:
             raise ValueError("module_path_prefix must be non-empty string")
 
+        if not self.runtime_version:
+            raise ValueError("runtime_version must be non-empty string")
+        if not re.match(
+            r"^\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?$", str(self.runtime_version)
+        ):
+            raise ValueError(
+                "runtime_version must be semantic version X.Y.Z with optional pre-release suffix"
+            )
+
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Config":
         """
@@ -240,6 +254,7 @@ class Config:
         - RUNTIME_VAULT_DB_PATH: path to vault SQLite file (required if vault_storage_type="sqlite")
         - RUNTIME_VAULT_PG_DSN: PostgreSQL DSN for vault (required if vault_storage_type="postgresql")
         - MARKETPLACE_REGISTRY_URL: default marketplace registry index URL (optional)
+        - RUNTIME_VERSION: semver of this core-runtime-service deployment (optional)
 
         Raises:
             ValueError: если конфигурация невалидна
@@ -282,6 +297,7 @@ class Config:
             orchestration_backend=env.get("RUNTIME_ORCHESTRATION_BACKEND", "docker").lower(),
             module_path_prefix=env.get("RUNTIME_MODULE_PATH_PREFIX", "modules"),
             marketplace_registry_url=str(env.get("MARKETPLACE_REGISTRY_URL", "")).strip(),
+            runtime_version=str(env.get("RUNTIME_VERSION", "0.1.0")).strip() or "0.1.0",
         )
         config.validate()
         return config

@@ -33,6 +33,7 @@ from modules.security.trust.legacy_crypto import (
 )
 from modules.plugins.schema import ValidationError as SchemaValidationError
 from modules.plugins.schema import validate_plugin_json
+from modules.marketplace.semver import Version, VersionConstraint, VersionConstraintError
 logger = logging.getLogger(__name__)
 
 
@@ -40,6 +41,57 @@ class InstallerError(Exception):
     """Marketplace installer error."""
 
     pass
+
+
+def _resolve_runtime_version_string(runtime: Any) -> str:
+    v = getattr(runtime, "version", None)
+    if isinstance(v, str) and v.strip():
+        return v.strip()
+
+    cfg = getattr(runtime, "config", None) or getattr(runtime, "_config", None)
+    if cfg is not None:
+        cfg_v = getattr(cfg, "runtime_version", None)
+        if cfg_v is None and isinstance(cfg, dict):
+            cfg_v = cfg.get("runtime_version")
+        if isinstance(cfg_v, str) and cfg_v.strip():
+            return cfg_v.strip()
+
+    return "0.0.0"
+
+
+def _normalize_min_runtime_constraint(raw: str) -> str:
+    s = raw.strip()
+    if not s:
+        raise InstallerError("min_runtime/min_runtime_version must be non-empty")
+
+    # If it's already a constraint language supported by VersionConstraint, pass through.
+    if s.startswith(("^", "~", ">=", "<=", ">", "<", "!=", "=")):
+        return s
+
+    # Plain semver => require runtime >= min
+    return f">={s}"
+
+
+def _assert_runtime_meets_min(runtime: Any, plugin_data: Dict[str, Any]) -> None:
+    min_raw = plugin_data.get("min_runtime_version")
+    if min_raw is None:
+        min_raw = plugin_data.get("min_runtime")
+    if min_raw is None:
+        return
+
+    if not isinstance(min_raw, str) or not min_raw.strip():
+        raise InstallerError("min_runtime/min_runtime_version must be a non-empty string")
+
+    try:
+        current = Version(_resolve_runtime_version_string(runtime))
+        normalized = _normalize_min_runtime_constraint(min_raw)
+        constraint = VersionConstraint(normalized)
+        if not constraint.matches(current):
+            raise InstallerError(
+                f"Plugin requires runtime {normalized} (from {min_raw.strip()!r}), current={current}"
+            )
+    except VersionConstraintError as e:
+        raise InstallerError(f"Invalid min_runtime/min_runtime_version: {e}") from e
 
 
 class MarketplaceInstaller:
@@ -133,6 +185,9 @@ class MarketplaceInstaller:
                 plugin_data = validate_plugin_json(plugin_data)
             except SchemaValidationError as e:
                 raise InstallerError(f"Invalid plugin.json: {str(e)}")
+
+            if runtime is not None:
+                _assert_runtime_meets_min(runtime, plugin_data)
 
             # Verify signature if present (BEFORE installation)
             plugin_sig_path = Path(temp_dir) / "plugin.sig"
