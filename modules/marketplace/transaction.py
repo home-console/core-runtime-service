@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import shutil
+import inspect
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
@@ -96,15 +97,68 @@ class UpdateTransactionManager:
 
         # Active transactions (in-memory + persistent)
         self._active_transactions: Dict[str, Transaction] = {}
-        self._load_pending_transactions()
+        self._pending_loaded = False
 
-    def _load_pending_transactions(self):
+    async def _storage_get(self, namespace: str, key: str, default: Optional[dict] = None) -> Optional[dict]:
+        if self.runtime is None:
+            return default
+        storage = getattr(self.runtime, "storage", None)
+        if storage is None:
+            return default
+
+        # New storage API: storage.get(namespace, key)
+        try:
+            value = storage.get(namespace, key)
+            if inspect.isawaitable(value):
+                value = await value
+            return value if value is not None else default
+        except TypeError:
+            pass
+
+        # Legacy KV API: storage.get("namespace.key")
+        legacy_key = f"{namespace}.{key}"
+        try:
+            value = storage.get(legacy_key, default)
+        except TypeError:
+            value = storage.get(legacy_key)
+        if inspect.isawaitable(value):
+            value = await value
+        return value if value is not None else default
+
+    async def _storage_set(self, namespace: str, key: str, value: dict) -> None:
+        if self.runtime is None:
+            return
+        storage = getattr(self.runtime, "storage", None)
+        if storage is None:
+            return
+
+        # New storage API: storage.set(namespace, key, value)
+        try:
+            maybe = storage.set(namespace, key, value)
+            if inspect.isawaitable(maybe):
+                await maybe
+            return
+        except TypeError:
+            pass
+
+        legacy_key = f"{namespace}.{key}"
+        maybe = storage.set(legacy_key, value)
+        if inspect.isawaitable(maybe):
+            await maybe
+
+    async def _ensure_pending_loaded(self) -> None:
+        if self._pending_loaded:
+            return
+        await self._load_pending_transactions()
+        self._pending_loaded = True
+
+    async def _load_pending_transactions(self):
         """Load transactions that may need recovery."""
         if self.runtime is None:
             return
         try:
             # Check storage for pending transactions
-            pending = self.runtime.storage.get("marketplace.transactions", {})
+            pending = await self._storage_get("marketplace", "transactions", default={})
             if not isinstance(pending, dict):
                 pending = {}
             for txn_id, txn_data in pending.items():
@@ -142,6 +196,7 @@ class UpdateTransactionManager:
         Returns:
             Transaction object (PREPARING state)
         """
+        await self._ensure_pending_loaded()
         txn_id = f"{plugin_name}_{version}_{int(datetime.now().timestamp())}"
         staging_path = self.staging_dir / plugin_name
 
@@ -152,10 +207,11 @@ class UpdateTransactionManager:
             state=TransactionState.PREPARING,
             start_time=datetime.now(timezone.utc).isoformat() + "Z",
             staging_path=str(staging_path),
+            details={"txn_id": txn_id},
         )
 
         self._active_transactions[txn_id] = txn
-        self._save_transaction(txn_id, txn)
+        await self._save_transaction(txn_id, txn)
 
         return txn
 
@@ -173,6 +229,7 @@ class UpdateTransactionManager:
         Returns:
             Transaction object with backup info
         """
+        await self._ensure_pending_loaded()
         current_path = self.plugins_dir / plugin_name
         if not current_path.exists():
             raise TransactionError(f"Plugin '{plugin_name}' not found")
@@ -205,21 +262,23 @@ class UpdateTransactionManager:
             old_version=old_version,
             staging_path=str(staging_path),
             backup_path=str(backup_path),
+            details={"txn_id": txn_id},
         )
 
         self._active_transactions[txn_id] = txn
-        self._save_transaction(txn_id, txn)
+        await self._save_transaction(txn_id, txn)
 
         return txn
 
     async def mark_validated(self, txn_id: str):
         """Mark transaction as validated."""
+        await self._ensure_pending_loaded()
         if txn_id not in self._active_transactions:
             raise TransactionError(f"Transaction {txn_id} not found")
 
         txn = self._active_transactions[txn_id]
         txn.state = TransactionState.STAGED
-        self._save_transaction(txn_id, txn)
+        await self._save_transaction(txn_id, txn)
         logger.info(f"Transaction {txn_id} validated")
 
     async def atomic_swap(self, txn_id: str) -> bool:
@@ -240,6 +299,7 @@ class UpdateTransactionManager:
         Raises:
             TransactionError: If swap fails
         """
+        await self._ensure_pending_loaded()
         if txn_id not in self._active_transactions:
             raise TransactionError(f"Transaction {txn_id} not found")
 
@@ -256,7 +316,7 @@ class UpdateTransactionManager:
         try:
             # Mark as swapping (for crash recovery)
             txn.state = TransactionState.SWAPPING
-            self._save_transaction(txn_id, txn)
+            await self._save_transaction(txn_id, txn)
 
             # For update: backup current version
             if txn.action == "update" and current_path.exists():
@@ -275,7 +335,7 @@ class UpdateTransactionManager:
             logger.info(f"Swapped {plugin_name} to current")
 
             txn.state = TransactionState.ACTIVATING
-            self._save_transaction(txn_id, txn)
+            await self._save_transaction(txn_id, txn)
             return True
 
         except Exception as e:
@@ -321,6 +381,7 @@ class UpdateTransactionManager:
 
         Cleanup: remove backup after successful activation.
         """
+        await self._ensure_pending_loaded()
         if txn_id not in self._active_transactions:
             raise TransactionError(f"Transaction {txn_id} not found")
 
@@ -341,8 +402,8 @@ class UpdateTransactionManager:
             if staging_path.exists():
                 shutil.rmtree(staging_path)
 
-        self._save_transaction(txn_id, txn)
-        self._audit_log(txn, "success")
+        await self._save_transaction(txn_id, txn)
+        await self._audit_log(txn, "success")
         logger.info(f"Transaction {txn_id} committed")
 
     async def rollback(self, txn_id: str, reason: str):
@@ -354,6 +415,7 @@ class UpdateTransactionManager:
         - Cleans up staging
         - Records reason
         """
+        await self._ensure_pending_loaded()
         if txn_id not in self._active_transactions:
             raise TransactionError(f"Transaction {txn_id} not found")
 
@@ -380,24 +442,24 @@ class UpdateTransactionManager:
                 if staging_path.exists():
                     shutil.rmtree(staging_path)
 
-            self._save_transaction(txn_id, txn)
-            self._audit_log(txn, "rolled_back", reason)
+            await self._save_transaction(txn_id, txn)
+            await self._audit_log(txn, "rolled_back", reason)
 
         except Exception as e:
             logger.error(f"Rollback failed: {e}")
             raise RollbackError(f"Failed to rollback transaction: {e}")
 
-    def _save_transaction(self, txn_id: str, txn: Transaction):
+    async def _save_transaction(self, txn_id: str, txn: Transaction):
         """Save transaction state to persistent storage."""
         if self.runtime is None:
             return
         try:
             txn_data = self._serialize_transaction(txn)
-            current = self.runtime.storage.get("marketplace.transactions", {})
+            current = await self._storage_get("marketplace", "transactions", default={})
             if not isinstance(current, dict):
                 current = {}
             current[txn_id] = txn_data
-            self.runtime.storage.set("marketplace.transactions", current)
+            await self._storage_set("marketplace", "transactions", current)
         except Exception as e:
             logger.error(f"Failed to save transaction: {e}")
 
@@ -433,7 +495,7 @@ class UpdateTransactionManager:
             details=data.get("details") or {},
         )
 
-    def _audit_log(
+    async def _audit_log(
         self, txn: Transaction, final_status: str, reason: Optional[str] = None
     ):
         """Write audit log entry."""
@@ -450,12 +512,12 @@ class UpdateTransactionManager:
                 "reason": reason or txn.error,
             }
 
-            audit_log = self.runtime.storage.get("marketplace.audit", {})
+            audit_log = await self._storage_get("marketplace", "audit", default={})
             if not isinstance(audit_log, dict):
                 audit_log = {}
             log_id = f"{txn.plugin_name}_{int(datetime.now().timestamp() * 1000)}"
             audit_log[log_id] = entry
-            self.runtime.storage.set("marketplace.audit", audit_log)
+            await self._storage_set("marketplace", "audit", audit_log)
 
             logger.info(f"Audit: {entry}")
         except Exception as e:

@@ -26,6 +26,7 @@ RuntimeModule — это обязательные домены системы, �
 """
 
 from abc import ABC, abstractmethod
+import inspect
 from typing import (
     Any,
     Awaitable,
@@ -154,7 +155,7 @@ class RuntimeModule(ABC):
         )
         try:
             if register_with_acl is not None:
-                await register_with_acl(
+                res = register_with_acl(
                     name,
                     _wrapper,
                     resource=resource,
@@ -166,6 +167,8 @@ class RuntimeModule(ABC):
                     version=version,
                     auth_config=auth_config,
                 )
+                if inspect.isawaitable(res):
+                    await res
                 return
 
             await reg.register(name, _wrapper, version=version, auth_config=auth_config)
@@ -201,7 +204,7 @@ class RuntimeModule(ABC):
         )
         try:
             if register_with_acl is not None:
-                await register_with_acl(
+                res = register_with_acl(
                     name,
                     _wrapper,
                     resource=resource,
@@ -213,6 +216,8 @@ class RuntimeModule(ABC):
                     version=version,
                     auth_config=auth_config,
                 )
+                if inspect.isawaitable(res):
+                    await res
                 return
 
             await reg.register(name, _wrapper, version=version, auth_config=auth_config)
@@ -250,7 +255,7 @@ class RuntimeModule(ABC):
         )
         try:
             if register_with_acl is not None:
-                await register_with_acl(
+                res = register_with_acl(
                     name,
                     _wrapper,
                     resource=resource,
@@ -262,6 +267,8 @@ class RuntimeModule(ABC):
                     version=version,
                     auth_config=auth_config,
                 )
+                if inspect.isawaitable(res):
+                    await res
                 return
 
             await reg.register(name, _wrapper, version=version, auth_config=auth_config)

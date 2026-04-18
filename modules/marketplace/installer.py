@@ -125,6 +125,8 @@ class MarketplaceInstaller:
         archive_path: Path,
         sha256: Optional[str] = None,
         runtime: Optional[Any] = None,
+        *,
+        load_plugin: bool = True,
     ) -> Dict[str, Any]:
         """
         Install plugin from archive file.
@@ -292,8 +294,8 @@ class MarketplaceInstaller:
                 else:
                     shutil.copy2(item, dest)
 
-            # Load via PluginManager if provided
-            if runtime:
+            # Load via PluginManager if provided (optional, can be disabled for staging).
+            if runtime and load_plugin:
                 try:
                     # P0: Wrap load in try-finally for proper cleanup
                     try:
@@ -522,6 +524,8 @@ class MarketplaceInstaller:
         public_key: Optional[str] = None,
         runtime: Optional[Any] = None,
         force_update: bool = False,
+        *,
+        load_plugin: bool = True,
     ) -> Dict[str, Any]:
         """
         Install plugin from remote URL (registry flow).
@@ -602,7 +606,7 @@ class MarketplaceInstaller:
 
             # Install from downloaded archive
             return await self.install_from_file(
-                archive_path, sha256=sha256, runtime=runtime
+                archive_path, sha256=sha256, runtime=runtime, load_plugin=load_plugin
             )
 
         finally:
