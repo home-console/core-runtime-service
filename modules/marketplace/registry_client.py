@@ -11,6 +11,7 @@ Manages:
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -97,7 +98,9 @@ class RegistryClient:
                 cache_dir = Path(base) / "marketplace" / "cache"
             else:
                 cache_dir = Path.cwd() / "data" / "homeconsole" / "marketplace" / "cache"
-        self._cache_dir = Path(cache_dir)
+        base_cache_dir = Path(cache_dir)
+        url_fingerprint = hashlib.sha256(registry_url.encode("utf-8")).hexdigest()[:32]
+        self._cache_dir = base_cache_dir / f"registry-{url_fingerprint}"
         self._cache_dir.mkdir(parents=True, exist_ok=True)
         
         self._cache_path = self._cache_dir / "registry-index.json"
