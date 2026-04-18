@@ -145,6 +145,17 @@ class SQLiteAdapter(StorageAdapter):
                 PRIMARY KEY (namespace, key)
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS storage_metadata (
+                key TEXT NOT NULL PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+        """)
+        # Schema version for forward-compatible migrations.
+        conn.execute("""
+            INSERT OR IGNORE INTO storage_metadata (key, value)
+            VALUES ('schema_version', '1')
+        """)
         conn.commit()
 
     async def initialize_schema(self) -> None:

@@ -115,6 +115,17 @@ class PostgreSQLAdapter(StorageAdapter):
                     PRIMARY KEY (namespace, key)
                 )
             """)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS storage_metadata (
+                    key TEXT NOT NULL PRIMARY KEY,
+                    value TEXT NOT NULL
+                )
+            """)
+            await conn.execute("""
+                INSERT INTO storage_metadata (key, value)
+                VALUES ('schema_version', '1')
+                ON CONFLICT (key) DO NOTHING
+            """)
 
     async def get(self, namespace: str, key: str) -> Optional[dict[str, Any]]:
         """Получить значение из storage.
