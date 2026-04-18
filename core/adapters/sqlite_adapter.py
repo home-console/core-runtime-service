@@ -46,7 +46,7 @@ class SQLiteAdapter(StorageAdapter):
             threading.local()
         )  # Thread-local storage для connections и transactions
 
-    def _get_connection(self) -> sqlite3.Connection:
+    def _get_connection(self, *, readonly: bool = False) -> sqlite3.Connection:
         """Создать или вернуть thread-local соединение.
 
         CRITICAL: Каждый поток получает свое собственное соединение, чтобы избежать
@@ -59,13 +59,16 @@ class SQLiteAdapter(StorageAdapter):
         - PRAGMA foreign_keys=ON: включить проверку foreign keys
         - PRAGMA wal_autocheckpoint=1000: checkpoints каждые 1000 страниц
         """
-        if not hasattr(self._local, "conn") or self._local.conn is None:
+        attr = "conn_ro" if readonly else "conn_rw"
+        conn = getattr(self._local, attr, None)
+        if conn is None:
             # Создаем новое соединение для текущего потока
-            self._local.conn = sqlite3.connect(
+            conn = sqlite3.connect(
                 self.db_path,
                 check_same_thread=True,  # Теперь каждый поток имеет свое соединение
                 timeout=30.0,  # Таймаут для database locked ситуаций
             )
+            setattr(self._local, attr, conn)
 
             # ┌─────────────────────────────────────────────────────────┐
             # │ CRASH SAFETY PRAGMAS                                    │
@@ -73,26 +76,26 @@ class SQLiteAdapter(StorageAdapter):
 
             # Write-Ahead Logging (WAL mode)
             # Гарантирует, что читатели не заблокируют писателей
-            self._local.conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA journal_mode=WAL")
 
             # FULL synchronous mode
             # Требует fsync после каждого COMMIT
             # Это гарантирует, что данные на диске даже при крахе ОС
-            self._local.conn.execute("PRAGMA synchronous=FULL")
+            conn.execute("PRAGMA synchronous=FULL")
 
             # Большой кэш для производительности (64MB)
             # Отрицательное число = кэш в килобайтах
-            self._local.conn.execute("PRAGMA cache_size=-64000")
+            conn.execute("PRAGMA cache_size=-64000")
 
             # Включить проверку foreign keys
-            self._local.conn.execute("PRAGMA foreign_keys=ON")
+            conn.execute("PRAGMA foreign_keys=ON")
 
             # WAL checkpoints каждые 1000 страниц (вместо default 1000000)
             # Меньше означает более частые checkpoints, но более консервативно
-            self._local.conn.execute("PRAGMA wal_autocheckpoint=1000")
+            conn.execute("PRAGMA wal_autocheckpoint=1000")
 
             # Проверить, что synchronous действительно FULL
-            cursor = self._local.conn.execute("PRAGMA synchronous")
+            cursor = conn.execute("PRAGMA synchronous")
             sync_mode = cursor.fetchone()[0]
             # synchronous: 0=OFF, 1=NORMAL, 2=FULL, 3=EXTRA
             if sync_mode != 2:
@@ -105,6 +108,13 @@ class SQLiteAdapter(StorageAdapter):
                 )
 
             # Проверить Docker overlayfs (частая проблема в контейнерах)
+            if readonly:
+                # Ensure this connection is used for reads only.
+                try:
+                    conn.execute("PRAGMA query_only=ON")
+                except Exception:
+                    logger.debug("[SQLiteAdapter] Failed to enable PRAGMA query_only=ON", exc_info=True)
+
             if self.db_path != ":memory:" and os.path.exists("/proc/mounts"):
                 try:
                     with open("/proc/mounts", "r") as f:
@@ -124,7 +134,7 @@ class SQLiteAdapter(StorageAdapter):
                         exc_info=True,
                     )
 
-        return self._local.conn
+        return conn
 
     def _get_in_transaction(self) -> bool:
         """Получить thread-local флаг транзакции."""
@@ -136,7 +146,7 @@ class SQLiteAdapter(StorageAdapter):
 
     def _create_schema_sync(self) -> None:
         """Синхронная функция создания таблицы схемы."""
-        conn = self._get_connection()
+        conn = self._get_connection(readonly=False)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS storage (
                 namespace TEXT NOT NULL,
@@ -180,7 +190,7 @@ class SQLiteAdapter(StorageAdapter):
         """
 
         def _get_sync(ns: str, k: str):
-            conn = self._get_connection()
+            conn = self._get_connection(readonly=True)
             cursor = conn.execute(
                 "SELECT value FROM storage WHERE namespace = ? AND key = ?",
                 (ns, k),
@@ -215,7 +225,7 @@ class SQLiteAdapter(StorageAdapter):
         """Сохранить значение в storage (выполняется в threadpool)."""
 
         def _set_sync(ns: str, k: str, v: dict[str, Any], in_transaction: bool):
-            conn = self._get_connection()
+            conn = self._get_connection(readonly=False)
             json_value = json.dumps(v, ensure_ascii=False)
             conn.execute(
                 "INSERT OR REPLACE INTO storage (namespace, key, value) VALUES (?, ?, ?)",
@@ -236,7 +246,7 @@ class SQLiteAdapter(StorageAdapter):
         """Удалить значение из storage (выполняется в threadpool)."""
 
         def _delete_sync(ns: str, k: str, in_transaction: bool):
-            conn = self._get_connection()
+            conn = self._get_connection(readonly=False)
             cursor = conn.execute(
                 "DELETE FROM storage WHERE namespace = ? AND key = ?",
                 (ns, k),
@@ -303,7 +313,7 @@ class SQLiteAdapter(StorageAdapter):
         """
 
         def _run():
-            conn = self._get_connection()
+            conn = self._get_connection(readonly=False)
             conn.execute("BEGIN")
             try:
                 result = sync_fn(conn, self)
@@ -319,7 +329,7 @@ class SQLiteAdapter(StorageAdapter):
         """Получить список ключей в namespace (выполняется в threadpool)."""
 
         def _list_keys_sync(ns: str):
-            conn = self._get_connection()
+            conn = self._get_connection(readonly=True)
             cursor = conn.execute("SELECT key FROM storage WHERE namespace = ?", (ns,))
             return [row[0] for row in cursor.fetchall()]
 
@@ -329,7 +339,7 @@ class SQLiteAdapter(StorageAdapter):
         """Получить список всех namespace (выполняется в threadpool)."""
 
         def _list_namespaces_sync():
-            conn = self._get_connection()
+            conn = self._get_connection(readonly=True)
             cursor = conn.execute("SELECT DISTINCT namespace FROM storage")
             return sorted(row[0] for row in cursor.fetchall())
 
@@ -339,7 +349,7 @@ class SQLiteAdapter(StorageAdapter):
         """Очистить все записи в namespace (выполняется в threadpool)."""
 
         def _clear_sync(ns: str, in_transaction: bool):
-            conn = self._get_connection()
+            conn = self._get_connection(readonly=False)
             conn.execute("DELETE FROM storage WHERE namespace = ?", (ns,))
             # Не делаем commit если мы в транзакции
             if not in_transaction:
@@ -361,15 +371,15 @@ class SQLiteAdapter(StorageAdapter):
         """
 
         def _begin_sync():
-            conn = self._get_connection()
+            conn = self._get_connection(readonly=False)
             conn.execute("BEGIN")
 
         def _commit_sync():
-            conn = self._get_connection()
+            conn = self._get_connection(readonly=False)
             conn.commit()
 
         def _rollback_sync():
-            conn = self._get_connection()
+            conn = self._get_connection(readonly=False)
             conn.rollback()
 
         # Начинаем транзакцию
@@ -393,7 +403,7 @@ class SQLiteAdapter(StorageAdapter):
         def _batch_set_sync(
             ns: str, items_dict: dict[str, dict[str, Any]], in_transaction: bool
         ):
-            conn = self._get_connection()
+            conn = self._get_connection(readonly=False)
             for key, value in items_dict.items():
                 json_value = json.dumps(value, ensure_ascii=False)
                 conn.execute(
@@ -429,7 +439,7 @@ class SQLiteAdapter(StorageAdapter):
             Гарантирует, что value всегда dict[str, Any], как требует интерфейс StorageAdapter.
             Некорректные JSON‑значения или не‑dict пропускаются.
             """
-            conn = self._get_connection()
+            conn = self._get_connection(readonly=True)
             offset = 0
             while True:
                 cursor = conn.execute(
@@ -466,11 +476,16 @@ class SQLiteAdapter(StorageAdapter):
         """Закрыть thread-local соединение с БД (выполняется в threadpool)."""
 
         def _close_sync():
-            # Закрываем только соединение текущего потока
-            if hasattr(self._local, "conn") and self._local.conn is not None:
+            # Закрываем только соединения текущего потока
+            if hasattr(self._local, "conn_rw") and self._local.conn_rw is not None:
                 try:
-                    self._local.conn.close()
+                    self._local.conn_rw.close()
                 finally:
-                    self._local.conn = None
+                    self._local.conn_rw = None
+            if hasattr(self._local, "conn_ro") and self._local.conn_ro is not None:
+                try:
+                    self._local.conn_ro.close()
+                finally:
+                    self._local.conn_ro = None
 
         await asyncio.to_thread(_close_sync)
