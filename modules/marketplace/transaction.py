@@ -106,21 +106,22 @@ class UpdateTransactionManager:
         if storage is None:
             return default
 
-        # New storage API: storage.get(namespace, key)
-        try:
-            value = storage.get(namespace, key)
+        # Prefer API shape based on coroutine-ness:
+        # - Real runtime storage ports are async (awaitable) and use (namespace, key).
+        # - Legacy/test storages are often sync and use "namespace.key".
+        legacy_key = f"{namespace}.{key}"
+        is_async_api = inspect.iscoroutinefunction(getattr(storage, "get", None))
+
+        if not is_async_api:
+            try:
+                value = storage.get(legacy_key, default)
+            except TypeError:
+                value = storage.get(legacy_key)
             if inspect.isawaitable(value):
                 value = await value
             return value if value is not None else default
-        except TypeError:
-            pass
 
-        # Legacy KV API: storage.get("namespace.key")
-        legacy_key = f"{namespace}.{key}"
-        try:
-            value = storage.get(legacy_key, default)
-        except TypeError:
-            value = storage.get(legacy_key)
+        value = storage.get(namespace, key)
         if inspect.isawaitable(value):
             value = await value
         return value if value is not None else default
@@ -132,17 +133,16 @@ class UpdateTransactionManager:
         if storage is None:
             return
 
-        # New storage API: storage.set(namespace, key, value)
-        try:
-            maybe = storage.set(namespace, key, value)
+        legacy_key = f"{namespace}.{key}"
+        is_async_api = inspect.iscoroutinefunction(getattr(storage, "set", None))
+
+        if not is_async_api:
+            maybe = storage.set(legacy_key, value)
             if inspect.isawaitable(maybe):
                 await maybe
             return
-        except TypeError:
-            pass
 
-        legacy_key = f"{namespace}.{key}"
-        maybe = storage.set(legacy_key, value)
+        maybe = storage.set(namespace, key, value)
         if inspect.isawaitable(maybe):
             await maybe
 
