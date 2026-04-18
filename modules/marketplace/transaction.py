@@ -253,6 +253,19 @@ class UpdateTransactionManager:
         staging_path = self.staging_dir / plugin_name
         backup_path = self.backup_dir / f"{plugin_name}_{old_version}"
 
+        was_started = False
+        try:
+            pm = getattr(self.runtime, "plugin_manager", None) if self.runtime is not None else None
+            if pm is not None and hasattr(pm, "get_plugin_state"):
+                from core.kernel.plugin_registry import PluginState
+
+                state = pm.get_plugin_state(plugin_name)
+                if inspect.isawaitable(state):
+                    state = await state
+                was_started = state == PluginState.STARTED
+        except Exception:
+            logger.debug("prepare_update: plugin state lookup failed", exc_info=True)
+
         txn = Transaction(
             plugin_name=plugin_name,
             version=version,
@@ -262,7 +275,7 @@ class UpdateTransactionManager:
             old_version=old_version,
             staging_path=str(staging_path),
             backup_path=str(backup_path),
-            details={"txn_id": txn_id},
+            details={"txn_id": txn_id, "was_started": was_started},
         )
 
         self._active_transactions[txn_id] = txn
@@ -441,6 +454,19 @@ class UpdateTransactionManager:
                 staging_path = Path(txn.staging_path)
                 if staging_path.exists():
                     shutil.rmtree(staging_path)
+
+            # Restart plugin if it was active before the update attempt.
+            try:
+                was_started = bool((txn.details or {}).get("was_started", False))
+                pm = getattr(self.runtime, "plugin_manager", None) if self.runtime is not None else None
+                if was_started and pm is not None and hasattr(pm, "start_plugin"):
+                    await pm.start_plugin(plugin_name)
+            except Exception:
+                logger.warning(
+                    "rollback: start_plugin failed after restore plugin=%s",
+                    plugin_name,
+                    exc_info=True,
+                )
 
             await self._save_transaction(txn_id, txn)
             await self._audit_log(txn, "rolled_back", reason)

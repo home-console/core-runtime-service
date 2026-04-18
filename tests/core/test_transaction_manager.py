@@ -188,6 +188,38 @@ class TestRollback:
         assert (current_path / "v1.py").exists()
         assert not (current_path / "v2.py").exists()
 
+    @pytest.mark.asyncio
+    async def test_rollback_restarts_plugin_if_was_started(self, temp_plugins_dir, mock_runtime):
+        """Rollback should restart plugin if it was active before update."""
+        from core.kernel.plugin_registry import PluginState
+
+        mgr = UpdateTransactionManager(temp_plugins_dir, mock_runtime)
+
+        # Create current plugin
+        current_path = temp_plugins_dir / "test_plugin"
+        current_path.mkdir()
+        (current_path / "v1.py").write_text("v1")
+        metadata = {"version": "1.0.0"}
+        (current_path / "metadata.json").write_text(json.dumps(metadata))
+
+        # Plugin was started before update attempt
+        mock_runtime.plugin_manager.get_plugin_state = MagicMock(return_value=PluginState.STARTED)
+        mock_runtime.plugin_manager.start_plugin = AsyncMock()
+
+        # Prepare update transaction and force a backup existing for rollback path
+        archive_path = temp_plugins_dir / "test.zip"
+        archive_path.write_text("fake")
+        txn = await mgr.prepare_update("test_plugin", "1.1.0", archive_path)
+        txn_id = list(mgr._active_transactions.keys())[0]
+
+        backup_path = mgr.backup_dir / "test_plugin_1.0.0"
+        backup_path.mkdir(parents=True)
+        (backup_path / "v1.py").write_text("v1")
+        txn.backup_path = str(backup_path)
+
+        await mgr.rollback(txn_id, "Activation failed")
+        mock_runtime.plugin_manager.start_plugin.assert_awaited()
+
 
 class TestCrashRecovery:
     """Test crash recovery during swap."""
