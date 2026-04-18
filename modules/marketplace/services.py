@@ -13,7 +13,8 @@ Exposes operations:
 
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
+import inspect
 
 from core.operations.models import Operation
 from modules.marketplace.installer import InstallerError, MarketplaceInstaller
@@ -59,6 +60,54 @@ class MarketplaceService:
         plugins_dir = Path(str(plugins_dir_value or "plugins"))
         self.installer = MarketplaceInstaller(plugins_dir)
         self.transaction_mgr = UpdateTransactionManager(plugins_dir, runtime)
+        self._storage_namespace = "marketplace"
+
+    async def _storage_get(self, key: str, default: Optional[dict] = None) -> Optional[dict]:
+        """
+        Compatibility storage getter.
+        
+        Prefers new Storage API: storage.get(namespace, key) → dict|None.
+        Falls back to legacy KV API: storage.get("marketplace.<key>") → dict|None.
+        """
+        storage = self.storage
+        # New storage API
+        try:
+            value = await storage.get(self._storage_namespace, key)
+            if value is not None:
+                return value
+        except TypeError:
+            pass
+
+        # Legacy KV storage API (sync or async)
+        legacy_key = f"{self._storage_namespace}.{key}"
+        try:
+            maybe = storage.get(legacy_key, default)
+        except TypeError:
+            # Some legacy storage.get takes only (key) without default
+            maybe = storage.get(legacy_key)
+        if inspect.isawaitable(maybe):
+            return await maybe
+        return maybe if maybe is not None else default
+
+    async def _storage_set(self, key: str, value: dict) -> None:
+        """
+        Compatibility storage setter.
+        
+        Prefers new Storage API: storage.set(namespace, key, value).
+        Falls back to legacy KV API: storage.set("marketplace.<key>", value).
+        """
+        storage = self.storage
+        # New storage API
+        try:
+            await storage.set(self._storage_namespace, key, value)
+            return
+        except TypeError:
+            pass
+
+        legacy_key = f"{self._storage_namespace}.{key}"
+        maybe = storage.set(legacy_key, value)
+        if inspect.isawaitable(maybe):
+            await maybe
 
     async def handle_install(self, operation: Operation) -> Dict[str, Any]:
         """
@@ -86,7 +135,7 @@ class MarketplaceService:
             )
 
             # Store installation info
-            self._store_installed_plugin(result)
+            await self._store_installed_plugin(result)
 
             # Log to audit trail
             plugin_name = result.get("name")
@@ -101,7 +150,7 @@ class MarketplaceService:
                 "source": "archive",
                 "archive_hash": result.get("hash"),
             }
-            self._add_audit_log(audit_entry)
+            await self._add_audit_log(audit_entry)
 
             return {"status": "success", "data": result}
 
@@ -114,7 +163,7 @@ class MarketplaceService:
                 "reason": str(e),
                 "source": "archive",
             }
-            self._add_audit_log(audit_entry)
+            await self._add_audit_log(audit_entry)
 
             return {"status": "failure", "error": str(e)}
 
@@ -138,7 +187,7 @@ class MarketplaceService:
 
         try:
             # Get plugin info before uninstall
-            installed = self._get_installed_plugins()
+            installed = await self._get_installed_plugins()
             if plugin_name not in installed:
                 return {
                     "status": "failure",
@@ -165,7 +214,7 @@ class MarketplaceService:
             result = await self.installer.uninstall(plugin_name, runtime=self.runtime)
 
             # Clear from storage
-            self._remove_installed_plugin(plugin_name)
+            await self._remove_installed_plugin(plugin_name)
 
             return {"status": "success", "data": result}
 
@@ -198,7 +247,7 @@ class MarketplaceService:
 
         try:
             # Check plugin exists
-            installed = self._get_installed_plugins()
+            installed = await self._get_installed_plugins()
             if plugin_name not in installed:
                 return {
                     "status": "failure",
@@ -210,14 +259,14 @@ class MarketplaceService:
 
             # Remove old version
             await self.installer.uninstall(plugin_name, runtime=self.runtime)
-            self._remove_installed_plugin(plugin_name)
+            await self._remove_installed_plugin(plugin_name)
 
             # Install new version
             result = await self.installer.install_from_file(
                 archive_path, sha256=params.get("sha256"), runtime=self.runtime
             )
 
-            self._store_installed_plugin(result)
+            await self._store_installed_plugin(result)
             new_version = result["version"]
 
             # Log to audit trail
@@ -231,7 +280,7 @@ class MarketplaceService:
                 "reason": None,
                 "archive_hash": result.get("hash"),
             }
-            self._add_audit_log(audit_entry)
+            await self._add_audit_log(audit_entry)
 
             return {
                 "status": "success",
@@ -252,7 +301,7 @@ class MarketplaceService:
                 "status": "failure",
                 "reason": str(e),
             }
-            self._add_audit_log(audit_entry)
+            await self._add_audit_log(audit_entry)
 
             return {"status": "failure", "error": str(e)}
 
@@ -276,7 +325,7 @@ class MarketplaceService:
 
         try:
             # Get plugin info
-            installed = self._get_installed_plugins()
+            installed = await self._get_installed_plugins()
             if plugin_name not in installed:
                 return {
                     "status": "failure",
@@ -291,7 +340,7 @@ class MarketplaceService:
             plugin_info = installed[plugin_name]
             plugin_info["enabled"] = True
             plugin_info["enabled_at"] = datetime.now(timezone.utc).isoformat()
-            self._store_installed_plugin(plugin_info)
+            await self._store_installed_plugin(plugin_info)
 
             return {
                 "status": "success",
@@ -322,7 +371,7 @@ class MarketplaceService:
 
         try:
             # Get plugin info
-            installed = self._get_installed_plugins()
+            installed = await self._get_installed_plugins()
             if plugin_name not in installed:
                 return {
                     "status": "failure",
@@ -353,7 +402,7 @@ class MarketplaceService:
             plugin_info = installed[plugin_name]
             plugin_info["enabled"] = False
             plugin_info["disabled_at"] = datetime.now(timezone.utc).isoformat()
-            self._store_installed_plugin(plugin_info)
+            await self._store_installed_plugin(plugin_info)
 
             return {
                 "status": "success",
@@ -374,7 +423,7 @@ class MarketplaceService:
             Dict with status, data, and error
         """
         try:
-            installed = self._get_installed_plugins()
+            installed = await self._get_installed_plugins()
             return {
                 "status": "success",
                 "data": {"installed_plugins": installed, "count": len(installed)},
@@ -383,9 +432,9 @@ class MarketplaceService:
             logger.warning("handle_list_installed failed: %s", e, exc_info=True)
             return {"status": "failure", "error": str(e)}
 
-    def _store_installed_plugin(self, plugin_info: Dict[str, Any]) -> None:
+    async def _store_installed_plugin(self, plugin_info: Dict[str, Any]) -> None:
         """Store plugin info in storage.installed namespace."""
-        installed = self._get_installed_plugins()
+        installed = await self._get_installed_plugins()
         plugin_name = plugin_info["name"]
 
         # Normalize storage format
@@ -401,18 +450,21 @@ class MarketplaceService:
             "capabilities_required": plugin_info.get("capabilities_required", []),
         }
 
-        self.storage.set("marketplace.installed", installed)
+        await self._storage_set("installed", installed)
 
-    def _remove_installed_plugin(self, plugin_name: str) -> None:
+    async def _remove_installed_plugin(self, plugin_name: str) -> None:
         """Remove plugin from storage.installed namespace."""
-        installed = self._get_installed_plugins()
+        installed = await self._get_installed_plugins()
         if plugin_name in installed:
             del installed[plugin_name]
-            self.storage.set("marketplace.installed", installed)
+            await self._storage_set("installed", installed)
 
-    def _get_installed_plugins(self) -> Dict[str, Dict[str, Any]]:
+    async def _get_installed_plugins(self) -> Dict[str, Dict[str, Any]]:
         """Get all installed plugins from storage."""
-        return self.storage.get("marketplace.installed") or {}
+        installed = await self._storage_get("installed", default={})
+        if not isinstance(installed, dict):
+            return {}
+        return installed or {}
 
     # ========== Registry-based operations ==========
 
@@ -474,8 +526,8 @@ class MarketplaceService:
             )
 
             # Store with registry metadata
-            self._store_installed_plugin(result)
-            self._store_registry_metadata(
+            await self._store_installed_plugin(result)
+            await self._store_registry_metadata(
                 plugin_name, release.version, registry_url, channel
             )
 
@@ -493,7 +545,7 @@ class MarketplaceService:
                 "archive_hash": result.get("hash"),
                 "registry_downgrade_protection": "enabled",
             }
-            self._add_audit_log(audit_entry)
+            await self._add_audit_log(audit_entry)
 
             return {
                 "status": "success",
@@ -512,7 +564,7 @@ class MarketplaceService:
                 "status": "failure",
                 "reason": str(e),
             }
-            self._add_audit_log(audit_entry)
+            await self._add_audit_log(audit_entry)
 
             logger.warning("handle_install_from_registry failed for plugin %s: %s", plugin_name, e, exc_info=True)
             return {"status": "failure", "error": str(e)}
@@ -602,7 +654,7 @@ class MarketplaceService:
             client = RegistryClient(registry_url)
             validator = PluginUpdateValidator(self.runtime)
 
-            installed = self._get_installed_plugins()
+            installed = await self._get_installed_plugins()
             updates = {}
 
             # Check each installed plugin
@@ -670,7 +722,7 @@ class MarketplaceService:
             client = RegistryClient(registry_url)
             validator = PluginUpdateValidator(self.runtime)
 
-            installed = self._get_installed_plugins()
+            installed = await self._get_installed_plugins()
             results = {"updated": [], "skipped": [], "errors": []}
 
             # Update each plugin
@@ -707,7 +759,7 @@ class MarketplaceService:
                         {"plugin": plugin_name, "version": release.version}
                     )
 
-                    self._store_installed_plugin(result)
+                    await self._store_installed_plugin(result)
 
                 except Exception as e:
                     logger.warning("handle_update_all: failed to update plugin %s: %s", plugin_name, e, exc_info=True)
@@ -722,10 +774,12 @@ class MarketplaceService:
             logger.warning("handle_update_all failed: %s", e, exc_info=True)
             return {"status": "failure", "error": str(e)}
 
-    def _add_audit_log(self, audit_entry: Dict[str, Any]) -> None:
+    async def _add_audit_log(self, audit_entry: Dict[str, Any]) -> None:
         """Add entry to marketplace audit log."""
         try:
-            audit_log = self.storage.get("marketplace.audit", {})
+            audit_log = await self._storage_get("audit", default={})
+            if not isinstance(audit_log, dict):
+                audit_log = {}
 
             # Generate log ID from timestamp
             import uuid
@@ -733,7 +787,7 @@ class MarketplaceService:
             log_id = str(uuid.uuid4())
 
             audit_log[log_id] = audit_entry
-            self.storage.set("marketplace.audit", audit_log)
+            await self._storage_set("audit", audit_log)
         except Exception as e:
             # Don't fail the main operation if audit logging fails
             import logging
@@ -741,11 +795,13 @@ class MarketplaceService:
             logger = logging.getLogger(__name__)
             logger.warning(f"Failed to write audit log: {e}")
 
-    def _store_registry_metadata(
+    async def _store_registry_metadata(
         self, plugin_name: str, version: str, registry_url: str, channel: str
     ) -> None:
         """Store registry metadata for installed plugin."""
-        registry_meta = self.storage.get("marketplace.registry_meta") or {}
+        registry_meta = await self._storage_get("registry_meta", default={})
+        if not isinstance(registry_meta, dict):
+            registry_meta = {}
 
         if plugin_name not in registry_meta:
             registry_meta[plugin_name] = {}
@@ -759,4 +815,4 @@ class MarketplaceService:
             }
         )
 
-        self.storage.set("marketplace.registry_meta", registry_meta)
+        await self._storage_set("registry_meta", registry_meta)

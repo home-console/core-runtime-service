@@ -136,7 +136,12 @@ class MarketplaceModule(RuntimeModule):
 
         # HTTP endpoints for admin marketplace operations (FastAPI via route_binding).
         http_registry = self.context.http
-        if http_registry is not None:
+        services_reg = self.context.services
+        services_reg_is_async = (
+            inspect.iscoroutinefunction(getattr(services_reg, "register_with_acl", None))
+            or inspect.iscoroutinefunction(getattr(services_reg, "register", None))
+        )
+        if http_registry is not None and services_reg_is_async:
             _admin_read = EndpointAuthConfig(required_scopes=["admin.read"])
             _admin_write = EndpointAuthConfig(required_scopes=["admin.write"])
 
