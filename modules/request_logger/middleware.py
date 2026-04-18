@@ -177,7 +177,9 @@ async def request_logger_middleware(request: Request, call_next: Callable) -> Re
                         request_body = sanitize_for_logging(request_body)
                     except (json.JSONDecodeError, UnicodeDecodeError):
                         # Если не JSON, сохраняем как строку (ограничиваем размер)
-                        request_body = body_bytes.decode("utf-8", errors="replace")[:10000]
+                        request_body = sanitize_for_logging(
+                            body_bytes.decode("utf-8", errors="replace")[:10000]
+                        )
         except ClientDisconnect:
             logger.debug(
                 "request_logger middleware: client disconnected while reading request body",
@@ -193,7 +195,7 @@ async def request_logger_middleware(request: Request, call_next: Callable) -> Re
         "method": request.method,
         "url": str(request.url),
         "path": request.url.path,
-        "query_params": dict(request.query_params),
+        "query_params": sanitize_for_logging(dict(request.query_params)),
         "headers": sanitized_request_headers,
         "body": request_body if debug_mode else None,  # Only in DEBUG mode
         "client": request.client.host if request.client else None,
@@ -223,7 +225,7 @@ async def request_logger_middleware(request: Request, call_next: Callable) -> Re
                 context={
                     "method": request.method,
                     "path": request.url.path,
-                    "query_params": dict(request.query_params),
+                    "query_params": sanitize_for_logging(dict(request.query_params)),
                     "client": request.client.host if request.client else None,
                     "user_agent": request.headers.get("user-agent"),
                     "origin": "http",  # HTTP запрос
@@ -260,9 +262,15 @@ async def request_logger_middleware(request: Request, call_next: Callable) -> Re
                         except (json.JSONDecodeError, UnicodeDecodeError, AttributeError):
                             # Если не JSON, сохраняем как строку (ограничиваем размер)
                             try:
-                                response_body = body_bytes.decode("utf-8", errors="replace")[:10000]
+                                response_body = sanitize_for_logging(
+                                    body_bytes.decode("utf-8", errors="replace")[:10000]
+                                )
                             except (AttributeError, TypeError):
-                                response_body = str(body_bytes)[:10000] if body_bytes else None
+                                response_body = (
+                                    sanitize_for_logging(str(body_bytes)[:10000])
+                                    if body_bytes
+                                    else None
+                                )
             except Exception:
                 logger.debug(
                     "request_logger middleware: response body capture failed",

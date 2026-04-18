@@ -17,6 +17,11 @@ SENSITIVE_KEYS = {
     "access_token",
     "refresh_token",
     "client_secret",
+    "secret_key",
+    "private_key",
+    "master_key",
+    "encryption_key",
+    "jwt_secret",
     "authorization",
     "cookie",
     "password",
@@ -46,6 +51,38 @@ def sanitize_for_logging(data: Any, mask: str = "***REDACTED***") -> Any:
         return tuple(sanitize_for_logging(item, mask) for item in data)
 
     if isinstance(data, str):
+        # Redact common key=value occurrences in strings (query strings, form data, logs).
+        # Examples:
+        # - password=...
+        # - token: ...
+        # - "client_secret": "..."
+        key_pattern = "|".join(
+            sorted(
+                {
+                    "password",
+                    "pass",
+                    "token",
+                    "access_token",
+                    "refresh_token",
+                    "secret",
+                    "client_secret",
+                    "api_key",
+                    "authorization",
+                    "cookie",
+                    "secret_key",
+                    "private_key",
+                    "master_key",
+                    "encryption_key",
+                    "jwt_secret",
+                }
+            )
+        )
+        data = re.sub(
+            rf"(?i)\b({key_pattern})\b(\s*[:=]\s*)([^&\s\"']+)",
+            rf"\1\2{mask}",
+            data,
+        )
+
         if (
             "authorization" in data.lower()
             or "bearer" in data.lower()

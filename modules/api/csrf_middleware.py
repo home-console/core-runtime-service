@@ -96,13 +96,17 @@ async def csrf_protection_middleware(request: Request, call_next: Callable) -> R
         csrf = CSRFProtection.from_env()
         csrf.validate_token(csrf_token, session_id)
     except RuntimeError as e:
-        # CSRF_SECRET not configured - log warning and allow (fail-open for development)
-        # In production, this should fail-closed
-        import os
-        if os.getenv("ENV", "development") == "production":
-            return JSONResponse(status_code=500, content={"detail": "CSRF protection not configured"})
-        # Development mode - allow without CSRF
-        pass
+        # CSRF is enabled but not configured (missing CSRF_SECRET) — fail-closed.
+        # If you intentionally want to disable CSRF (dev only), set RUNTIME_CSRF_ENABLED=false.
+        r = JSONResponse(
+            status_code=500,
+            content={
+                "detail": "CSRF protection not configured (CSRF_SECRET missing). "
+                "Set CSRF_SECRET or disable CSRF via RUNTIME_CSRF_ENABLED=false."
+            },
+        )
+        _add_cors_to_response(request, r)
+        return r
     except ValueError:
         r = JSONResponse(status_code=403, content={"detail": "Invalid CSRF token"})
         _add_cors_to_response(request, r)
