@@ -13,7 +13,18 @@ Implements operations:
 from typing import Dict, Any, List, Optional
 import inspect
 from core.runtime.runtime_module import RuntimeModule
+from core.http.models import EndpointAuthConfig, HttpEndpoint
 from modules.marketplace.services import MarketplaceService
+from modules.marketplace.admin_services import (
+    admin_marketplace_disable,
+    admin_marketplace_enable,
+    admin_marketplace_install,
+    admin_marketplace_install_from_registry,
+    admin_marketplace_installed,
+    admin_marketplace_remove,
+    admin_marketplace_update,
+    admin_marketplace_updates,
+)
 import logging
 logger = logging.getLogger(__name__)
 
@@ -122,6 +133,98 @@ class MarketplaceModule(RuntimeModule):
             "marketplace.update_all",
             self._wrap_handler(self.service.handle_update_all)
         )
+
+        # HTTP endpoints for admin marketplace operations (FastAPI via route_binding).
+        http_registry = self.context.http
+        if http_registry is not None:
+            _admin_read = EndpointAuthConfig(required_scopes=["admin.read"])
+            _admin_write = EndpointAuthConfig(required_scopes=["admin.write"])
+
+            # Register services (called by HTTP layer via service_registry).
+            await self.register_runtime_service("admin.v1.marketplace.install", admin_marketplace_install)
+            await self.register_runtime_service(
+                "admin.v1.marketplace.install_from_registry", admin_marketplace_install_from_registry
+            )
+            await self.register_runtime_service("admin.v1.marketplace.remove", admin_marketplace_remove)
+            await self.register_runtime_service("admin.v1.marketplace.update", admin_marketplace_update)
+            await self.register_runtime_service("admin.v1.marketplace.enable", admin_marketplace_enable)
+            await self.register_runtime_service("admin.v1.marketplace.disable", admin_marketplace_disable)
+            await self.register_runtime_service("admin.v1.marketplace.installed", admin_marketplace_installed)
+            await self.register_runtime_service("admin.v1.marketplace.updates", admin_marketplace_updates)
+
+            # Register HTTP endpoints → service mapping.
+            http_registry.register(
+                HttpEndpoint(
+                    method="POST",
+                    path="/admin/v1/marketplace/install",
+                    service="admin.v1.marketplace.install",
+                    description="Marketplace: install plugin from archive",
+                    auth_config=_admin_write,
+                )
+            )
+            http_registry.register(
+                HttpEndpoint(
+                    method="POST",
+                    path="/admin/v1/marketplace/install-from-registry",
+                    service="admin.v1.marketplace.install_from_registry",
+                    description="Marketplace: install plugin from registry",
+                    auth_config=_admin_write,
+                )
+            )
+            http_registry.register(
+                HttpEndpoint(
+                    method="POST",
+                    path="/admin/v1/marketplace/remove",
+                    service="admin.v1.marketplace.remove",
+                    description="Marketplace: remove plugin",
+                    auth_config=_admin_write,
+                )
+            )
+            http_registry.register(
+                HttpEndpoint(
+                    method="POST",
+                    path="/admin/v1/marketplace/update",
+                    service="admin.v1.marketplace.update",
+                    description="Marketplace: update plugin",
+                    auth_config=_admin_write,
+                )
+            )
+            http_registry.register(
+                HttpEndpoint(
+                    method="POST",
+                    path="/admin/v1/marketplace/enable/{plugin_name}",
+                    service="admin.v1.marketplace.enable",
+                    description="Marketplace: enable plugin",
+                    auth_config=_admin_write,
+                )
+            )
+            http_registry.register(
+                HttpEndpoint(
+                    method="POST",
+                    path="/admin/v1/marketplace/disable/{plugin_name}",
+                    service="admin.v1.marketplace.disable",
+                    description="Marketplace: disable plugin",
+                    auth_config=_admin_write,
+                )
+            )
+            http_registry.register(
+                HttpEndpoint(
+                    method="GET",
+                    path="/admin/v1/marketplace/installed",
+                    service="admin.v1.marketplace.installed",
+                    description="Marketplace: list installed plugins",
+                    auth_config=_admin_read,
+                )
+            )
+            http_registry.register(
+                HttpEndpoint(
+                    method="GET",
+                    path="/admin/v1/marketplace/updates",
+                    service="admin.v1.marketplace.updates",
+                    description="Marketplace: check updates for installed plugins",
+                    auth_config=_admin_read,
+                )
+            )
     
     async def start(self) -> None:
         """Start marketplace module."""
