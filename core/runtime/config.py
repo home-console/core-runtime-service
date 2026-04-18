@@ -101,6 +101,10 @@ class Config:
     orchestration_backend: str = "docker"
     # RUNTIME_MODULE_PATH_PREFIX: префикс для discovery модулей (default "modules")
     module_path_prefix: str = "modules"
+    
+    # Marketplace
+    # Default registry index URL (e.g. "https://marketplace.homeconsole.dev/registry/index.json")
+    marketplace_registry_url: str = ""
 
     def validate(self) -> None:
         """
@@ -235,6 +239,7 @@ class Config:
         - RUNTIME_VAULT_STORAGE_TYPE: "sqlite" or "postgresql" (required in dual mode)
         - RUNTIME_VAULT_DB_PATH: path to vault SQLite file (required if vault_storage_type="sqlite")
         - RUNTIME_VAULT_PG_DSN: PostgreSQL DSN for vault (required if vault_storage_type="postgresql")
+        - MARKETPLACE_REGISTRY_URL: default marketplace registry index URL (optional)
 
         Raises:
             ValueError: если конфигурация невалидна
@@ -276,6 +281,7 @@ class Config:
             plugins_dir=env.get("RUNTIME_PLUGINS_DIR"),
             orchestration_backend=env.get("RUNTIME_ORCHESTRATION_BACKEND", "docker").lower(),
             module_path_prefix=env.get("RUNTIME_MODULE_PATH_PREFIX", "modules"),
+            marketplace_registry_url=str(env.get("MARKETPLACE_REGISTRY_URL", "")).strip(),
         )
         config.validate()
         return config

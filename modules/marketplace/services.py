@@ -438,14 +438,23 @@ class MarketplaceService:
         plugin_name = params.get("plugin_name")
         version_constraint = params.get("version_constraint")
         channel = params.get("channel", "stable")
-        registry_url = params.get("registry_url")
+        cfg = getattr(self.runtime, "config", None)
+        default_registry_url = None
+        if cfg is not None:
+            default_registry_url = getattr(cfg, "marketplace_registry_url", None)
+            if default_registry_url is None and isinstance(cfg, dict):
+                default_registry_url = cfg.get("marketplace_registry_url")
+
+        registry_url = params.get("registry_url") or (str(default_registry_url or "").strip() or None)
         force_update = params.get("force_update", False)
 
-        if not plugin_name or not registry_url:
+        if not plugin_name:
             return {
                 "status": "failure",
-                "error": "plugin_name and registry_url required",
+                "error": "plugin_name required",
             }
+        if not registry_url:
+            return {"status": "failure", "error": "registry_url not configured"}
 
         try:
             # Resolve version from registry
