@@ -9,7 +9,7 @@ Allocates mutable bytearray with:
 - Blocks copy, repr, pickle, deepcopy
 
 LINUX ONLY - No fallback.
-Requires: glibc, Python 3.11+
+Requires: glibc, Python 3.13+
 """
 
 import ctypes

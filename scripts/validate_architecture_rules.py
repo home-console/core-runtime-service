@@ -112,8 +112,8 @@ class _ImportCollector:
         except SyntaxError as e:
             raise SyntaxError(
                 f"Failed to parse {self.file_path}. "
-                "This repo targets Python 3.11+. "
-                "If you are running on macOS system Python (3.9), switch to Python 3.11+. "
+                "This repo targets Python 3.13+. "
+                "If you are running on macOS system Python (3.9), switch to Python 3.13+. "
                 f"Original error: {e}"
             ) from e
         self._visit(tree, module_name, in_type_checking=False)
