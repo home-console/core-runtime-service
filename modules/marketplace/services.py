@@ -725,6 +725,8 @@ class MarketplaceService:
             installed = await self._get_installed_plugins()
             results = {"updated": [], "skipped": [], "errors": []}
 
+            staging_installer = MarketplaceInstaller(self.transaction_mgr.staging_dir)
+
             # Update each plugin
             for plugin_name, plugin_info in installed.items():
                 try:
@@ -745,21 +747,63 @@ class MarketplaceService:
                         )
                         continue
 
-                    # Install update
-                    result = await self.installer.install_from_url(
-                        release.url,
-                        sha256=release.sha256,
-                        signature=release.signature,
-                        public_key=release.public_key,
-                        runtime=self.runtime,
-                        force_update=force,
+                    # Transactional update (backup + atomic swap)
+                    txn = await self.transaction_mgr.prepare_update(
+                        plugin_name, release.version, Path("downloaded-via-registry")
                     )
+                    txn_id = (txn.details or {}).get("txn_id")
+                    if not isinstance(txn_id, str) or not txn_id:
+                        raise RuntimeError("transaction id missing")
+
+                    # Best-effort stop before swap (avoid running code from replaced dir)
+                    try:
+                        if hasattr(self.plugin_manager, "stop_plugin"):
+                            await self.plugin_manager.stop_plugin(plugin_name)
+                    except Exception:
+                        logger.debug(
+                            "handle_update_all: stop_plugin failed (ignored) plugin=%s",
+                            plugin_name,
+                            exc_info=True,
+                        )
+
+                    try:
+                        # Stage new version into .staging/<plugin_name> without loading it yet
+                        staged = await staging_installer.install_from_url(
+                            release.url,
+                            sha256=release.sha256,
+                            signature=release.signature,
+                            public_key=release.public_key,
+                            runtime=self.runtime,
+                            force_update=force,
+                            load_plugin=False,
+                        )
+
+                        await self.transaction_mgr.mark_validated(txn_id)
+                        await self.transaction_mgr.atomic_swap(txn_id)
+
+                        # Activate
+                        if hasattr(self.plugin_manager, "start_plugin"):
+                            await self.plugin_manager.start_plugin(plugin_name)
+
+                        await self.transaction_mgr.commit(txn_id)
+
+                        # Persist metadata for installed plugin (now current)
+                        staged["path"] = str(self.transaction_mgr.plugins_dir / plugin_name)
+                        await self._store_installed_plugin(staged)
+                    except Exception as e:
+                        try:
+                            await self.transaction_mgr.rollback(txn_id, str(e))
+                        except Exception:
+                            logger.warning(
+                                "handle_update_all: rollback failed plugin=%s",
+                                plugin_name,
+                                exc_info=True,
+                            )
+                        raise
 
                     results["updated"].append(
                         {"plugin": plugin_name, "version": release.version}
                     )
-
-                    await self._store_installed_plugin(result)
 
                 except Exception as e:
                     logger.warning("handle_update_all: failed to update plugin %s: %s", plugin_name, e, exc_info=True)
