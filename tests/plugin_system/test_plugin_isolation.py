@@ -413,12 +413,12 @@ class TestCapabilityRegistryIntegration:
             plugin_name="update_test",
             capability_id="test.update",
             execution_mode="container",
-            container_config={"image": "python:3.11"}
+            container_config={"image": "python:3.13"}
         )
         
         info = registry.get_provider_info("test.update", "update_test")
         assert info["execution_mode"] == "container"
-        assert info["container_config"]["image"] == "python:3.11"
+        assert info["container_config"]["image"] == "python:3.13"
 
 
 if __name__ == "__main__":
