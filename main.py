@@ -116,6 +116,35 @@ def _validate_security_configuration() -> None:
         print(f"[Runtime][Security Warning] {warning}")
 
 
+def _preflight_required_env() -> None:
+    """
+    Pre-flight проверка env vars с понятным списком проблем.
+
+    Важно: CSRF_SECRET и OAUTH_ENCRYPTION_KEY могут быть проброшены из SecretStore
+    при старте, поэтому эту проверку вызываем ПОСЛЕ bootstrap секретов.
+    """
+    missing: list[str] = []
+
+    # Always required (bootstrap secret)
+    if not (os.getenv("RUNTIME_MASTER_KEY") or "").strip():
+        missing.append("RUNTIME_MASTER_KEY")
+
+    # Security secrets must exist if CSRF is enabled (default true).
+    csrf_enabled = (os.getenv("RUNTIME_CSRF_ENABLED") or "true").lower().strip() == "true"
+    if csrf_enabled:
+        if not (os.getenv("CSRF_SECRET") or "").strip():
+            missing.append("CSRF_SECRET")
+        if not (os.getenv("OAUTH_ENCRYPTION_KEY") or "").strip():
+            missing.append("OAUTH_ENCRYPTION_KEY")
+
+    if missing:
+        hint = (
+            "Missing required environment variables:\n"
+            + "\n".join(f"  - {k}" for k in missing)
+        )
+        raise RuntimeError(hint)
+
+
 async def main() -> None:
     config = Config.from_env()
     if config.storage_type == "sqlite":
@@ -166,6 +195,7 @@ async def main() -> None:
             raise
         print(f"[Runtime] SecretStore not available: {e}")
 
+    _preflight_required_env()
     _validate_security_configuration()
 
     print(f"[Runtime] Storage mode: {config.storage_mode} ({config.storage_type})")

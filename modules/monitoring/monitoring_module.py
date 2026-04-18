@@ -4,7 +4,7 @@ import time
 
 from prometheus_client import CollectorRegistry, generate_latest, CONTENT_TYPE_LATEST
 from prometheus_client import Counter, Gauge, Histogram
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, Response, Request
 import logging
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,29 @@ class MonitoringModule:
         self.router.add_api_route("/metrics", self.metrics_endpoint, methods=["GET"])
         self.router.add_api_route("/health", self.health_endpoint, methods=["GET"])
 
-    async def metrics_endpoint(self) -> Response:
+    def _metrics_allowed(self, request: Request) -> bool:
+        """
+        Protect /metrics:
+        - If RUNTIME_METRICS_TOKEN is set: require Authorization: Bearer <token>
+        - Otherwise, in production: deny by default
+        - In development: allow (for local debugging)
+        """
+        import os
+
+        token = (os.getenv("RUNTIME_METRICS_TOKEN") or "").strip()
+        if token:
+            auth = (request.headers.get("authorization") or "").strip()
+            if auth.lower().startswith("bearer "):
+                provided = auth.split(" ", 1)[1].strip()
+                return provided == token
+            return False
+
+        env = (os.getenv("RUNTIME_ENV") or "development").lower().strip()
+        return env != "production"
+
+    async def metrics_endpoint(self, request: Request) -> Response:
+        if not self._metrics_allowed(request):
+            return Response(status_code=403, content="Forbidden")
         self.uptime.set(time.time() - self._start_time)
         data = generate_latest(self.registry)
         return Response(content=data, media_type=CONTENT_TYPE_LATEST)

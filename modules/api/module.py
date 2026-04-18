@@ -87,6 +87,21 @@ class ApiModule(RuntimeModule):
         
         self.app.add_middleware(CORSMiddleware, **cors_kw)
 
+        # SECURITY: limit request body size to mitigate simple DoS.
+        # Register early to reject oversized payloads before other middleware parses bodies.
+        try:
+            from modules.api.content_size_limit_middleware import (
+                content_size_limit_middleware,
+            )
+
+            self.app.middleware("http")(content_size_limit_middleware)
+        except Exception as e:
+            logger.warning(
+                "API: failed to register content size limit middleware: %s",
+                e,
+                exc_info=True,
+            )
+
         try:
             from modules.request_logger.middleware import request_logger_middleware
 

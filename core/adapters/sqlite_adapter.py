@@ -119,8 +119,8 @@ class SQLiteAdapter(StorageAdapter):
                                 "This can cause durability issues. Consider using named volumes."
                             )
                 except OSError:
-                    logger.debug(
-                        "sqlite_adapter._get_connection: /proc/mounts check failed (suppressed)",
+                    logger.warning(
+                        "sqlite_adapter._get_connection: /proc/mounts check failed; overlayfs durability checks skipped",
                         exc_info=True,
                     )
 
