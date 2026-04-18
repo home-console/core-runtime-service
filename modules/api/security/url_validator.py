@@ -78,10 +78,10 @@ def _resolve_host_ips(host: str) -> tuple[str, ...]:
         # Evict stale or shrink if over limit
         to_remove = [k for k, (_, exp) in _dns_cache.items() if exp <= now]
         for k in to_remove:
-            del _dns_cache[k]
+            _dns_cache.pop(k, None)
         while len(_dns_cache) >= _DNS_CACHE_MAXSIZE and _dns_cache:
             oldest = min(_dns_cache, key=lambda k: _dns_cache[k][1])
-            del _dns_cache[oldest]
+            _dns_cache.pop(oldest, None)
 
     try:
         infos = socket.getaddrinfo(host, None)

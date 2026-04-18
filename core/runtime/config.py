@@ -19,6 +19,21 @@ def _get_security_attr(config: SecurityConfig | None, name: str, default: object
     return getattr(config, name, default)
 
 
+def _get_int(env: Mapping[str, str], key: str, default: int) -> int:
+    raw = env.get(key, str(default))
+    try:
+        return int(str(raw).strip())
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"Invalid integer env var {key}={raw!r}") from e
+
+
+def _get_float(env: Mapping[str, str], key: str, default: float) -> float:
+    raw = env.get(key, str(default))
+    try:
+        return float(str(raw).strip())
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"Invalid float env var {key}={raw!r}") from e
+
 @dataclass
 class Config:
     """Конфигурация Core Runtime."""
@@ -237,19 +252,17 @@ class Config:
             storage_type=env.get("RUNTIME_STORAGE_TYPE", "sqlite"),
             db_path=env.get("RUNTIME_DB_PATH", "data/runtime.db"),
             pg_host=env.get("RUNTIME_PG_HOST", "localhost"),
-            pg_port=int(env.get("RUNTIME_PG_PORT", "5432")),
+            pg_port=_get_int(env, "RUNTIME_PG_PORT", 5432),
             pg_database=env.get("RUNTIME_PG_DATABASE", "homeconsole"),
             pg_user=env.get("RUNTIME_PG_USER", "postgres"),
             pg_password=env.get("RUNTIME_PG_PASSWORD", ""),
             pg_dsn=env.get("RUNTIME_PG_DSN"),
-            shutdown_timeout=int(env.get("RUNTIME_SHUTDOWN_TIMEOUT", "10")),
-            service_call_timeout=float(
-                env.get("RUNTIME_SERVICE_CALL_TIMEOUT", "30.0")
-            ),
+            shutdown_timeout=_get_int(env, "RUNTIME_SHUTDOWN_TIMEOUT", 10),
+            service_call_timeout=_get_float(env, "RUNTIME_SERVICE_CALL_TIMEOUT", 30.0),
             rate_limiting_enabled=env.get("RUNTIME_RATE_LIMITING_ENABLED", "true").lower()
             == "true",
-            rate_limit_requests=int(env.get("RUNTIME_RATE_LIMIT_REQUESTS", "100")),
-            rate_limit_window=int(env.get("RUNTIME_RATE_LIMIT_WINDOW", "60")),
+            rate_limit_requests=_get_int(env, "RUNTIME_RATE_LIMIT_REQUESTS", 100),
+            rate_limit_window=_get_int(env, "RUNTIME_RATE_LIMIT_WINDOW", 60),
             env=env.get("RUNTIME_ENV", "development").lower(),
             log_format=env.get("RUNTIME_LOG_FORMAT", "text").lower(),
             security_config=security_config,
