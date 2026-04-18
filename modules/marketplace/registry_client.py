@@ -125,6 +125,13 @@ class RegistryClient:
         Raises:
             RegistrySecurityError: if URL fails validation
         """
+        # In development, allow HTTP and localhost to support local marketplace-api.
+        # IMPORTANT: do not enable this in production.
+        if os.getenv("MARKETPLACE_ALLOW_LOCALHOST", "false").lower() == "true":
+            if not (url.startswith("https://") or url.startswith("http://")):
+                raise RegistrySecurityError("Registry URL must be HTTP(S)")
+            return
+
         # Must be HTTPS
         if not url.startswith("https://"):
             raise RegistrySecurityError("Registry URL must be HTTPS only")
