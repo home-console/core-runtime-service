@@ -172,8 +172,11 @@ async def test_install_from_registry_end_to_end_https_localhost(tmp_path: Path, 
     ssl_ctx = _make_self_signed_tls_context(tmp_path)
 
     app = aiohttp.web.Application()
-    app["zip_path"] = zip_path
-    app["sha256"] = sha
+    # aiohttp recommends using AppKey instead of bare strings.
+    ZIP_PATH_KEY = aiohttp.web.AppKey("zip_path", Path)
+    SHA256_KEY = aiohttp.web.AppKey("sha256", str)
+    app[ZIP_PATH_KEY] = zip_path
+    app[SHA256_KEY] = sha
 
     async def registry_index(request: aiohttp.web.Request) -> aiohttp.web.Response:
         base = f"{request.url.scheme}://{request.host}"
@@ -186,7 +189,7 @@ async def test_install_from_registry_end_to_end_https_localhost(tmp_path: Path, 
                         "stable": {
                             "version": "1.0.0",
                             "url": f"{base}/e2e_plugin.zip",
-                            "sha256": request.app["sha256"],
+                            "sha256": request.app[SHA256_KEY],
                             "signature": base64.b64encode(b"0" * 32).decode("ascii"),
                             "public_key": base64.b64encode(b"x" * 32).decode("ascii"),
                         }
@@ -198,7 +201,7 @@ async def test_install_from_registry_end_to_end_https_localhost(tmp_path: Path, 
         return aiohttp.web.json_response(payload)
 
     async def plugin_zip(request: aiohttp.web.Request) -> aiohttp.web.FileResponse:
-        return aiohttp.web.FileResponse(path=request.app["zip_path"])
+        return aiohttp.web.FileResponse(path=request.app[ZIP_PATH_KEY])
 
     app.router.add_get("/registry/index.json", registry_index)
     app.router.add_get("/e2e_plugin.zip", plugin_zip)

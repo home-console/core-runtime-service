@@ -31,10 +31,11 @@ from unittest.mock import Mock, patch, MagicMock
 import tempfile
 import shutil
 
-# For memory testing (Linux only)
-if sys.platform == "linux":
-    import resource
-    from ctypes import c_void_p, c_int
+# For memory testing. `resource` exists on Unix-like platforms (Linux/macOS).
+try:
+    import resource  # type: ignore
+except Exception:
+    resource = None  # type: ignore
 
 
 class CrashTestFixture:
@@ -280,7 +281,10 @@ class TestCrashSafetyValidation:
         assert recovered_hash == original_hash, "Merkle root should persist"
         storage.close()
     
-    @pytest.mark.skipif(sys.platform != "linux", reason="Subprocess crash test Linux-only")
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="Subprocess SIGKILL crash simulation is not portable on Windows",
+    )
     def test_subprocess_crash_simulation(self, crash_fixture):
         """Test crash using actual subprocess SIGKILL."""
         
@@ -538,89 +542,75 @@ class TestMemorySecurityValidation:
       • SecureBuffer actually zeroizes
     """
     
-    @pytest.mark.skipif(sys.platform != "linux", reason="Linux-only memory tests")
     def test_ptrace_disabled_after_hardening(self):
         """Verify ptrace is disabled after VaultHardening.enable()."""
         
-        # Check if VaultHardening exists
-        try:
-            from modules.security import VaultHardening
-        except ImportError:
-            pytest.skip("VaultHardening not available")
+        from modules.security import VaultHardening
         
-        # Try to enable hardening
-        try:
-            VaultHardening.enable()
-        except RuntimeError as e:
-            # Might fail if no CAP_IPC_LOCK, but that's OK for test
-            pytest.skip(f"Hardening unavailable: {e}")
-        
-        # Check /proc/self/status for not being dumpable
-        try:
-            with open("/proc/self/status", "r") as f:
-                content = f.read()
-                
-            # Look for TracerPid (should be 0 if ptrace disabled)
-            for line in content.split("\n"):
-                if line.startswith("TracerPid"):
-                    tracer_pid = int(line.split(":")[1].strip())
-                    assert tracer_pid == 0, "TracerPid should be 0 (no tracer)"
-        except FileNotFoundError:
-            pytest.skip("/proc/self/status not available")
-    
-    @pytest.mark.skipif(sys.platform != "linux", reason="Linux-only")
-    def test_core_dumps_disabled_after_hardening(self):
-        """Verify core dump limit is set to 0."""
-        
-        try:
-            from modules.security import VaultHardening
-        except ImportError:
-            pytest.skip("VaultHardening not available")
-        
-        # Try to enable
         try:
             VaultHardening.enable()
         except RuntimeError:
-            pytest.skip("Hardening unavailable")
+            # Non-Linux (or restricted) environments: hardening may be unavailable.
+            assert sys.platform != "linux"
+            return
+        
+        if sys.platform != "linux":
+            return
+
+        # Check /proc/self/status for not being dumpable
+        with open("/proc/self/status", "r") as f:
+            content = f.read()
+        # Look for TracerPid (should be 0 if ptrace disabled)
+        for line in content.split("\n"):
+            if line.startswith("TracerPid"):
+                tracer_pid = int(line.split(":")[1].strip())
+                assert tracer_pid == 0, "TracerPid should be 0 (no tracer)"
+    
+    def test_core_dumps_disabled_after_hardening(self):
+        """Verify core dump limit is set to 0."""
+        
+        from modules.security import VaultHardening
+        
+        try:
+            VaultHardening.enable()
+        except RuntimeError:
+            assert sys.platform != "linux"
+            return
+
+        if sys.platform != "linux":
+            return
         
         # Check ulimit
+        assert resource is not None
         soft, hard = resource.getrlimit(resource.RLIMIT_CORE)
         # After hardening, soft limit should be 0
         assert soft == 0, f"Core dump limit should be 0, got {soft}"
     
-    @pytest.mark.skipif(sys.platform != "linux", reason="Linux-only")
     def test_secure_buffer_memory_clear(self):
         """Verify SecureBuffer actually clears memory."""
         
-        try:
-            from modules.security import SecureBuffer
-        except ImportError:
-            pytest.skip("SecureBuffer not available")
+        from modules.security import SecureBuffer
         
         # Create secret in SecureBuffer
         secret_data = b"SECRET_KEY_DATA_12345"
         
+        buf = SecureBuffer(secret_data)
+        addr = buf._ptr  # c_void_p into the backing buffer (works on Linux + fallback)
+
+        # Read initial memory
+        initial = ctypes.string_at(addr, len(secret_data))
+        assert initial == secret_data, "Initial memory should contain data"
+
+        # Close/zeroize
+        buf.close()
+
+        # Try to read (might fail due to munlock, but if readable, should be zero)
         try:
-            buf = SecureBuffer(secret_data)
-            addr = ctypes.addressof(buf._buffer)  # Get memory address
-            
-            # Read initial memory
-            initial = ctypes.string_at(addr, len(secret_data))
-            assert initial == secret_data, "Initial memory should contain data"
-            
-            # Close/zeroize
-            buf.close()
-            
-            # Try to read (might fail due to munlock, but if readable, should be zero)
-            try:
-                after = ctypes.string_at(addr, len(secret_data))
-                assert after == b"\x00" * len(secret_data), "Memory should be zeroed"
-            except (OSError, ValueError):
-                # Expected if memory is unlocked/unmapped
-                pass
-        
-        except RuntimeError:
-            pytest.skip("SecureBuffer not available (non-Linux?)")
+            after = ctypes.string_at(addr, len(secret_data))
+            assert after == b"\x00" * len(secret_data), "Memory should be zeroed"
+        except (OSError, ValueError):
+            # Expected if memory is unlocked/unmapped
+            pass
 
 
 # ============================================================================
@@ -637,14 +627,9 @@ class TestSessionTTLValidation:
     """
     
     @pytest.mark.asyncio
-    @pytest.mark.skipif(sys.platform != "linux", reason="VaultSession Linux-only")
     async def test_session_ttl_expiration(self):
         """Verify session expires after TTL."""
-        
-        try:
-            from modules.security import VaultSession, SessionExpiredError
-        except ImportError:
-            pytest.skip("VaultSession not available")
+        from modules.security import VaultSession, SessionExpiredError
         
         # Create session with 2-second TTL (for fast test)
         session = VaultSession(ttl_seconds=2)
@@ -667,18 +652,13 @@ class TestSessionTTLValidation:
         assert not session.is_unlocked(), "Session should be expired after TTL"
         
         # Attempting to derive should fail
-        with pytest.raises(Exception):  # VaultLockedError or similar
+        with pytest.raises(SessionExpiredError):
             session.derive_namespace_key("test_namespace")
     
     @pytest.mark.asyncio
-    @pytest.mark.skipif(sys.platform != "linux", reason="VaultSession Linux-only")
     async def test_session_explicit_lock(self):
         """Verify explicit lock() clears session."""
-        
-        try:
-            from modules.security import VaultSession
-        except ImportError:
-            pytest.skip("VaultSession not available")
+        from modules.security import VaultSession
         
         session = VaultSession(ttl_seconds=300)
         

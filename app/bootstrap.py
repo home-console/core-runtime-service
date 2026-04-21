@@ -150,3 +150,24 @@ async def auto_load_plugins_if_enabled(runtime: CoreRuntime, config: Config) -> 
     plugins_dir_str = getattr(config, "plugins_dir", None)
     plugins_dir = Path(plugins_dir_str).expanduser() if plugins_dir_str else None
     await runtime.plugin_manager.auto_load_plugins(plugins_dir=plugins_dir)
+
+
+def resolve_module_specs_for_profile(
+    profile_name: str | None,
+    config: Config,
+) -> list[ModuleSpec]:
+    """
+    Определить список модулей с учётом профиля и RUNTIME_MODULES ENV.
+
+    Приоритет (от высшего к низшему):
+    1. RUNTIME_MODULES в ENV — если задан, всегда используется как есть
+    2. RUNTIME_PROFILE — если задан, берёт модули из профиля
+    3. APP_MODULES — дефолт
+
+    Returns:
+        Отсортированный список ModuleSpec (ModuleDependencySorter уже применён)
+    """
+    # Local import to avoid app.bootstrap <-> app.profiles cycle at import time.
+    from app.profiles import resolve_module_specs_for_profile as _resolve
+
+    return _resolve(profile_name, config)

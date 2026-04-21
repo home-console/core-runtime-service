@@ -16,7 +16,6 @@ from app.bootstrap import (
     APP_MODULES,
     auto_load_plugins_if_enabled,
     build_runtime,
-    parse_module_specs,
 )
 from core.runtime.config import Config
 from core.runtime.state_engine import StateEngine
@@ -146,7 +145,24 @@ def _preflight_required_env() -> None:
 
 
 async def main() -> None:
+    profile_name = os.getenv("RUNTIME_PROFILE")  # "minimal" | "dev" | "full" | "prod" | None
     config = Config.from_env()
+    if profile_name:
+        from app.profiles import PROFILES, apply_profile_to_config, get_profile
+
+        try:
+            profile = get_profile(profile_name)
+            config = apply_profile_to_config(profile, config)
+            # После overrides может потребоваться повторная валидация.
+            config.validate()
+            print(f"[Runtime] Profile: {profile.name} — {profile.description}")
+        except KeyError:
+            available = list(PROFILES.keys())
+            print(
+                f"[Runtime] Unknown RUNTIME_PROFILE={profile_name!r}. Available: {available}"
+            )
+            sys.exit(1)
+
     if config.storage_type == "sqlite":
         Path(config.db_path).parent.mkdir(parents=True, exist_ok=True)
     if (
@@ -158,13 +174,18 @@ async def main() -> None:
 
     state_engine = StateEngine()
     storage_stack = await build_storage_stack(config, state_engine)
+
+    from app.profiles import resolve_module_specs_for_profile
+
+    module_specs = resolve_module_specs_for_profile(profile_name, config)
+    print(f"[Runtime] Modules ({len(module_specs)}): {[s.name for s in module_specs]}")
     runtime = await build_runtime(
         storage_port=storage_stack.core_port,
         config=config,
         vault_port=storage_stack.vault_port,
         state_engine=state_engine,
         storage_manager=storage_stack.manager,
-        module_specs=parse_module_specs(config),
+        module_specs=module_specs,
     )
 
     # SecretStore для inspector (debug) и credentials: один раз при старте

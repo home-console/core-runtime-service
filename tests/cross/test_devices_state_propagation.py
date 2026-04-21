@@ -12,7 +12,7 @@ Scenario:
 import asyncio
 import pytest
 from core.runtime.runtime import CoreRuntime
-from main import APP_MODULES
+from app.bootstrap import APP_MODULES
 
 
 @pytest.mark.asyncio

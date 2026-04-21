@@ -5,7 +5,7 @@ import pytest
 from core.runtime.runtime import CoreRuntime
 from modules.devices.events import validate_device_discovered
 from modules.events.registry import get_event_validator
-from main import APP_MODULES
+from app.bootstrap import APP_MODULES
 
 
 @pytest.mark.asyncio

@@ -223,7 +223,7 @@ async def test_clear_modules():
 async def test_register_app_modules_via_bootstrap(memory_adapter):
     """Тест регистрации модулей приложения через bootstrap."""
     from core.runtime.runtime import CoreRuntime
-    from main import APP_MODULES
+    from app.bootstrap import APP_MODULES
 
     runtime = CoreRuntime(memory_adapter)
     await runtime.module_manager.register_module_specs(runtime, APP_MODULES)

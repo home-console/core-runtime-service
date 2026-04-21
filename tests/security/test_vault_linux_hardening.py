@@ -15,12 +15,6 @@ import sys
 import os
 from unittest.mock import patch, MagicMock
 
-# Skip non-Linux tests
-pytestmark = pytest.mark.skipif(
-    sys.platform != "linux",
-    reason="Tests require Linux"
-)
-
 from modules.security.secure_memory import SecureBuffer, SecureBytes, wipe_memory
 from modules.security.vault_hardening import VaultHardening, HardeningStatus
 from modules.security.vault_session import VaultSession, VaultLockedError, SessionExpiredError
@@ -40,7 +34,9 @@ class TestSecureBuffer:
         buf = SecureBuffer(data)
         
         assert buf.bytes == data
-        assert buf._locked is True  # mlock called
+        # On Linux: mlock is attempted and _locked should be True.
+        # On non-Linux: SecureBuffer is best-effort fallback.
+        assert buf._locked is (sys.platform == "linux")
         
         buf.close()
         assert buf._zeroed is True
@@ -156,10 +152,11 @@ class TestVaultHardening:
         # Enable hardening (this is destructive, only in test)
         try:
             VaultHardening.enable()
-            assert VaultHardening.is_enabled()
         except RuntimeError:
-            # May fail due to permissions, that's ok for test
-            pytest.skip("Hardening requires elevated permissions")
+            # Non-Linux or restricted permissions: hardening can be unavailable.
+            assert VaultHardening.is_enabled() is False
+            return
+        assert VaultHardening.is_enabled()
     
     def test_core_dump_limit(self):
         """Test core dump limit reading."""
@@ -175,15 +172,15 @@ class TestVaultHardening:
         
         try:
             VaultHardening.enable()
-            enabled_once = VaultHardening.is_enabled()
-            
-            # Enable again
-            VaultHardening.enable()
-            enabled_twice = VaultHardening.is_enabled()
-            
-            assert enabled_once == enabled_twice
         except RuntimeError:
-            pytest.skip("Hardening requires elevated permissions")
+            assert VaultHardening.is_enabled() is False
+            return
+
+        enabled_once = VaultHardening.is_enabled()
+        # Enable again
+        VaultHardening.enable()
+        enabled_twice = VaultHardening.is_enabled()
+        assert enabled_once == enabled_twice
 
 
 # ──────────────────────────────────────────────────────────────────────────────

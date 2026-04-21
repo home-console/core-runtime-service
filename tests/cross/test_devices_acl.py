@@ -5,7 +5,7 @@ from core.exceptions import NotFoundError
 from modules.api.auth.context import RequestContext
 from modules.api.auth.contextvars import set_current_request_context
 from modules.policy.engine import PolicyEngine as ModulePolicyEngine
-from main import APP_MODULES
+from app.bootstrap import APP_MODULES
 
 
 @pytest.mark.asyncio

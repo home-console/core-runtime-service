@@ -116,10 +116,17 @@ class VaultSession:
                 raise ValueError("passphrase cannot be empty")
             
             # Derive master key using Argon2id
+            #
+            # cryptography's Argon2id KDF uses:
+            # - iterations (time cost)
+            # - lanes (parallelism)
+            # - memory_cost (KiB)
             kdf = Argon2id(
-                time_cost=self._argon2_time,
+                length=32,
+                salt=self._derivation_salt,
+                iterations=self._argon2_time,
+                lanes=self._argon2_parallel,
                 memory_cost=self._argon2_memory,
-                parallelism=self._argon2_parallel,
             )
             
             master_key_bytes = kdf.derive(

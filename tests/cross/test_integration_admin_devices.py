@@ -2,7 +2,7 @@ import pytest
 
 from core.runtime.runtime import CoreRuntime
 from plugins.test import SystemLoggerPlugin
-from main import APP_MODULES
+from app.bootstrap import APP_MODULES
 
 
 async def _call_http(runtime: CoreRuntime, method: str, path: str, body=None):

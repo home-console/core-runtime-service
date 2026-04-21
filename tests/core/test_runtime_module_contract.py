@@ -10,7 +10,7 @@ import pytest
 from core.runtime.runtime import CoreRuntime
 from core.runtime import CoreRuntime
 from core.runtime.runtime_module import RuntimeModule
-from main import APP_MODULES
+from app.bootstrap import APP_MODULES
 
 
 class DummyModule(RuntimeModule):
