@@ -50,3 +50,6 @@ report.html
 .continue/
 # Deploy dev stage
 deploy/dev/frontend/
+
+# recovery
+deploy/dev/docker-compose.recovery.yml

@@ -7,7 +7,8 @@
 	file_server
 
 	# API endpoints → core-runtime
-	handle /api/* /admin/* /auth/* /presence/* /media/* /oauth/* /yandex/* /ws/* {
+	@api path /api/* /admin/* /auth/* /presence/* /media/* /oauth/* /yandex/* /ws/*
+	handle @api {
 		reverse_proxy core-runtime:8000
 	}
 

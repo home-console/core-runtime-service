@@ -173,12 +173,14 @@ class PostgreSQLAdapter(StorageAdapter):
         """Сохранить значение в storage.
 
         JSONB автоматически валидирует JSON, поэтому можно передавать dict напрямую.
-        asyncpg автоматически сериализует dict в JSONB.
+        Важно: asyncpg НЕ всегда автоматически сериализует Python dict/list в json/jsonb
+        без дополнительных кодеков. Поэтому сериализуем сами.
         """
         pool = await self._get_pool()
         async with pool.acquire() as conn:
-            # asyncpg автоматически сериализует dict в JSONB
-            # Не нужно делать json.dumps() - asyncpg сделает это сам
+            payload: Any = value
+            if isinstance(payload, (dict, list)):
+                payload = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
             await conn.execute(
                 """
                 INSERT INTO storage (namespace, key, value)
@@ -187,7 +189,7 @@ class PostgreSQLAdapter(StorageAdapter):
             """,
                 namespace,
                 key,
-                value,
+                payload,
             )
 
     async def delete(self, namespace: str, key: str) -> bool:
@@ -249,8 +251,12 @@ class PostgreSQLAdapter(StorageAdapter):
         pool = await self._get_pool()
         async with pool.acquire() as conn:
             # Используем executemany для оптимизации множественных вставок
-            # asyncpg автоматически сериализует dict в JSONB
-            values = [(namespace, key, value) for key, value in items.items()]
+            values = []
+            for key, value in items.items():
+                payload: Any = value
+                if isinstance(payload, (dict, list)):
+                    payload = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+                values.append((namespace, key, payload))
             await conn.executemany(
                 """
                 INSERT INTO storage (namespace, key, value)
@@ -279,16 +285,40 @@ class PostgreSQLAdapter(StorageAdapter):
         """
         pool = await self._get_pool()
         async with pool.acquire() as conn:
-            # Используем cursor для efficient streaming больших наборов
-            async with conn.cursor(
-                """
-                SELECT key, value FROM storage WHERE namespace = $1
-            """,
-                namespace,
-            ) as cursor:
-                while True:
-                    rows = await cursor.fetch(batch_size)
-                    if not rows:
-                        break
-                    for row in rows:
-                        yield row["key"], row["value"]
+            # Не используем async context manager для cursor(): в некоторых версиях asyncpg
+            # conn.cursor(...) возвращает CursorFactory без поддержки `async with`.
+            # Вместо этого читаем батчами через LIMIT/OFFSET.
+            offset = 0
+            while True:
+                rows = await conn.fetch(
+                    """
+                    SELECT key, value
+                    FROM storage
+                    WHERE namespace = $1
+                    ORDER BY key
+                    LIMIT $2 OFFSET $3
+                    """,
+                    namespace,
+                    batch_size,
+                    offset,
+                )
+                if not rows:
+                    break
+                for row in rows:
+                    value = row["value"]
+                    if isinstance(value, dict):
+                        yield row["key"], value
+                        continue
+                    if isinstance(value, (str, bytes, bytearray)):
+                        try:
+                            parsed = json.loads(value)
+                            if isinstance(parsed, dict):
+                                yield row["key"], parsed
+                                continue
+                        except json.JSONDecodeError:
+                            pass
+                    raise StorageCorruptionError(
+                        f"Invalid value type in storage: expected dict, "
+                        f"got {type(value).__name__} for {namespace}.{row['key']}"
+                    )
+                offset += len(rows)

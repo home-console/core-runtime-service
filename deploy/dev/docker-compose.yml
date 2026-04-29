@@ -1,5 +1,3 @@
-version: "3.8"
-
 # Dev stage docker-compose
 # Usage:
 #   1. Build frontend:   cd platform-home-console && pnpm build:web
