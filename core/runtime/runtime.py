@@ -130,15 +130,15 @@ class CoreRuntime(RuntimeLifecycleMixin):
         # SECURITY P0 (safe defaults): plugin isolation must be enabled by default.
         # App can override these via runtime.plugin_* setters.
         if self.app_config.plugin_storage_proxy_cls is None:
-            from modules.plugins.isolation import StorageProxy
+            from core.kernel.plugin_isolation import StorageProxy
 
             self.app_config.plugin_storage_proxy_cls = StorageProxy
         if self.app_config.plugin_service_proxy_cls is None:
-            from modules.plugins.isolation import ServiceProxy
+            from core.kernel.plugin_isolation import ServiceProxy
 
             self.app_config.plugin_service_proxy_cls = ServiceProxy
         if not self.app_config.plugin_default_allowed_services:
-            from modules.plugins.isolation import DEFAULT_ALLOWED_SERVICES
+            from core.kernel.plugin_isolation import DEFAULT_ALLOWED_SERVICES
 
             self.app_config.plugin_default_allowed_services = list(DEFAULT_ALLOWED_SERVICES)
 
