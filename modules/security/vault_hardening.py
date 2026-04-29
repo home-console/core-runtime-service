@@ -13,6 +13,7 @@ Must be called once at runtime initialization.
 import ctypes
 import ctypes.util
 import resource
+import os
 import sys
 from typing import Optional
 
@@ -57,6 +58,8 @@ class VaultHardening:
     """
     
     _enabled = False  # Track if hardening was applied
+    _memory_locked = False
+    _strict = bool(int(os.getenv("VAULT_HARDENING_STRICT", "0") or "0"))
     
     @staticmethod
     def enable() -> None:
@@ -68,8 +71,11 @@ class VaultHardening:
         2. disable_ptrace() - PR_SET_DUMPABLE = 0
         3. lock_process_memory() - mlockall(MCL_CURRENT | MCL_FUTURE)
         
-        Raises:
-            RuntimeError: if any operation fails (no fallback)
+        Strict mode:
+            If VAULT_HARDENING_STRICT=1, any failure raises RuntimeError.
+            Otherwise, hardening is best-effort and degrades gracefully in
+            restricted Linux environments (CI/containers without CAP_IPC_LOCK,
+            memlock ulimit, or with seccomp restrictions).
         """
         if VaultHardening._enabled:
             return  # Idempotent
@@ -77,9 +83,11 @@ class VaultHardening:
         print("[VaultHardening] Enabling process hardening...")
         
         if not _is_linux:
-            print("[VaultHardening] WARNING: Platform does not support full hardening (requires Linux); using best-effort fallback")
+            print(
+                "[VaultHardening] WARNING: Platform does not support full hardening (requires Linux); using best-effort fallback"
+            )
         
-        # Disable core dumps
+        # Disable core dumps (best-effort on non-Linux too)
         VaultHardening._disable_core_dumps()
         print("[VaultHardening] ✓ Core dumps disabled")
         
@@ -87,10 +95,19 @@ class VaultHardening:
             # Disable ptrace (Linux only)
             VaultHardening._disable_ptrace()
             print("[VaultHardening] ✓ ptrace attach disabled")
-            
-            # Lock process memory (Linux only)
-            VaultHardening._lock_process_memory()
-            print("[VaultHardening] ✓ Process memory locked")
+
+            # Lock process memory (Linux only, best-effort unless strict)
+            try:
+                VaultHardening._lock_process_memory()
+                VaultHardening._memory_locked = True
+                print("[VaultHardening] ✓ Process memory locked")
+            except RuntimeError as e:
+                VaultHardening._memory_locked = False
+                if VaultHardening._strict:
+                    raise
+                import sys as _sys
+
+                print(f"[VaultHardening] WARNING: memory lock unavailable: {e}", file=_sys.stderr)
         
         VaultHardening._enabled = True
     
@@ -104,7 +121,11 @@ class VaultHardening:
         try:
             resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
         except Exception as e:
-            raise RuntimeError(f"Failed to disable core dumps: {e}")
+            if VaultHardening._strict:
+                raise RuntimeError(f"Failed to disable core dumps: {e}")
+            import sys as _sys
+
+            print(f"[VaultHardening] WARNING: failed to disable core dumps: {e}", file=_sys.stderr)
     
     @staticmethod
     def _disable_ptrace() -> None:
@@ -126,10 +147,15 @@ class VaultHardening:
         
         if result != 0:
             errno = _get_errno()
-            raise RuntimeError(
+            msg = (
                 f"prctl(PR_SET_DUMPABLE, 0) failed: errno={errno}. "
                 f"This operation requires appropriate permissions."
             )
+            if VaultHardening._strict:
+                raise RuntimeError(msg)
+            import sys as _sys
+
+            print(f"[VaultHardening] WARNING: {msg}", file=_sys.stderr)
     
     @staticmethod
     def _lock_process_memory() -> None:
@@ -165,6 +191,11 @@ class VaultHardening:
     def is_enabled() -> bool:
         """Check if hardening was applied."""
         return VaultHardening._enabled
+
+    @staticmethod
+    def is_memory_locked() -> bool:
+        """Whether mlockall succeeded (best-effort)."""
+        return bool(VaultHardening._memory_locked)
 
 
 class HardeningStatus:

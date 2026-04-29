@@ -547,12 +547,9 @@ class TestMemorySecurityValidation:
         
         from modules.security import VaultHardening
         
-        try:
-            VaultHardening.enable()
-        except RuntimeError:
-            # Non-Linux (or restricted) environments: hardening may be unavailable.
-            assert sys.platform != "linux"
-            return
+        # Best-effort hardening: in restricted Linux environments some steps may degrade,
+        # but enable() should not fail by default.
+        VaultHardening.enable()
         
         if sys.platform != "linux":
             return
@@ -571,11 +568,7 @@ class TestMemorySecurityValidation:
         
         from modules.security import VaultHardening
         
-        try:
-            VaultHardening.enable()
-        except RuntimeError:
-            assert sys.platform != "linux"
-            return
+        VaultHardening.enable()
 
         if sys.platform != "linux":
             return

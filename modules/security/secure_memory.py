@@ -14,6 +14,7 @@ Requires: glibc, Python 3.13+
 
 import ctypes
 import ctypes.util
+import os
 import sys
 from typing import Optional
 import copy
@@ -90,6 +91,8 @@ class SecureBuffer:
         self._size = len(self._buffer)
         self._locked = False
         self._zeroed = False
+        self._dontdump_enabled = False
+        self._strict = bool(int(os.getenv("SECURE_MEMORY_STRICT", "0") or "0"))
         
         # Get pointer to buffer data for zeroization
         array_type = ctypes.c_ubyte * self._size
@@ -100,8 +103,23 @@ class SecureBuffer:
         self._locked = False
         if _is_linux:
             # Lock memory and exclude from core dumps
-            self._lock_memory()
-            self._exclude_from_dump()
+            try:
+                self._lock_memory()
+            except RuntimeError as e:
+                if self._strict:
+                    raise
+                import sys as _sys
+
+                print(f"[SecureBuffer] WARNING: mlock unavailable: {e}", file=_sys.stderr)
+
+            try:
+                self._exclude_from_dump()
+            except RuntimeError as e:
+                if self._strict:
+                    raise
+                import sys as _sys
+
+                print(f"[SecureBuffer] WARNING: MADV_DONTDUMP unavailable: {e}", file=_sys.stderr)
         else:
             # On non-Linux platforms we cannot mlock/madvise reliably.
             # Provide a best-effort implementation: warn and continue.
@@ -135,15 +153,11 @@ class SecureBuffer:
         )
         if result != 0:
             errno = _get_errno()
-            # madvise failure is warning-level (try to unlock first)
-            try:
-                _libc.munlock(self._ptr, ctypes.c_size_t(self._size))
-            except Exception:
-                logger.warning("Unhandled exception", exc_info=True)
             raise RuntimeError(
                 f"madvise(MADV_DONTDUMP) failed: errno={errno}. "
                 f"System may not support DONTDUMP."
             )
+        self._dontdump_enabled = True
     
     @property
     def bytes(self) -> bytes:

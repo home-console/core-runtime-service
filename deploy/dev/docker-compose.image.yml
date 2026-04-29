@@ -1,12 +1,11 @@
-# Dev stage docker-compose (builds from local source)
+# Prod-like compose (runs from prebuilt image)
 # Usage:
-#   1. Build frontend:   cd platform-home-console && pnpm build:web
-#   2. Copy dist:        cp -r platform-home-console/apps/web/dist ./deploy/dev/frontend/
-#   3. Run:              docker compose -f deploy/dev/docker-compose.yml up -d
-#   4. Open:             http://localhost (Caddy)
+#   CORE_RUNTIME_IMAGE=ghcr.io/<org>/<repo>/core-runtime:TAG \
+#   docker compose -f deploy/dev/docker-compose.image.yml up -d
 #
-# For "prod-like" (image-only) runs, see:
-#   deploy/dev/docker-compose.image.yml
+# Notes:
+# - No `build:` here. This is meant to validate "image-only" deploys.
+# - UI (caddy) still serves static files from ./frontend like dev compose.
 
 services:
   redis:
@@ -23,9 +22,7 @@ services:
       retries: 5
 
   core-runtime:
-    build:
-      context: ../..
-      dockerfile: Dockerfile
+    image: ${CORE_RUNTIME_IMAGE:-dev-core-runtime}
     container_name: core-runtime
     restart: unless-stopped
     env_file:
@@ -71,3 +68,4 @@ volumes:
   core-data:
   caddy-data:
   caddy-config:
+
