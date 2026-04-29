@@ -106,6 +106,19 @@ async def build_runtime(
         trust_level_to_privilege_mapper=module_trust_level_to_privilege,
         orchestration_service=orchestration_service,
     )
+
+    # Optional: start external event bus backend (e.g. Redis Streams).
+    event_bus = runtime.services.event_bus
+    start = getattr(event_bus, "start", None)
+    if callable(start):
+        await start()
+
+    # Optional: start remote service registry client (for split deployments).
+    service_registry = runtime.services.service_registry
+    svc_start = getattr(service_registry, "start", None)
+    if callable(svc_start):
+        await svc_start()
+
     # App-level policy: какие namespaces гидратировать при старте.
     async def _state_hydration_namespaces() -> list[str]:
         all_namespaces = await runtime.storage.list_namespaces()

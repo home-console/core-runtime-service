@@ -45,10 +45,18 @@ class PluginSandbox:
         if runtime is None:
             return
 
+        # FAIL-FAST: если StorageProxy не настроен — это P0 нарушение изоляции
+        storage_proxy_cls = getattr(runtime, "plugin_storage_proxy_cls", None)
+        if storage_proxy_cls is None:
+            raise RuntimeError(
+                "StorageProxy not configured in CoreRuntime. "
+                "Plugin isolation is DISABLED — this is a P0 security violation. "
+                "Set runtime.plugin_storage_proxy_cls before loading plugins."
+            )
+
         try:
             # P0 SECURITY: Do NOT set plugin.runtime directly
             # Instead, provide only isolated access through proxies
-            storage_proxy_cls = getattr(runtime, "plugin_storage_proxy_cls", None)
             service_proxy_cls = getattr(runtime, "plugin_service_proxy_cls", None)
             default_allowed_services = getattr(
                 runtime, "plugin_default_allowed_services", []

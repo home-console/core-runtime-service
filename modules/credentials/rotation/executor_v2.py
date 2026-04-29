@@ -7,7 +7,7 @@ from .policy import RotationPolicy
 from .policy import RotationStrategy as PolicyStrategy
 from .registry import StrategyRegistry
 from .strategy import RotationStrategyContext, RotationStrategyType
-from modules.security import TrustLevel
+from modules.domain import TrustLevel
 
 
 class RotationExecutor:

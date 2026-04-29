@@ -1,0 +1,20 @@
+services:
+  core-runtime:
+    environment:
+      - RUNTIME_PROFILE=dev
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY:-dev-internal-secret}
+
+  api-gateway:
+    build: .
+    ports:
+      - "8001:8000"
+    environment:
+      - RUNTIME_PROFILE=minimal
+      - SERVICE_REGISTRY_BACKEND=remote
+      - CORE_RUNTIME_URL=http://core-runtime:8000
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY:-dev-internal-secret}
+      - SERVICE_CALL_TIMEOUT=30
+    depends_on:
+      core-runtime:
+        condition: service_healthy
+

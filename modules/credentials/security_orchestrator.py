@@ -170,7 +170,7 @@ class CredentialSecurityOrchestrator:
             trust_state = await self.trust.get_state(user_id)
             trust_level = trust_state.level.value if trust_state else None
             
-            from modules.security import TrustLevel as TL
+            from modules.domain import TrustLevel as TL
             if trust_state and trust_state.level == TL.FROZEN:
                 audit_events.append("TRUST_STATE:FROZEN")
                 await self._audit_access_denied(
@@ -249,7 +249,7 @@ class CredentialSecurityOrchestrator:
             # TRUST ENGINE EVALUATION
             # ════════════════════════════════════════════════════
             if self.trust:
-                from modules.security import TrustAction as TA
+                from modules.domain import TrustAction as TA
                 trust_decision = await self.trust.evaluate(user_id, risk_score)
                 trust_action = trust_decision.action
                 trust_level = trust_decision.new_state.level.value

@@ -9,6 +9,21 @@
 #   docker compose up -d
 
 services:
+  redis:
+    image: redis:7-alpine
+    container_name: core-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - app
+
   core-runtime:
     build:
       context: .
@@ -19,10 +34,15 @@ services:
       - .env
     environment:
       - LOG_LEVEL=${LOG_LEVEL:-info}
+      - EVENT_BUS_BACKEND=${EVENT_BUS_BACKEND:-memory}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
       # Run as non-root; keep SQLite DBs on the mounted /data volume.
       - RUNTIME_DB_PATH=/data/runtime.db
       - RUNTIME_VAULT_DB_PATH=/data/vault.db
       - RUNTIME_VAULT_SECRET_DB_PATH=/data/vault_secret.db
+    depends_on:
+      redis:
+        condition: service_healthy
     volumes:
       - core-data:/data
     expose:

@@ -118,6 +118,22 @@ async def run_cli(
 
     await _auto_load_plugins(runtime, config)
     await runtime.start()
+    # Optional: start external event bus backend (e.g. Redis Streams).
+    try:
+        event_bus = runtime.services.event_bus
+        start = getattr(event_bus, "start", None)
+        if callable(start):
+            await start()
+    except Exception:
+        pass
+    # Optional: start remote service registry client.
+    try:
+        service_registry = runtime.services.service_registry
+        start = getattr(service_registry, "start", None)
+        if callable(start):
+            await start()
+    except Exception:
+        pass
 
     endpoints = runtime.http.list()
 
@@ -150,6 +166,22 @@ async def run_cli(
                 pass
         if shutdown_on_exit:
             await runtime.shutdown()
+            # Optional: stop external event bus backend.
+            try:
+                event_bus = runtime.services.event_bus
+                stop = getattr(event_bus, "stop", None)
+                if callable(stop):
+                    await stop()
+            except Exception:
+                pass
+            # Optional: stop remote service registry client.
+            try:
+                service_registry = runtime.services.service_registry
+                stop = getattr(service_registry, "stop", None)
+                if callable(stop):
+                    await stop()
+            except Exception:
+                pass
         return runtime
 
     print("Интерактивный режим CLI. Доступные действия:")
@@ -186,6 +218,22 @@ async def run_cli(
             print("Не удалось распознать выбор")
         if shutdown_on_exit:
             await runtime.shutdown()
+            # Optional: stop external event bus backend.
+            try:
+                event_bus = runtime.services.event_bus
+                stop = getattr(event_bus, "stop", None)
+                if callable(stop):
+                    await stop()
+            except Exception:
+                pass
+            # Optional: stop remote service registry client.
+            try:
+                service_registry = runtime.services.service_registry
+                stop = getattr(service_registry, "stop", None)
+                if callable(stop):
+                    await stop()
+            except Exception:
+                pass
         return runtime
 
     endpoint, params = selected
@@ -226,6 +274,22 @@ async def run_cli(
 
     if shutdown_on_exit:
         await runtime.shutdown()
+        # Optional: stop external event bus backend.
+        try:
+            event_bus = runtime.services.event_bus
+            stop = getattr(event_bus, "stop", None)
+            if callable(stop):
+                await stop()
+        except Exception:
+            pass
+        # Optional: stop remote service registry client.
+        try:
+            service_registry = runtime.services.service_registry
+            stop = getattr(service_registry, "stop", None)
+            if callable(stop):
+                await stop()
+        except Exception:
+            pass
     return runtime
 
 

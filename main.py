@@ -236,6 +236,24 @@ async def main() -> None:
 
     await runtime.run()
 
+    # Optional: stop external event bus backend (e.g. Redis Streams).
+    try:
+        event_bus = runtime.services.event_bus
+        stop = getattr(event_bus, "stop", None)
+        if callable(stop):
+            await stop()
+    except Exception:
+        pass
+
+    # Optional: stop remote service registry client.
+    try:
+        service_registry = runtime.services.service_registry
+        stop = getattr(service_registry, "stop", None)
+        if callable(stop):
+            await stop()
+    except Exception:
+        pass
+
     try:
         await storage_stack.manager.close()
         print("[Runtime] Storage закрыт")

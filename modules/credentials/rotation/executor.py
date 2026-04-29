@@ -7,7 +7,7 @@ import asyncio
 from .policy import RotationPolicy, RotationStatus, RotationStrategy, RotationState
 from .exceptions import RotationFailedError, RotationNotAllowedError
 from .secret_gen import generate_strong_secret
-from modules.security import TrustLevel
+from modules.domain import TrustLevel
 import logging
 logger = logging.getLogger(__name__)
 

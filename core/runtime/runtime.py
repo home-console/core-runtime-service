@@ -17,6 +17,7 @@ from core.kernel.context import KernelContext
 from core.kernel.plugin_api import PluginAPI
 from core.kernel.plugin_infrastructure import PluginInfrastructure
 from core.operations.component import OperationsComponent
+from core.ports import IEventBus, IServiceRegistry
 from core.runtime._lifecycle import RuntimeLifecycleMixin
 from core.runtime.app_config import AppExtensionConfig
 from core.runtime.monitor import RuntimeMonitor
@@ -126,6 +127,20 @@ class CoreRuntime(RuntimeLifecycleMixin):
         
         # App-level extension hooks (вынесено в app_config для соблюдения границ ядра)
         self.app_config: AppExtensionConfig = AppExtensionConfig.create()
+        # SECURITY P0 (safe defaults): plugin isolation must be enabled by default.
+        # App can override these via runtime.plugin_* setters.
+        if self.app_config.plugin_storage_proxy_cls is None:
+            from modules.plugins.isolation import StorageProxy
+
+            self.app_config.plugin_storage_proxy_cls = StorageProxy
+        if self.app_config.plugin_service_proxy_cls is None:
+            from modules.plugins.isolation import ServiceProxy
+
+            self.app_config.plugin_service_proxy_cls = ServiceProxy
+        if not self.app_config.plugin_default_allowed_services:
+            from modules.plugins.isolation import DEFAULT_ALLOWED_SERVICES
+
+            self.app_config.plugin_default_allowed_services = list(DEFAULT_ALLOWED_SERVICES)
 
         # App-level плагины и модули доступны через self.plugins
         # Для обратной совместимости добавлены property-методы ниже
@@ -238,12 +253,12 @@ class CoreRuntime(RuntimeLifecycleMixin):
     # Направляют к self.services для старого кода
 
     @property
-    def event_bus(self) -> Any:
+    def event_bus(self) -> IEventBus:
         """Обратная совместимость: event_bus через services."""
         return self.services.event_bus
 
     @property
-    def service_registry(self) -> Any:
+    def service_registry(self) -> IServiceRegistry:
         """Обратная совместимость: service_registry через services."""
         return self.services.service_registry
 

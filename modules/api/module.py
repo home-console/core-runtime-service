@@ -163,6 +163,13 @@ class ApiModule(RuntimeModule):
         self.app.middleware("http")(security_headers_middleware)
 
         self.app.include_router(MonitoringModule(runtime=runtime).router, prefix="/monitor", tags=["monitoring"])
+        # Internal API (service proxy) — not included in OpenAPI schema.
+        try:
+            from modules.api.internal_routes import create_internal_router
+
+            self.app.include_router(create_internal_router(runtime))
+        except Exception as e:
+            logger.warning("API: internal routes not available: %s", e, exc_info=True)
         try:
             from modules.request_logger.router import create_request_logger_router
 

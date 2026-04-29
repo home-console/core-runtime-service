@@ -215,3 +215,14 @@ class TrustConfigs:
         auto_unfreeze_enabled=True,            # Quick recovery
         recovery_threshold=40.0,               # Easy to recover
     )
+
+
+# Backward compatibility re-exports
+from modules.domain.trust import (  # noqa: F401,E402
+    TrustAction,
+    TrustConfig,
+    TrustConfigs,
+    TrustDecision,
+    TrustLevel,
+    TrustState,
+)

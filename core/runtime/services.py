@@ -14,13 +14,16 @@ CoreServices — базовые сервисы ядра.
 
 from typing import Any, Optional
 
-from core.messaging import InMemoryEventBus
-from core.service.registry import ServiceRegistry
+from core.messaging_factory import create_event_bus
+from core.ports import IEventBus, IServiceRegistry
+from core.service.registry_factory import create_service_registry
 from core.http.registry import HttpRegistry
 from core.runtime.state_engine import StateEngine
 
 
 class CoreServices:
+    event_bus: IEventBus
+    service_registry: IServiceRegistry
     """
     Базовые сервисы ядра — минимальный набор для работы плагинов.
 
@@ -63,12 +66,11 @@ class CoreServices:
         self.vault = vault_port
 
         # Event bus — коммуникационная шина
-        self.event_bus = InMemoryEventBus(storage=self.storage)
+        self.event_bus = create_event_bus(config=config, storage=self.storage)
 
         # Service registry — вызов сервисов
-        default_timeout = config.service_call_timeout if config else None
-        self.service_registry = ServiceRegistry(
-            default_timeout=default_timeout,
+        self.service_registry = create_service_registry(
+            config=config,
             policy_engine=policy_engine,
             policy_engine_factory=service_policy_engine_factory,
             acl_wrapper_builder=service_acl_wrapper_builder,

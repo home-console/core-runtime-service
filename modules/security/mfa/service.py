@@ -9,7 +9,7 @@ Responsibilities:
 5. No direct HTTP logic
 """
 
-from typing import Optional, TYPE_CHECKING
+from typing import Optional, Protocol, TYPE_CHECKING
 import time
 
 from modules.security.mfa.methods import MFAMethod, TOTPMethod
@@ -24,7 +24,14 @@ from modules.security.mfa.exceptions import (
 if TYPE_CHECKING:
     from core.audit.binder import AuditBinder
     from modules.security.secret_store import SecretStore
-    from modules.credentials.abuse_detection import CredentialAbuseDetector
+
+
+class CredentialAbuseDetectorProtocol(Protocol):
+    async def validate_mfa_available(self, user_id: str) -> None: ...
+
+    async def record_mfa_failure(self, user_id: str) -> None: ...
+
+    async def reset_mfa_failures(self, user_id: str) -> None: ...
 
 
 class MFAService:
@@ -41,7 +48,7 @@ class MFAService:
         secret_store: "SecretStore",
         audit_binder: Optional["AuditBinder"] = None,
         elevation_session_manager: Optional[ElevationSessionManager] = None,
-        abuse_detector: Optional["CredentialAbuseDetector"] = None,
+        abuse_detector: Optional[CredentialAbuseDetectorProtocol] = None,
         elevation_ttl_seconds: int = 90,
         max_failed_attempts: int = 5,
         lockout_seconds: int = 300,

@@ -28,6 +28,7 @@ from core.kernel.plugin_orchestration_manager import PluginOrchestrationManager
 from core.kernel.plugin_registry import PluginRegistry, PluginState
 from core.kernel.plugin_storage_manager import PluginStorageManager
 from core.kernel.plugin_sandbox import PluginSandbox
+from core.kernel.plugin_supervisor import PluginSupervisor, RestartPolicy, PluginStatus
 from core.observability.logger_helper import info, warning
 from core.exception_groups import BEST_EFFORT_BACKGROUND_ERRORS
 import logging
@@ -59,6 +60,13 @@ class PluginLifecycleManager:
         self._registry = registry
         self._runtime = runtime
         self._capability_registry = capability_registry
+        self._supervisor = PluginSupervisor()
+
+        async def _mark_plugin_failed(name: str, exc: Exception) -> None:
+            # "Degraded" semantics mapped to registry ERROR (plugin stays registered).
+            await self._registry.set_plugin_state(name, PluginState.ERROR)
+
+        self._supervisor.on_plugin_failed(_mark_plugin_failed)
 
         # Делегирование специализированным компонентам (SRP)
         self._storage_manager = PluginStorageManager(runtime)
@@ -153,7 +161,11 @@ class PluginLifecycleManager:
             raise
 
     async def start_plugin(
-        self, plugin_name: str, _start_stack: Optional[set[str]] = None
+        self,
+        plugin_name: str,
+        _start_stack: Optional[set[str]] = None,
+        *,
+        _propagate_errors: bool = True,
     ) -> None:
         """
         Запустить плагин.
@@ -196,7 +208,9 @@ class PluginLifecycleManager:
                 dep_state = await self._registry.get_plugin_state(dep_name)
                 if dep_state != PluginState.STARTED:
                     try:
-                        await self.start_plugin(dep_name, start_stack)
+                        await self.start_plugin(
+                            dep_name, start_stack, _propagate_errors=False
+                        )
                     except (RuntimeError, ValueError, AttributeError, KeyError) as e:
                         logger.warning(
                             "plugin_lifecycle.start_plugin: dependency start failed: %s",
@@ -275,7 +289,21 @@ class PluginLifecycleManager:
                 return  # Плагин не стартуем — управляемое состояние (blocked), не исключение
 
         try:
-            await plugin.on_start()
+            # Fault isolation with deterministic semantics:
+            # on_start() is an init hook; after await it must have executed (tests rely on it).
+            handle = await self._supervisor.run_supervised(
+                plugin_name=plugin_name,
+                coro=plugin.on_start(),
+                restart_policy=RestartPolicy.NEVER,
+            )
+            # If plugin crashed during on_start, supervisor marks it DEGRADED.
+            # In that case do NOT mark plugin as STARTED.
+            if handle.status == PluginStatus.DEGRADED:
+                await self._registry.set_plugin_state(plugin_name, PluginState.ERROR)
+                if _propagate_errors:
+                    raise RuntimeError(f"Ошибка запуска плагина '{plugin_name}'")
+                return
+
             await self._registry.set_plugin_state(plugin_name, PluginState.STARTED)
         except asyncio.CancelledError:
             raise
@@ -283,7 +311,10 @@ class PluginLifecycleManager:
             await self._registry.set_plugin_state(plugin_name, PluginState.ERROR)
             start_stack.discard(plugin_name)
             logger.exception("plugin_lifecycle.start_plugin: on_start failed for '%s'", plugin_name)
-            raise RuntimeError(f"Ошибка запуска плагина '{plugin_name}': {e}") from e
+            # Runtime must stay alive, but caller may want an explicit error.
+            if _propagate_errors:
+                raise RuntimeError(f"Ошибка запуска плагина '{plugin_name}'") from e
+            return
         finally:
             start_stack.discard(plugin_name)
 
@@ -325,6 +356,8 @@ class PluginLifecycleManager:
             metadata = plugin.metadata
             await self._orchestration_manager.stop_plugin_runtime(plugin_name, metadata)
 
+            # Stop supervised task first (if any), then call plugin shutdown hook.
+            await self._supervisor.stop_plugin(plugin_name)
             await plugin.on_stop()
             await self._registry.set_plugin_state(plugin_name, PluginState.STOPPED)
         except asyncio.CancelledError:
@@ -469,3 +502,6 @@ class PluginLifecycleManager:
         for plugin_name, state in states.items():
             if state == PluginState.STARTED:
                 await self.stop_plugin(plugin_name)
+
+        # Best-effort: ensure any remaining supervised tasks are cancelled.
+        await self._supervisor.stop_all(timeout=10.0)

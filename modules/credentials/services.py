@@ -10,7 +10,7 @@ Zero-trust secret access with MFA elevation
 from typing import Any, Dict, Optional, List, TYPE_CHECKING
 from datetime import datetime, UTC
 
-from modules.security import CredentialAccessLevel, CredentialPolicy, RiskAction, Role
+from modules.domain import CredentialAccessLevel, CredentialPolicy, RiskAction, Role
 from modules.credentials import (
     Credential,
     CredentialAccessDenied,

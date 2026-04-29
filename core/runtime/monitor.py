@@ -68,6 +68,18 @@ class RuntimeMonitor:
         checks: Dict[str, Any] = {}
         status = "healthy"
 
+        # Plugin supervisor statuses (best-effort)
+        try:
+            plugin_mgr = getattr(getattr(self.runtime, "plugins", None), "plugin_manager", None)
+            lifecycle = getattr(plugin_mgr, "_lifecycle", None) if plugin_mgr is not None else None
+            supervisor = getattr(lifecycle, "_supervisor", None) if lifecycle is not None else None
+            if supervisor is not None and hasattr(supervisor, "list_plugins"):
+                checks["plugins"] = {
+                    name: st.value for name, st in supervisor.list_plugins().items()
+                }
+        except Exception as exc:
+            checks["plugins_error"] = str(exc)
+
         try:
             # Проверка storage
             await self.runtime.storage.get("health_check", "test")
@@ -118,6 +130,18 @@ class RuntimeMonitor:
             "storage": {},
             "http_endpoints": {},
         }
+
+        # Plugin supervisor statuses (best-effort)
+        try:
+            plugin_mgr = getattr(getattr(self.runtime, "plugins", None), "plugin_manager", None)
+            lifecycle = getattr(plugin_mgr, "_lifecycle", None) if plugin_mgr is not None else None
+            supervisor = getattr(lifecycle, "_supervisor", None) if lifecycle is not None else None
+            if supervisor is not None and hasattr(supervisor, "list_plugins"):
+                metrics["plugins"] = {
+                    name: st.value for name, st in supervisor.list_plugins().items()
+                }
+        except Exception as exc:
+            metrics["plugins"] = {"error": str(exc)}
 
         try:
             await self.runtime.storage.get("metrics", "test")

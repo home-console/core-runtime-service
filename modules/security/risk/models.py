@@ -151,3 +151,13 @@ class RiskConfig:
         assert self.decay_half_life > 0, "decay_half_life must be > 0"
         assert self.max_events_per_user > 0, "max_events_per_user must be > 0"
         assert self.cleanup_interval > 0, "cleanup_interval must be > 0"
+
+
+# Backward compatibility re-exports
+from modules.domain.risk import (  # noqa: F401,E402
+    EventType,
+    RiskAction,
+    RiskAssessment,
+    RiskConfig,
+    RiskEvent,
+)
