@@ -499,15 +499,13 @@ class TestHTTPEndpointRegistration:
         endpoints = runtime.http.list()
         paths = {ep.path for ep in endpoints}
 
-        # TASK 1.1
-        assert "/admin/v1/agents/deploy" in paths, "deploy endpoint missing"
-        # TASK 1.4
-        assert "/admin/v1/deployments/{deployment_id}" in paths, "deployment status endpoint missing"
-        assert "/admin/v1/deployments" in paths, "deployment metrics endpoint missing"
+        assert "/api/v1/admin/agents/deploy" in paths, "deploy endpoint missing"
+        assert "/api/v1/admin/deployments/{deployment_id}" in paths, "deployment status endpoint missing"
+        assert "/api/v1/admin/deployments" in paths, "deployment metrics endpoint missing"
 
         # Enrollment endpoints (pre-existing)
-        assert "/admin/v1/agents/enrollment-token" in paths
-        assert "/admin/v1/agents/enroll" in paths
+        assert "/api/v1/admin/agents/enrollment-token" in paths
+        assert "/api/v1/admin/agents/enroll" in paths
 
         await runtime.stop()
 
@@ -522,7 +520,7 @@ class TestHTTPEndpointRegistration:
         await runtime.start()
 
         paths = {ep.path for ep in runtime.http.list()}
-        assert "/admin/v1/agents/{agent_id}/heartbeat" in paths
+        assert "/api/v1/admin/agents/{agent_id}/heartbeat" in paths
 
         await runtime.stop()
 
@@ -537,8 +535,8 @@ class TestHTTPEndpointRegistration:
         await runtime.start()
 
         paths = {ep.path for ep in runtime.http.list()}
-        assert "/media/checksum" in paths
-        assert "/media/download/binary" in paths
+        assert "/api/v1/media/checksum" in paths
+        assert "/api/v1/media/download/binary" in paths
 
         await runtime.stop()
 
@@ -553,7 +551,7 @@ class TestHTTPEndpointRegistration:
         await runtime.start()
 
         deploy_endpoints = [
-            ep for ep in runtime.http.list() if ep.path == "/admin/v1/agents/deploy"
+            ep for ep in runtime.http.list() if ep.path == "/api/v1/admin/agents/deploy"
         ]
         assert len(deploy_endpoints) == 1
         assert deploy_endpoints[0].method.upper() == "POST"
@@ -572,7 +570,7 @@ class TestHTTPEndpointRegistration:
 
         status_eps = [
             ep for ep in runtime.http.list()
-            if ep.path == "/admin/v1/deployments/{deployment_id}"
+            if ep.path == "/api/v1/admin/deployments/{deployment_id}"
         ]
         assert len(status_eps) == 1
         assert status_eps[0].method.upper() == "GET"

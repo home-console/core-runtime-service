@@ -933,61 +933,61 @@ class OAuthYandexPlugin(BasePlugin):
         _admin_write = EndpointAuthConfig(required_scopes=["admin.write"])
         _public = EndpointAuthConfig(public=True)
         try:
-            # POST /oauth/yandex/configure — сохранить конфигурацию OAuth
+            # POST /api/v1/plugins/oauth-yandex/configure — сохранить конфигурацию OAuth
             self.register_http_endpoint(HttpEndpoint(
                 method="POST",
-                path="/oauth/yandex/configure",
+                path="/api/v1/plugins/oauth-yandex/configure",
                 service="oauth.configure",
                 description="Настроить OAuth параметры (client_id, client_secret, redirect_uri)",
                 auth_config=_admin_write,
             ))
-            # GET /oauth/yandex/status — получить статус авторизации (не возвращает токены)
+            # GET /api/v1/plugins/oauth-yandex/status — получить статус авторизации (не возвращает токены)
             self.register_http_endpoint(HttpEndpoint(
                 method="GET",
-                path="/oauth/yandex/status",
+                path="/api/v1/plugins/oauth-yandex/status",
                 service="oauth.get_status",
                 description="Получить статус OAuth: configured, authorized, access_token_valid",
                 auth_config=_public,
             ))
-            # [DEPRECATED] /oauth/yandex/authorize-url — НЕ публикуем как HTTP.
+            # [DEPRECATED] /api/v1/plugins/oauth-yandex/authorize-url — НЕ публикуем как HTTP.
             # Метод остаётся доступен как внутренний сервис для обратной совместимости.
-            # POST /oauth/yandex/exchange-code — обменять код на токены
+            # POST /api/v1/plugins/oauth-yandex/exchange-code — обменять код на токены
             # Этот HTTP-эндпоинт сохраняет токены в storage, но не возвращает их клиенту.
             self.register_http_endpoint(HttpEndpoint(
                 method="POST",
-                path="/oauth/yandex/exchange-code",
+                path="/api/v1/plugins/oauth-yandex/exchange-code",
                 service="oauth.exchange_code",
                 description="Обменять code на токены (использует сохранённую конфигурацию)",
                 auth_config=_public,
             ))
-            # GET /oauth/yandex/validate — проверить access_token (optional query param `token`)
+            # GET /api/v1/plugins/oauth-yandex/validate — проверить access_token (optional query param `token`)
             self.register_http_endpoint(HttpEndpoint(
                 method="GET",
-                path="/oauth/yandex/validate",
+                path="/api/v1/plugins/oauth-yandex/validate",
                 service="oauth.validate_token",
                 description="Проверить валидность access_token (если не указан, используется сохранённый)",
                 auth_config=_public,
             ))
-            # POST /oauth/yandex/unlink — очистить токены и разлинковать аккаунт
+            # POST /api/v1/plugins/oauth-yandex/unlink — очистить токены и разлинковать аккаунт
             self.register_http_endpoint(HttpEndpoint(
                 method="POST",
-                path="/oauth/yandex/unlink",
+                path="/api/v1/plugins/oauth-yandex/unlink",
                 service="oauth.clear_tokens",
                 description="Очистить сохранённые токены (разлинковка аккаунта)",
                 auth_config=_admin_write,
             ))
-            # POST /oauth/yandex/cookies — сохранить cookies для Quasar API
+            # POST /api/v1/plugins/oauth-yandex/cookies — сохранить cookies для Quasar API
             self.register_http_endpoint(HttpEndpoint(
                 method="POST",
-                path="/oauth/yandex/cookies",
+                path="/api/v1/plugins/oauth-yandex/cookies",
                 service="oauth.set_cookies",
                 description="Сохранить Yandex session cookies для Quasar API",
                 auth_config=_admin_write,
             ))
-            # GET /oauth/yandex/cookies — получить cookies
+            # GET /api/v1/plugins/oauth-yandex/cookies — получить cookies
             self.register_http_endpoint(HttpEndpoint(
                 method="GET",
-                path="/oauth/yandex/cookies",
+                path="/api/v1/plugins/oauth-yandex/cookies",
                 service="oauth.get_cookies",
                 description="Получить сохранённые Yandex session cookies",
                 auth_config=_admin_write,
@@ -996,14 +996,14 @@ class OAuthYandexPlugin(BasePlugin):
             # Новые единые login-эндпоинты для контролируемого UI
             self.register_http_endpoint(HttpEndpoint(
                 method="POST",
-                path="/yandex/login/start",
+                path="/api/v1/plugins/oauth-yandex/login/start",
                 service="yandex.login.start",
                 description="Запустить единый login flow (Embedded WebView)",
                 auth_config=_public,
             ))
             self.register_http_endpoint(HttpEndpoint(
                 method="POST",
-                path="/yandex/login/status",
+                path="/api/v1/plugins/oauth-yandex/login/status",
                 service="yandex.login.status",
                 description="Получить статус login-процесса/аккаунта",
                 auth_config=_public,

@@ -167,3 +167,20 @@ class StrategyRegistry:
     def __repr__(self) -> str:
         strategies = list(self._strategies.keys())
         return f"<StrategyRegistry: {len(strategies)} strategies [{', '.join(strategies)}]>"
+
+
+def register_builtin_rotation_strategies(registry: StrategyRegistry) -> None:
+    """Register built-in strategies synchronously (call before concurrent async use)."""
+    from .strategies import (
+        AgentPushStrategy,
+        GenerateNewSecretStrategy,
+        WebhookRotationStrategy,
+    )
+
+    registry._strategies[RotationStrategyType.GENERATE_NEW_SECRET.value] = (
+        GenerateNewSecretStrategy()
+    )
+    registry._strategies[RotationStrategyType.AGENT_PUSH.value] = AgentPushStrategy()
+    registry._strategies[RotationStrategyType.WEBHOOK_CALLBACK.value] = (
+        WebhookRotationStrategy()
+    )

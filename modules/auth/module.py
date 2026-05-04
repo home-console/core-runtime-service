@@ -113,14 +113,14 @@ class AuthModule(RuntimeModule):
         # Bootstrap endpoint (check if system initialized)
         self.context.http.register(HttpEndpoint(
             method="GET",
-            path="/auth/v1/bootstrap",
+            path="/api/v1/auth/bootstrap",
             service="auth.bootstrap",
             description="Check if system is initialized (bootstrap status)",
             auth_config=EndpointAuthConfig(public=True)
         ))
         self.context.http.register(HttpEndpoint(
             method="GET",
-            path="/auth/v1/dev-credentials",
+            path="/api/v1/auth/dev-credentials",
             service="auth.dev_credentials",
             description="Dev-only: api_base_url and optional api_key for web (when DEV_CREDENTIALS=1)",
             auth_config=EndpointAuthConfig(public=True)
@@ -129,49 +129,49 @@ class AuthModule(RuntimeModule):
         # Auth initialization & login endpoints
         self.context.http.register(HttpEndpoint(
             method="POST",
-            path="/auth/v1/initialize",
+            path="/api/v1/auth/initialize",
             service="auth.initialize",
             description="Initialize auth system (first-time setup)",
             auth_config=EndpointAuthConfig(public=True)
         ))
         self.context.http.register(HttpEndpoint(
             method="POST",
-            path="/auth/v1/login",
+            path="/api/v1/auth/login",
             service="auth.login",
             description="Login with credentials",
             auth_config=EndpointAuthConfig(public=True)
         ))
         self.context.http.register(HttpEndpoint(
             method="POST",
-            path="/auth/v1/refresh",
+            path="/api/v1/auth/refresh",
             service="auth.refresh",
             description="Refresh access token",
             auth_config=EndpointAuthConfig(public=True)
         ))
         self.context.http.register(HttpEndpoint(
             method="POST",
-            path="/auth/v1/logout",
+            path="/api/v1/auth/logout",
             service="auth.logout",
             description="Logout and clear session",
             auth_config=EndpointAuthConfig(public=True)
         ))
         self.context.http.register(HttpEndpoint(
             method="GET",
-            path="/auth/v1/me",
+            path="/api/v1/auth/me",
             service="auth.me",
             description="Get current user info",
             auth_config=EndpointAuthConfig(public=True)
         ))
         self.context.http.register(HttpEndpoint(
             method="POST",
-            path="/admin/v1/auth/password/set",
+            path="/api/v1/admin/auth/password/set",
             service="admin.auth.set_password",
             description="Set user password (admin only)",
             auth_config=EndpointAuthConfig(required_scopes=["admin.*"]),
         ))
         self.context.http.register(HttpEndpoint(
             method="POST",
-            path="/admin/v1/auth/password/change",
+            path="/api/v1/admin/auth/password/change",
             service="admin.auth.change_password",
             description="Change own password",
             auth_config=EndpointAuthConfig(required_scopes=["admin.*"]),
@@ -180,21 +180,21 @@ class AuthModule(RuntimeModule):
         # Session management endpoints
         self.context.http.register(HttpEndpoint(
             method="GET",
-            path="/admin/v1/auth/sessions",
+            path="/api/v1/admin/auth/sessions",
             service="admin.auth.list_sessions",
             description="List user sessions",
             auth_config=EndpointAuthConfig(required_scopes=["admin.*"]),
         ))
         self.context.http.register(HttpEndpoint(
             method="POST",
-            path="/admin/v1/auth/sessions/revoke",
+            path="/api/v1/admin/auth/sessions/revoke",
             service="admin.auth.revoke_session",
             description="Revoke a session",
             auth_config=EndpointAuthConfig(required_scopes=["admin.*"]),
         ))
         self.context.http.register(HttpEndpoint(
             method="POST",
-            path="/admin/v1/auth/sessions/revoke-all",
+            path="/api/v1/admin/auth/sessions/revoke-all",
             service="admin.auth.revoke_all_sessions",
             description="Revoke all user sessions",
             auth_config=EndpointAuthConfig(required_scopes=["admin.*"]),
@@ -203,28 +203,28 @@ class AuthModule(RuntimeModule):
         # API key management endpoints
         self.context.http.register(HttpEndpoint(
             method="POST",
-            path="/admin/v1/auth/api-keys",
+            path="/api/v1/admin/auth/api-keys",
             service="admin.auth.create_api_key",
             description="Create API key",
             auth_config=EndpointAuthConfig(required_scopes=["admin.*"]),
         ))
         self.context.http.register(HttpEndpoint(
             method="GET",
-            path="/admin/v1/auth/api-keys",
+            path="/api/v1/admin/auth/api-keys",
             service="admin.auth.list_api_keys",
             description="List API keys",
             auth_config=EndpointAuthConfig(required_scopes=["admin.*"]),
         ))
         self.context.http.register(HttpEndpoint(
             method="POST",
-            path="/admin/v1/auth/api-keys/revoke",
+            path="/api/v1/admin/auth/api-keys/revoke",
             service="admin.auth.revoke_api_key",
             description="Revoke API key",
             auth_config=EndpointAuthConfig(required_scopes=["admin.*"]),
         ))
         self.context.http.register(HttpEndpoint(
             method="POST",
-            path="/admin/v1/auth/api-keys/rotate",
+            path="/api/v1/admin/auth/api-keys/rotate",
             service="admin.auth.rotate_api_key",
             description="Rotate API key",
             auth_config=EndpointAuthConfig(required_scopes=["admin.*"]),
@@ -233,14 +233,14 @@ class AuthModule(RuntimeModule):
         # User management endpoints
         self.context.http.register(HttpEndpoint(
             method="POST",
-            path="/admin/v1/auth/users",
+            path="/api/v1/admin/auth/users",
             service="admin.auth.create_user",
             description="Create user",
             auth_config=EndpointAuthConfig(required_scopes=["admin.*"]),
         ))
         self.context.http.register(HttpEndpoint(
             method="GET",
-            path="/admin/v1/auth/users",
+            path="/api/v1/admin/auth/users",
             service="admin.auth.list_users",
             description="List users",
             auth_config=EndpointAuthConfig(required_scopes=["admin.*"]),

@@ -11,11 +11,11 @@ storage ("inspector"/"auth_flows"); Inspector читает; UI только
 GET /admin/v1/inspector/auth и POST /admin/v1/operations.
 
 HTTP API (legacy/прямые вызовы):
-- POST /yandex/auth/device/start — generate QR URL
-- GET /yandex/auth/device/status — check QR confirmation status
-- POST /yandex/auth/device/cookies — manual cookie submission
-- GET /yandex/auth/device/session — get account session status
-- POST /yandex/auth/device/unlink — unlink account
+- POST /api/v1/plugins/yandex-device-auth/device/start — generate QR URL
+- GET /api/v1/plugins/yandex-device-auth/device/status — check QR confirmation status
+- POST /api/v1/plugins/yandex-device-auth/device/cookies — manual cookie submission
+- GET /api/v1/plugins/yandex-device-auth/device/session — get account session status
+- POST /api/v1/plugins/yandex-device-auth/device/unlink — unlink account
 
 Events:
 - yandex.device_auth.linked — account linked
@@ -336,7 +336,7 @@ class YandexDeviceAuthPlugin(BasePlugin):
             self.register_http_endpoint(
                 HttpEndpoint(
                     method="POST",
-                    path="/yandex/auth/device/start",
+                    path="/api/v1/plugins/yandex-device-auth/device/start",
                     service="device_auth.start",
                     description="Start QR or password authorization",
                     auth_config=EndpointAuthConfig(public=True),
@@ -346,7 +346,7 @@ class YandexDeviceAuthPlugin(BasePlugin):
             self.register_http_endpoint(
                 HttpEndpoint(
                     method="GET",
-                    path="/yandex/auth/device/status",
+                    path="/api/v1/plugins/yandex-device-auth/device/status",
                     service="device_auth.status",
                     description="Check QR confirmation status",
                     auth_config=EndpointAuthConfig(public=True),
@@ -356,7 +356,7 @@ class YandexDeviceAuthPlugin(BasePlugin):
             self.register_http_endpoint(
                 HttpEndpoint(
                     method="POST",
-                    path="/yandex/auth/device/cookies",
+                    path="/api/v1/plugins/yandex-device-auth/device/cookies",
                     service="device_auth.cookies",
                     description="Save cookies from manual submission",
                     auth_config=EndpointAuthConfig(public=True),
@@ -366,7 +366,7 @@ class YandexDeviceAuthPlugin(BasePlugin):
             self.register_http_endpoint(
                 HttpEndpoint(
                     method="GET",
-                    path="/yandex/auth/device/session",
+                    path="/api/v1/plugins/yandex-device-auth/device/session",
                     service="device_auth.get_session",
                     description="Get account session status",
                     auth_config=EndpointAuthConfig(public=True),
@@ -376,7 +376,7 @@ class YandexDeviceAuthPlugin(BasePlugin):
             self.register_http_endpoint(
                 HttpEndpoint(
                     method="POST",
-                    path="/yandex/auth/device/cancel",
+                    path="/api/v1/plugins/yandex-device-auth/device/cancel",
                     service="device_auth.cancel",
                     description="Cancel ongoing authorization",
                     auth_config=EndpointAuthConfig(public=True),
@@ -386,7 +386,7 @@ class YandexDeviceAuthPlugin(BasePlugin):
             self.register_http_endpoint(
                 HttpEndpoint(
                     method="POST",
-                    path="/yandex/auth/device/unlink",
+                    path="/api/v1/plugins/yandex-device-auth/device/unlink",
                     service="device_auth.unlink",
                     description="Unlink account",
                     auth_config=EndpointAuthConfig(public=True),

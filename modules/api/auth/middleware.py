@@ -79,13 +79,12 @@ async def require_auth_middleware(request: Request, call_next):
     # frequently by the frontend (polling/hooks/retries). It must NOT be treated
     # as a brute-force surface; keep it under general API rate limiting instead.
     is_auth_endpoint = (
-        request_path.startswith("/admin/v1/auth/")
-        or request_path.startswith("/admin/auth/")
+        request_path.startswith("/api/v1/admin/auth/")
         or request_path in (
-            "/auth/v1/login",
-            "/auth/v1/initialize",
-            "/auth/v1/refresh",
-            "/auth/v1/logout",
+            "/api/v1/auth/login",
+            "/api/v1/auth/initialize",
+            "/api/v1/auth/refresh",
+            "/api/v1/auth/logout",
         )
         or "create_api_key" in request_path.lower()
     )
@@ -229,9 +228,9 @@ async def require_auth_middleware(request: Request, call_next):
                 logger.debug("middleware.require_auth_middleware: error (using fallback value)", exc_info=True)
                 context = None
 
-    # Приоритет 4: refresh_token cookie для POST /auth/v1/refresh (восстановление сессии после перезагрузки страницы)
+    # Приоритет 4: refresh_token cookie для POST /api/v1/auth/refresh (восстановление сессии после перезагрузки страницы)
     # Access token хранится только в памяти — при F5 он теряется; refresh_token в httpOnly cookie — по нему восстанавливаем контекст
-    if context is None and runtime and "/auth/v1/refresh" in request_path:
+    if context is None and runtime and "/api/v1/auth/refresh" in request_path:
         refresh_token = request.cookies.get("refresh_token")
         if refresh_token:
             try:

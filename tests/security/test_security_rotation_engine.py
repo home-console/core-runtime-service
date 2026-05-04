@@ -15,7 +15,7 @@ Comprehensive test suite covering:
 """
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 from datetime import datetime, timezone, timedelta
 
 from modules.credentials.rotation import (
@@ -28,6 +28,8 @@ from modules.credentials.rotation import (
     RotationExecutor,
     RotationFailedError,
     RotationNotAllowedError,
+    StrategyRegistry,
+    register_builtin_rotation_strategies,
     generate_strong_secret,
     calculate_entropy_bits,
 )
@@ -308,24 +310,31 @@ class TestRotationExecutor:
         vault = AsyncMock()
         repository = AsyncMock()
         audit = AsyncMock()
-        
+        credential = MagicMock()
+        credential.version = 1
+        credential.mutate.return_value = MagicMock()
+        repository.get.return_value = credential
+
+        registry = StrategyRegistry()
+        register_builtin_rotation_strategies(registry)
         executor = RotationExecutor(
             vault_store=vault,
             repository=repository,
             audit_binder=audit,
+            strategy_registry=registry,
         )
-        
+
         policy = RotationPolicy.daily()
-        
+
         new_ref, new_version = await executor.execute_rotation(
             credential_id="cred123",
             rotation_policy=policy,
             current_version=1,
         )
-        
+
         assert new_version == 2
         assert "cred123:v2" in new_ref
-        vault.store_secret.assert_called_once()
+        vault.store_secret.assert_any_call(key="cred123:v2", value=ANY)
     
     @pytest.mark.asyncio
     async def test_executor_manual_rotation(self):
@@ -333,8 +342,16 @@ class TestRotationExecutor:
         vault = AsyncMock()
         repository = AsyncMock()
         audit = AsyncMock()
-        
-        executor = RotationExecutor(vault, repository, audit)
+        credential = MagicMock()
+        repository.get.return_value = credential
+
+        registry = StrategyRegistry()
+        executor = RotationExecutor(
+            vault_store=vault,
+            repository=repository,
+            audit_binder=audit,
+            strategy_registry=registry,
+        )
         
         new_ref, new_version = await executor.execute_manual_rotation(
             credential_id="cred123",
@@ -363,7 +380,10 @@ class TestRotationExecutor:
         trust_engine.get_state.return_value = frozen_state
         
         executor = RotationExecutor(
-            vault, repository, audit,
+            vault_store=vault,
+            repository=repository,
+            audit_binder=audit,
+            strategy_registry=StrategyRegistry(),
             trust_engine=trust_engine,
         )
         

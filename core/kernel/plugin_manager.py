@@ -115,8 +115,8 @@ class PluginManager:
     def get_plugin_block_reason(self, plugin_name: str) -> Optional[Dict[str, Any]]:
         return self._registry.get_plugin_block_reason(plugin_name)
     
-    def list_plugins(self) -> list[str]:
-        return self._registry.list_plugins()
+    async def list_plugins(self) -> list[str]:
+        return await self._registry.list_plugins()
 
     def get_loaded_plugins(self) -> list[tuple[str, BasePlugin]]:
         """Список загруженных плагинов для policy/integrity проверок."""

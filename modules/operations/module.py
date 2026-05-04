@@ -35,35 +35,35 @@ class OperationsModule(RuntimeModule):
         _admin_write = EndpointAuthConfig(required_scopes=["admin.write"])
         self.context.http.register(HttpEndpoint(
             method="POST",
-            path="/admin/v1/operations",
+            path="/api/v1/admin/operations",
             service="admin.operations.create",
             description="Create and execute an operation",
             auth_config=_admin_write,
         ))
         self.context.http.register(HttpEndpoint(
             method="GET",
-            path="/admin/v1/operations",
+            path="/api/v1/admin/operations",
             service="admin.operations.list",
             description="List operations with pagination",
             auth_config=_admin_read,
         ))
         self.context.http.register(HttpEndpoint(
             method="GET",
-            path="/admin/v1/operations/{operation_id}",
+            path="/api/v1/admin/operations/{operation_id}",
             service="admin.operations.get",
             description="Get operation details by ID",
             auth_config=_admin_read,
         ))
         self.context.http.register(HttpEndpoint(
             method="POST",
-            path="/admin/v1/operations/{operation_id}/cancel",
+            path="/api/v1/admin/operations/{operation_id}/cancel",
             service="admin.operations.cancel",
             description="Cancel a pending or running operation",
             auth_config=_admin_write,
         ))
         self.context.http.register(HttpEndpoint(
             method="POST",
-            path="/admin/v1/operations/{operation_id}/retry",
+            path="/api/v1/admin/operations/{operation_id}/retry",
             service="admin.operations.retry",
             description="Retry a failed operation",
             auth_config=_admin_write,

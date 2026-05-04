@@ -12,7 +12,7 @@ from core.http.models import HttpEndpoint, EndpointAuthConfig
 class IntegrationsModule(RuntimeModule):
     """
     Модуль HTTP endpoints для интеграций.
-    Владеет GET /admin/v1/integrations и GET /api/v1/user/integrations.
+    Владеет GET /api/v1/admin/integrations и GET /api/v1/user/integrations.
     """
 
     @property
@@ -44,7 +44,7 @@ class IntegrationsModule(RuntimeModule):
         # Admin endpoint with full information
         self.context.http.register(HttpEndpoint(
             method="GET",
-            path="/admin/v1/integrations",
+            path="/api/v1/admin/integrations",
             service="admin.v1.integrations",
             description="List registered integrations (admin only)",
             auth_config=EndpointAuthConfig(required_scopes=["admin.read"]),

@@ -4,7 +4,7 @@ CSRF Protection Middleware for Admin API.
 SECURITY P0: Admin API endpoints MUST validate CSRF tokens to prevent CSRF attacks.
 
 Mechanics:
-- Client gets CSRF token from /admin/v1/auth/csrf endpoint
+- Client gets CSRF token from /api/v1/admin/auth/csrf endpoint
 - Client includes token in X-CSRF-Token header for mutating operations
 - Server validates token using HMAC-based validation
 - Token is tied to user session
@@ -52,7 +52,7 @@ async def csrf_protection_middleware(request: Request, call_next: Callable) -> R
         HTTPException 403: If CSRF validation fails
     """
     # Only validate CSRF for admin endpoints
-    if not request.url.path.startswith("/admin/"):
+    if not request.url.path.startswith("/api/v1/admin/"):
         return await call_next(request)
     
     # Skip CSRF for safe methods
@@ -60,7 +60,7 @@ async def csrf_protection_middleware(request: Request, call_next: Callable) -> R
         return await call_next(request)
     
     # Skip CSRF for auth endpoints (bootstrap problem)
-    if request.url.path.startswith("/admin/v1/auth/"):
+    if request.url.path.startswith("/api/v1/admin/auth/"):
         return await call_next(request)
     
     # Auth context is set by require_auth_middleware which must run before this middleware.
@@ -137,11 +137,11 @@ async def rate_limit_middleware(request: Request, call_next: Callable) -> Respon
         return await call_next(request)
     
     # Only rate limit admin endpoints
-    if not request.url.path.startswith("/admin/"):
+    if not request.url.path.startswith("/api/v1/admin/"):
         return await call_next(request)
     
     # Skip rate limiting for monitoring endpoints
-    if request.url.path.startswith("/admin/v1/monitor"):
+    if request.url.path.startswith("/api/v1/monitor"):
         return await call_next(request)
     
     # Get user identifier from request context
@@ -154,9 +154,9 @@ async def rate_limit_middleware(request: Request, call_next: Callable) -> Respon
     
     # Define rate limits for different endpoint types
     rate_limits = {
-        "/admin/v1/yandex/sync": {"max_calls": 60, "window_sec": 60},  # Повышено: 5 → 60 для синхронизации
-        "/admin/v1/devices": {"max_calls": 500, "window_sec": 60},      # Повышено: 100 → 500
-        "/admin/v1/inspector/storage": {"max_calls": 500, "window_sec": 60},  # Повышено: 100 → 500
+        "/api/v1/plugins/oauth-yandex/sync": {"max_calls": 60, "window_sec": 60},  # Повышено: 5 → 60 для синхронизации
+        "/api/v1/admin/devices": {"max_calls": 500, "window_sec": 60},      # Повышено: 100 → 500
+        "/api/v1/admin/inspector/storage": {"max_calls": 500, "window_sec": 60},  # Повышено: 100 → 500
         "default": {"max_calls": 1000, "window_sec": 60},                # Повышено: 200 → 1000
     }
     

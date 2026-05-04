@@ -162,7 +162,7 @@ class ApiModule(RuntimeModule):
         from modules.api.security_headers import security_headers_middleware
         self.app.middleware("http")(security_headers_middleware)
 
-        self.app.include_router(MonitoringModule(runtime=runtime).router, prefix="/monitor", tags=["monitoring"])
+        self.app.include_router(MonitoringModule(runtime=runtime).router, prefix="/api/v1/monitor", tags=["monitoring"])
         # Internal API (service proxy) — not included in OpenAPI schema.
         try:
             from modules.api.internal_routes import create_internal_router

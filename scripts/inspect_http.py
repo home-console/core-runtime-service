@@ -33,7 +33,7 @@ async def main():
         except Exception as e:
             print(f"skip module {module_name} due to {e}")
 
-    print("Loaded plugins:", runtime.plugin_manager.list_plugins())
+    print("Loaded plugins:", await runtime.plugin_manager.list_plugins())
     print("Registered HTTP endpoints:")
     for ep in runtime.http.list():
         print(f"  {ep.method} {ep.path} -> {ep.service}")

@@ -307,6 +307,7 @@ cursor.execute('''
     )
 ''')
 conn.commit()
+print("READY", flush=True)
 
 # Write data
 cursor.execute("INSERT INTO data VALUES (NULL, 'test_value')")
@@ -322,8 +323,23 @@ sys._exit(1)  # Force exit without cleanup
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE
         )
-        
-        time.sleep(0.2)
+
+        # Ensure the worker created the table before killing it (crash must happen after DDL commit).
+        ready = False
+        start = time.time()
+        while time.time() - start < 2:
+            line = proc.stdout.readline() if proc.stdout is not None else b""
+            if not line:
+                break
+            if b"READY" in line:
+                ready = True
+                break
+        if not ready:
+            # If worker didn't start properly, surface stderr for easier debugging.
+            _out, _err = proc.communicate(timeout=2)
+            raise AssertionError(f"crash worker not ready: stdout={_out!r} stderr={_err!r}")
+
+        time.sleep(0.1)
         proc.kill()
         _, _ = proc.communicate(timeout=2)
         

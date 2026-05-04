@@ -161,7 +161,7 @@ class MarketplaceModule(RuntimeModule):
             http_registry.register(
                 HttpEndpoint(
                     method="POST",
-                    path="/admin/v1/marketplace/install",
+                    path="/api/v1/admin/marketplace/install",
                     service="admin.v1.marketplace.install",
                     description="Marketplace: install plugin from archive",
                     auth_config=_admin_write,
@@ -170,7 +170,7 @@ class MarketplaceModule(RuntimeModule):
             http_registry.register(
                 HttpEndpoint(
                     method="POST",
-                    path="/admin/v1/marketplace/install-from-registry",
+                    path="/api/v1/admin/marketplace/install-from-registry",
                     service="admin.v1.marketplace.install_from_registry",
                     description="Marketplace: install plugin from registry",
                     auth_config=_admin_write,
@@ -179,7 +179,7 @@ class MarketplaceModule(RuntimeModule):
             http_registry.register(
                 HttpEndpoint(
                     method="POST",
-                    path="/admin/v1/marketplace/remove",
+                    path="/api/v1/admin/marketplace/remove",
                     service="admin.v1.marketplace.remove",
                     description="Marketplace: remove plugin",
                     auth_config=_admin_write,
@@ -188,7 +188,7 @@ class MarketplaceModule(RuntimeModule):
             http_registry.register(
                 HttpEndpoint(
                     method="POST",
-                    path="/admin/v1/marketplace/update",
+                    path="/api/v1/admin/marketplace/update",
                     service="admin.v1.marketplace.update",
                     description="Marketplace: update plugin",
                     auth_config=_admin_write,
@@ -197,7 +197,7 @@ class MarketplaceModule(RuntimeModule):
             http_registry.register(
                 HttpEndpoint(
                     method="POST",
-                    path="/admin/v1/marketplace/enable/{plugin_name}",
+                    path="/api/v1/admin/marketplace/enable/{plugin_name}",
                     service="admin.v1.marketplace.enable",
                     description="Marketplace: enable plugin",
                     auth_config=_admin_write,
@@ -206,7 +206,7 @@ class MarketplaceModule(RuntimeModule):
             http_registry.register(
                 HttpEndpoint(
                     method="POST",
-                    path="/admin/v1/marketplace/disable/{plugin_name}",
+                    path="/api/v1/admin/marketplace/disable/{plugin_name}",
                     service="admin.v1.marketplace.disable",
                     description="Marketplace: disable plugin",
                     auth_config=_admin_write,
@@ -215,7 +215,7 @@ class MarketplaceModule(RuntimeModule):
             http_registry.register(
                 HttpEndpoint(
                     method="GET",
-                    path="/admin/v1/marketplace/installed",
+                    path="/api/v1/admin/marketplace/installed",
                     service="admin.v1.marketplace.installed",
                     description="Marketplace: list installed plugins",
                     auth_config=_admin_read,
@@ -224,7 +224,7 @@ class MarketplaceModule(RuntimeModule):
             http_registry.register(
                 HttpEndpoint(
                     method="GET",
-                    path="/admin/v1/marketplace/updates",
+                    path="/api/v1/admin/marketplace/updates",
                     service="admin.v1.marketplace.updates",
                     description="Marketplace: check updates for installed plugins",
                     auth_config=_admin_read,

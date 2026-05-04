@@ -7,6 +7,7 @@ import asyncio
 from .policy import RotationPolicy, RotationState, RotationStatus
 from .scheduler import RotationScheduler
 from .executor import RotationExecutor
+from .registry import StrategyRegistry, register_builtin_rotation_strategies
 from .exceptions import (
     RotationFailedError,
     RotationNotAllowedError,
@@ -35,6 +36,7 @@ class CredentialRotationEngine:
         audit_binder: Any,
         security_orchestrator: Optional[Any] = None,
         trust_engine: Optional[Any] = None,
+        risk_engine: Optional[Any] = None,
         check_interval_seconds: int = 60,
     ):
         """
@@ -53,14 +55,19 @@ class CredentialRotationEngine:
         self.audit_binder = audit_binder
         self.security_orchestrator = security_orchestrator
         self.trust_engine = trust_engine
-        
+        self.risk_engine = risk_engine
+
         self.scheduler = RotationScheduler(check_interval_seconds)
+        self.strategy_registry = StrategyRegistry()
+        register_builtin_rotation_strategies(self.strategy_registry)
         self.executor = RotationExecutor(
             vault_store=vault_store,
             repository=repository,
             audit_binder=audit_binder,
+            strategy_registry=self.strategy_registry,
             security_orchestrator=security_orchestrator,
             trust_engine=trust_engine,
+            risk_engine=risk_engine,
         )
         
         self._running = False
@@ -178,13 +185,7 @@ class CredentialRotationEngine:
                 rotation_policy=policy,
                 current_version=credential.version,
             )
-            
-            # Update credential (increment version)
-            updated = credential.mutate(
-                secret_ref=new_secret_ref,
-            )
-            await self.repository.update(updated)
-            
+
             # Mark completed
             now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
             await self.scheduler.mark_rotation_completed(

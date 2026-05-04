@@ -90,7 +90,7 @@ class TestFailClosedOnMissingAuthConfig:
         """Тест: сообщение об ошибке содержит список endpoint'ов без auth_config."""
         ep = HttpEndpoint(
             method="DELETE",
-            path="/admin/v1/resources/{id}",
+            path="/api/v1/admin/resources/{id}",
             service="admin.v1.resources.delete",
             description="No auth config",
         )
@@ -102,7 +102,7 @@ class TestFailClosedOnMissingAuthConfig:
 
         msg = str(exc_info.value)
         assert "auth_config" in msg
-        assert "DELETE /admin/v1/resources/{id}" in msg
+        assert "DELETE /api/v1/admin/resources/{id}" in msg
         assert "admin.v1.resources.delete" in msg
 
 
@@ -132,7 +132,7 @@ class TestFailClosedWithAuthConfig:
         """Тест: HTTP endpoint с public=True биндится успешно."""
         ep = HttpEndpoint(
             method="GET",
-            path="/auth/v1/bootstrap",
+            path="/api/v1/auth/bootstrap",
             service="auth.bootstrap",
             description="Bootstrap status",
             auth_config=EndpointAuthConfig(public=True),
@@ -143,12 +143,12 @@ class TestFailClosedWithAuthConfig:
         bind_routes(runtime, app)
 
         routes = [r.path for r in app.routes]
-        assert "/auth/v1/bootstrap" in routes
+        assert "/api/v1/auth/bootstrap" in routes
 
     def test_ws_endpoint_with_auth_config_binds(self):
         """Тест: WS endpoint с auth_config биндится успешно."""
         ep = HttpEndpoint(
-            path="/admin/v1/ssh/ws/{session_id}",
+            path="/api/v1/admin/ssh/ws/{session_id}",
             service="admin.v1.ssh.ws",
             websocket=True,
             description="SSH WebSocket",

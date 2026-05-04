@@ -1,252 +1,296 @@
-"""Credential rotation execution logic."""
+"""Credential rotation execution logic (strategy-based)."""
 
-from datetime import datetime, timezone
-from typing import Optional, Any, Callable
-import asyncio
+from __future__ import annotations
 
-from .policy import RotationPolicy, RotationStatus, RotationStrategy, RotationState
-from .exceptions import RotationFailedError, RotationNotAllowedError
-from .secret_gen import generate_strong_secret
-from modules.domain import TrustLevel
 import logging
+from typing import Any, Optional
+
+from .exceptions import RotationFailedError, RotationNotAllowedError
+from .policy import RotationPolicy
+from .policy import RotationStrategy as PolicyStrategy
+from .registry import StrategyRegistry
+from .strategy import RotationStrategyContext, RotationStrategyType
+from modules.domain import TrustLevel
+
 logger = logging.getLogger(__name__)
 
 
 class RotationExecutor:
     """
-    Executes credential rotation atomically.
-    
+    Executes credential rotation atomically using strategy pattern.
+
     Responsibilities:
-    - Generate new secrets
+    - Select appropriate rotation strategy
+    - Execute rotation atomically through strategy
     - Update vault storage
     - Increment version
     - Track audit events
     - Rollback on failure
+
+    Strategies are pluggable and registered with StrategyRegistry.
     """
-    
+
     def __init__(
         self,
         vault_store: Any,  # SecretStore implementation
         repository: Any,  # CredentialRepository
         audit_binder: Any,  # AuditBinder for logging
+        strategy_registry: StrategyRegistry,  # Plugin registry
         security_orchestrator: Optional[Any] = None,
         trust_engine: Optional[Any] = None,
+        risk_engine: Optional[Any] = None,
     ):
-        """
-        Initialize rotation executor.
-        
-        Args:
-            vault_store: Storage for actual secrets
-            repository: Storage for credential metadata
-            audit_binder: Audit logging system
-            security_orchestrator: For checking if rotation allowed
-            trust_engine: For checking account trust state
-        """
         self.vault_store = vault_store
         self.repository = repository
         self.audit_binder = audit_binder
+        self.strategy_registry = strategy_registry
         self.security_orchestrator = security_orchestrator
         self.trust_engine = trust_engine
-    
+        self.risk_engine = risk_engine
+
     async def execute_rotation(
         self,
         credential_id: str,
         rotation_policy: RotationPolicy,
         current_version: int,
+        extra_context: Optional[dict[str, Any]] = None,
     ) -> tuple[str, int]:
-        """
-        Execute credential rotation atomically.
-        
-        Steps:
-        1. Check if rotation allowed (not frozen)
-        2. Generate new secret
-        3. Save to vault
-        4. Update credential version
-        5. Log audit event
-        6. Return new secret reference
-        
-        Args:
-            credential_id: ID of credential to rotate
-            rotation_policy: Policy defining rotation strategy
-            current_version: Current version number
-        
-        Returns:
-            (new_secret_ref, new_version) tuple
-        
-        Raises:
-            RotationNotAllowedError: if rotation cannot proceed
-            RotationFailedError: if rotation execution fails
-        """
-        # Check if rotation allowed
-        if self.trust_engine:
-            trust_state = await self.trust_engine.get_state(credential_id)
-            
-            # Must convert TrustLevel enum to compare
-            if trust_state and trust_state.level == TrustLevel.FROZEN:
-                await self.audit_binder.append_event(
-                    event_type="credential_rotation_denied",
-                    metadata={
-                        "credential_id": credential_id,
-                        "reason": "account_frozen",
-                    }
-                )
-                raise RotationNotAllowedError(
-                    f"Cannot rotate {credential_id}: account frozen"
-                )
-        
         try:
-            # Generate new secret based on strategy
-            if rotation_policy.strategy == RotationStrategy.GENERATE_NEW_SECRET:
-                new_secret = generate_strong_secret(length=32)
-            elif rotation_policy.strategy == RotationStrategy.MANUAL:
+            if self.trust_engine:
+                trust_state = await self.trust_engine.get_state(credential_id)
+
+                if trust_state and trust_state.level == TrustLevel.FROZEN:
+                    await self.audit_binder.append_event(
+                        event_type="credential_rotation_denied",
+                        metadata={
+                            "credential_id": credential_id,
+                            "reason": "account_frozen",
+                        },
+                    )
+                    raise RotationNotAllowedError(
+                        f"Cannot rotate {credential_id}: account frozen"
+                    )
+
+            strategy_type = self._map_policy_to_strategy(rotation_policy.strategy)
+            if strategy_type == RotationStrategyType.MANUAL:
                 raise RotationNotAllowedError(
                     "Cannot auto-rotate with MANUAL strategy"
                 )
-            elif rotation_policy.strategy == RotationStrategy.AGENT_PUSH:
-                # Would be handled by agent, not here
-                raise RotationNotAllowedError(
-                    "AGENT_PUSH rotations must be initiated by agent"
+
+            strategy = await self.strategy_registry.get_or_fail(strategy_type)
+
+            context = RotationStrategyContext(
+                credential_id=credential_id,
+                current_version=current_version,
+                vault_store=self.vault_store,
+                repository=self.repository,
+                audit_binder=self.audit_binder,
+                trust_engine=self.trust_engine,
+                risk_engine=self.risk_engine,
+                security_orchestrator=self.security_orchestrator,
+                extra_params=extra_context or {},
+            )
+
+            if not await strategy.validate(context):
+                await self.audit_binder.append_event(
+                    event_type="credential_rotation_validation_failed",
+                    metadata={
+                        "credential_id": credential_id,
+                        "strategy": strategy.name,
+                    },
                 )
-            else:
                 raise RotationFailedError(
-                    f"Unknown rotation strategy: {rotation_policy.strategy}"
+                    f"Strategy validation failed for {credential_id}"
                 )
-            
-            # Save new secret to vault
-            new_secret_ref = f"{credential_id}:v{current_version + 1}"
-            
-            try:
-                await self.vault_store.store_secret(
-                    key=new_secret_ref,
-                    value=new_secret,
-                )
-            except Exception as e:
-                raise RotationFailedError(f"Failed to store secret: {e}")
-            
-            # Update repository with new version
-            # (actual update handled by caller)
-            
-            # Log audit event
-            now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
             await self.audit_binder.append_event(
-                event_type="credential_rotated",
-                user_id=credential_id,
-                resource_id=credential_id,
+                event_type="credential_rotation_started",
                 metadata={
                     "credential_id": credential_id,
-                    "old_version": current_version,
+                    "strategy": strategy.name,
                     "new_version": current_version + 1,
-                    "new_secret_ref": new_secret_ref,
-                    "strategy": rotation_policy.strategy.value,
-                    "rotated_at": now,
-                }
+                },
             )
-            
-            return (new_secret_ref, current_version + 1)
-            
-        except RotationFailedError:
-            raise
+
+            result = await strategy.execute(context)
+
+            if not result.success:
+                await self.audit_binder.append_event(
+                    event_type="credential_rotation_failed",
+                    metadata={
+                        "credential_id": credential_id,
+                        "strategy": strategy.name,
+                        "error": result.error_code,
+                    },
+                )
+
+                if result.should_freeze_account and self.trust_engine:
+                    await self.trust_engine.freeze(credential_id)
+                if result.should_escalate_risk and self.risk_engine:
+                    await self.risk_engine.escalate(credential_id)
+
+                raise RotationFailedError(result.error_message)
+
+            if result.new_secret_ref is None or result.new_version is None:
+                raise RotationFailedError(
+                    "Strategy returned success but missing secret_ref or version"
+                )
+
+            credential = await self.repository.get(credential_id)
+            updated_credential = credential.mutate(
+                version=result.new_version,
+                secret_ref=result.new_secret_ref,
+            )
+            await self.repository.update(updated_credential)
+
+            await self.audit_binder.append_event(
+                event_type=result.audit_event_type or "credential_rotated",
+                metadata={
+                    "credential_id": credential_id,
+                    "new_version": result.new_version,
+                    "strategy": strategy.name,
+                },
+            )
+
+            return result.new_secret_ref, result.new_version
+
         except RotationNotAllowedError:
             raise
+        except RotationFailedError:
+            raise
         except Exception as e:
-            # Log unexpected error
             await self.audit_binder.append_event(
-                event_type="credential_rotation_failed",
-                user_id=credential_id,
-                resource_id=credential_id,
+                event_type="credential_rotation_error",
                 metadata={
                     "credential_id": credential_id,
                     "error": str(e),
-                    "version": current_version,
-                }
+                },
             )
-            raise RotationFailedError(f"Rotation execution failed: {e}")
-    
+            raise RotationFailedError(f"Rotation execution failed: {str(e)}")
+
     async def execute_manual_rotation(
         self,
         credential_id: str,
         new_secret: str,
         current_version: int,
     ) -> tuple[str, int]:
-        """
-        Execute manual credential rotation with provided secret.
-        
-        Used when secret is provided externally (e.g., by admin or agent).
-        
-        Args:
-            credential_id: ID of credential to rotate
-            new_secret: The new secret value
-            current_version: Current version number
-        
-        Returns:
-            (new_secret_ref, new_version) tuple
-        
-        Raises:
-            RotationFailedError: if rotation execution fails
-        """
         try:
-            # Save new secret to vault
-            new_secret_ref = f"{credential_id}:v{current_version + 1}"
-            
+            if self.trust_engine:
+                trust_state = await self.trust_engine.get_state(credential_id)
+
+                if trust_state and trust_state.level == TrustLevel.FROZEN:
+                    raise RotationNotAllowedError(
+                        f"Cannot rotate {credential_id}: account frozen"
+                    )
+
+            new_version = current_version + 1
+            vault_key = f"{credential_id}:v{new_version}:manual"
+
             await self.vault_store.store_secret(
-                key=new_secret_ref,
+                key=vault_key,
                 value=new_secret,
             )
-            
-            # Log audit event
-            now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+            credential = await self.repository.get(credential_id)
+            updated = credential.mutate(
+                version=new_version,
+                secret_ref=vault_key,
+            )
+            await self.repository.update(updated)
+
             await self.audit_binder.append_event(
                 event_type="credential_rotated_manual",
-                resource_id=credential_id,
                 metadata={
                     "credential_id": credential_id,
-                    "old_version": current_version,
-                    "new_version": current_version + 1,
-                    "new_secret_ref": new_secret_ref,
-                    "rotated_at": now,
-                }
+                    "new_version": new_version,
+                },
             )
-            
-            return (new_secret_ref, current_version + 1)
-            
+
+            return vault_key, new_version
+
+        except RotationNotAllowedError:
+            raise
         except Exception as e:
             await self.audit_binder.append_event(
-                event_type="credential_rotation_failed",
-                resource_id=credential_id,
+                event_type="credential_rotation_manual_failed",
                 metadata={
                     "credential_id": credential_id,
                     "error": str(e),
-                    "version": current_version,
-                }
+                },
             )
-            raise RotationFailedError(f"Manual rotation failed: {e}")
-    
+            raise RotationFailedError(f"Manual rotation failed: {str(e)}")
+
     async def rollback_rotation(
         self,
         credential_id: str,
-        old_version: int,
-        new_version: int,
-    ) -> None:
-        """
-        Rollback failed rotation to previous version.
-        
-        Args:
-            credential_id: ID of credential
-            old_version: Previous version number
-            new_version: Failed new version number
-        """
+        failed_version: int,
+        previous_secret_ref: str,
+    ) -> bool:
         try:
-            # Log rollback event
+            credential = await self.repository.get(credential_id)
+            if not credential.rotation_policy:
+                return False
+
+            policy = RotationPolicy.from_dict(credential.rotation_policy)
+            strategy_type = self._map_policy_to_strategy(policy.strategy)
+            strategy = await self.strategy_registry.get(strategy_type)
+
+            if not strategy:
+                return False
+
+            context = RotationStrategyContext(
+                credential_id=credential_id,
+                current_version=failed_version,
+                vault_store=self.vault_store,
+                repository=self.repository,
+                audit_binder=self.audit_binder,
+                trust_engine=self.trust_engine,
+                risk_engine=self.risk_engine,
+                security_orchestrator=self.security_orchestrator,
+            )
+
+            success = await strategy.rollback(
+                context,
+                failed_version,
+                previous_secret_ref,
+            )
+
+            if success:
+                updated = credential.mutate(
+                    version=failed_version - 1,
+                    secret_ref=previous_secret_ref,
+                )
+                await self.repository.update(updated)
+
+            return success
+
+        except Exception as e:
+            logger.warning(
+                "executor.rollback_rotation: unexpected error: %s",
+                e,
+                exc_info=True,
+            )
             await self.audit_binder.append_event(
-                event_type="credential_rotation_rolled_back",
-                resource_id=credential_id,
+                event_type="credential_rotation_rollback_failed",
                 metadata={
                     "credential_id": credential_id,
-                    "old_version": old_version,
-                    "rolled_back_version": new_version,
-                }
+                    "error": str(e),
+                },
             )
-        except Exception as e:
-            # Continue even if audit fails
-            logger.debug("executor.rollback_rotation: unexpected error (suppressed): %s", e)
-            pass
+            return False
+
+    def _map_policy_to_strategy(
+        self,
+        policy_strategy: PolicyStrategy,
+    ) -> RotationStrategyType:
+        strategy_map = {
+            PolicyStrategy.GENERATE_NEW_SECRET: RotationStrategyType.GENERATE_NEW_SECRET,
+            PolicyStrategy.AGENT_PUSH: RotationStrategyType.AGENT_PUSH,
+            PolicyStrategy.CALLBACK_WEBHOOK: RotationStrategyType.WEBHOOK_CALLBACK,
+            PolicyStrategy.MANUAL: RotationStrategyType.MANUAL,
+        }
+
+        return strategy_map.get(
+            policy_strategy,
+            RotationStrategyType.GENERATE_NEW_SECRET,
+        )

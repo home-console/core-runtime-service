@@ -45,27 +45,27 @@ async def test_admin_endpoints_registered(memory_adapter, monkeypatch):
     
     # Проверяем, что admin endpoints зарегистрированы
     endpoints = runtime.http.list()
-    admin_endpoints = [ep for ep in endpoints if ep.path.startswith("/admin")]
+    admin_endpoints = [ep for ep in endpoints if ep.path.startswith("/api/v1/admin")]
     
     assert len(admin_endpoints) > 0
     
     # Проверяем наличие основных endpoints
     paths = [ep.path for ep in admin_endpoints]
-    assert any("/admin/v1/inspector/runtime" in path for path in paths)
-    assert any("/admin/v1/inspector/operations" in path for path in paths)
-    assert any("/admin/v1/inspector/executions" in path for path in paths)
-    assert any("/admin/v1/inspector/executions/{execution_id}" in path for path in paths)
-    assert any("/admin/v1/inspector/operations/{operation_id}/executions" in path for path in paths)
-    assert any("/admin/v1/inspector/schedules" in path for path in paths)
-    assert any("/admin/v1/inspector/schedules/{schedule_id}" in path for path in paths)
-    assert any("/admin/v1/inspector/operations/{operation_id}/schedules" in path for path in paths)
+    assert any("/api/v1/admin/inspector/runtime" in path for path in paths)
+    assert any("/api/v1/admin/inspector/operations" in path for path in paths)
+    assert any("/api/v1/admin/inspector/executions" in path for path in paths)
+    assert any("/api/v1/admin/inspector/executions/{execution_id}" in path for path in paths)
+    assert any("/api/v1/admin/inspector/operations/{operation_id}/executions" in path for path in paths)
+    assert any("/api/v1/admin/inspector/schedules" in path for path in paths)
+    assert any("/api/v1/admin/inspector/schedules/{schedule_id}" in path for path in paths)
+    assert any("/api/v1/admin/inspector/operations/{operation_id}/schedules" in path for path in paths)
     
     await runtime.stop()
 
 
 @pytest.mark.asyncio
 async def test_admin_runtime_endpoint(memory_adapter, monkeypatch):
-    """Тест: GET /admin/v1/inspector/runtime возвращает информацию о runtime."""
+    """Тест: GET /api/v1/admin/inspector/runtime возвращает информацию о runtime."""
     monkeypatch.setenv("TEST_MODE", "1")
     runtime = CoreRuntime(memory_adapter)
     await runtime.module_manager.register_module_specs(runtime, APP_MODULES)

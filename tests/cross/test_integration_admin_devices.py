@@ -8,7 +8,7 @@ from app.bootstrap import APP_MODULES
 async def _call_http(runtime: CoreRuntime, method: str, path: str, body=None):
     """Simple http simulator: finds matching HttpEndpoint and calls service.
 
-    Matching supports templates like /admin/v1/devices/{id}/state
+    Matching supports templates like /api/v1/admin/devices/{id}/state
     Returns the service call result.
     """
     method = method.upper()
@@ -58,8 +58,8 @@ async def test_admin_devices_end_to_end(memory_adapter):
     # Start runtime (invokes on_start of modules and plugins)
     await runtime.start()
 
-    # 1. GET /admin/v1/devices -> initially empty list
-    res = await _call_http(runtime, "GET", "/admin/v1/devices")
+    # 1. GET /api/v1/admin/devices -> initially empty list
+    res = await _call_http(runtime, "GET", "/api/v1/admin/devices")
     assert isinstance(res, list)
 
     # 2. Publish external device discovered (provider: yandex)
@@ -67,7 +67,7 @@ async def test_admin_devices_end_to_end(memory_adapter):
     await runtime.event_bus.publish("external.device_discovered", payload)
 
     # 3. GET external devices for provider yandex
-    ext = await _call_http(runtime, "GET", "/admin/v1/devices/external/yandex")
+    ext = await _call_http(runtime, "GET", "/api/v1/admin/devices/external/yandex")
     assert isinstance(ext, list)
     assert any(e.get("external_id") == "yandex_1" for e in ext)
 
@@ -75,14 +75,14 @@ async def test_admin_devices_end_to_end(memory_adapter):
     await runtime.service_registry.call("devices.create", "dev_integ_1", name="Integration Lamp", device_type="light")
 
     # Ensure current state is off
-    d = await _call_http(runtime, "GET", "/admin/v1/devices/dev_integ_1")
+    d = await _call_http(runtime, "GET", "/api/v1/admin/devices/dev_integ_1")
     assert d["id"] == "dev_integ_1"
     # New state model: {desired, reported, pending}
     assert d["state"]["desired"]["on"] is False
     assert d["state"]["reported"]["on"] is False
 
     # POST to set state -> turn on
-    await _call_http(runtime, "POST", "/admin/v1/devices/dev_integ_1/state", {"power": "on"})
+    await _call_http(runtime, "POST", "/api/v1/admin/devices/dev_integ_1/state", {"power": "on"})
 
     # Verify state changed
     d2 = await runtime.service_registry.call("devices.get", "dev_integ_1")

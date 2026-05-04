@@ -25,7 +25,7 @@ from modules.credentials.rotation import (
     GenerateNewSecretStrategy,
     AgentPushStrategy,
     WebhookRotationStrategy,
-    RotationExecutorV2 as RotationExecutor,
+    RotationExecutor,
     RotationPolicy,
     StrategyExecutionError,
 )

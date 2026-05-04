@@ -228,7 +228,7 @@ class AgentControlPlaneModule(RuntimeModule):
         self.context.http.register(
             HttpEndpoint(
                 method="POST",
-                path="/admin/v1/agents/enrollment-token",
+                path="/api/v1/admin/agents/enrollment-token",
                 service="admin.agent.create_enrollment_token",
                 description="Create enrollment token for new agent",
                 auth_config=_admin_write,
@@ -239,7 +239,7 @@ class AgentControlPlaneModule(RuntimeModule):
         self.context.http.register(
             HttpEndpoint(
                 method="POST",
-                path="/admin/v1/agents/bootstrap-token",
+                path="/api/v1/admin/agents/bootstrap-token",
                 service="admin.agent.generate_bootstrap_token",
                 description="Generate one-time bootstrap enrollment token for installer",
                 auth_config=_admin_write,
@@ -249,7 +249,7 @@ class AgentControlPlaneModule(RuntimeModule):
         self.context.http.register(
             HttpEndpoint(
                 method="POST",
-                path="/admin/v1/agents/enroll",
+                path="/api/v1/admin/agents/enroll",
                 service="admin.agent.enroll_agent",
                 description="Enroll agent with enrollment token",
                 auth_config=_admin_write,
@@ -260,7 +260,7 @@ class AgentControlPlaneModule(RuntimeModule):
         self.context.http.register(
             HttpEndpoint(
                 method="GET",
-                path="/admin/v1/agents",
+                path="/api/v1/admin/agents",
                 service="admin.agent.list_agents",
                 description="List all registered agents",
                 auth_config=_admin_read,
@@ -270,7 +270,7 @@ class AgentControlPlaneModule(RuntimeModule):
         self.context.http.register(
             HttpEndpoint(
                 method="GET",
-                path="/admin/v1/agents/{agent_id}",
+                path="/api/v1/admin/agents/{agent_id}",
                 service="admin.agent.get_agent",
                 description="Get agent details",
                 auth_config=_admin_read,
@@ -280,7 +280,7 @@ class AgentControlPlaneModule(RuntimeModule):
         self.context.http.register(
             HttpEndpoint(
                 method="POST",
-                path="/admin/v1/agents/{agent_id}/deregister",
+                path="/api/v1/admin/agents/{agent_id}/deregister",
                 service="admin.agent.deregister_agent",
                 description="Deregister agent",
                 auth_config=_admin_write,
@@ -291,7 +291,7 @@ class AgentControlPlaneModule(RuntimeModule):
         self.context.http.register(
             HttpEndpoint(
                 method="POST",
-                path="/admin/v1/agents/deploy",
+                path="/api/v1/admin/agents/deploy",
                 service="admin.agent.deploy",
                 description="Deploy agent to remote host via SSH",
                 auth_config=_admin_write,
@@ -301,7 +301,7 @@ class AgentControlPlaneModule(RuntimeModule):
         self.context.http.register(
             HttpEndpoint(
                 method="GET",
-                path="/admin/v1/deployments/{deployment_id}",
+                path="/api/v1/admin/deployments/{deployment_id}",
                 service="admin.agent.get_deployment_status",
                 description="Get agent deployment status",
                 auth_config=_admin_read,
@@ -311,7 +311,7 @@ class AgentControlPlaneModule(RuntimeModule):
         self.context.http.register(
             HttpEndpoint(
                 method="GET",
-                path="/admin/v1/deployments",
+                path="/api/v1/admin/deployments",
                 service="admin.agent.get_deployment_metrics",
                 description="Get deployment metrics and statistics",
                 auth_config=_admin_read,
@@ -321,7 +321,7 @@ class AgentControlPlaneModule(RuntimeModule):
         self.context.http.register(
             HttpEndpoint(
                 method="POST",
-                path="/admin/v1/agents/{agent_id}/heartbeat",
+                path="/api/v1/admin/agents/{agent_id}/heartbeat",
                 service="admin.agent.heartbeat",
                 description="Receive heartbeat from agent",
                 auth_config=_admin_write,
@@ -331,7 +331,7 @@ class AgentControlPlaneModule(RuntimeModule):
         self.context.http.register(
             HttpEndpoint(
                 method="GET",
-                path="/admin/v1/agents/{agent_id}/heartbeat",
+                path="/api/v1/admin/agents/{agent_id}/heartbeat",
                 service="admin.agent.get_heartbeat_status",
                 description="Get heartbeat status for specific agent",
                 auth_config=_admin_read,
@@ -341,7 +341,7 @@ class AgentControlPlaneModule(RuntimeModule):
         self.context.http.register(
             HttpEndpoint(
                 method="GET",
-                path="/admin/v1/agents/health/check",
+                path="/api/v1/admin/agents/health/check",
                 service="admin.agent.check_agents_health",
                 description="Check health of all agents",
                 auth_config=EndpointAuthConfig(public=True),
@@ -351,7 +351,7 @@ class AgentControlPlaneModule(RuntimeModule):
         self.context.http.register(
             HttpEndpoint(
                 method="GET",
-                path="/admin/v1/agents/online",
+                path="/api/v1/admin/agents/online",
                 service="admin.agent.list_online_agents",
                 description="List all currently online agents",
                 auth_config=_admin_read,
@@ -365,7 +365,7 @@ class AgentControlPlaneModule(RuntimeModule):
         self.context.http.register(
             HttpEndpoint(
                 method="GET",
-                path="/media/checksum",
+                path="/api/v1/media/checksum",
                 service="admin.agent.download_checksum",
                 description="Get SHA256 checksum of agent binary",
                 auth_config=_public,
@@ -375,7 +375,7 @@ class AgentControlPlaneModule(RuntimeModule):
         self.context.http.register(
             HttpEndpoint(
                 method="GET",
-                path="/media/download/binary",
+                path="/api/v1/media/download/binary",
                 service="admin.agent.download_binary",
                 description="Stream agent binary to installer",
                 auth_config=_public,
@@ -386,7 +386,7 @@ class AgentControlPlaneModule(RuntimeModule):
         self.context.http.register(
             HttpEndpoint(
                 method="GET",
-                path="/admin/v1/agents/capabilities/{capability_id}",
+                path="/api/v1/admin/agents/capabilities/{capability_id}",
                 service="admin.agent.list_agents_providing_capability",
                 description="List agents providing capability",
                 auth_config=_admin_read,
@@ -397,7 +397,7 @@ class AgentControlPlaneModule(RuntimeModule):
         self.context.http.register(
             HttpEndpoint(
                 method="POST",
-                path="/admin/v1/agents/{agent_id}/logs",
+                path="/api/v1/admin/agents/{agent_id}/logs",
                 service="admin.agent.submit_logs",
                 description="Agent pushes log entries to Core",
                 auth_config=_admin_write,
@@ -407,7 +407,7 @@ class AgentControlPlaneModule(RuntimeModule):
         self.context.http.register(
             HttpEndpoint(
                 method="GET",
-                path="/admin/v1/agents/{agent_id}/logs",
+                path="/api/v1/admin/agents/{agent_id}/logs",
                 service="admin.agent.get_logs",
                 description="Get stored logs for agent",
                 auth_config=_admin_read,
@@ -418,7 +418,7 @@ class AgentControlPlaneModule(RuntimeModule):
         self.context.http.register(
             HttpEndpoint(
                 method="GET",
-                path="/admin/v1/agents/{agent_id}/status",
+                path="/api/v1/admin/agents/{agent_id}/status",
                 service="admin.agent.get_status",
                 description="Get real-time status of agent",
                 auth_config=_admin_read,

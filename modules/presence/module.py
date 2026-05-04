@@ -53,7 +53,7 @@ class PresenceModule(RuntimeModule):
             self.context.http.register(
                 HttpEndpoint(
                     method="POST",
-                    path="/presence/enter",
+                    path="/api/v1/presence/enter",
                     service="presence.enter",
                     auth_config=_presence_write,
                 )
@@ -61,7 +61,7 @@ class PresenceModule(RuntimeModule):
             self.context.http.register(
                 HttpEndpoint(
                     method="POST",
-                    path="/presence/leave",
+                    path="/api/v1/presence/leave",
                     service="presence.leave",
                     auth_config=_presence_write,
                 )

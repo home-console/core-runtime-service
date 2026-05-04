@@ -22,7 +22,7 @@ def create_request_logger_router(runtime: Any) -> APIRouter:
     Returns:
         FastAPI роутер с endpoints для получения логов
     """
-    router = APIRouter(prefix="/admin/v1/request-logs", tags=["request-logs"])
+    router = APIRouter(prefix="/api/v1/admin/request-logs", tags=["request-logs"])
     
     @router.get("/{request_id}")
     async def get_request_logs(request_id: str):

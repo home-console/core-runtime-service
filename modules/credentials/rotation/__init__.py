@@ -15,7 +15,6 @@ from .policy import (
     RotationState,
 )
 from .executor import RotationExecutor
-from .executor_v2 import RotationExecutor as RotationExecutorV2
 from .scheduler import RotationScheduler
 from .engine import CredentialRotationEngine
 from .exceptions import (
@@ -41,12 +40,14 @@ from .strategy import (
     StrategyExecutionError,
     IdempotencyKeyError,
 )
-from .registry import StrategyRegistry
+from .registry import StrategyRegistry, register_builtin_rotation_strategies
 from .strategies import (
     GenerateNewSecretStrategy,
     AgentPushStrategy,
     WebhookRotationStrategy,
 )
+
+RotationExecutorV2 = RotationExecutor
 
 __all__ = [
     # Policy
@@ -65,6 +66,7 @@ __all__ = [
     "RotationStrategyContext",
     "RotationResult",
     "StrategyRegistry",
+    "register_builtin_rotation_strategies",
     # Built-in Strategies
     "GenerateNewSecretStrategy",
     "AgentPushStrategy",

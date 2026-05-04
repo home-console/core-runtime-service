@@ -145,7 +145,7 @@ async def demo():
     
     # 9. Список плагинов
     print("\n[9] Список загруженных плагинов...")
-    plugins = runtime.plugin_manager.list_plugins()
+    plugins = await runtime.plugin_manager.list_plugins()
     print(f"   Плагины: {plugins}")
     
     for plugin_name in plugins:
