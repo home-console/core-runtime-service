@@ -1,0 +1,107 @@
+# Production-ish stack: Core Runtime + Platform UI (image-only).
+#
+# Usage (local):
+#   CORE_RUNTIME_IMAGE=ghcr.io/<org>/<repo>:sha123 \
+#   PLATFORM_IMAGE=ghcr.io/home-console/platform-home-console:sha123 \
+#   RUNTIME_MASTER_KEY=... \
+#   docker compose -f deploy/prod/docker-compose.image.yml up -d
+#
+# Usage (with hc, remote):
+#   hc deploy stack --core-image ghcr.io/<org>/<repo> --core-tag sha123 \
+#                  --platform-image ghcr.io/home-console/platform-home-console --platform-tag sha123 \
+#                  --ssh user@host --path /srv/core-runtime-service
+#
+# Plugins directory:
+#   Default: Docker named volume `runtime-plugins` → /app/plugins (rw; persists across deploys).
+#   Bind mount from host: PLUGINS_VOLUME=/abs/path/to/plugins (hc plugin sync --mode bind uses repo plugins/).
+#   Monorepo dev without volume name: PLUGINS_VOLUME=../../plugins (relative to this compose file).
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks: [app]
+
+  core-runtime:
+    image: ${CORE_RUNTIME_IMAGE:-dev-core-runtime}
+    restart: unless-stopped
+    env_file:
+      - ../../.env
+    environment:
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - EVENT_BUS_BACKEND=${EVENT_BUS_BACKEND:-memory}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      - RUNTIME_STORAGE_MODE=${RUNTIME_STORAGE_MODE:-dual}
+      - RUNTIME_VAULT_STORAGE_TYPE=${RUNTIME_VAULT_STORAGE_TYPE:-sqlite}
+      - RUNTIME_VAULT_PG_DSN=${RUNTIME_VAULT_PG_DSN:-}
+      - RUNTIME_PLUGINS_DIR=${RUNTIME_PLUGINS_DIR:-/app/plugins}
+      - RUNTIME_DB_PATH=${RUNTIME_DB_PATH:-/data/runtime.db}
+      - RUNTIME_VAULT_DB_PATH=${RUNTIME_VAULT_DB_PATH:-/data/vault.db}
+      - RUNTIME_VAULT_SECRET_DB_PATH=${RUNTIME_VAULT_SECRET_DB_PATH:-/data/vault_secret.db}
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - core-data:/data
+      # Default named volume; override with PLUGINS_VOLUME=/host/path for bind mount.
+      - ${PLUGINS_VOLUME:-runtime-plugins}:/app/plugins:rw
+    expose:
+      - "8000"
+    # Optional: expose core directly for debugging.
+    # ports:
+    #   - "${CORE_PORT:-18000}:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/monitor/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks: [app]
+
+  platform-web:
+    image: ${PLATFORM_IMAGE:-ghcr.io/home-console/platform-home-console:latest}
+    restart: unless-stopped
+    environment:
+      CORE_RUNTIME_URL: ${CORE_RUNTIME_URL:-http://core-runtime:8000}
+      # For local HTTP runs keep cookies working; for production behind HTTPS set SECURE_COOKIES=true.
+      SECURE_COOKIES: ${SECURE_COOKIES:-false}
+    depends_on:
+      core-runtime:
+        condition: service_healthy
+    expose:
+      - "80"
+    networks: [app]
+
+  edge:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    depends_on:
+      core-runtime:
+        condition: service_healthy
+      platform-web:
+        condition: service_started
+    networks: [app]
+
+volumes:
+  core-data:
+  runtime-plugins:
+  caddy-data:
+  caddy-config:
+
+networks:
+  app:
+

@@ -142,7 +142,14 @@ class YandexDeviceAuthPlugin(BasePlugin):
                 return result
             except Exception as e:
                 await self._sync_auth_inspector_flows()
-                raise Exception(f"500: {str(e)}")
+                msg = str(e)
+                if "csrf_token" in msg:
+                    msg = (
+                        "Yandex upstream недоступен/изменил страницу авторизации (csrf_token не найден). "
+                        "Попробуйте позже или используйте ручную передачу cookies."
+                    )
+                # Важно: не падать 500 на публичном endpoint — UI ожидает структурированный ответ.
+                return {"ok": False, "error": msg, "code": "UNAVAILABLE"}
 
         async def check_qr_status(
             *, body: Optional[Dict[str, Any]] = None, **kwargs

@@ -31,6 +31,10 @@ services:
       - LOG_LEVEL=info
       - EVENT_BUS_BACKEND=${EVENT_BUS_BACKEND:-memory}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      - RUNTIME_STORAGE_MODE=${RUNTIME_STORAGE_MODE:-dual}
+      - RUNTIME_VAULT_STORAGE_TYPE=${RUNTIME_VAULT_STORAGE_TYPE:-sqlite}
+      - RUNTIME_VAULT_PG_DSN=${RUNTIME_VAULT_PG_DSN:-}
+      - RUNTIME_PLUGINS_DIR=${RUNTIME_PLUGINS_DIR:-/app/plugins}
       # Run as non-root; keep SQLite DBs on the mounted /data volume.
       - RUNTIME_DB_PATH=${RUNTIME_DB_PATH:-/data/runtime.db}
       - RUNTIME_VAULT_DB_PATH=${RUNTIME_VAULT_DB_PATH:-/data/vault.db}
@@ -43,7 +47,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/monitor/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/monitor/health"]
       interval: 10s
       timeout: 5s
       retries: 3

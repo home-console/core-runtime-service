@@ -11,9 +11,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
-COPY requirements.txt .
+COPY requirements.txt requirements.lock* ./
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
-    pip install --no-cache-dir -r requirements.txt
+    if [ -f requirements.lock ]; then pip install --no-cache-dir -r requirements.lock; else pip install --no-cache-dir -r requirements.txt; fi
 
 # Copy application code
 COPY . .
@@ -23,7 +23,7 @@ RUN mkdir -p /data && chown -R nobody:nogroup /data
 
 # Health check
 HEALTHCHECK --interval=10s --timeout=5s --retries=3 \
-    CMD curl -f http://localhost:8000/admin/v1/status || exit 1
+    CMD curl -f http://localhost:8000/api/v1/monitor/health || exit 1
 
 # Switch to non-root user
 USER nobody

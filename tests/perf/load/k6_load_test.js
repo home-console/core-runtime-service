@@ -76,7 +76,7 @@ export const options = {
 
     /**
      * Scenario 3: Deploy endpoint stress
-     * POST /admin/v1/agents/deploy under concurrent load
+     * POST /api/v1/admin/agents/deploy under concurrent load
      */
     deploy_stress: {
       executor: "constant-arrival-rate",
@@ -153,7 +153,7 @@ export function smokeTest() {
   errorRate.add(healthRes.status !== 200);
 
   // 2. List agents
-  const listRes = http.get(`${BASE_URL}/admin/v1/agents`, { headers });
+  const listRes = http.get(`${BASE_URL}/api/v1/admin/agents`, { headers });
   check(listRes, {
     "list agents returns 200 or 204": (r) =>
       r.status === 200 || r.status === 204,
@@ -179,7 +179,7 @@ export function heartbeatFlood() {
 
   const start = Date.now();
   const res = http.post(
-    `${BASE_URL}/admin/v1/agents/${agentId}/heartbeat`,
+    `${BASE_URL}/api/v1/admin/agents/${agentId}/heartbeat`,
     payload,
     { headers: agentHeaders(agentId), tags: { scenario: "heartbeat_flood" } }
   );
@@ -215,7 +215,7 @@ export function deployStress() {
 
   const start = Date.now();
   const deployRes = http.post(
-    `${BASE_URL}/admin/v1/agents/deploy`,
+    `${BASE_URL}/api/v1/admin/agents/deploy`,
     payload,
     { headers, tags: { scenario: "deploy_stress" } }
   );
@@ -244,7 +244,7 @@ export function deployStress() {
         // Poll status once
         const pollStart = Date.now();
         const statusRes = http.get(
-          `${BASE_URL}/admin/v1/agents/deployments/${depId}`,
+          `${BASE_URL}/api/v1/admin/agents/deployments/${depId}`,
           { headers, tags: { scenario: "deploy_stress" } }
         );
         statusPollLatency.add(Date.now() - pollStart);
@@ -275,9 +275,9 @@ export function deployStress() {
 
 export function healthPolling() {
   const endpoints = [
-    `${BASE_URL}/admin/v1/agents/health/check`,
-    `${BASE_URL}/admin/v1/agents`,
-    `${BASE_URL}/admin/v1/agents/deployments/metrics`,
+    `${BASE_URL}/api/v1/admin/agents/health/check`,
+    `${BASE_URL}/api/v1/admin/agents`,
+    `${BASE_URL}/api/v1/admin/agents/deployments/metrics`,
   ];
 
   for (const url of endpoints) {

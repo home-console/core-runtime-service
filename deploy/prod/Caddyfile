@@ -1,0 +1,30 @@
+# Edge reverse proxy: one origin for UI + API.
+#
+# - UI:     platform-web:80
+# - API:    core-runtime:8000
+#
+# Notes:
+# - In production set DOMAIN to your real domain; Caddy will manage TLS.
+# - For local/dev you can keep DOMAIN=localhost and use HTTP.
+
+{
+	auto_https off
+}
+
+:80 {
+	# API endpoints → core-runtime.
+	#
+	# IMPORTANT:
+	# - UI routes like `/admin/plugins` are SPA paths and must go to platform-web.
+	# - Backend HTTP API must be routed only via /api/v1/* (and /ws/* for WebSockets).
+	@api path /api/v1/* /ws/*
+	handle @api {
+		reverse_proxy core-runtime:8000
+	}
+
+	# Everything else → platform web (nginx static)
+	handle {
+		reverse_proxy platform-web:80
+	}
+}
+
