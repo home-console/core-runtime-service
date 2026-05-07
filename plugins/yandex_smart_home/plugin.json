@@ -7,6 +7,16 @@
     "dependencies": [
         "oauth_yandex"
     ],
+    "namespace": "yandex",
+    "provides_events": [
+        "external.device_discovered",
+        "external.device_state_reported"
+    ],
+    "storage_namespaces": [
+        "devices",
+        "devices_mappings",
+        "yandex"
+    ],
     "is_integration": true,
     "integration_name": "Yandex Smart Home",
     "integration_flags": [

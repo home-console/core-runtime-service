@@ -41,7 +41,7 @@ async def register_device_admin_bindings(context: Any) -> list[str]:
                 method="GET",
                 path="/api/v1/admin/devices/external",
                 service="admin.v1.devices.list_external",
-                description="List all external devices (optional ?provider=yandex to filter)",
+                description="List all external devices (optional ?provider=<provider> to filter)",
                 auth_config=_admin_read,
             ),
             HttpEndpoint(
@@ -55,7 +55,7 @@ async def register_device_admin_bindings(context: Any) -> list[str]:
                 method="GET",
                 path="/api/v1/admin/devices/{id}/external",
                 service="admin.v1.devices.get_external_for_device",
-                description="Get external device payload (Yandex etc.) for an internal device",
+                description="Get external device payload for an internal device",
                 auth_config=_admin_read,
             ),
         ]:

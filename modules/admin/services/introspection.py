@@ -589,10 +589,7 @@ def _flow_ids_set(flows: List[Dict[str, Any]]) -> set:
 # Auth flows, которые приходят из storage и не обязаны совпадать с каким-либо plugin-id.
 # Для статуса "unavailable" используем probe через
 # нейтральные сервисы, а не через имена плагинов.
-_FLOW_ID_PROBE_SERVICES: Dict[str, str] = {
-    # flow id (UI) -> service name to probe
-    "yandex-device": "device_auth.start",
-}
+_FLOW_ID_PROBE_SERVICES: Dict[str, str] = {}
 
 # plugin_name -> flow id из state, которые считаются тем же плагином (дедуп в UI)
 _PLUGIN_FLOW_ID_ALIASES: Dict[str, List[str]] = {}
@@ -648,7 +645,7 @@ async def list_integrations(runtime: Any) -> List[Dict[str, Any]]:
             for info in runtime.integrations.list():
                 if info.id in existing_ids:
                     continue
-                # Не дублировать плагин, если у него уже есть flow из state (другой id, напр. yandex-device)
+                # Не дублировать плагин, если у него уже есть flow из state (другой id)
                 alias_ids = _PLUGIN_FLOW_ID_ALIASES.get(info.plugin_name, [])
                 if any(aid in existing_ids for aid in alias_ids):
                     continue

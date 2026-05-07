@@ -26,7 +26,21 @@ SECURITY P0: Плагины НЕ должны иметь прямой досту
 
 # Реализация изоляции теперь живёт в `core`, чтобы runtime мог
 # включать безопасные дефолты без зависимости core -> modules.
-from core.kernel.plugin_isolation import DEFAULT_ALLOWED_SERVICES, ServiceProxy, StorageProxy
+from core.kernel.plugin_isolation import (
+    DEFAULT_ALLOWED_SERVICES,
+    EventBusProxy,
+    NamespacedStorageProxy,
+    ServiceProxy,
+    ServiceRegistryProxy,
+    StorageProxy,
+)
 
-__all__ = ["DEFAULT_ALLOWED_SERVICES", "ServiceProxy", "StorageProxy"]
+__all__ = [
+    "DEFAULT_ALLOWED_SERVICES",
+    "EventBusProxy",
+    "NamespacedStorageProxy",
+    "ServiceProxy",
+    "ServiceRegistryProxy",
+    "StorageProxy",
+]
 

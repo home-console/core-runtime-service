@@ -9,27 +9,18 @@
     "requires": [
         "core"
     ],
+    "namespace": "yandex.device_auth",
+    "provides_services": [
+        "device_auth.*"
+    ],
+    "provides_operations": [
+        "device_auth.*"
+    ],
+    "storage_namespaces": [
+        "yandex"
+    ],
     "is_integration": true,
     "integration_name": "Yandex Device Auth",
-    "provides": {
-        "services": [
-            "yandex_device_auth.start",
-            "yandex_device_auth.status",
-            "yandex_device_auth.cancel",
-            "yandex_device_auth.get_session",
-            "yandex_device_auth.force_approve"
-        ],
-        "http_endpoints": [
-            "/yandex/auth/device/start",
-            "/yandex/auth/device/status",
-            "/yandex/auth/device/cancel",
-            "/yandex/auth/device/session",
-            "/yandex/auth/device/approve"
-        ],
-        "events": [
-            "yandex.device_auth.linked"
-        ]
-    },
     "config": {
         "enabled": true,
         "poll_interval": 5,

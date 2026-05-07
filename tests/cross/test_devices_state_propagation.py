@@ -29,7 +29,7 @@ async def test_state_propagation_via_event_bus(memory_adapter):
         # 1. Create an external device
         external_id = "test-ext-light-001"
         external_payload = {
-            "provider": "yandex",
+            "provider": "integration_test",
             "external_id": external_id,
             "name": "Test Light",
             "type": "light",
@@ -39,7 +39,7 @@ async def test_state_propagation_via_event_bus(memory_adapter):
         await runtime.storage.set("devices_external", external_id, external_payload)
 
         # 2. Create an internal device and mapping
-        internal_id = "yandex-test-ext-light-001"
+        internal_id = "it-test-ext-light-001"
         internal_device = {
             "id": internal_id,
             "name": "Test Light",
@@ -146,7 +146,7 @@ async def test_state_propagation_merge(memory_adapter):
 
     try:
         external_id = "test-ext-ac-001"
-        internal_id = "yandex-test-ext-ac-001"
+        internal_id = "it-test-ext-ac-001"
 
         # Create internal device with initial state
         initial_state = {

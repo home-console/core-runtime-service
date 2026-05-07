@@ -5,5 +5,8 @@
     "description": "Сканирование локальной сети и обнаружение устройств",
     "author": "Home Console",
     "dependencies": [],
+    "provides_events": [
+        "external.device_discovered"
+    ],
     "is_integration": false
 }

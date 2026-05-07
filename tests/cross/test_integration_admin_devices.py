@@ -62,14 +62,14 @@ async def test_admin_devices_end_to_end(memory_adapter):
     res = await _call_http(runtime, "GET", "/api/v1/admin/devices")
     assert isinstance(res, list)
 
-    # 2. Publish external device discovered (provider: yandex)
-    payload = {"external_id": "yandex_1", "provider": "yandex", "name": "Yandex Lamp"}
+    # 2. Publish external device discovered (provider: integration_test)
+    payload = {"external_id": "it_1", "provider": "integration_test", "name": "Test Lamp"}
     await runtime.event_bus.publish("external.device_discovered", payload)
 
-    # 3. GET external devices for provider yandex
-    ext = await _call_http(runtime, "GET", "/api/v1/admin/devices/external/yandex")
+    # 3. GET external devices for provider integration_test
+    ext = await _call_http(runtime, "GET", "/api/v1/admin/devices/external/integration_test")
     assert isinstance(ext, list)
-    assert any(e.get("external_id") == "yandex_1" for e in ext)
+    assert any(e.get("external_id") == "it_1" for e in ext)
 
     # 4. Create internal device and change state via admin HTTP POST
     await runtime.service_registry.call("devices.create", "dev_integ_1", name="Integration Lamp", device_type="light")

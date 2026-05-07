@@ -24,6 +24,16 @@ from sdk.plugin import BasePlugin as SDKBasePlugin
 from core.kernel.base_plugin import BasePlugin
 from dataclasses import replace
 from core.kernel.plugin_contract import PluginManifest, PluginDependencies, PluginContext
+from core.kernel.plugin_isolation import (
+    AgentManagerProxy,
+    CapabilityRegistryProxy,
+    HttpRegistryProxy,
+    NamespacedStorageProxy,
+    OperationRegistryProxy,
+    ServiceRegistryProxy,
+)
+from core.kernel.plugin_runtime_facade import PluginRuntimeFacade
+from sdk.operations_events import OPERATION_READY_EVENT_TYPE
 from core.exception_groups import (
     BEST_EFFORT_BACKGROUND_ERRORS,
     LOGGING_HELPER_ERRORS,
@@ -302,10 +312,137 @@ class PluginManifestLoader:
             
             # Создаём экземпляр плагина
             try:
-                plugin_instance = plugin_class(runtime)
+                # SECURITY P0: do NOT pass raw CoreRuntime into plugin __init__.
+                # A plugin can execute code in __init__ before sandbox is applied, which would
+                # bypass ServiceProxy/StorageProxy allowlists/namespacing.
+                plugin_name = str(manifest.get("name") or "unknown")
+                default_allowed = (
+                    list(getattr(runtime, "plugin_default_allowed_services", []) or [])
+                    if runtime is not None
+                    else []
+                )
+                manifest_allowed = manifest.get("allowed_services", []) or []
+                # P2.4: log any services beyond the default allowlist so operators can audit.
+                if isinstance(manifest_allowed, list) and manifest_allowed:
+                    extra_services = [s for s in manifest_allowed if s not in default_allowed]
+                    if extra_services:
+                        logger.warning(
+                            "plugin_loader: plugin '%s' requests extra allowed_services beyond default: %s",
+                            plugin_name,
+                            extra_services,
+                        )
+                allowed = (
+                    list(manifest_allowed)
+                    if isinstance(manifest_allowed, list) and manifest_allowed
+                    else default_allowed
+                )
 
-                # Создаём формализованный манифест
-                manifest_obj = PluginManifest.from_dict(manifest)
+                manifest_obj_early = PluginManifest.from_dict(manifest)
+                plugin_namespace = manifest_obj_early.namespace
+                dynamic_svc = manifest_obj_early.dynamic_service_registration
+                allowed_provided_services = list(manifest_obj_early.provides_services or [])
+                allowed_events = list(manifest_obj_early.provides_events or [])
+                allowed_operations = list(manifest_obj_early.provides_operations or [])
+                allowed_storage_namespaces = list(manifest_obj_early.storage_namespaces or [])
+                manifest_provides = manifest_obj_early.extra.get("provides", {})
+                if isinstance(manifest_provides, dict):
+                    allowed_provided_services.extend(manifest_provides.get("services", []) or [])
+                    allowed_events.extend(manifest_provides.get("events", []) or [])
+                    allowed_operations.extend(manifest_provides.get("operations", []) or [])
+
+                raw_event_bus = getattr(runtime, "event_bus", None) if runtime is not None else None
+                from core.kernel.plugin_isolation import EventBusProxy
+                event_bus_for_facade = (
+                    EventBusProxy(
+                        raw_event_bus,
+                        plugin_name,
+                        namespace=plugin_namespace,
+                        allowed_events=allowed_events,
+                        allowed_system_events=[OPERATION_READY_EVENT_TYPE],
+                    )
+                    if raw_event_bus is not None
+                    else None
+                )
+                raw_operations = getattr(runtime, "operations", None) if runtime is not None else None
+                operations_for_facade = (
+                    OperationRegistryProxy(
+                        raw_operations,
+                        plugin_name,
+                        namespace=plugin_namespace,
+                        allowed_operations=allowed_operations,
+                        dynamic_services=dynamic_svc,
+                    )
+                    if raw_operations is not None
+                    else None
+                )
+                raw_http = getattr(runtime, "http", None) if runtime is not None else None
+                http_for_facade = (
+                    HttpRegistryProxy(
+                        raw_http,
+                        plugin_name,
+                        namespace=plugin_namespace,
+                        allowed_provided_services=allowed_provided_services,
+                        dynamic_services=dynamic_svc,
+                    )
+                    if raw_http is not None
+                    else None
+                )
+                raw_capabilities = (
+                    getattr(runtime, "capability_registry", None)
+                    if runtime is not None
+                    else None
+                )
+                capabilities_for_facade = (
+                    CapabilityRegistryProxy(raw_capabilities)
+                    if raw_capabilities is not None
+                    else None
+                )
+                raw_agent_manager = (
+                    getattr(runtime, "agent_manager", None) if runtime is not None else None
+                )
+                agent_manager_for_facade = (
+                    AgentManagerProxy(raw_agent_manager)
+                    if raw_agent_manager is not None
+                    else None
+                )
+
+                facade = PluginRuntimeFacade(
+                    storage=(
+                        NamespacedStorageProxy(
+                            getattr(runtime, "storage", None),
+                            namespace=plugin_name,
+                            allowed_namespaces=allowed_storage_namespaces,
+                        )
+                        if runtime is not None and getattr(runtime, "storage", None) is not None
+                        else None
+                    ),
+                    service_registry=(
+                        ServiceRegistryProxy(
+                            getattr(runtime, "service_registry", None),
+                            allowed_services=allowed,
+                            plugin_name=plugin_name,
+                            namespace=plugin_namespace,
+                            dynamic_services=dynamic_svc,
+                            allowed_provided_services=allowed_provided_services,
+                        )
+                        if runtime is not None and getattr(runtime, "service_registry", None) is not None
+                        else None
+                    ),
+                    http=http_for_facade,
+                    operations=operations_for_facade,
+                    state=getattr(runtime, "state", None) if runtime is not None else None,
+                    event_bus=event_bus_for_facade,
+                    capabilities=capabilities_for_facade,
+                    vault=None,
+                    config=getattr(runtime, "config", None) if runtime is not None else None,
+                    agent_manager=agent_manager_for_facade,
+                    agent_registry=None,
+                )
+
+                plugin_instance = plugin_class(facade)
+
+                # Создаём формализованный манифест (уже разобран выше)
+                manifest_obj = manifest_obj_early
 
                 # Создаём контекст плагина (вместо setattr на экземпляр/класс)
                 plugin_context = PluginContext.create(plugin_instance, manifest_obj)

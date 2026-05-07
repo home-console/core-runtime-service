@@ -21,17 +21,27 @@ class OperationExecutor(IOperationExecutor):
         registry: OperationHandlerRegistry,
         runtime: Any,
         storage: Any,
+        *,
+        restricted_runtime: Any = None,
     ) -> None:
         self.registry = registry
         self.runtime = runtime
         self.storage = storage
+        # SECURITY P1: plugin-registered handlers must receive a facade (restricted_runtime)
+        # instead of the raw CoreRuntime. Core module handlers receive self.runtime.
+        # Set restricted_runtime when constructing an executor for plugin operation handlers.
+        self._restricted_runtime = restricted_runtime if restricted_runtime is not None else runtime
 
     def resolve_handler(self, operation: Operation):
         return self.registry.find_handler(operation.type)
 
     def _build_handler_context(self, operation: Operation) -> dict[str, Any]:
+        # SECURITY NOTE: "runtime" here is self._restricted_runtime.
+        # For plugin-registered handlers this should be a PluginRuntimeFacade, not
+        # the raw CoreRuntime. Use OperationExecutor(restricted_runtime=facade) when
+        # registering plugin handlers to prevent allowlist bypass.
         return {
-            "runtime": self.runtime,
+            "runtime": self._restricted_runtime,
             "operation": operation,
             "operation_id": operation.operation_id,
         }
@@ -52,10 +62,11 @@ class OperationExecutor(IOperationExecutor):
         else:
             first_name = params[0].name
             second_name = params[1].name
+            # SECURITY: pass self._restricted_runtime (facade for plugins, raw for core).
             if first_name in {"runtime", "rt"} or second_name in {"operation", "op"}:
-                candidates.append((self.runtime, operation))
+                candidates.append((self._restricted_runtime, operation))
             candidates.append((operation.params, context))
-            candidates.append((self.runtime, operation))
+            candidates.append((self._restricted_runtime, operation))
 
         if not candidates:
             candidates.append((self.runtime, operation))

@@ -131,7 +131,7 @@ class PluginRegistry:
         
         Returns:
             None если плагин стартовал или не загружен.
-            Иначе dict, например {"missing_capabilities": ["oauth:yandex"]}.
+            Иначе dict, например {"missing_capabilities": ["oauth:provider"]}.
         """
         async with self._plugin_lock:
             return self._block_reasons.get(plugin_name)

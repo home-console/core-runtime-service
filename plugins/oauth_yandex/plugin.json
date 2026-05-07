@@ -5,6 +5,16 @@
     "description": "OAuth helper для Яндекса: получение и хранение токенов",
     "author": "Home Console",
     "dependencies": [],
+    "namespace": "oauth",
+    "provides_services": [
+        "yandex.login.*"
+    ],
+    "provides_events": [
+        "yandex.login.*"
+    ],
+    "storage_namespaces": [
+        "yandex"
+    ],
     "role": "capability_provider",
     "capability": "oauth:yandex",
     "user_facing": false,

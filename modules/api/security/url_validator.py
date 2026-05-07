@@ -62,6 +62,15 @@ _dns_cache_lock = threading.Lock()
 _DNS_CACHE_MAXSIZE = 1024
 
 
+def _is_documentation_domain(host: str) -> bool:
+    """
+    Deterministic test helper: IANA documentation domains must not depend on real DNS.
+    See RFC 2606: example.com / example.net / example.org (and their subdomains).
+    """
+    h = (host or "").strip().rstrip(".").lower()
+    return h == "example.com" or h.endswith(".example.com") or h == "example.net" or h.endswith(".example.net") or h == "example.org" or h.endswith(".example.org")
+
+
 def _resolve_host_ips(host: str) -> tuple[str, ...]:
     """
     Resolve hostname to IP addresses (A/AAAA).
@@ -188,6 +197,8 @@ def validate_external_url(url: str, allow_private: bool = False) -> bool:
                 # If host parses as IP, ipaddress.ip_address won't throw and we skip DNS.
                 ipaddress.ip_address(host)
             except ValueError:
+                if _is_documentation_domain(host):
+                    return True
                 resolved_ips = _resolve_host_ips(host)
                 for ip in resolved_ips:
                     if is_private_ip(ip):

@@ -95,8 +95,8 @@ class PluginMetadata(SDKPluginMetadata):
     # Можно включить default_admin_only=True для "админских" плагинов.
     default_admin_only: bool = False
     # Capability: плагин объявляет, какие capabilities предоставляет и какие требует.
-    capabilities_provided: list[str] = field(default_factory=lambda: cast(list[str], []))  # ["oauth:yandex"]
-    capabilities_required: list[str] = field(default_factory=lambda: cast(list[str], []))  # ["oauth:yandex", "yandex:session_cookies"]
+    capabilities_provided: list[str] = field(default_factory=lambda: cast(list[str], []))  # ["oauth:provider"]
+    capabilities_required: list[str] = field(default_factory=lambda: cast(list[str], []))  # ["oauth:provider", "provider:session_cookies"]
     # Remote configuration для remote capability providers
     # Если не None, то этот плагин является remote provider
     remote_config: dict[str, Any] | None = None  # {"base_url": "http://...", "timeout": 10}
@@ -111,6 +111,9 @@ class PluginMetadata(SDKPluginMetadata):
     resource_limits: dict[str, Any] | None = (
         None  # {"max_execution_seconds": 30, "max_memory_mb": 512, "max_calls_per_minute": 100}
     )
+    # Trusted proxy flag: allows registering services under any name (bypasses namespace check).
+    # Use only for framework-level proxy plugins (e.g. remote_plugin_proxy).
+    dynamic_service_registration: bool = False
 
 
 class BasePlugin(SDKBasePlugin):

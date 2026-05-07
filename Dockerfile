@@ -23,7 +23,7 @@ RUN mkdir -p /data && chown -R nobody:nogroup /data
 
 # Health check
 HEALTHCHECK --interval=10s --timeout=5s --retries=3 \
-    CMD curl -f http://localhost:8000/api/v1/monitor/health || exit 1
+    CMD curl -f http://localhost:8000/monitor/health || exit 1
 
 # Switch to non-root user
 USER nobody

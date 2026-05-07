@@ -4,7 +4,7 @@
 
 # Configurable params
 BASE_URL="http://localhost:8000"
-INTERNAL_ID="yandex-d43c7d12-cc9e-4790-95aa-565e0c47e1d8"
+INTERNAL_ID="it-d43c7d12-cc9e-4790-95aa-565e0c47e1d8"
 TIMEOUT=20
 INTERVAL=1
 

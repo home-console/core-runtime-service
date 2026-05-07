@@ -14,9 +14,7 @@ PluginLifecycle - управление lifecycle плагинов.
 - PluginInfrastructureCoordinator — capabilities, operations, integrations
 """
 
-import importlib
 import sys
-import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -402,6 +400,10 @@ class PluginLifecycleManager:
 
             # Удаляем из реестра плагинов (in-memory)
             await self._registry.unregister(plugin_name)
+
+            # P2.6: Clean up dynamically loaded modules from sys.modules to avoid
+            # stale references on hot-reload and prevent memory leaks.
+            _cleanup_plugin_modules(plugin_name)
         except asyncio.CancelledError:
             raise
         except BEST_EFFORT_BACKGROUND_ERRORS as e:
@@ -505,3 +507,15 @@ class PluginLifecycleManager:
 
         # Best-effort: ensure any remaining supervised tasks are cancelled.
         await self._supervisor.stop_all(timeout=10.0)
+
+
+def _cleanup_plugin_modules(plugin_name: str) -> None:
+    """Remove dynamically loaded plugin modules from sys.modules (P2.6)."""
+    prefix = f"hc_dynamic_plugins.{plugin_name}."
+    exact = f"hc_dynamic_plugins.{plugin_name}"
+    to_remove = [
+        k for k in list(sys.modules)
+        if k == exact or k.startswith(prefix)
+    ]
+    for key in to_remove:
+        del sys.modules[key]

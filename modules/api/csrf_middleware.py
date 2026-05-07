@@ -154,7 +154,8 @@ async def rate_limit_middleware(request: Request, call_next: Callable) -> Respon
     
     # Define rate limits for different endpoint types
     rate_limits = {
-        "/api/v1/plugins/oauth-yandex/sync": {"max_calls": 60, "window_sec": 60},  # Повышено: 5 → 60 для синхронизации
+        # Plugin sync endpoints can be bursty; apply a higher limit without hardcoding vendor/plugin paths.
+        "/api/v1/plugins/": {"max_calls": 60, "window_sec": 60},
         "/api/v1/admin/devices": {"max_calls": 500, "window_sec": 60},      # Повышено: 100 → 500
         "/api/v1/admin/inspector/storage": {"max_calls": 500, "window_sec": 60},  # Повышено: 100 → 500
         "default": {"max_calls": 1000, "window_sec": 60},                # Повышено: 200 → 1000
@@ -164,6 +165,9 @@ async def rate_limit_middleware(request: Request, call_next: Callable) -> Respon
     endpoint_limit = rate_limits.get("default")
     for path_prefix, limit in rate_limits.items():
         if path_prefix != "default" and request.url.path.startswith(path_prefix):
+            # Special-case: only treat as "plugin sync" when the path ends with "/sync"
+            if path_prefix == "/api/v1/plugins/" and not request.url.path.endswith("/sync"):
+                continue
             endpoint_limit = limit
             break
     

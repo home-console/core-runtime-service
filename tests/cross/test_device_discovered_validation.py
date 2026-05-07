@@ -14,7 +14,7 @@ async def test_validate_device_discovered_accepts_valid_payload(caplog):
         await validate_device_discovered(
             {
                 "external_id": "device-1",
-                "provider": "yandex",
+                "provider": "integration_test",
                 "capabilities": {},
             }
         )
@@ -25,7 +25,7 @@ async def test_validate_device_discovered_accepts_valid_payload(caplog):
 @pytest.mark.asyncio
 async def test_validate_device_discovered_warns_for_missing_fields(caplog):
     with caplog.at_level(logging.WARNING):
-        await validate_device_discovered({"provider": "yandex"})
+        await validate_device_discovered({"provider": "integration_test"})
         await validate_device_discovered({"external_id": "device-2"})
 
     messages = [record.message for record in caplog.records]

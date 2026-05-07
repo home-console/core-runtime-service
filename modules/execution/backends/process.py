@@ -17,6 +17,7 @@ import asyncio
 import json
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from ..backend import OperationResult
@@ -67,6 +68,12 @@ class ProcessBackend:
         ]
 
         stdin_bytes = (json.dumps(payload, ensure_ascii=False)).encode("utf-8")
+        # Ensure runner can import `modules.*` when executed from arbitrary cwd (e.g. monorepo root).
+        repo_root = Path(__file__).resolve().parents[3]  # core-runtime-service/
+        env = dict(**getattr(__import__("os"), "environ"))
+        existing_pp = env.get("PYTHONPATH", "")
+        root_str = str(repo_root)
+        env["PYTHONPATH"] = root_str if not existing_pp else f"{root_str}{__import__('os').pathsep}{existing_pp}"
 
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -74,6 +81,8 @@ class ProcessBackend:
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                cwd=str(repo_root),
+                env=env,
             )
         except FileNotFoundError as e:
             return OperationResult(

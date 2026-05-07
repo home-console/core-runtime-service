@@ -10,7 +10,7 @@ Usage:
     python3 dev-scripts/quasar_ws_smoke.py
 
 Prerequisites:
-- Valid Yandex cookies saved via POST /oauth/yandex/cookies or set_yandex_cookies.py
+- Valid session cookies saved via the OAuth plugin cookies endpoint
 - OAuth is optional (not used for WS), but device sync may use it
 """
 
@@ -36,27 +36,15 @@ async def main() -> None:
 
     await runtime.start()
 
-    # Ensure feature flag enabled
-    try:
-        use_real = await runtime.storage.get("yandex", "use_real_api")
-        if not use_real:
-            await runtime.storage.set("yandex", "use_real_api", {"enabled": True})
-            print("[init] Enabled yandex.use_real_api in storage")
-    except Exception:
-        await runtime.storage.set("yandex", "use_real_api", {"enabled": True})
-        print("[init] Enabled yandex.use_real_api in storage")
-
     # Check cookies presence
     cookies = None
     try:
         cookies = await runtime.service_registry.call("oauth_yandex.get_cookies")
     except Exception:
-        cookies = await runtime.storage.get("yandex", "cookies")
+        cookies = None
 
     if not isinstance(cookies, dict) or not cookies:
-        print("[error] Yandex cookies not found. Set cookies first:")
-        print("        - python3 dev-scripts/set_yandex_cookies.py")
-        print("        - or POST /oauth/yandex/cookies with Session_id & yandexuid")
+        print("[error] Session cookies not found. Configure cookies via OAuth plugin first.")
         await runtime.shutdown()
         return
 
@@ -79,18 +67,6 @@ async def main() -> None:
         print(f"[update] {device_id}: {state}")
 
     await runtime.event_bus.subscribe("external.device_state_reported", on_update)
-
-    # Optionally trigger device sync to seed states if service exists
-    try:
-        if await runtime.service_registry.has_service("admin.v1.yandex.sync"):
-            print("[info] Triggering device sync via admin.v1.yandex.sync...")
-            res = await runtime.service_registry.call("admin.v1.yandex.sync")
-            if isinstance(res, dict) and res.get("ok"):
-                print(f"[info] Synced {res.get('count', 0)} devices")
-            else:
-                print(f"[warn] Sync result: {res}")
-    except Exception as e:
-        print(f"[warn] Sync failed: {e}")
 
     # Wait for events / connection logs
     print("[info] Listening for WS events (press Ctrl+C to stop)...")

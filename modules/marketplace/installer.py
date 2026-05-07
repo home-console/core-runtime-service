@@ -486,33 +486,16 @@ class MarketplaceInstaller:
     def _load_plugin_module(self, plugin_dir: Path, entrypoint_file: str):
         """Dynamically load plugin module."""
         import importlib.util
-        import sys
 
-        # Add plugin directory to path
-        plugin_dir_str = str(plugin_dir)
-        path_inserted = False
-        if plugin_dir_str not in sys.path:
-            sys.path.insert(0, plugin_dir_str)
-            path_inserted = True
-
-
-        # Load module
+        # Load module without mutating sys.path to avoid module name collisions.
         entrypoint_path = plugin_dir / entrypoint_file
-        module_name = entrypoint_file.replace("/", ".").replace(".py", "")
+        module_name = f"hc_marketplace_plugins.{plugin_dir.name}.{entrypoint_file.replace('/', '.').replace('.py', '')}"
 
         spec = importlib.util.spec_from_file_location(module_name, entrypoint_path)
         if not spec or not spec.loader:
             raise InstallerError(f"Cannot load module: {entrypoint_file}")
 
         module = importlib.util.module_from_spec(spec)
-        try:
-            spec.loader.exec_module(module)
-            return module
-        finally:
-            if path_inserted and sys.path and sys.path[0] == plugin_dir_str:
-                sys.path.pop(0)
-    
-    
         spec.loader.exec_module(module)
         return module
 

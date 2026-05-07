@@ -36,6 +36,29 @@
 - Допустимые операции SDK-слоя: вызов сервисов, публикация/подписка событий, storage read/write, регистрация HTTP-контрактов и operation handlers.
 - Доступ к `plugin_manager`, `module_manager`, orchestration и другим внутренностям ядра из плагинов запрещён.
 
+## 5.2) Декларативные namespace права (SECURITY P0)
+Плагины **обязаны** декларативно описывать “расширенные” поверхности в `plugin.json`, чтобы ядро могло
+fail-closed запрещать:
+
+- регистрацию сервисов вне допустимого namespace,
+- публикацию событий вне допустимого namespace,
+- регистрацию operation handlers вне допустимого namespace,
+- доступ к shared storage namespaces (кроме собственного).
+
+Поддерживаемые поля манифеста:
+- `allowed_services`: какие сервисы плагин может **вызывать**
+- `namespace`: дополнительный namespace префикс, помимо `{plugin_name}.*`
+- `provides_services`: какие сервисы плагин может **регистрировать** вне `{plugin_name}.*`
+- `provides_events`: какие события плагин может **публиковать** вне `{plugin_name}.*`
+- `provides_operations`: какие operation types плагин может **регистрировать** вне `{plugin_name}.*`
+- `storage_namespaces`: какие storage namespaces плагин может **использовать** кроме своего `{plugin_name}`
+
+Нарушение этих правил должно приводить к `ForbiddenError` (fail-closed).
+
+## 5.3) Vendor namespace hygiene (SECURITY P0)
+Vendor namespaces (например `yandex` как word / `yandex.*` / `yandex:*`) не должны встречаться вне `plugins/`.
+В репозитории есть охранная проверка: `scripts/validate_no_vendor_namespaces.py`, она запускается в тестах.
+
 ## 6) Про классы типа CapabilityRegistry / InMemoryEventBus / PolicyEngine / IntegrationRegistry
 - Допустимы в `core` только как нейтральные инфраструктурные механизмы.
 - В них нельзя вносить доменные правила, policy-решения и бизнес-интерпретации.

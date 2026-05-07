@@ -25,7 +25,14 @@ class PluginManifest:
         version: версия плагина
         class_path: путь к классу плагина
         dependencies: список зависимостей
-        allowed_services: список разрешённых сервисов
+        allowed_services: список сервисов, которые плагин может ВЫЗЫВАТЬ
+        provides_services: список сервисов, которые плагин может РЕГИСТРИРОВАТЬ
+            (из manifest "provides.services"). Вместе с "{name}.*" namespace определяет
+            что плагин имеет право регистрировать.
+        provides_events: список типов событий, которые плагин может ПУБЛИКОВАТЬ
+            (из manifest "provides.events"). Вместе с "{name}.*" namespace.
+        dynamic_service_registration: плагин-прокси с динамической регистрацией сервисов
+            (например remote_plugin_proxy). Пропускает проверку namespace при register.
         is_integration: флаг интеграции
         container_config: конфигурация контейнера (опционально)
         extra: дополнительные данные из манифеста
@@ -35,33 +42,44 @@ class PluginManifest:
     class_path: str
     dependencies: List[str] = field(default_factory=list)
     allowed_services: List[str] = field(default_factory=list)
+    # Optional namespace prefix for service registration and event publishing.
+    # Plugin may register services/publish events under "{plugin_name}.*" (always)
+    # or under "{namespace}.*" (when declared here).
+    # Example: a plugin may declare a namespace to allow "<namespace>.*" registration/publish.
+    namespace: str = ""
+    provides_services: List[str] = field(default_factory=list)
+    provides_events: List[str] = field(default_factory=list)
+    provides_operations: List[str] = field(default_factory=list)
+    storage_namespaces: List[str] = field(default_factory=list)
+    dynamic_service_registration: bool = False
     is_integration: bool = False
     container_config: Optional[Dict[str, Any]] = None
     extra: Dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "PluginManifest":
-        """
-        Создать PluginManifest из словаря.
-
-        Args:
-            data: словарь с данными манифеста
-
-        Returns:
-            Экземпляр PluginManifest
-        """
+        """Создать PluginManifest из словаря."""
+        _known = {
+            "name", "version", "class_path", "dependencies", "allowed_services",
+            "namespace", "provides_services", "provides_events", "provides_operations",
+            "storage_namespaces", "dynamic_service_registration", "is_integration",
+            "container_config",
+        }
         return cls(
             name=data.get("name", "unknown"),
             version=data.get("version", "0.0.0"),
             class_path=data.get("class_path", ""),
             dependencies=data.get("dependencies", []) or [],
             allowed_services=data.get("allowed_services", []) or [],
+            namespace=str(data.get("namespace") or ""),
+            provides_services=data.get("provides_services", []) or [],
+            provides_events=data.get("provides_events", []) or [],
+            provides_operations=data.get("provides_operations", []) or [],
+            storage_namespaces=data.get("storage_namespaces", []) or [],
+            dynamic_service_registration=bool(data.get("dynamic_service_registration", False)),
             is_integration=bool(data.get("is_integration", False)),
             container_config=data.get("container_config"),
-            extra={k: v for k, v in data.items() if k not in [
-                "name", "version", "class_path", "dependencies",
-                "allowed_services", "is_integration", "container_config"
-            ]}
+            extra={k: v for k, v in data.items() if k not in _known},
         )
 
 

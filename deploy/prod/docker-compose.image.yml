@@ -57,7 +57,7 @@ services:
     # ports:
     #   - "${CORE_PORT:-18000}:8000"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/monitor/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/monitor/health"]
       interval: 10s
       timeout: 5s
       retries: 3

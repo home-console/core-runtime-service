@@ -15,14 +15,70 @@ import asyncio
 import base64
 import json
 import logging
-import pickle
 import re
 import time
 from typing import Optional, Dict, Any
 
 from aiohttp import ClientSession
+from yarl import URL
 
 _LOGGER = logging.getLogger(__name__)
+
+_COOKIE_B64_JSON_MAGIC = "hcj1:"
+
+
+def _encode_cookie_state(session: ClientSession) -> str:
+    """
+    Security: do NOT use pickle for cookie persistence.
+    We store a minimal JSON snapshot and base64 it.
+    """
+    items: list[dict[str, Any]] = []
+    for c in session.cookie_jar:
+        try:
+            items.append(
+                {
+                    "name": c.key,
+                    "value": c.value,
+                    "domain": c.get("domain"),
+                    "path": c.get("path") or "/",
+                    "secure": bool(c.get("secure")),
+                }
+            )
+        except Exception:
+            continue
+    raw = json.dumps(items, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return _COOKIE_B64_JSON_MAGIC + base64.b64encode(raw).decode("ascii")
+
+
+def _try_restore_cookie_state(session: ClientSession, cookie: str) -> None:
+    """
+    Accepts only JSON-based format: "hcj1:" + base64(json).
+    Legacy pickle-based blobs are intentionally rejected to avoid RCE.
+    """
+    if not cookie:
+        return
+    if not cookie.startswith(_COOKIE_B64_JSON_MAGIC):
+        return
+    b64 = cookie[len(_COOKIE_B64_JSON_MAGIC) :]
+    raw = base64.b64decode(b64)
+    items = json.loads(raw.decode("utf-8"))
+    if not isinstance(items, list):
+        return
+    session.cookie_jar.clear()
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        name = it.get("name")
+        value = it.get("value")
+        domain = it.get("domain") or "yandex.ru"
+        path = it.get("path") or "/"
+        if not isinstance(name, str) or not isinstance(value, str):
+            continue
+        # update_cookies expects a response URL context
+        try:
+            session.cookie_jar.update_cookies({name: value}, response_url=URL(f"https://{domain}{path}"))
+        except Exception:
+            continue
 
 
 class LoginResponse:
@@ -87,15 +143,11 @@ class YandexSession:
         self.csrf_token: Optional[str] = None
         self.last_ts: float = 0
         
-        if cookie:
-            cookie_jar = session.cookie_jar
-            _cookies = cookie_jar._cookies
-            try:
-                raw = base64.b64decode(cookie)
-                cookie_jar._cookies = pickle.loads(raw)
-                cookie_jar.clear(lambda x: False)
-            except Exception:
-                cookie_jar._cookies = _cookies
+        try:
+            _try_restore_cookie_state(session, cookie or "")
+        except Exception:
+            # best-effort восстановление cookies; на ошибке просто стартуем с пустым jar
+            _LOGGER.debug("Cookie restore failed (ignored)", exc_info=True)
 
     async def login_username(self, username: str) -> LoginResponse:
         """Создать сессию логина и вернуть поддерживаемые методы авторизации."""
@@ -306,11 +358,8 @@ class YandexSession:
 
     @property
     def cookie(self) -> str:
-        """Получить cookies в base64 формате для сохранения."""
-        raw = pickle.dumps(
-            getattr(self._session.cookie_jar, "_cookies"), pickle.HIGHEST_PROTOCOL
-        )
-        return base64.b64encode(raw).decode()
+        """Получить cookies в безопасном формате для сохранения."""
+        return _encode_cookie_state(self._session)
 
     async def _get(self, url: str, **kwargs):
         """Внутренний GET запрос."""

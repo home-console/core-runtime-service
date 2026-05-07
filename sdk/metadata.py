@@ -23,3 +23,7 @@ class PluginMetadata:
 
     capabilities_provided: list[str] = field(default_factory=list)
     capabilities_required: list[str] = field(default_factory=list)
+
+    # Set True for trusted proxy plugins that register services dynamically
+    # (e.g. remote_plugin_proxy). Bypasses namespace enforcement in ServiceRegistryProxy.
+    dynamic_service_registration: bool = False

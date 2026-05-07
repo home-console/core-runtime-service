@@ -45,6 +45,9 @@ def _iter_plugin_py_files(root: Path, *, include_tests: bool) -> Iterable[Path]:
             # Dedicated test plugins
             if rel.parts[:2] == ("plugins", "test"):
                 continue
+            # Standalone agent-side service (not an in-process SDK plugin)
+            if rel.parts[:2] == ("plugins", "client-manager-plugin"):
+                continue
             # Per-plugin test packages (plugins/foo/tests/**)
             if len(rel.parts) >= 3 and rel.parts[0] == "plugins" and rel.parts[2] == "tests":
                 continue

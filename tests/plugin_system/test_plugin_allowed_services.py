@@ -59,3 +59,13 @@ async def test_plugin_services_proxy_uses_manifest_allowed_services():
     assert out == {"ok": True}
     mock_service_registry.call.assert_awaited()
 
+    # Assert: runtime facade must not leak raw service_registry (bypass allowlist)
+    assert plugin.runtime is not None
+    with pytest.raises(ForbiddenError):
+        await plugin.runtime.service_registry.call("disallowed.service", x=1)  # type: ignore[union-attr]
+
+    # Assert: context must not leak raw services either (bypass allowlist)
+    assert plugin.context is not None
+    with pytest.raises(ForbiddenError):
+        await plugin.context.services.call("disallowed.service", x=1)  # type: ignore[union-attr]
+

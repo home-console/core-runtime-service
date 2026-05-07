@@ -2,7 +2,7 @@
 Operation handlers for operation types not owned by a domain module.
 
 Device operations (device.set_state, device.mapping.*) — в DevicesModule (modules/devices/operations.py).
-Yandex operations (yandex.sync_devices, yandex.check_devices_online) — в publisher plugin, который владеет этими операциями.
+Integration-specific operations are owned by corresponding plugins.
 Здесь остаётся только OAuth handler (до переноса в плагин oauth при необходимости).
 """
 
@@ -17,17 +17,17 @@ async def handle_oauth_refresh(params: Dict[str, Any], context: Any) -> Dict[str
     """
     Handler: oauth.refresh_token
     
-    Refreshes OAuth tokens (e.g., Yandex).
+    Refreshes OAuth tokens for a given provider.
     
     Params:
-        - service (str): Service name (e.g., "yandex")
+        - service (str): Provider service prefix (e.g., "oauth_provider")
     
     Returns:
         - success (bool): Whether refresh succeeded
         - service (str): Service name
         - token_expires_in (int): Token expiration in seconds
     """
-    service = params.get("service", "yandex")
+    service = params.get("service", "oauth_provider")
     
     runtime = context.get("runtime")
     if not runtime:

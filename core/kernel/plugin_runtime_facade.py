@@ -30,6 +30,9 @@ class PluginRuntimeFacade:
     api: Optional[PluginAPI] = None
 
     def __post_init__(self) -> None:
+        set_restricted_runtime = getattr(self.operations, "set_restricted_runtime", None)
+        if callable(set_restricted_runtime):
+            set_restricted_runtime(self)
         object.__setattr__(
             self,
             "api",
@@ -117,4 +120,5 @@ class PluginRuntimeFacade:
             capabilities=self.capabilities,
             operations=self.operations,
             state=self.state,
+            event_bus=self.event_bus,
         )

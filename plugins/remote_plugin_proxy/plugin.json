@@ -5,6 +5,6 @@
   "description": "Local proxy that forwards calls to a remote plugin over HTTP",
   "author": "Home Console",
   "dependencies": [],
-  "execution_mode": "in_process"
+  "execution_mode": "in_process",
+  "dynamic_service_registration": true
 }
-

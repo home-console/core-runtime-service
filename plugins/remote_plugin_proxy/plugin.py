@@ -113,12 +113,14 @@ class RemotePluginProxy(BasePlugin):
                     version="0.0.0",
                     description="Remote plugin proxy",
                     author="Home Console",
+                    dynamic_service_registration=True,
                 )
             return PluginMetadata(
                 name=self._metadata.get("name", "remote_plugin"),
                 version=self._metadata.get("version", "0.0.0"),
                 description=self._metadata.get("description", ""),
                 author=self._metadata.get("author", ""),
+                dynamic_service_registration=True,
             )
         except Exception:
             return PluginMetadata(
@@ -126,6 +128,7 @@ class RemotePluginProxy(BasePlugin):
                 version="0.0.0",
                 description="Remote plugin proxy",
                 author="Home Console",
+                dynamic_service_registration=True,
             )
 
     async def on_load(self) -> None:

@@ -86,6 +86,12 @@ def _iter_python_files(plugins_dir: Path) -> Iterable[Path]:
         if parts and parts[0] == "test":
             continue
 
+        # Exclude non-SDK plugin projects vendored under plugins/.
+        # `client-manager-plugin` is a standalone agent-side service and is not constrained
+        # by the in-process Plugin SDK surface rules.
+        if parts and parts[0] == "client-manager-plugin":
+            continue
+
         # Exclude any tests inside a plugin (e.g. plugins/foo/tests/**)
         if "tests" in parts:
             continue
