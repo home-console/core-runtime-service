@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Локальный прогон тех же проверок, что job `tests` в .github/workflows/tests.yml (CI).
 #
+# Виртуальное окружение .venv НЕ удаляется и не «сбрасывается»: скрипт только
+# при необходимости делает pip install внутрь существующего .venv (как в CI).
+#
 # Перед первым запуском:
 #   python3 -m venv .venv && . .venv/bin/activate
 #   pip install -r requirements.txt  # или requirements.lock
