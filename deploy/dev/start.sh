@@ -1,21 +1,28 @@
 #!/usr/bin/env bash
 # Start dev stage with frontend + core-runtime behind Caddy.
 #
+# Порты по умолчанию не пересекаются с prod (edge на 80/443):
+#   UI (Caddy)  → http://localhost:${DEV_HTTP_PORT:-18080}
+#   Ядро (API) → http://localhost:${DEV_CORE_PORT:-18000}
+#
 # Usage:
 #   ./deploy/dev/start.sh              # with frontend
-#   ./deploy/dev/start.sh --no-ui      # core-runtime only (port 18000)
+#   ./deploy/dev/start.sh --no-ui      # core-runtime only
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 FRONTEND_DIR="$SCRIPT_DIR/frontend"
 
+DEV_HTTP_PORT="${DEV_HTTP_PORT:-18080}"
+DEV_CORE_PORT="${DEV_CORE_PORT:-18000}"
+
 cd "$SCRIPT_DIR"
 
 if [[ "${1:-}" == "--no-ui" ]]; then
-    echo "▶ Starting core-runtime only (http://localhost:18000)"
+    echo "▶ Starting core-runtime only (http://localhost:${DEV_CORE_PORT})"
     docker compose -f docker-compose.yml up -d core-runtime
-    echo "✓ core-runtime running on http://localhost:18000"
+    echo "✓ core-runtime running on http://localhost:${DEV_CORE_PORT}"
     exit 0
 fi
 
@@ -34,12 +41,12 @@ if [[ ! -f "$FRONTEND_DIR/index.html" ]]; then
     exit 1
 fi
 
-echo "▶ Starting dev stage (http://localhost)"
+echo "▶ Starting dev stage (http://localhost:${DEV_HTTP_PORT} — параллельно с prod на :80)"
 docker compose -f docker-compose.yml up -d
 echo ""
 echo "✓ Services running:"
-echo "  Frontend:  http://localhost"
-echo "  API:       http://localhost/api/v1/..."
-echo "  Admin:     http://localhost/api/v1/admin/..."
-echo "  Auth:      http://localhost/api/v1/auth/..."
-echo "  Core (direct): http://localhost:18000"
+echo "  Frontend (Caddy): http://localhost:${DEV_HTTP_PORT}"
+echo "  API (через Caddy): http://localhost:${DEV_HTTP_PORT}/api/v1/..."
+echo "  Admin:            http://localhost:${DEV_HTTP_PORT}/api/v1/admin/..."
+echo "  Auth:             http://localhost:${DEV_HTTP_PORT}/api/v1/auth/..."
+echo "  Core (direct):    http://localhost:${DEV_CORE_PORT}"

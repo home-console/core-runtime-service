@@ -1,19 +1,18 @@
-# Prod-like compose (runs from prebuilt image)
+# Dev-image: готовый образ ядра + dev-Caddy + те же порты, что docker-compose.yml
+# (совместимо с параллельным prod stack на 80/443).
+#
+#   DEV_HTTP_PORT=18080  DEV_HTTPS_PORT=18443  DEV_REDIS_PORT=6380  DEV_CORE_PORT=18000
+#
 # Usage:
 #   CORE_RUNTIME_IMAGE=ghcr.io/<org>/<repo>/core-runtime:TAG \
 #   docker compose -f deploy/dev/docker-compose.image.yml up -d
-#
-# Notes:
-# - No `build:` here. This is meant to validate "image-only" deploys.
-# - UI (caddy) still serves static files from ./frontend like dev compose.
 
 services:
   redis:
     image: redis:7-alpine
-    container_name: core-redis
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "${DEV_REDIS_PORT:-6380}:6379"
     command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -22,8 +21,7 @@ services:
       retries: 5
 
   core-runtime:
-    image: ${CORE_RUNTIME_IMAGE:-ghcr.io/home-console/core-runtime}
-    container_name: core-runtime
+    image: ${CORE_RUNTIME_IMAGE:-ghcr.io/home-console/core-runtime:latest}
     restart: unless-stopped
     env_file:
       - ../../.env
@@ -42,7 +40,7 @@ services:
     volumes:
       - core-data:/data
     ports:
-      - "18000:8000"
+      - "${DEV_CORE_PORT:-18000}:8000"
     depends_on:
       redis:
         condition: service_healthy
@@ -54,7 +52,6 @@ services:
 
   caddy:
     image: caddy:2-alpine
-    container_name: caddy
     restart: unless-stopped
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
@@ -62,8 +59,8 @@ services:
       - caddy-data:/data
       - caddy-config:/config
     ports:
-      - "80:80"
-      - "443:443"
+      - "${DEV_HTTP_PORT:-18080}:80"
+      - "${DEV_HTTPS_PORT:-18443}:443"
     depends_on:
       core-runtime:
         condition: service_healthy
@@ -72,4 +69,3 @@ volumes:
   core-data:
   caddy-data:
   caddy-config:
-

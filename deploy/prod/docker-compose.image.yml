@@ -1,5 +1,7 @@
 # Production-ish stack: Core Runtime + Platform UI (image-only).
-#
+# Edge слушает HTTP_PORT / HTTPS_PORT (по умолчанию 80 и 443).
+# Параллельный локальный DEV-стек: deploy/dev/* — там UI на ${DEV_HTTP_PORT:-18080}, не занимает :80.
+
 # Usage (local):
 #   CORE_RUNTIME_IMAGE=ghcr.io/<org>/<repo>:sha123 \
 #   PLATFORM_IMAGE=ghcr.io/home-console/platform-home-console:sha123 \

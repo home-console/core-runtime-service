@@ -5,7 +5,7 @@
 #   docker compose -f deploy/dev/docker-compose.reload.yml --profile frontend up -d
 #
 # API + WebSocket ядра → core-runtime:8000
-# Всё остальное (включая HMR WebSocket) → Vite dev server на frontend-vite:5173
+# Vite слушает 5173 внутри контейнера; с хоста: docker мапит на DEV_VITE_HOST_PORT (по умолчанию 15173).
 
 {$DOMAIN:localhost} {
     # API и WebSocket ядра

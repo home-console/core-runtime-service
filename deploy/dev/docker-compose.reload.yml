@@ -21,6 +21,10 @@
 #
 # ─── Использование ───────────────────────────────────────────────────────────
 #
+# Параллельно с prod: по умолчанию HTTP не :80 —
+#   UI: http://localhost:18080
+# Также: DEV_REDIS_PORT (6380), DEV_CORE_PORT (18000), DEV_VITE_HOST_PORT (15173).
+#
 # Backend hot-reload (только Python ядро):
 #   docker compose -f deploy/dev/docker-compose.reload.yml up -d
 #   hc core up --mode dev-reload
@@ -36,10 +40,9 @@
 services:
   redis:
     image: redis:7-alpine
-    container_name: core-redis-reload
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "${DEV_REDIS_PORT:-6380}:6379"
     command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -77,7 +80,7 @@ services:
       # Pip-зависимости остаются в site-packages образа — доступны без переустановки.
       - ../../:/app:cached
     ports:
-      - "18000:8000"
+      - "${DEV_CORE_PORT:-18000}:8000"
     depends_on:
       redis:
         condition: service_healthy
@@ -93,7 +96,6 @@ services:
   # Требует: platform-home-console рядом с core-runtime-service в монорепе.
   frontend-vite:
     image: node:22-alpine
-    container_name: core-frontend-vite
     working_dir: /workspace
     volumes:
       # Монтируем исходники platform-home-console из монорепы
@@ -101,13 +103,12 @@ services:
     command: >-
       sh -c "corepack enable && pnpm install --frozen-lockfile && pnpm dev --host 0.0.0.0 --port 5173"
     ports:
-      - "5173:5173"
+      - "${DEV_VITE_HOST_PORT:-15173}:5173"
     profiles: ["frontend"]
     networks: [app]
 
   caddy:
     image: caddy:2-alpine
-    container_name: caddy-reload
     restart: unless-stopped
     volumes:
       # По умолчанию: статика из ./frontend (как dev).
@@ -117,8 +118,8 @@ services:
       - caddy-data:/data
       - caddy-config:/config
     ports:
-      - "80:80"
-      - "443:443"
+      - "${DEV_HTTP_PORT:-18080}:80"
+      - "${DEV_HTTPS_PORT:-18443}:443"
     depends_on:
       core-runtime:
         condition: service_healthy

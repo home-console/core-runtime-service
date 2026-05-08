@@ -1,9 +1,14 @@
 # Dev stage docker-compose (builds from local source)
+#
+# Параллельно с prod (deploy/prod): порты по умолчанию НЕ конфликтуют с 80/443/6379.
+#   DEV_HTTP_PORT=18080   DEV_HTTPS_PORT=18443   DEV_REDIS_PORT=6380   DEV_CORE_PORT=18000
+# Без фиксированных container_name — стек живёт в своём compose-проекте рядом с prod.
+#
 # Usage:
 #   1. Build frontend:   cd platform-home-console && pnpm build:web
 #   2. Copy dist:        cp -r platform-home-console/apps/web/dist ./deploy/dev/frontend/
 #   3. Run:              docker compose -f deploy/dev/docker-compose.yml up -d
-#   4. Open:             http://localhost (Caddy)
+#   4. Open UI:          http://localhost:${DEV_HTTP_PORT:-18080}   (не :80 — его занимает prod edge)
 #
 # For "prod-like" (image-only) runs, see:
 #   deploy/dev/docker-compose.image.yml
@@ -11,10 +16,9 @@
 services:
   redis:
     image: redis:7-alpine
-    container_name: core-redis
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "${DEV_REDIS_PORT:-6380}:6379"
     command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -26,7 +30,6 @@ services:
     build:
       context: ../..
       dockerfile: Dockerfile
-    container_name: core-runtime
     restart: unless-stopped
     env_file:
       - ../../.env
@@ -47,7 +50,7 @@ services:
       # Volume mode: mount repo plugins dir into container for auto-load.
       - ../../plugins:/app/plugins:ro
     ports:
-      - "18000:8000"
+      - "${DEV_CORE_PORT:-18000}:8000"
     depends_on:
       redis:
         condition: service_healthy
@@ -59,7 +62,6 @@ services:
 
   caddy:
     image: caddy:2-alpine
-    container_name: caddy
     restart: unless-stopped
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
@@ -67,8 +69,8 @@ services:
       - caddy-data:/data
       - caddy-config:/config
     ports:
-      - "80:80"
-      - "443:443"
+      - "${DEV_HTTP_PORT:-18080}:80"
+      - "${DEV_HTTPS_PORT:-18443}:443"
     depends_on:
       core-runtime:
         condition: service_healthy
