@@ -11,6 +11,7 @@ used by the kernel and modules:
 """
 
 from .check_env import check_security_env
+from .master_key import has_master_key, resolve_master_key_passphrase
 from .crypto import (
     MASTER_KEY_SIZE,
     DEK_SIZE,
@@ -88,6 +89,8 @@ __all__ = [
     "TokenEncryption",
     "CSRFProtection",
     "check_security_env",
+    "resolve_master_key_passphrase",
+    "has_master_key",
     "generate_master_key",
     "generate_nonce",
     "generate_salt",

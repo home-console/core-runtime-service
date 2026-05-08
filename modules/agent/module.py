@@ -46,6 +46,9 @@ from modules.agent.domain import (
 logger = logging.getLogger(__name__)
 
 
+from modules.security.master_key import resolve_master_key_passphrase as _resolve_master_key_for_agent_module
+
+
 class AgentControlPlaneModule(RuntimeModule):
     """
     Agent Control Plane Module.
@@ -97,10 +100,9 @@ class AgentControlPlaneModule(RuntimeModule):
                 )
             wrapper = SecretStoreStorageAdapter(backend)
             secret_store = SecretStore(wrapper)
-            passphrase = (os.getenv("RUNTIME_MASTER_KEY") or "").strip()
-            if not passphrase:
-                # Tests and local dev bootstrap: allow an explicit test key.
-                # In production, failing fast here is desirable.
+            try:
+                passphrase = _resolve_master_key_for_agent_module()
+            except RuntimeError:
                 cfg = getattr(self.runtime, "_config", None)
                 env = str(getattr(cfg, "env", "") or "").lower()
                 is_pytest = bool(os.getenv("PYTEST_CURRENT_TEST"))
@@ -112,7 +114,7 @@ class AgentControlPlaneModule(RuntimeModule):
                         is_pytest,
                     )
                 else:
-                    raise RuntimeError("RUNTIME_MASTER_KEY is required")
+                    raise
             try:
                 await secret_store.open_with_passphrase(passphrase)
             except RuntimeError:

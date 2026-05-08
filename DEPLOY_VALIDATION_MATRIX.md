@@ -4,7 +4,7 @@
 
 ## Общие инварианты
 
-- **Health URL**: `http://localhost:8000/monitor/health`
+- **Health URL**: `http://localhost:8000/api/v1/monitor/health`
 - **Core API prefix**: `/...` (например: `/admin/v1/...`)
 - **Плагины**:
   - **volume mode (dev)**: compose монтирует `core-runtime-service/plugins` → `/app/plugins`, `RUNTIME_PLUGINS_DIR=/app/plugins`
@@ -17,9 +17,9 @@
 - **rollout**
   - `hc deploy core rollout --mode dev --db sqlite --cache redis --no-wait`
 - **wait**
-  - `hc deploy core wait --mode dev --health-url http://localhost:8000/monitor/health`
+  - `hc deploy core wait --mode dev --health-url http://localhost:8000/api/v1/monitor/health`
 - **ручной sanity**
-  - `curl -fsS http://localhost:18000/monitor/health`
+  - `curl -fsS http://localhost:18000/api/v1/monitor/health`
 
 ### 2) Local / dev / sqlite / memory / volume-plugins
 
