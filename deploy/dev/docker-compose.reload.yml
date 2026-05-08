@@ -1,0 +1,134 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# dev-reload: горячая перезагрузка без пересборки контейнера
+#
+# Режим                 Compose-файл
+# ──────────────────────────────────────────────────────────────────────────
+# dev                   deploy/dev/docker-compose.yml          (build из src)
+# dev-reload  ← ВЫ ЗДЕСЬ  deploy/dev/docker-compose.reload.yml  (build + live src mount + watchfiles)
+# dev-image             deploy/dev/docker-compose.image.yml   (образ + dev-инфра)
+# prod                  deploy/prod/docker-compose.image.yml  (образ из registry, prod-инфра)
+#
+# Что делает этот файл:
+#   - core-runtime: образ собирается из src; src монтируется обратно в /app.
+#     watchfiles следит за *.py — перезапускает "python main.py" при изменениях.
+#     Зависимости (pip) берутся из образа, исходники — с хоста. Рестарт < 1 сек.
+#   - redis: идентично dev
+#   - caddy: по умолчанию отдаёт статику из ./frontend (результат pnpm build:web)
+#
+# ─── Опция --profile frontend (HMR для frontend) ─────────────────────────────
+#   Запускает контейнер с Vite dev server (HMR) из platform-home-console.
+#   Caddy переключается на проксирование к Vite через CADDYFILE_PATH.
+#
+# ─── Использование ───────────────────────────────────────────────────────────
+#
+# Backend hot-reload (только Python ядро):
+#   docker compose -f deploy/dev/docker-compose.reload.yml up -d
+#   hc core up --mode dev-reload
+#
+# Backend + Frontend HMR:
+#   CADDYFILE_PATH=./Caddyfile.hmr \
+#   docker compose -f deploy/dev/docker-compose.reload.yml --profile frontend up -d
+#
+# Остановить:
+#   docker compose -f deploy/dev/docker-compose.reload.yml down
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: core-redis-reload
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks: [app]
+
+  core-runtime:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    # watchfiles перезапускает main.py при изменениях *.py (без полной пересборки)
+    command: >-
+      sh -c "python -m watchfiles --filter python 'python main.py' /app"
+    # root нужен для записи при volume-mount из хоста; только для dev-reload
+    user: root
+    restart: unless-stopped
+    env_file:
+      - ../../.env
+    environment:
+      - LOG_LEVEL=${LOG_LEVEL:-debug}
+      - EVENT_BUS_BACKEND=${EVENT_BUS_BACKEND:-memory}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      - RUNTIME_STORAGE_MODE=${RUNTIME_STORAGE_MODE:-dual}
+      - RUNTIME_VAULT_STORAGE_TYPE=${RUNTIME_VAULT_STORAGE_TYPE:-sqlite}
+      - RUNTIME_VAULT_PG_DSN=${RUNTIME_VAULT_PG_DSN:-}
+      - RUNTIME_PLUGINS_DIR=${RUNTIME_PLUGINS_DIR:-/app/plugins}
+      - RUNTIME_DB_PATH=${RUNTIME_DB_PATH:-/data/runtime.db}
+      - RUNTIME_VAULT_DB_PATH=${RUNTIME_VAULT_DB_PATH:-/data/vault.db}
+      - RUNTIME_VAULT_SECRET_DB_PATH=${RUNTIME_VAULT_SECRET_DB_PATH:-/data/vault_secret.db}
+    volumes:
+      - core-data:/data
+      # Live source mount: перекрывает /app из образа живыми файлами.
+      # Pip-зависимости остаются в site-packages образа — доступны без переустановки.
+      - ../../:/app:cached
+    ports:
+      - "18000:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/monitor/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [app]
+
+  # ── Frontend HMR (opt-in: docker compose ... --profile frontend) ──────────
+  # Запускает Vite dev server из platform-home-console с HMR.
+  # Требует: platform-home-console рядом с core-runtime-service в монорепе.
+  frontend-vite:
+    image: node:22-alpine
+    container_name: core-frontend-vite
+    working_dir: /workspace
+    volumes:
+      # Монтируем исходники platform-home-console из монорепы
+      - ../../../platform-home-console:/workspace:cached
+    command: >-
+      sh -c "corepack enable && pnpm install --frozen-lockfile && pnpm dev --host 0.0.0.0 --port 5173"
+    ports:
+      - "5173:5173"
+    profiles: ["frontend"]
+    networks: [app]
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: caddy-reload
+    restart: unless-stopped
+    volumes:
+      # По умолчанию: статика из ./frontend (как dev).
+      # Для frontend HMR: задай CADDYFILE_PATH=./Caddyfile.hmr перед запуском.
+      - ${CADDYFILE_PATH:-./Caddyfile}:/etc/caddy/Caddyfile:ro
+      - ./frontend:/srv:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      core-runtime:
+        condition: service_healthy
+    networks: [app]
+
+volumes:
+  core-data:
+  caddy-data:
+  caddy-config:
+
+networks:
+  app:
+    driver: bridge

@@ -1,0 +1,26 @@
+# Caddyfile.hmr — для frontend HMR (--profile frontend в docker-compose.reload.yml)
+#
+# Использование:
+#   CADDYFILE_PATH=./Caddyfile.hmr \
+#   docker compose -f deploy/dev/docker-compose.reload.yml --profile frontend up -d
+#
+# API + WebSocket ядра → core-runtime:8000
+# Всё остальное (включая HMR WebSocket) → Vite dev server на frontend-vite:5173
+
+{$DOMAIN:localhost} {
+    # API и WebSocket ядра
+    @api path /api/v1/* /ws/*
+    handle @api {
+        reverse_proxy core-runtime:8000
+    }
+
+    # Всё остальное — Vite dev server (HTML + JS + HMR WebSocket)
+    handle {
+        reverse_proxy frontend-vite:5173 {
+            # Пробрасываем заголовки для корректной работы WebSocket HMR
+            header_up Host {upstream_hostport}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+}
