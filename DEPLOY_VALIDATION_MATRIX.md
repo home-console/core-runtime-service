@@ -161,21 +161,37 @@ hc deploy platform --mode dev --build --ssh user@host --path /srv/core-runtime-s
 
 ---
 
-## 5) Плагины и реестр — куда докручивать (без подписи «лишний раз»)
+## 5) Ядро и плагины (локально / Docker, без marketplace)
 
-Контекст ядра: контракт плагина и изоляция — `core/kernel/plugin_contract.py`, загрузчик/прокси.  
-Отдельно **marketplace-api** — прототип реестра по `TZ_PLUGIN_REGISTRY_CRITICAL_GAPS.md` (в корне монорепы HomeConsole).
+Реестр (`marketplace-api`) **не в приоритете** — здесь только то, как жить с плагинами в монорепе.
 
-**Уже есть в реестре (по ТЗ-документу):** индекс, выдача пакетов, multipart upload как каркас.
+**Откуда грузятся плагины**
 
-**Реально закрыть следующим спринтом (must-have для «доверять реестру»):**
+- **Dev compose**: каталог монтируется в контейнер — `plugins/` репозитория → `/app/plugins` (`RUNTIME_PLUGINS_DIR`).
+- **Prod / image**: то, что уже **внутри образа** при `Dockerfile` `COPY . .`; либо named volume с копией (см. `PLUGINS_VOLUME` в прод‑compose).
 
-1. **Крипто на сервере:** посчитать SHA256 архива, проверить Ed25519 по стандарту (base64 ключ/подпись), при ошибке **не сохранять** файл — сейчас часть метаданных может быть формальной.
-2. **Инспекция архива:** лимиты файлов/размера (archive bomb), валидный `plugin.json` и совпадение версии.
-3. **API keys / роли publisher vs admin** вместо одного статического admin token где это требует ТЗ.
-4. **Кеш `index.json` + инвалидация** под целевой SLO.
+**Авто‑discovery**
 
-**Подпись плагина на клиенте (ядро):** имеет смысл после того, как сервер гарантированно отдаёт проверенный артефакт; иначе смысл «цепочки доверия» размывается. Порядок: **верификация на registry → затем опционально повторная проверка при установке в core**.
+- При старте: `runtime.plugin_manager.auto_load_plugins(...)` если `AUTO_LOAD_PLUGINS` / конфиг включают это и каталог не пустой (`app/bootstrap.py`).
+- Зависимости и порядок: топологическая сортировка по manifest (`PluginManifestLoader`).
+
+**Обязательные проверки перед пушем (плагины + импорты)**
+
+```bash
+cd core-runtime-service
+./scripts/validate_all.sh --with-tests
+# или полный паритет CI:
+./scripts/ci_local.sh
+```
+
+**Контракт плагина (манифест)**
+
+- Поля и прокси: `core/kernel/plugin_contract.py`, `plugin.json` у каждого плагина.
+- После изменений SDK/импортов не забыть `validate_plugin_sdk_imports` / `validate_plugin_sdk_usage` (входит в скрипты выше).
+
+**Установка из архива без реестра**
+
+- Есть офлайновый установщик: `modules/marketplace/installer.py` (`MarketplaceInstaller`) — zip/tar, `plugin.json`, опционально SHA256. Подходит для ручной доставки пакета без registry.
 
 ---
 
@@ -187,7 +203,11 @@ hc deploy platform --mode dev --build --ssh user@host --path /srv/core-runtime-s
 | HMR в Docker | `deploy/dev/docker-compose.reload.yml` + profile `frontend`, см. заголовок compose |
 | Prod | Образ **`PLATFORM_IMAGE`** в `deploy/prod/docker-compose.image.yml`; edge проксирует на platform-web |
 
-Проверка после деплоя: главная платформы загружается, запросы к `/api/v1/` уходят на core (cookies/CORS см. `.env.example` при прямом `localhost:18000`).
+**Platform web (`platform-home-console/apps/web`):**
+
+- `pnpm dev`: по умолчанию **same-origin + Vite proxy** — запросы идут на `/api`, прокси в `vite.config.ts` целится в **`http://localhost:18000`** (ядро напрямую). Не задавай **`VITE_API_BASE_URL=http://localhost:8000`**, если API на **18000** — иначе обойдёшь прокси и сломаешь куки.
+- Для dev за Caddy (**18080**): можно выставить `VITE_API_BASE_URL=` пустым и открывать сборку на том же хосте, что и API, или задать `VITE_API_BASE_URL=http://localhost:18080` — см. `apps/web/.env.example`.
+- Прод: в образе platform обычно `VITE_API_BASE_URL` пустой → тот же origin, что фронт (edge отдаёт и UI и `/api`).
 
 ---
 
