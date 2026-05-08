@@ -29,7 +29,7 @@ services:
     networks: [app]
 
   core-runtime:
-    image: ${CORE_RUNTIME_IMAGE:-dev-core-runtime}
+    image: ${CORE_RUNTIME_IMAGE:-ghcr.io/home-console/core-runtime}
     restart: unless-stopped
     env_file:
       - ../../.env
@@ -57,7 +57,7 @@ services:
     # ports:
     #   - "${CORE_PORT:-18000}:8000"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/monitor/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/monitor/health"]
       interval: 10s
       timeout: 5s
       retries: 3

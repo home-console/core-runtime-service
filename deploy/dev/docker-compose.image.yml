@@ -22,7 +22,7 @@ services:
       retries: 5
 
   core-runtime:
-    image: ${CORE_RUNTIME_IMAGE:-dev-core-runtime}
+    image: ${CORE_RUNTIME_IMAGE:-ghcr.io/home-console/core-runtime}
     container_name: core-runtime
     restart: unless-stopped
     env_file:
@@ -47,7 +47,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/monitor/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/monitor/health"]
       interval: 10s
       timeout: 5s
       retries: 3

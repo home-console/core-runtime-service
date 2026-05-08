@@ -18,12 +18,15 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
 # Copy application code
 COPY . .
 
+# Скрипты операций должны быть в образе (hc secrets exec → secrets_tool.py)
+RUN test -f scripts/secrets_tool.py || (echo "MISSING scripts/secrets_tool.py — проверь .dockerignore" && exit 1)
+
 # Create data directory для SQLite (если нужно)
 RUN mkdir -p /data && chown -R nobody:nogroup /data
 
 # Health check
 HEALTHCHECK --interval=10s --timeout=5s --retries=3 \
-    CMD curl -f http://localhost:8000/monitor/health || exit 1
+    CMD curl -f http://localhost:8000/api/v1/monitor/health || exit 1
 
 # Switch to non-root user
 USER nobody
