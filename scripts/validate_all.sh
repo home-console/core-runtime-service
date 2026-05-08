@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Быстрые гарды (validators). Полный прогон как в GitHub Actions см.:
+#   scripts/ci_local.sh
+#
 # Single entrypoint for local validation (Python >= 3.11 via .venv).
 #
 # Runs (by default):
@@ -25,15 +28,15 @@ if [[ "${1:-}" == "--with-tests" ]]; then
 fi
 
 echo "[1/4] Architecture guard"
-"${PY}" -- "${ROOT_DIR}/scripts/validate_architecture_rules.py" --root "${ROOT_DIR}"
+"${PY}" -- "${ROOT_DIR}/scripts/validate_architecture_rules.py" --root "${ROOT_DIR}" --enforce
 echo ""
 
 echo "[2/4] Plugin SDK import guard"
-"${PY}" -- "${ROOT_DIR}/scripts/validate_plugin_sdk_imports.py" --root "${ROOT_DIR}"
+"${PY}" -- "${ROOT_DIR}/scripts/validate_plugin_sdk_imports.py" --root "${ROOT_DIR}" --enforce
 echo ""
 
 echo "[3/4] Plugin SDK usage guard"
-"${PY}" -- "${ROOT_DIR}/scripts/validate_plugin_sdk_usage.py" --root "${ROOT_DIR}"
+"${PY}" -- "${ROOT_DIR}/scripts/validate_plugin_sdk_usage.py" --root "${ROOT_DIR}" --enforce
 echo ""
 
 if [[ "${WITH_TESTS}" -eq 1 ]]; then

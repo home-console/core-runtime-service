@@ -1,4 +1,5 @@
 name: CI - Tests
+# Локально тот же набор шагов: scripts/ci_local.sh
 
 on:
   push: {}
