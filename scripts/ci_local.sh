@@ -62,14 +62,17 @@ if [[ "${DO_AUDIT}" -eq 1 ]]; then
   echo ""
   echo "==> [pip-audit] как в CI"
   PIP_AUDIT="${ROOT_DIR}/.venv/bin/pip-audit"
+  # TODO(security): remove ignore when Paramiko releases fix for CVE-2026-44405.
+  # Ref: https://nvd.nist.gov/vuln/detail/CVE-2026-44405
+  PIP_AUDIT_IGNORE="${PIP_AUDIT_IGNORE:-CVE-2026-44405}"
   if [[ ! -x "${PIP_AUDIT}" ]]; then
     echo "ERROR: нет ${PIP_AUDIT}. Убери --no-install или выполни: pip install pip-audit" >&2
     exit 2
   fi
   if [[ -f "${ROOT_DIR}/requirements.lock" ]]; then
-    "${PIP_AUDIT}" -r "${ROOT_DIR}/requirements.lock"
+    "${PIP_AUDIT}" -r "${ROOT_DIR}/requirements.lock" --ignore-vuln "${PIP_AUDIT_IGNORE}"
   else
-    "${PIP_AUDIT}" -r "${ROOT_DIR}/requirements.txt"
+    "${PIP_AUDIT}" -r "${ROOT_DIR}/requirements.txt" --ignore-vuln "${PIP_AUDIT_IGNORE}"
   fi
 fi
 
