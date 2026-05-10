@@ -39,6 +39,8 @@ from core.exception_groups import (
     LOGGING_HELPER_ERRORS,
     PLUGIN_INTROSPECTION_ERRORS,
 )
+from modules.plugins.schema import ValidationError as SchemaValidationError
+from modules.plugins.schema import validate_plugin_json
 
 logger = logging.getLogger(__name__)
 
@@ -51,9 +53,13 @@ class PluginManifestLoader:
     """
     
     @staticmethod
-    def load_manifest(plugin_path: Path) -> Optional[Dict[str, Any]]:
+    def load_manifest(plugin_path: Path, *, strict: bool = True) -> Optional[Dict[str, Any]]:
         """
         Загрузить манифест плагина из файла plugin.json или manifest.json.
+
+        При ``strict=True`` (по умолчанию) содержимое проверяется через
+        ``modules.plugins.schema.validate_plugin_json``; при ошибке —
+        логируем и возвращаем None (чтобы один битый плагин не ронял весь процесс discovery).
         
         Args:
             plugin_path: путь к директории плагина или файлу плагина
@@ -75,12 +81,51 @@ class PluginManifestLoader:
                 try:
                     with open(manifest_path, "r", encoding="utf-8") as f:
                         manifest_data = json.load(f)
-                        return manifest_data
-                except (json.JSONDecodeError, IOError) as e:
-                    # Ошибка чтения манифеста - пропускаем
+                except json.JSONDecodeError as e:
+                    logger.error(
+                        "Invalid JSON in plugin manifest %s: %s", manifest_path, e,
+                    )
                     continue
+                except OSError as e:
+                    logger.error("Cannot read plugin manifest %s: %s", manifest_path, e)
+                    continue
+                if strict:
+                    try:
+                        return validate_plugin_json(manifest_data)
+                    except SchemaValidationError as e:
+                        logger.error(
+                            "plugin.json validation failed for %s: %s", manifest_path, e,
+                        )
+                        return None
+                return manifest_data
         
         return None
+
+    @staticmethod
+    def find_plugin_directory(plugins_dir: Path, plugin_name: str) -> Optional[Path]:
+        """
+        Найти каталог плагина по логическому ``name`` из манифеста.
+
+        Поддерживает каталоги, имя папки ≠ ``plugin_name`` (например ``client-manager-plugin`` для ``client_manager``).
+        Если объявлено несколько каталогов с одним ``name``, берётся первый по имени каталога и пишется warning.
+        """
+        if not plugins_dir.is_dir():
+            return None
+        matches: list[Path] = []
+        for item in sorted(plugins_dir.iterdir(), key=lambda p: p.name):
+            if item.name == "test" or not item.is_dir():
+                continue
+            manifest = PluginManifestLoader.load_manifest(item)
+            if manifest and manifest.get("name") == plugin_name:
+                matches.append(item)
+        if len(matches) > 1:
+            logger.warning(
+                "Multiple directories declare plugin name %r — using %s among %s",
+                plugin_name,
+                matches[0],
+                matches,
+            )
+        return matches[0] if matches else None
     
     @staticmethod
     def topological_sort(manifests: Dict[str, Dict[str, Any]], runtime: Optional[Any] = None) -> List[str]:
@@ -217,6 +262,16 @@ class PluginManifestLoader:
             True если плагин успешно загружен, False иначе
         """
         try:
+            try:
+                manifest = validate_plugin_json(dict(manifest))
+            except SchemaValidationError as e:
+                await logger_func(
+                    runtime,
+                    f"manifest validation failed ({plugin_dir}): {e}",
+                    component="plugin_loader",
+                )
+                return False
+
             # Получаем путь к классу плагина
             class_path = manifest.get("class_path")
             plugin_name = manifest.get("name", "unknown")

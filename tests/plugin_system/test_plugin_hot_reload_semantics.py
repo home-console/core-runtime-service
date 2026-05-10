@@ -35,6 +35,7 @@ class TestPlugin(BasePlugin):
                 "version": "1.0.0",
                 "class_path": "plugin.TestPlugin",
                 "description": "hot reload semantics test",
+                "author": "test",
                 "dependencies": [],
                 "allowed_services": [],
                 "is_integration": False,

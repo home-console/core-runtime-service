@@ -459,6 +459,9 @@ def _make_api_handler(runtime: Any, endpoint: Any):
             ):
                 call_params.pop("body", None)
                 call_params["code"] = body.get("code", "")
+            elif endpoint.service == "admin.v1.marketplace.install_upload":
+                call_params.pop("body", None)
+                call_params["request"] = request
 
         # Проверяем существование сервиса
         if not await runtime.service_registry.has_service(endpoint.service):

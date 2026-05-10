@@ -12,20 +12,28 @@ Implements operations:
 
 from typing import Dict, Any, List, Optional
 import inspect
+import asyncio
+import logging
+from datetime import datetime, timezone
 from core.runtime.runtime_module import RuntimeModule
 from core.http.models import EndpointAuthConfig, HttpEndpoint
 from modules.marketplace.services import MarketplaceService
+from modules.marketplace.registry_client import RegistryClient
 from modules.marketplace.admin_services import (
     admin_marketplace_disable,
     admin_marketplace_enable,
     admin_marketplace_install,
+    admin_marketplace_install_upload,
+    admin_marketplace_install_from_git,
     admin_marketplace_install_from_registry,
     admin_marketplace_installed,
+    admin_marketplace_git_sources_get,
+    admin_marketplace_git_sources_set,
+    admin_marketplace_git_catalog,
     admin_marketplace_remove,
     admin_marketplace_update,
     admin_marketplace_updates,
 )
-import logging
 logger = logging.getLogger(__name__)
 
 
@@ -53,6 +61,11 @@ class MarketplaceModule(RuntimeModule):
         self._name = "marketplace"
         self._version = "1.0.0"
         self.service = MarketplaceService(runtime)
+        self._registry_probe_ok: Optional[bool] = None
+        self._registry_probe_error: Optional[str] = None
+        self._registry_probe_checked_at: Optional[str] = None
+
+    _MARKETPLACE_HANDLER_EXTRA_KEYS = frozenset({"error_stage", "user_message"})
     
     @property
     def name(self) -> str:
@@ -72,6 +85,10 @@ class MarketplaceModule(RuntimeModule):
                 "MarketplaceModule requires runtime.operations to register handlers. "
                 "Check module wiring/bootstrap order."
             )
+        
+        # Health check: verify registry is accessible (if configured)
+        await self._probe_registry()
+        
         # Register install operation
         ops_mgr.register_handler(
             "marketplace.install",
@@ -148,7 +165,22 @@ class MarketplaceModule(RuntimeModule):
             # Register services (called by HTTP layer via service_registry).
             await self.register_runtime_service("admin.v1.marketplace.install", admin_marketplace_install)
             await self.register_runtime_service(
+                "admin.v1.marketplace.install_upload", admin_marketplace_install_upload
+            )
+            await self.register_runtime_service(
+                "admin.v1.marketplace.install_from_git", admin_marketplace_install_from_git
+            )
+            await self.register_runtime_service(
                 "admin.v1.marketplace.install_from_registry", admin_marketplace_install_from_registry
+            )
+            await self.register_runtime_service(
+                "admin.v1.marketplace.git_sources.get", admin_marketplace_git_sources_get
+            )
+            await self.register_runtime_service(
+                "admin.v1.marketplace.git_sources.set", admin_marketplace_git_sources_set
+            )
+            await self.register_runtime_service(
+                "admin.v1.marketplace.git_catalog", admin_marketplace_git_catalog
             )
             await self.register_runtime_service("admin.v1.marketplace.remove", admin_marketplace_remove)
             await self.register_runtime_service("admin.v1.marketplace.update", admin_marketplace_update)
@@ -170,10 +202,55 @@ class MarketplaceModule(RuntimeModule):
             http_registry.register(
                 HttpEndpoint(
                     method="POST",
+                    path="/api/v1/admin/marketplace/install-upload",
+                    service="admin.v1.marketplace.install_upload",
+                    description="Marketplace: install plugin from uploaded archive (multipart: file)",
+                    auth_config=_admin_write,
+                )
+            )
+            http_registry.register(
+                HttpEndpoint(
+                    method="POST",
                     path="/api/v1/admin/marketplace/install-from-registry",
                     service="admin.v1.marketplace.install_from_registry",
                     description="Marketplace: install plugin from registry",
                     auth_config=_admin_write,
+                )
+            )
+            http_registry.register(
+                HttpEndpoint(
+                    method="POST",
+                    path="/api/v1/admin/marketplace/install-from-git",
+                    service="admin.v1.marketplace.install_from_git",
+                    description="Marketplace: install plugin from git repo (tarball HTTPS)",
+                    auth_config=_admin_write,
+                )
+            )
+            http_registry.register(
+                HttpEndpoint(
+                    method="GET",
+                    path="/api/v1/admin/marketplace/git-sources",
+                    service="admin.v1.marketplace.git_sources.get",
+                    description="Marketplace: get git sources list (persisted)",
+                    auth_config=_admin_read,
+                )
+            )
+            http_registry.register(
+                HttpEndpoint(
+                    method="POST",
+                    path="/api/v1/admin/marketplace/git-sources",
+                    service="admin.v1.marketplace.git_sources.set",
+                    description="Marketplace: set git sources list (persisted)",
+                    auth_config=_admin_write,
+                )
+            )
+            http_registry.register(
+                HttpEndpoint(
+                    method="POST",
+                    path="/api/v1/admin/marketplace/git-catalog",
+                    service="admin.v1.marketplace.git_catalog",
+                    description="Marketplace: build catalog from git sources (no install)",
+                    auth_config=_admin_read,
                 )
             )
             http_registry.register(
@@ -342,15 +419,78 @@ class MarketplaceModule(RuntimeModule):
             },
         ]
     
+    async def _probe_registry(self) -> None:
+        """
+        Health check: verify registry is accessible.
+        
+        Called during module registration. If registry is configured but unreachable,
+        logs a warning but does not fail startup (marketplace operations may work
+        if registry becomes available later).
+        """
+        cfg = getattr(self.runtime, "config", None)
+        if cfg is None:
+            self._registry_probe_ok = None
+            self._registry_probe_error = "runtime config unavailable"
+            self._registry_probe_checked_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            logger.debug("No config available for registry probe")
+            return
+        
+        registry_url = getattr(cfg, "marketplace_registry_url", "")
+        if not registry_url or not registry_url.strip():
+            self._registry_probe_ok = None
+            self._registry_probe_error = "marketplace registry url not configured"
+            self._registry_probe_checked_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            logger.info("marketplace: no registry configured (MARKETPLACE_REGISTRY_URL not set)")
+            return
+        
+        try:
+            logger.info(f"marketplace: probing registry at {registry_url}...")
+            client = RegistryClient(registry_url)
+            
+            # Attempt to fetch index with short timeout
+            # Use asyncio.wait_for with 5 second timeout
+            try:
+                await asyncio.wait_for(client.fetch_index(), timeout=5.0)
+                self._registry_probe_ok = True
+                self._registry_probe_error = None
+                self._registry_probe_checked_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                logger.info("marketplace: registry health check passed")
+            except asyncio.TimeoutError:
+                self._registry_probe_ok = False
+                self._registry_probe_error = f"registry health check timed out after 5s: {registry_url}"
+                self._registry_probe_checked_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                logger.warning(
+                    f"marketplace: registry health check timed out after 5s: {registry_url}"
+                )
+            except Exception as e:
+                self._registry_probe_ok = False
+                self._registry_probe_error = str(e)
+                self._registry_probe_checked_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                logger.warning(
+                    f"marketplace: registry health check failed: {registry_url} — {e}"
+                )
+        except Exception as e:
+            self._registry_probe_ok = False
+            self._registry_probe_error = str(e)
+            self._registry_probe_checked_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            logger.warning(f"marketplace: registry probe exception: {e}")
+    
     def _wrap_handler(self, handler):
         """Wrap MarketplaceService handler for OperationManager."""
+        extras = self._MARKETPLACE_HANDLER_EXTRA_KEYS
+
         async def wrapped(runtime, operation):
             result = await handler(operation)
-            return {
+            out = {
                 "status": result.get("status"),
                 "data": result.get("data"),
-                "error": result.get("error")
+                "error": result.get("error"),
             }
+            for key in extras:
+                if key in result:
+                    out[key] = result[key]
+            return out
+
         return wrapped
     
     def list_installed_plugins(self) -> Dict[str, Any]:
@@ -379,6 +519,11 @@ class MarketplaceModule(RuntimeModule):
         return {
             "status": "healthy",
             "installed_plugins_count": len(installed),
+            "registry_probe": {
+                "ok": self._registry_probe_ok,
+                "error": self._registry_probe_error,
+                "checked_at": self._registry_probe_checked_at,
+            },
             "operations_available": [
                 "marketplace.install",
                 "marketplace.remove",

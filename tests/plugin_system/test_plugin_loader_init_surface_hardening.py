@@ -37,6 +37,8 @@ async def test_plugin_loader_does_not_pass_raw_runtime_into_init(tmp_path: Path)
     manifest: Dict[str, Any] = {
         "name": "evil",
         "version": "0.0.1",
+        "description": "init surface test",
+        "author": "test",
         "class_path": "plugin.EvilPlugin",
         "allowed_services": ["logger.log"],
     }

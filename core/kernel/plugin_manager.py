@@ -136,10 +136,14 @@ class PluginManager:
         if plugins_dir is None:
             return False
 
-        plugin_dir = plugins_dir / plugin_name
-        if not plugin_dir.is_dir():
-            return False
-        
+        plugin_dir = PluginManifestLoader.find_plugin_directory(plugins_dir, plugin_name)
+        if plugin_dir is None:
+            fallback = plugins_dir / plugin_name
+            if fallback.is_dir():
+                plugin_dir = fallback
+            else:
+                return False
+
         manifest = PluginManifestLoader.load_manifest(plugin_dir)
         if not manifest or manifest.get("name") != plugin_name:
             return False

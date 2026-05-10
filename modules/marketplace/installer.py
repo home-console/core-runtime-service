@@ -1,4 +1,3 @@
-import logging
 """
 Marketplace plugin installer.
 
@@ -12,6 +11,7 @@ Handles:
 - PluginManager integration
 """
 
+import logging
 import asyncio
 import hashlib
 import json
@@ -20,7 +20,7 @@ import shutil
 import tarfile
 import tempfile
 import zipfile
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 from pathlib import PurePosixPath
@@ -40,7 +40,16 @@ logger = logging.getLogger(__name__)
 class InstallerError(Exception):
     """Marketplace installer error."""
 
-    pass
+    stage: Optional[str]
+
+    def __init__(self, message: str, *, stage: Optional[str] = None) -> None:
+        super().__init__(message)
+        self.stage = stage
+
+
+def _merr(stage: str, message: str) -> InstallerError:
+    """Понятный префикс этапа для ручной установки из zip и логов."""
+    return InstallerError(f"[marketplace:{stage}] {message}", stage=stage)
 
 
 def _resolve_runtime_version_string(runtime: Any) -> str:
@@ -62,7 +71,7 @@ def _resolve_runtime_version_string(runtime: Any) -> str:
 def _normalize_min_runtime_constraint(raw: str) -> str:
     s = raw.strip()
     if not s:
-        raise InstallerError("min_runtime/min_runtime_version must be non-empty")
+        raise _merr("runtime", "min_runtime/min_runtime_version must be non-empty")
 
     # If it's already a constraint language supported by VersionConstraint, pass through.
     if s.startswith(("^", "~", ">=", "<=", ">", "<", "!=", "=")):
@@ -80,18 +89,21 @@ def _assert_runtime_meets_min(runtime: Any, plugin_data: Dict[str, Any]) -> None
         return
 
     if not isinstance(min_raw, str) or not min_raw.strip():
-        raise InstallerError("min_runtime/min_runtime_version must be a non-empty string")
+        raise _merr(
+            "runtime", "min_runtime/min_runtime_version must be a non-empty string"
+        )
 
     try:
         current = Version(_resolve_runtime_version_string(runtime))
         normalized = _normalize_min_runtime_constraint(min_raw)
         constraint = VersionConstraint(normalized)
         if not constraint.matches(current):
-            raise InstallerError(
-                f"Plugin requires runtime {normalized} (from {min_raw.strip()!r}), current={current}"
+            raise _merr(
+                "runtime",
+                f"plugin requires {normalized} (from {min_raw.strip()!r}), current={current}",
             )
     except VersionConstraintError as e:
-        raise InstallerError(f"Invalid min_runtime/min_runtime_version: {e}") from e
+        raise _merr("runtime", f"invalid min_runtime/min_runtime_version: {e}") from e
 
 
 class MarketplaceInstaller:
@@ -126,6 +138,7 @@ class MarketplaceInstaller:
         sha256: Optional[str] = None,
         runtime: Optional[Any] = None,
         *,
+        require_signature: bool = False,
         load_plugin: bool = True,
     ) -> Dict[str, Any]:
         """
@@ -152,19 +165,21 @@ class MarketplaceInstaller:
 
         # Validate archive exists
         if not archive_path.exists():
-            raise InstallerError(f"Archive not found: {archive_path}")
+            raise _merr("archive", f"file not found: {archive_path}")
 
         # Validate archive extension
         if not self._is_supported_archive(archive_path):
-            raise InstallerError(
-                f"Unsupported archive format. Supported: {self.SUPPORTED_EXTENSIONS}"
+            raise _merr(
+                "archive",
+                f"unsupported format (supported: {sorted(self.SUPPORTED_EXTENSIONS)})",
             )
 
         # Calculate SHA256
         calculated_hash = self._calculate_sha256(archive_path)
         if sha256 and calculated_hash != sha256:
-            raise InstallerError(
-                f"SHA256 mismatch. Expected: {sha256}, got: {calculated_hash}"
+            raise _merr(
+                "integrity",
+                f"SHA256 mismatch: expected {sha256}, got {calculated_hash}",
             )
 
         # Extract to temp directory
@@ -177,16 +192,22 @@ class MarketplaceInstaller:
             # Validate plugin.json
             plugin_json_path = Path(temp_dir) / "plugin.json"
             if not plugin_json_path.exists():
-                raise InstallerError("plugin.json not found in archive")
+                raise _merr(
+                    "manifest",
+                    "plugin.json missing at archive root (expected plugin.json next to plugin sources)",
+                )
 
-            with open(plugin_json_path) as f:
-                plugin_data = json.load(f)
+            try:
+                with open(plugin_json_path, encoding="utf-8") as f:
+                    plugin_data = json.load(f)
+            except json.JSONDecodeError as e:
+                raise _merr("manifest", f"plugin.json is not valid JSON: {e}") from e
 
             # Validate schema
             try:
                 plugin_data = validate_plugin_json(plugin_data)
             except SchemaValidationError as e:
-                raise InstallerError(f"Invalid plugin.json: {str(e)}")
+                raise _merr("manifest", f"plugin.json does not match schema: {e}") from e
 
             if runtime is not None:
                 _assert_runtime_meets_min(runtime, plugin_data)
@@ -213,14 +234,19 @@ class MarketplaceInstaller:
                     trust_level = verify_result.get("trust_level")
 
                 except PluginTrustError as e:
-                    raise InstallerError(f"Plugin signature verification failed: {e}")
+                    raise _merr("trust", f"signature verification failed: {e}") from e
                 except Exception as e:
-                    raise InstallerError(f"Failed to verify plugin signature: {e}")
+                    raise _merr("trust", f"signature verification error: {e}") from e
             elif plugin_data.get("public_key"):
                 # plugin.json declares public_key but no signature file
-                raise InstallerError(
-                    "Plugin manifest declares 'public_key' but plugin.sig file not found. "
-                    "Signature file is required for signed plugins."
+                raise _merr(
+                    "trust",
+                    "manifest has 'public_key' but plugin.sig is missing in archive",
+                )
+            elif require_signature:
+                raise _merr(
+                    "trust",
+                    "signature is required for this install, but plugin.sig/public_key are missing",
                 )
 
             plugin_name = plugin_data["name"]
@@ -256,9 +282,10 @@ class MarketplaceInstaller:
                     if policy is not None:
                         ok, errors = policy.can_install_plugin(metadata)
                         if not ok and errors:
-                            raise InstallerError(
-                                f"Cannot install {plugin_name}: dependency validation failed:\n"
-                                + "\n".join(f"  - {e}" for e in errors)
+                            raise _merr(
+                                "policy",
+                                f"cannot install {plugin_name} (dependency/capability check):\n"
+                                + "\n".join(f"  - {e}" for e in errors),
                             )
                     else:
                         errors = []
@@ -276,14 +303,19 @@ class MarketplaceInstaller:
             # Check for conflicts
             target_dir = self.plugins_dir / plugin_name
             if target_dir.exists():
-                raise InstallerError(
-                    f"Plugin '{plugin_name}' already installed at {target_dir}"
+                raise _merr(
+                    "conflict",
+                    f"plugin '{plugin_name}' already installed at {target_dir} "
+                    f"(remove directory or use upgrade flow)",
                 )
 
             # Validate entrypoint exists in archive
             entrypoint_path = Path(temp_dir) / entrypoint_file
             if not entrypoint_path.exists():
-                raise InstallerError(f"Plugin module not found: {entrypoint_file}")
+                raise _merr(
+                    "entrypoint",
+                    f"file {entrypoint_file!r} not in archive (from class_path {class_path!r})",
+                )
 
             # Move to plugins directory
             target_dir.mkdir(parents=True, exist_ok=True)
@@ -305,8 +337,9 @@ class MarketplaceInstaller:
                         # Find BasePlugin subclass
                         plugin_class = self._find_plugin_class(plugin_module)
                         if not plugin_class:
-                            raise InstallerError(
-                                f"No BasePlugin subclass found in {class_path}"
+                            raise _merr(
+                                "load",
+                                f"no BasePlugin subclass in module for class_path {class_path!r}",
                             )
 
                         # Instantiate and load
@@ -339,21 +372,21 @@ class MarketplaceInstaller:
                     except InstallerError:
                         raise
                     except Exception as e:
-                        raise InstallerError(
-                            f"Failed to load plugin via PluginManager: {str(e)}"
-                        )
+                        raise _merr(
+                            "load",
+                            f"PluginManager.load_plugin failed: {e}",
+                        ) from e
 
                 except InstallerError:
                     raise
                 except Exception as e:
-                    raise InstallerError(f"Plugin loading error: {str(e)}")
+                    raise _merr("load", f"unexpected error while loading plugin: {e}") from e
 
             # Return installation info
             return {
                 "name": plugin_name,
                 "version": plugin_version,
                 "path": str(target_dir),
-                "installed_at": datetime.now(timezone.utc).isoformat(),
                 "installed_at": datetime.now(UTC).isoformat(),
                 "hash": calculated_hash,
                 "class_path": class_path,
@@ -403,7 +436,7 @@ class MarketplaceInstaller:
         target_dir = self.plugins_dir / plugin_name
 
         if not target_dir.exists():
-            raise InstallerError(f"Plugin not found: {plugin_name}")
+            raise _merr("uninstall", f"plugin directory not found: {target_dir}")
 
         # Unload via PluginManager if provided
         if runtime:
@@ -421,7 +454,6 @@ class MarketplaceInstaller:
 
         return {
             "name": plugin_name,
-            "uninstalled_at": datetime.now(timezone.utc).isoformat(),
             "uninstalled_at": datetime.now(UTC).isoformat(),
         }
 
@@ -444,12 +476,14 @@ class MarketplaceInstaller:
         def _safe_destination(member_name: str) -> Path:
             parts = PurePosixPath(member_name).parts
             if not parts:
-                raise InstallerError("Archive contains empty member name")
+                raise _merr("extract", "archive member has empty name")
             if any(part in ("", ".", "..") for part in parts):
-                raise InstallerError(f"Unsafe archive path: {member_name}")
+                raise _merr("extract", f"unsafe path in archive: {member_name!r}")
             destination = (target_root / Path(*parts)).resolve()
             if destination != target_root and target_root not in destination.parents:
-                raise InstallerError(f"Archive path escapes target directory: {member_name}")
+                raise _merr(
+                    "extract", f"path escapes extract directory: {member_name!r}"
+                )
             return destination
 
         try:
@@ -467,21 +501,26 @@ class MarketplaceInstaller:
                 with tarfile.open(archive_path, "r:gz") as tf:
                     for member in tf.getmembers():
                         if member.issym() or member.islnk() or member.isdev():
-                            raise InstallerError(f"Unsafe archive member type: {member.name}")
+                            raise _merr(
+                                "extract",
+                                f"unsupported member type (symlink/device): {member.name!r}",
+                            )
                         destination = _safe_destination(member.name)
                         if member.isdir():
                             destination.mkdir(parents=True, exist_ok=True)
                             continue
                         extracted = tf.extractfile(member)
                         if extracted is None:
-                            raise InstallerError(f"Failed to extract archive member: {member.name}")
+                            raise _merr(
+                                "extract", f"failed to read member: {member.name!r}"
+                            )
                         destination.parent.mkdir(parents=True, exist_ok=True)
                         with extracted, open(destination, "wb") as dst:
                             shutil.copyfileobj(extracted, dst)
             else:
-                raise InstallerError(f"Unknown archive format: {archive_path}")
+                raise _merr("extract", f"unknown format: {archive_path}")
         except (zipfile.BadZipFile, tarfile.TarError) as e:
-            raise InstallerError(f"Invalid archive: {str(e)}")
+            raise _merr("extract", f"corrupt or unreadable archive: {e}") from e
 
     def _load_plugin_module(self, plugin_dir: Path, entrypoint_file: str):
         """Dynamically load plugin module."""
@@ -493,7 +532,7 @@ class MarketplaceInstaller:
 
         spec = importlib.util.spec_from_file_location(module_name, entrypoint_path)
         if not spec or not spec.loader:
-            raise InstallerError(f"Cannot load module: {entrypoint_file}")
+            raise _merr("load", f"cannot build import spec for {entrypoint_file!r}")
 
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
@@ -528,16 +567,15 @@ class MarketplaceInstaller:
             InstallerError: if download or installation fails
         """
         if not signature or not public_key:
-            raise InstallerError(
-                "Marketplace install requires signature and public_key from registry metadata"
+            raise _merr(
+                "download",
+                "registry flow requires signature and public_key in metadata",
             )
 
         try:
             import aiohttp
         except ImportError:
-            raise InstallerError(
-                "aiohttp not installed (required for registry downloads)"
-            )
+            raise _merr("download", "aiohttp is required for URL installs")
 
         # Security settings (matching registry client)
         MAX_SIZE = 100 * 1024 * 1024  # 100 MB
@@ -556,16 +594,17 @@ class MarketplaceInstaller:
                         url, timeout=aiohttp.ClientTimeout(total=TIMEOUT), ssl=True
                     ) as response:
                         if response.status != 200:
-                            raise InstallerError(
-                                f"Download failed: HTTP {response.status}"
-                            )
+                            raise _merr("download", f"HTTP {response.status} from URL")
 
                         # Check Content-Length
                         if (
                             response.content_length
                             and response.content_length > MAX_SIZE
                         ):
-                            raise InstallerError("Plugin archive too large")
+                            raise _merr(
+                                "download",
+                                f"Content-Length exceeds limit ({MAX_SIZE} bytes)",
+                            )
 
                         # Download with size limit
                         downloaded = 0
@@ -573,15 +612,16 @@ class MarketplaceInstaller:
                             async for chunk in response.content.iter_chunked(8192):
                                 downloaded += len(chunk)
                                 if downloaded > MAX_SIZE:
-                                    raise InstallerError(
-                                        "Plugin archive exceeds size limit"
+                                    raise _merr(
+                                        "download",
+                                        f"download exceeded size limit ({MAX_SIZE} bytes)",
                                     )
                                 f.write(chunk)
 
                 except asyncio.TimeoutError:
-                    raise InstallerError(f"Download timeout ({TIMEOUT}s)")
+                    raise _merr("download", f"timeout after {TIMEOUT}s")
                 except aiohttp.ClientError as e:
-                    raise InstallerError(f"Download failed: {e}")
+                    raise _merr("download", f"network error: {e}") from e
             
 
             # If signature provided, it will be verified during install_from_file

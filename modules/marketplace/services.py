@@ -17,10 +17,15 @@ from typing import Any, Dict, Optional
 import inspect
 
 from core.operations.models import Operation
+from modules.marketplace.install_error_payload import (
+    generic_marketplace_failure_payload,
+    installer_failure_payload,
+)
 from modules.marketplace.installer import InstallerError, MarketplaceInstaller
 from modules.marketplace.registry_client import RegistryClient
 from modules.marketplace.transaction import UpdateTransactionManager
 from modules.marketplace.update_validator import PluginUpdateValidator
+from modules.marketplace.upload_util import is_safe_staged_archive_path
 logger = logging.getLogger(__name__)
 
 
@@ -116,7 +121,8 @@ class MarketplaceService:
         Args:
             operation.params: {
                 "archive_path": str,
-                "sha256": Optional[str]
+                "sha256": Optional[str],
+                "delete_archive_after": Optional[bool],  # удалить archive_path после install; только с staging из upload
             }
 
         Returns:
@@ -125,13 +131,20 @@ class MarketplaceService:
         params = operation.params or {}
         archive_path = params.get("archive_path")
         sha256 = params.get("sha256")
+        require_signature = bool(params.get("require_signature", False))
 
         if not archive_path:
             return {"status": "failure", "error": "archive_path required"}
 
+        path_str = str(archive_path)
+        delete_after = bool(params.get("delete_archive_after"))
+
         try:
             result = await self.installer.install_from_file(
-                archive_path, sha256=sha256, runtime=self.runtime
+                archive_path,
+                sha256=sha256,
+                runtime=self.runtime,
+                require_signature=require_signature,
             )
 
             # Store installation info
@@ -165,7 +178,19 @@ class MarketplaceService:
             }
             await self._add_audit_log(audit_entry)
 
-            return {"status": "failure", "error": str(e)}
+            payload = installer_failure_payload(e)
+            return {"status": "failure", **payload}
+
+        finally:
+            if delete_after and is_safe_staged_archive_path(path_str):
+                try:
+                    Path(path_str).unlink(missing_ok=True)
+                except OSError:
+                    logger.debug(
+                        "marketplace install: cleanup staged archive failed %s",
+                        path_str,
+                        exc_info=True,
+                    )
 
     async def handle_remove(self, operation: Operation) -> Dict[str, Any]:
         """
@@ -219,7 +244,8 @@ class MarketplaceService:
             return {"status": "success", "data": result}
 
         except InstallerError as e:
-            return {"status": "failure", "error": str(e)}
+            payload = installer_failure_payload(e)
+            return {"status": "failure", **payload}
 
     async def handle_update(self, operation: Operation) -> Dict[str, Any]:
         """
@@ -303,7 +329,8 @@ class MarketplaceService:
             }
             await self._add_audit_log(audit_entry)
 
-            return {"status": "failure", "error": str(e)}
+            payload = installer_failure_payload(e)
+            return {"status": "failure", **payload}
 
     async def handle_enable(self, operation: Operation) -> Dict[str, Any]:
         """
@@ -552,6 +579,26 @@ class MarketplaceService:
                 "data": {**result, "registry": registry_url, "channel": channel},
             }
 
+        except InstallerError as e:
+            # Log failure
+            audit_entry = {
+                "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
+                "action": "install_from_registry",
+                "plugin_name": plugin_name,
+                "version_constraint": version_constraint,
+                "channel": channel,
+                "registry": registry_url,
+                "status": "failure",
+                "reason": str(e),
+            }
+            await self._add_audit_log(audit_entry)
+
+            logger.warning(
+                "handle_install_from_registry failed for plugin %s: %s", plugin_name, e, exc_info=True
+            )
+            payload = installer_failure_payload(e)
+            return {"status": "failure", **payload}
+
         except Exception as e:
             # Log failure
             audit_entry = {
@@ -566,8 +613,11 @@ class MarketplaceService:
             }
             await self._add_audit_log(audit_entry)
 
-            logger.warning("handle_install_from_registry failed for plugin %s: %s", plugin_name, e, exc_info=True)
-            return {"status": "failure", "error": str(e)}
+            logger.warning(
+                "handle_install_from_registry failed for plugin %s: %s", plugin_name, e, exc_info=True
+            )
+            payload = generic_marketplace_failure_payload(str(e))
+            return {"status": "failure", **payload}
 
     async def handle_search(self, operation: Operation) -> Dict[str, Any]:
         """

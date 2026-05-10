@@ -21,6 +21,7 @@ from typing import Any, Dict, Optional
 import asyncio
 
 from core.kernel.base_plugin import BasePlugin
+from core.kernel.plugin_loader import PluginManifestLoader
 from core.kernel.plugin_infrastructure import PluginInfrastructureCoordinator
 from core.kernel.plugin_orchestration_manager import PluginOrchestrationManager
 from core.kernel.plugin_registry import PluginRegistry, PluginState
@@ -443,17 +444,23 @@ class PluginLifecycleManager:
                 f"Не удалось перезагрузить плагин '{plugin_name}': "
                 f"plugins_dir не задан в конфигурации runtime (Config.plugins_dir)."
             )
-        plugin_dir = plugins_dir / plugin_name
+        plugin_dir = PluginManifestLoader.find_plugin_directory(plugins_dir, plugin_name)
+        if plugin_dir is None:
+            fallback = plugins_dir / plugin_name
+            if fallback.is_dir():
+                plugin_dir = fallback
+            else:
+                raise ValueError(
+                    f"Не удалось найти каталог плагина '{plugin_name}' под {plugins_dir}"
+                )
 
-        if not plugin_dir.exists() or not plugin_dir.is_dir():
+        if not plugin_dir.is_dir():
             raise ValueError(
                 f"Не удалось найти директорию плагина '{plugin_name}' для перезагрузки "
                 f"(ожидался путь: {plugin_dir})"
             )
 
         # Загружаем манифест
-        from core.kernel.plugin_loader import PluginManifestLoader
-
         manifest = PluginManifestLoader.load_manifest(plugin_dir)
         if not manifest:
             raise ValueError(f"Не удалось найти manifest для плагина '{plugin_name}'")

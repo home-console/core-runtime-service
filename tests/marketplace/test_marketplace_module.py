@@ -161,7 +161,7 @@ class TestMarketplaceInstaller:
     @pytest.mark.asyncio
     async def test_install_nonexistent_archive(self, installer):
         """Test installing from non-existent archive."""
-        with pytest.raises(InstallerError, match="Archive not found"):
+        with pytest.raises(InstallerError, match=r"\[marketplace:archive\].*not found"):
             await installer.install_from_file("/nonexistent/plugin.zip")
     
     @pytest.mark.asyncio
@@ -171,7 +171,7 @@ class TestMarketplaceInstaller:
         bad_archive = temp_dir / "plugin.txt"
         bad_archive.write_text("not an archive")
         
-        with pytest.raises(InstallerError, match="Unsupported archive format"):
+        with pytest.raises(InstallerError, match=r"\[marketplace:archive\].*unsupported format"):
             await installer.install_from_file(str(bad_archive))
     
     @pytest.mark.asyncio
@@ -179,7 +179,7 @@ class TestMarketplaceInstaller:
         """Test SHA256 validation."""
         wrong_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
         
-        with pytest.raises(InstallerError, match="SHA256 mismatch"):
+        with pytest.raises(InstallerError, match=r"\[marketplace:integrity\].*SHA256 mismatch"):
             await installer.install_from_file(
                 str(test_plugin_archive),
                 sha256=wrong_sha256
@@ -205,7 +205,7 @@ class TestMarketplaceInstaller:
         bad_zip = temp_dir / "bad.zip"
         bad_zip.write_text("not a real zip file")
         
-        with pytest.raises(InstallerError, match="Invalid archive"):
+        with pytest.raises(InstallerError, match=r"\[marketplace:extract\].*corrupt or unreadable"):
             await installer.install_from_file(str(bad_zip))
     
     @pytest.mark.asyncio
@@ -216,7 +216,7 @@ class TestMarketplaceInstaller:
         with zipfile.ZipFile(archive_path, "w") as zf:
             zf.writestr("plugin.py", "# empty")
         
-        with pytest.raises(InstallerError, match="plugin.json not found"):
+        with pytest.raises(InstallerError, match=r"\[marketplace:manifest\].*plugin\.json missing"):
             await installer.install_from_file(str(archive_path))
 
     @pytest.mark.asyncio
@@ -234,7 +234,7 @@ class TestMarketplaceInstaller:
             }))
             zf.writestr("plugin.py", "from core.kernel.base_plugin import BasePlugin\nclass TestPlugin(BasePlugin): pass\n")
 
-        with pytest.raises(InstallerError, match="Unsafe archive path|escapes target directory"):
+        with pytest.raises(InstallerError, match=r"\[marketplace:extract\].*unsafe path"):
             await installer.install_from_file(str(archive_path))
     
     @pytest.mark.asyncio
@@ -246,7 +246,7 @@ class TestMarketplaceInstaller:
             # Missing required fields
             zf.writestr("plugin.json", json.dumps({"name": "test"}))
         
-        with pytest.raises(InstallerError, match="Invalid plugin.json"):
+        with pytest.raises(InstallerError, match=r"\[marketplace:manifest\].*does not match schema"):
             await installer.install_from_file(str(archive_path))
     
     @pytest.mark.asyncio
@@ -258,7 +258,7 @@ class TestMarketplaceInstaller:
         await installer.install_from_file(str(test_plugin_archive), runtime=mock_runtime)
         
         # Try to install again
-        with pytest.raises(InstallerError, match="already installed"):
+        with pytest.raises(InstallerError, match=r"\[marketplace:conflict\].*already installed"):
             await installer.install_from_file(str(test_plugin_archive), runtime=mock_runtime)
     
     @pytest.mark.asyncio
@@ -280,7 +280,7 @@ class TestMarketplaceInstaller:
     @pytest.mark.asyncio
     async def test_uninstall_nonexistent_plugin(self, installer):
         """Test uninstalling non-existent plugin."""
-        with pytest.raises(InstallerError, match="Plugin not found"):
+        with pytest.raises(InstallerError, match=r"\[marketplace:uninstall\].*not found"):
             await installer.uninstall("nonexistent")
 
 
@@ -337,7 +337,34 @@ class TestMarketplaceService:
         
         assert result["status"] == "failure"
         assert "archive_path required" in result["error"]
-    
+        assert "error_stage" not in result
+
+    @pytest.mark.asyncio
+    async def test_handle_install_includes_error_stage_and_user_message_on_bad_manifest(
+        self, temp_dir, mock_runtime
+    ):
+        """При ошибке манифеста в ответе есть error_stage и user_message для UI."""
+        plugins_dir = temp_dir / "plugins"
+        plugins_dir.mkdir()
+        mock_runtime.config = {"plugins_dir": str(plugins_dir)}
+        archive_path = temp_dir / "bad_manifest.zip"
+        with zipfile.ZipFile(archive_path, "w") as zf:
+            zf.writestr("plugin.json", json.dumps({"name": "bad_only"}))
+
+        service = MarketplaceService(mock_runtime)
+        operation = Operation(
+            operation_id="op_manifest",
+            op_type="marketplace.install",
+            params={"archive_path": str(archive_path)},
+            initiator=OperationInitiator(kind=OperationInitiatorKind.ADMIN),
+        )
+        result = await service.handle_install(operation)
+        assert result["status"] == "failure"
+        assert result["error_stage"] == "manifest"
+        assert "user_message" in result
+        assert "Подробнее:" in result["user_message"]
+        assert "[marketplace:manifest]" in result["error"]
+
     @pytest.mark.asyncio
     async def test_handle_remove_success(self, installer, test_plugin_archive, mock_runtime):
         """Test handle_remove operation."""
@@ -389,7 +416,7 @@ class TestMarketplaceService:
         """Registry install must require signature/public_key metadata."""
         installer = MarketplaceInstaller(temp_dir / "plugins")
 
-        with pytest.raises(InstallerError, match="requires signature and public_key"):
+        with pytest.raises(InstallerError, match=r"\[marketplace:download\].*signature"):
             await installer.install_from_url(
                 "https://example.com/plugin.zip",
                 sha256="abc",
@@ -422,6 +449,35 @@ class TestMarketplaceService:
         assert result["data"]["count"] == 2
         assert "plugin1" in result["data"]["installed_plugins"]
         assert "plugin2" in result["data"]["installed_plugins"]
+
+    @pytest.mark.asyncio
+    async def test_handle_install_deletes_staged_archive_when_flag_set(self, mock_runtime):
+        from modules.marketplace.upload_util import STAGING_PREFIX
+
+        p = Path(tempfile.gettempdir()).resolve() / f"{STAGING_PREFIX}unit_cleanup.zip"
+        p.write_bytes(b"x")
+        service = MarketplaceService(mock_runtime)
+        operation = Operation(
+            operation_id="op_del_staged",
+            op_type="marketplace.install",
+            params={"archive_path": str(p), "delete_archive_after": True},
+            initiator=OperationInitiator(kind=OperationInitiatorKind.ADMIN),
+        )
+        fake = {
+            "name": "n",
+            "version": "1.0.0",
+            "path": "/plugins/n",
+            "hash": "h",
+            "class_path": "p.C",
+            "capabilities_provided": [],
+            "capabilities_required": [],
+        }
+        with patch.object(service.installer, "install_from_file", new=AsyncMock(return_value=fake)):
+            with patch.object(service, "_store_installed_plugin", new=AsyncMock()):
+                with patch.object(service, "_add_audit_log", new=AsyncMock()):
+                    result = await service.handle_install(operation)
+        assert result["status"] == "success"
+        assert not p.exists()
 
 
 # ============================================================================
@@ -495,6 +551,29 @@ class TestMarketplaceModule:
         
         assert manifest is None
     
+    @pytest.mark.asyncio
+    async def test_wrap_handler_preserves_install_error_hints(self, mock_runtime):
+        module = MarketplaceModule(mock_runtime)
+
+        async def fake_handler(operation):
+            return {
+                "status": "failure",
+                "error": "[marketplace:conflict] x",
+                "error_stage": "conflict",
+                "user_message": "RU hint",
+                "data": None,
+            }
+
+        wrapped = module._wrap_handler(fake_handler)
+        out = await wrapped(None, Operation(
+            operation_id="t",
+            op_type="marketplace.install",
+            params={},
+            initiator=OperationInitiator(kind=OperationInitiatorKind.ADMIN),
+        ))
+        assert out["error_stage"] == "conflict"
+        assert out["user_message"] == "RU hint"
+
     @pytest.mark.asyncio
     async def test_on_start_registers_operations(self, mock_runtime):
         """Test register() registers operations."""
