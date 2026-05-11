@@ -39,8 +39,8 @@ from core.exception_groups import (
     LOGGING_HELPER_ERRORS,
     PLUGIN_INTROSPECTION_ERRORS,
 )
-from modules.plugins.schema import ValidationError as SchemaValidationError
-from modules.plugins.schema import validate_plugin_json
+from core.kernel.plugin_manifest_schema import ValidationError as SchemaValidationError
+from core.kernel.plugin_manifest_schema import validate_plugin_json
 
 logger = logging.getLogger(__name__)
 
