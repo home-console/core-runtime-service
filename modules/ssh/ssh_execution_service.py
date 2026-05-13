@@ -11,9 +11,17 @@ import asyncio
 import io
 from typing import Any, Dict, Tuple
 
-import paramiko  # type: ignore[import-not-found]
-
 from modules.credentials import Credential, CredentialType
+
+
+def _import_paramiko() -> Any:
+    try:
+        import paramiko  # type: ignore[import-not-found]
+        return paramiko
+    except ModuleNotFoundError as e:
+        raise ModuleNotFoundError(
+            "SSH features require 'paramiko'. Install with: pip install paramiko"
+        ) from e
 import logging
 logger = logging.getLogger(__name__)
 
@@ -50,12 +58,13 @@ class SSHExecutionService:
             "SSHExecutionService expects credential as (Credential, secret_bytes) tuple"
         )
 
-    def _connect(self, cred: Credential, secret_bytes: bytes) -> paramiko.SSHClient:
+    def _connect(self, cred: Credential, secret_bytes: bytes) -> Any:
         """
         Синхронное установление SSH-подключения.
 
         Не логирует и не возвращает секрет.
         """
+        paramiko = _import_paramiko()
         if cred.type not in (CredentialType.SSH_PASSWORD, CredentialType.SSH_KEY):
             raise ValueError(f"Unsupported credential type for SSH: {cred.type}")
         if not cred.host or not cred.username:

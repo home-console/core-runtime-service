@@ -103,6 +103,13 @@ class Config:
     # RUNTIME_MODULE_PATH_PREFIX: префикс для discovery модулей (default "modules")
     module_path_prefix: str = "modules"
     
+    # URL-префиксы.
+    # Все HTTP-роуты при маунте получат этот префикс вместо захардкоженного /api/v1.
+    # Пример: RUNTIME_API_PREFIX=/api/v2 → /api/v2/admin/..., /api/v2/auth/...
+    # WS-роуты берут тот же префикс, если RUNTIME_WS_PREFIX не задан отдельно.
+    api_url_prefix: str = "/api/v1"
+    ws_url_prefix: str = ""  # пусто = совпадает с api_url_prefix
+
     # Marketplace
     # Default registry index URL (e.g. "https://marketplace.homeconsole.dev/registry/index.json")
     marketplace_registry_url: str = ""
@@ -298,6 +305,8 @@ class Config:
             module_path_prefix=env.get("RUNTIME_MODULE_PATH_PREFIX", "modules"),
             marketplace_registry_url=str(env.get("MARKETPLACE_REGISTRY_URL", "")).strip(),
             runtime_version=str(env.get("RUNTIME_VERSION", "0.1.0")).strip() or "0.1.0",
+            api_url_prefix=str(env.get("RUNTIME_API_PREFIX", "/api/v1")).strip() or "/api/v1",
+            ws_url_prefix=str(env.get("RUNTIME_WS_PREFIX", "")).strip(),
         )
         config.validate()
         return config

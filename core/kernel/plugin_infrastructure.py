@@ -198,7 +198,7 @@ class PluginInfrastructureCoordinator:
             try:
                 await self._capability_registry.unregister_plugin(plugin_name)
             except BEST_EFFORT_BACKGROUND_ERRORS as e:
-                if isinstance(e, _CAP_REG_BOUNDARY):
+                if isinstance(e, PLUGIN_INTROSPECTION_ERRORS):
                     logger.debug(
                         "on_plugin_unloaded: unregister_plugin failed for %s",
                         plugin_name,

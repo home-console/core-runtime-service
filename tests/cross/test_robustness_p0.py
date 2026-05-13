@@ -20,10 +20,24 @@ from core.kernel.base_plugin import BasePlugin, PluginMetadata
 from core.kernel.plugin_manager import PluginManager
 from core.kernel.plugin_registry import PluginState
 from core.runtime.runtime import CoreRuntime
+from core.runtime.runtime_context import RuntimeContext
 from core.runtime.state_engine import StateEngine
 from modules.marketplace.installer import MarketplaceInstaller
 from modules.storage.port import CoreStoragePort
 from tests.conftest import InMemoryStorageAdapter
+
+
+def _test_context() -> RuntimeContext:
+    class _Dummy:
+        pass
+
+    return RuntimeContext(
+        storage=_Dummy(),
+        services=_Dummy(),
+        http=_Dummy(),
+        capabilities=_Dummy(),
+        operations=_Dummy(),
+    )
 
 
 # Test Plugin fixtures
@@ -31,7 +45,7 @@ class DemoPluginA(BasePlugin):
     """Demo plugin A."""
 
     def __init__(self, runtime_or_context=None):
-        super().__init__(runtime_or_context)
+        super().__init__(runtime_or_context or _test_context())
 
     @property
     def metadata(self) -> PluginMetadata:
@@ -53,7 +67,7 @@ class DemoPluginB(BasePlugin):
     """Demo plugin B with circular requirement."""
 
     def __init__(self, runtime_or_context=None):
-        super().__init__(runtime_or_context)
+        super().__init__(runtime_or_context or _test_context())
 
     @property
     def metadata(self) -> PluginMetadata:
@@ -77,7 +91,7 @@ class DemoPluginC(BasePlugin):
     """Demo plugin C that requires plugin B."""
 
     def __init__(self, runtime_or_context=None):
-        super().__init__(runtime_or_context)
+        super().__init__(runtime_or_context or _test_context())
 
     @property
     def metadata(self) -> PluginMetadata:

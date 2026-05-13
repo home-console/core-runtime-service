@@ -13,13 +13,27 @@ from pathlib import Path
 from core.kernel.base_plugin import BasePlugin, PluginMetadata
 from core.kernel.plugin_manager import PluginManager
 from core.runtime.runtime import CoreRuntime
+from core.runtime.runtime_context import RuntimeContext
+
+
+def _test_context() -> RuntimeContext:
+    class _Dummy:
+        pass
+
+    return RuntimeContext(
+        storage=_Dummy(),
+        services=_Dummy(),
+        http=_Dummy(),
+        capabilities=_Dummy(),
+        operations=_Dummy(),
+    )
 
 
 class DummyPlugin(BasePlugin):
     """Dummy плагин для тестирования контракта."""
     
     def __init__(self, runtime=None, name="dummy", version="1.0.0", dependencies=None):
-        super().__init__(runtime)
+        super().__init__(runtime or _test_context())
         self._name = name
         self._version = version
         self._dependencies = dependencies or []
@@ -285,7 +299,7 @@ async def test_plugin_cyclic_dependency_detected(memory_adapter):
 async def test_plugin_lifecycle_order_load_start_stop_unload():
     """Тест: порядок lifecycle - on_load → on_start → on_stop → on_unload."""
     manager = PluginManager()
-    plugin = DummyPlugin(None, "test_lifecycle")
+    plugin = DummyPlugin(_test_context(), "test_lifecycle")
     
     # Загружаем
     await manager.load_plugin(plugin)
@@ -320,14 +334,14 @@ async def test_plugin_dependency_check_before_load():
     manager = PluginManager()
     
     # Создаём плагин с зависимостью
-    dependent_plugin = DummyPlugin(None, "dependent", dependencies=["missing"])
+    dependent_plugin = DummyPlugin(_test_context(), "dependent", dependencies=["missing"])
     
     # Попытка загрузить плагин с отсутствующей зависимостью должна упасть
     with pytest.raises(ValueError, match="требует плагин"):
         await manager.load_plugin(dependent_plugin)
     
     # Загружаем зависимость
-    dependency_plugin = DummyPlugin(None, "missing")
+    dependency_plugin = DummyPlugin(_test_context(), "missing")
     await manager.load_plugin(dependency_plugin)
     
     # Теперь зависимый плагин должен загрузиться
@@ -339,7 +353,7 @@ async def test_plugin_dependency_check_before_load():
 async def test_plugin_load_error_sets_error_state():
     """Тест: ошибка при загрузке устанавливает состояние ERROR."""
     manager = PluginManager()
-    failing_plugin = FailingLoadPlugin(None, "failing")
+    failing_plugin = FailingLoadPlugin(_test_context(), "failing")
     
     # Попытка загрузить падающий плагин должна упасть
     with pytest.raises(RuntimeError, match="load failed"):

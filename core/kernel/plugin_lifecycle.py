@@ -446,13 +446,9 @@ class PluginLifecycleManager:
             )
         plugin_dir = PluginManifestLoader.find_plugin_directory(plugins_dir, plugin_name)
         if plugin_dir is None:
-            fallback = plugins_dir / plugin_name
-            if fallback.is_dir():
-                plugin_dir = fallback
-            else:
-                raise ValueError(
-                    f"Не удалось найти каталог плагина '{plugin_name}' под {plugins_dir}"
-                )
+            raise ValueError(
+                f"Не удалось найти каталог плагина '{plugin_name}' под {plugins_dir}"
+            )
 
         if not plugin_dir.is_dir():
             raise ValueError(

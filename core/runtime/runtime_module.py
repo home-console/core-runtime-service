@@ -36,7 +36,7 @@ from typing import (
     runtime_checkable,
 )
 
-from core.runtime.runtime_context import RuntimeContext
+from core.runtime.runtime_context import RuntimeContext, resolve_runtime_context_for_host
 from core.service._acl import PreloadResourceFunc
 from core.service.models import ServiceAuthConfig
 
@@ -95,33 +95,8 @@ class RuntimeModule(ABC):
             return
 
         self.runtime = runtime_or_context
-
-        create_context = getattr(runtime_or_context, "create_context", None)
-        if callable(create_context):
-            maybe_context = create_context()
-            if isinstance(maybe_context, RuntimeContext):
-                self.context = maybe_context
-                return
-            # Some tests/mocks define create_context() but return None or a non-RuntimeContext.
-            # Fall back to a best-effort RuntimeContext constructed from runtime attributes.
-
-        # Backward compatibility for lightweight tests/mocks without create_context().
-        self.context = RuntimeContext(
-            storage=getattr(runtime_or_context, "storage", None),
-            vault=getattr(runtime_or_context, "vault", None),
-            services=getattr(runtime_or_context, "service_registry", None),
-            http=getattr(runtime_or_context, "http", None),
-            capabilities=getattr(
-                runtime_or_context,
-                "capability_registry",
-                getattr(runtime_or_context, "capabilities", None),
-            ),
-            operations=getattr(runtime_or_context, "operations", None),
-            state=getattr(
-                runtime_or_context,
-                "state_engine",
-                getattr(runtime_or_context, "state", None),
-            ),
+        self.context = resolve_runtime_context_for_host(
+            runtime_or_context, owner=self.__class__.__name__
         )
 
     async def register_service(
@@ -150,31 +125,23 @@ class RuntimeModule(ABC):
             return await func(self.context, *args, **kwargs)
 
         reg = self.context.services
-        register_with_acl: Callable[..., Awaitable[Any]] | None = getattr(
-            reg, "register_with_acl", None
+        register_with_acl: Callable[..., Awaitable[Any]] | None = getattr(reg, "register_with_acl", None)
+        if register_with_acl is None:
+            raise TypeError("RuntimeContext.services must provide register_with_acl()")
+        res = register_with_acl(
+            name,
+            _wrapper,
+            resource=resource,
+            admin_only=admin_only,
+            filter_result=filter_result,
+            enforce_result=enforce_result,
+            preload_resource=preload_resource,
+            inject_owner_param=inject_owner_param,
+            version=version,
+            auth_config=auth_config,
         )
-        try:
-            if register_with_acl is not None:
-                res = register_with_acl(
-                    name,
-                    _wrapper,
-                    resource=resource,
-                    admin_only=admin_only,
-                    filter_result=filter_result,
-                    enforce_result=enforce_result,
-                    preload_resource=preload_resource,
-                    inject_owner_param=inject_owner_param,
-                    version=version,
-                    auth_config=auth_config,
-                )
-                if inspect.isawaitable(res):
-                    await res
-                return
-
-            await reg.register(name, _wrapper, version=version, auth_config=auth_config)
-        except ValueError:
-            # Service already registered (hot-reload / repeated test setup) — skip silently.
-            pass
+        if inspect.isawaitable(res):
+            await res
 
     async def register_runtime_service(
         self,
@@ -199,31 +166,23 @@ class RuntimeModule(ABC):
             return await func(self.runtime, *args, **kwargs)
 
         reg = self.context.services
-        register_with_acl: Callable[..., Awaitable[Any]] | None = getattr(
-            reg, "register_with_acl", None
+        register_with_acl: Callable[..., Awaitable[Any]] | None = getattr(reg, "register_with_acl", None)
+        if register_with_acl is None:
+            raise TypeError("RuntimeContext.services must provide register_with_acl()")
+        res = register_with_acl(
+            name,
+            _wrapper,
+            resource=resource,
+            admin_only=admin_only,
+            filter_result=filter_result,
+            enforce_result=enforce_result,
+            preload_resource=preload_resource,
+            inject_owner_param=inject_owner_param,
+            version=version,
+            auth_config=auth_config,
         )
-        try:
-            if register_with_acl is not None:
-                res = register_with_acl(
-                    name,
-                    _wrapper,
-                    resource=resource,
-                    admin_only=admin_only,
-                    filter_result=filter_result,
-                    enforce_result=enforce_result,
-                    preload_resource=preload_resource,
-                    inject_owner_param=inject_owner_param,
-                    version=version,
-                    auth_config=auth_config,
-                )
-                if inspect.isawaitable(res):
-                    await res
-                return
-
-            await reg.register(name, _wrapper, version=version, auth_config=auth_config)
-        except ValueError:
-            # Service already registered (hot-reload / repeated test setup) — skip silently.
-            pass
+        if inspect.isawaitable(res):
+            await res
 
     async def register_raw_service(
         self,
@@ -250,31 +209,23 @@ class RuntimeModule(ABC):
             return await func(*args, **kwargs)
 
         reg = self.context.services
-        register_with_acl: Callable[..., Awaitable[Any]] | None = getattr(
-            reg, "register_with_acl", None
+        register_with_acl: Callable[..., Awaitable[Any]] | None = getattr(reg, "register_with_acl", None)
+        if register_with_acl is None:
+            raise TypeError("RuntimeContext.services must provide register_with_acl()")
+        res = register_with_acl(
+            name,
+            _wrapper,
+            resource=resource,
+            admin_only=admin_only,
+            filter_result=filter_result,
+            enforce_result=enforce_result,
+            preload_resource=preload_resource,
+            inject_owner_param=inject_owner_param,
+            version=version,
+            auth_config=auth_config,
         )
-        try:
-            if register_with_acl is not None:
-                res = register_with_acl(
-                    name,
-                    _wrapper,
-                    resource=resource,
-                    admin_only=admin_only,
-                    filter_result=filter_result,
-                    enforce_result=enforce_result,
-                    preload_resource=preload_resource,
-                    inject_owner_param=inject_owner_param,
-                    version=version,
-                    auth_config=auth_config,
-                )
-                if inspect.isawaitable(res):
-                    await res
-                return
-
-            await reg.register(name, _wrapper, version=version, auth_config=auth_config)
-        except ValueError:
-            # Service already registered (hot-reload / repeated test setup) — skip silently.
-            pass
+        if inspect.isawaitable(res):
+            await res
 
     @property
     @abstractmethod

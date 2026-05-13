@@ -11,6 +11,7 @@ import logging
 from typing import Any, Optional
 
 from core.kernel.base_plugin import BasePlugin
+from core.runtime.runtime_context import RuntimeContext
 from sdk.operations_events import OPERATION_READY_EVENT_TYPE
 
 from core.kernel.plugin_isolation import (
@@ -111,17 +112,11 @@ class PluginSandbox:
 
         # Create ServiceProxy for plugin (limited service access)
         if service_proxy_cls is not None and hasattr(runtime, "service_registry"):
-            allowed_raw = getattr(plugin, "_manifest_allowed_services", None)
-
-            # Bridge current contract:
-            # - manifest.allowed_services is stored in plugin._plugin_context.manifest
-            # - sandbox historically looked only at _manifest_allowed_services
-            if not allowed_raw or not isinstance(allowed_raw, list):
-                manifest_allowed = getattr(_manifest, "allowed_services", None)
-                if isinstance(manifest_allowed, list) and manifest_allowed:
-                    allowed_raw = manifest_allowed
-                else:
-                    allowed_raw = default_allowed_services
+            manifest_allowed = getattr(_manifest, "allowed_services", None)
+            if isinstance(manifest_allowed, list) and manifest_allowed:
+                allowed_raw = manifest_allowed
+            else:
+                allowed_raw = default_allowed_services
             allowed = list(allowed_raw) if isinstance(allowed_raw, list) else allowed
             plugin.services = service_proxy_cls(
                 runtime.service_registry,
@@ -167,7 +162,7 @@ class PluginSandbox:
             if raw_http is not None
             else None
         )
-        raw_capabilities = getattr(runtime, "capability_registry", None) or getattr(runtime, "capabilities", None)
+        raw_capabilities = getattr(runtime, "capability_registry", None)
         capabilities_proxy = (
             CapabilityRegistryProxy(raw_capabilities) if raw_capabilities is not None else None
         )
@@ -176,9 +171,17 @@ class PluginSandbox:
             AgentManagerProxy(raw_agent_manager) if raw_agent_manager is not None else None
         )
 
-        # Устанавливаем RuntimeContext для плагина (если runtime поддерживает create_context)
-        if hasattr(runtime, "create_context"):
-            plugin.context = runtime.create_context()
+        create_context = getattr(runtime, "create_context", None)
+        if not callable(create_context):
+            raise RuntimeError(
+                "CoreRuntime must provide create_context() for plugin isolation."
+            )
+        runtime_context = create_context()
+        if not isinstance(runtime_context, RuntimeContext):
+            raise RuntimeError(
+                "CoreRuntime.create_context() must return RuntimeContext for plugin isolation."
+            )
+        plugin.context = runtime_context
 
         # SECURITY P0/P2.3: RuntimeContext is also a plugin surface.
         # Replace services, storage, and event_bus with proxied versions.
@@ -214,14 +217,10 @@ class PluginSandbox:
 
         # Backward compat (SECURITY): provide facade instead of raw CoreRuntime.
         plugin.runtime = PluginRuntimeFacade(
-            storage=(
-                NamespacedStorageProxy(
-                    getattr(runtime, "storage", None),
-                    namespace=plugin_name,
-                    allowed_namespaces=allowed_storage_namespaces,
-                )
-                if getattr(runtime, "storage", None) is not None
-                else getattr(plugin, "storage", None) or getattr(runtime, "storage", None)
+            storage=NamespacedStorageProxy(
+                getattr(runtime, "storage", None),
+                namespace=plugin_name,
+                allowed_namespaces=allowed_storage_namespaces,
             ),
             # SECURITY P0: do NOT leak raw service_registry to plugin code.
             service_registry=(

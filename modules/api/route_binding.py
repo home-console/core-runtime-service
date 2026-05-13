@@ -110,6 +110,33 @@ def _normalize_api_error(
     return payload
 
 
+_LEGACY_PREFIX = "/api/v1"
+
+
+def _resolve_prefixes(runtime: Any) -> tuple[str, str]:
+    """Возвращает (api_prefix, ws_prefix) из конфига рантайма."""
+    cfg = getattr(runtime, "_config", None)
+    raw_api = getattr(cfg, "api_url_prefix", _LEGACY_PREFIX) if cfg is not None else _LEGACY_PREFIX
+    if isinstance(raw_api, str) and raw_api.strip():
+        api_prefix = raw_api.rstrip("/")
+    else:
+        api_prefix = _LEGACY_PREFIX
+
+    _ws_raw = getattr(cfg, "ws_url_prefix", "") if cfg is not None else ""
+    if isinstance(_ws_raw, str) and _ws_raw.strip():
+        ws_prefix = _ws_raw.rstrip("/")
+    else:
+        ws_prefix = api_prefix
+    return api_prefix, ws_prefix
+
+
+def _repath(path: str, prefix: str) -> str:
+    """Заменяет захардкоженный /api/v1 на сконфигурированный префикс."""
+    if path.startswith(_LEGACY_PREFIX):
+        return prefix + path[len(_LEGACY_PREFIX):]
+    return path
+
+
 def bind_routes(runtime: Any, app: Any) -> None:
     """
     Bind all endpoints from runtime.http to the FastAPI app.
@@ -119,6 +146,7 @@ def bind_routes(runtime: Any, app: Any) -> None:
     Phase 3: syncs HttpEndpoint.auth_config → ServiceAuthConfig (Variant B).
     """
     endpoints = runtime.http.list()
+    api_prefix, ws_prefix = _resolve_prefixes(runtime)
 
     # Phase 3 (Variant B): sync HttpEndpoint.auth_config → ServiceAuthConfig.
     # This ensures WS endpoints and any service-level auth lookups see the
@@ -149,17 +177,19 @@ def bind_routes(runtime: Any, app: Any) -> None:
         if not ep.method:
             continue
         handler = _make_api_handler(runtime, ep)
-        route_name = f"{ep.method}_{ep.path}"
-        app.add_api_route(ep.path, handler, methods=[ep.method], name=route_name)
+        mounted_path = _repath(ep.path, api_prefix)
+        route_name = f"{ep.method}_{mounted_path}"
+        app.add_api_route(mounted_path, handler, methods=[ep.method], name=route_name)
 
     for ep in webhook_endpoints:
         # Проверяем, что method не None (для безопасности)
         if not ep.method:
             continue
         handler = _make_webhook_handler(runtime, ep)
-        route_name = f"webhook_{ep.method}_{ep.path}"
+        mounted_path = _repath(ep.path, api_prefix)
+        route_name = f"webhook_{ep.method}_{mounted_path}"
         app.add_api_route(
-            ep.path,
+            mounted_path,
             handler,
             methods=[ep.method],
             name=route_name,
@@ -168,7 +198,8 @@ def bind_routes(runtime: Any, app: Any) -> None:
 
     for ep in ws_endpoints:
         handler = _make_ws_handler(runtime, ep)
-        route_name = f"ws_{ep.path.replace('/', '_').lstrip('_')}"
+        mounted_path = _repath(ep.path, ws_prefix)
+        route_name = f"ws_{mounted_path.replace('/', '_').lstrip('_')}"
         # Извлекаем path параметры из пути для передачи в handler
         path_params = re.findall(r"\{(\w+)\}", ep.path)
         if path_params:
@@ -177,7 +208,7 @@ def bind_routes(runtime: Any, app: Any) -> None:
                 websocket: WebSocket,
                 original_handler=handler,
                 params=path_params,
-                ep_path=ep.path,
+                ep_path=mounted_path,
                 ep_service=ep.service,
                 ep_auth=ep.auth_config,
             ):
@@ -235,9 +266,9 @@ def bind_routes(runtime: Any, app: Any) -> None:
                 finally:
                     set_current_request_context(None)
 
-            app.websocket(ep.path, name=route_name)(ws_wrapper)
+            app.websocket(mounted_path, name=route_name)(ws_wrapper)
         else:
-            app.websocket(ep.path, name=route_name)(handler)
+            app.websocket(mounted_path, name=route_name)(handler)
 
     _install_openapi_schema(app, ws_endpoints)
 

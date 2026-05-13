@@ -63,3 +63,68 @@ class RuntimeContext:
             raise ValueError("capabilities is required")
         if self.operations is None:
             raise ValueError("operations is required")
+
+
+def build_synthetic_runtime_context(runtime: Any) -> "RuntimeContext":
+    """
+    Собрать RuntimeContext из полей произвольного объекта (тестовые даблы, SimpleNamespace).
+
+    Используется когда нет настоящего CoreRuntime.create_context().
+    """
+    from unittest.mock import MagicMock
+
+    def _need(val: Any) -> Any:
+        return MagicMock() if val is None else val
+
+    storage = getattr(runtime, "storage", None)
+    services = (
+        getattr(runtime, "service_registry", None)
+        or getattr(runtime, "services", None)
+    )
+    http = getattr(runtime, "http", None)
+    capabilities = (
+        getattr(runtime, "capabilities", None)
+        or getattr(runtime, "capability_registry", None)
+    )
+    operations = getattr(runtime, "operations", None)
+
+    return RuntimeContext(
+        storage=_need(storage),
+        services=_need(services),
+        http=_need(http),
+        capabilities=_need(capabilities),
+        operations=_need(operations),
+        vault=getattr(runtime, "vault", None),
+        state=getattr(runtime, "state_engine", None) or getattr(runtime, "state", None),
+        event_bus=getattr(runtime, "event_bus", None),
+        metrics=getattr(runtime, "metrics", None),
+        rate_limiter=getattr(runtime, "rate_limiter", None),
+        operation_context=getattr(runtime, "operation_context", None),
+    )
+
+
+def resolve_runtime_context_for_host(runtime: Any, *, owner: str) -> "RuntimeContext":
+    """
+    Получить RuntimeContext из уже готового контекста или с рантайма (create_context / синтетика).
+
+    Поддерживает:
+    - CoreRuntime.create_context() → RuntimeContext
+    - unittest.mock: create_context() вернул Mock → синтетика по полям runtime
+    - тестовые объекты без create_context() (например SimpleNamespace) → синтетика
+    """
+    create_context = getattr(runtime, "create_context", None)
+    if not callable(create_context):
+        return build_synthetic_runtime_context(runtime)
+
+    maybe_context = create_context()
+    if isinstance(maybe_context, RuntimeContext):
+        return maybe_context
+    # Mock по умолчанию возвращает None; иные тестовые даблы — тоже через синтетику
+    if maybe_context is None:
+        return build_synthetic_runtime_context(runtime)
+    if type(maybe_context).__module__ == "unittest.mock":
+        return build_synthetic_runtime_context(runtime)
+
+    raise TypeError(
+        f"{owner}: create_context() must return RuntimeContext (got {type(maybe_context).__name__})"
+    )

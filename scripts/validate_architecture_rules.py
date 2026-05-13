@@ -3,6 +3,7 @@ Architecture dependency report for the core/modules/plugins split.
 
 The script is intentionally conservative:
 - it reports runtime imports from ``core`` into ``modules``;
+- it reports runtime imports from ``core`` into ``app``;
 - it reports runtime imports from ``modules`` into ``plugins``;
 - it reports runtime imports from ``modules`` into legacy ``core`` domains
     (``core.agent``, ``core.credentials``).
@@ -34,6 +35,7 @@ class ImportViolation:
 @dataclass
 class ArchitectureReport:
     core_to_modules: list[ImportViolation] = field(default_factory=list)
+    core_to_app: list[ImportViolation] = field(default_factory=list)
     modules_to_plugins: list[ImportViolation] = field(default_factory=list)
     plugins_to_modules: list[ImportViolation] = field(default_factory=list)
     modules_to_legacy_core: list[ImportViolation] = field(default_factory=list)
@@ -41,6 +43,7 @@ class ArchitectureReport:
     def has_violations(self) -> bool:
         return bool(
             self.core_to_modules
+            or self.core_to_app
             or self.modules_to_plugins
             or self.plugins_to_modules
             or self.modules_to_legacy_core
@@ -50,10 +53,12 @@ class ArchitectureReport:
         legacy_count = len(self.modules_to_legacy_core)
         return {
             "core_to_modules": len(self.core_to_modules),
+            "core_to_app": len(self.core_to_app),
             "modules_to_plugins": len(self.modules_to_plugins),
             "plugins_to_modules": len(self.plugins_to_modules),
             "modules_to_legacy_core": legacy_count,
             "total": len(self.core_to_modules)
+            + len(self.core_to_app)
             + len(self.modules_to_plugins)
             + len(self.plugins_to_modules)
             + legacy_count,
@@ -83,6 +88,8 @@ def _classify_target(module_name: str | None) -> str | None:
         return None
     if module_name.startswith("modules"):
         return "modules"
+    if module_name.startswith("app"):
+        return "app"
     if module_name.startswith("plugins"):
         return "plugins"
     if module_name.startswith("core.agent") or module_name.startswith(
@@ -170,6 +177,16 @@ class _ImportCollector:
                     kind="core_to_modules",
                 )
             )
+        elif source_kind == "core" and target_kind == "app":
+            self.imports.append(
+                ImportViolation(
+                    source=source_module,
+                    target=target_module or "",
+                    module=target_module or "",
+                    line=line,
+                    kind="core_to_app",
+                )
+            )
         elif source_kind == "modules" and target_kind == "plugins":
             self.imports.append(
                 ImportViolation(
@@ -218,6 +235,8 @@ def scan_architecture(root: Path) -> ArchitectureReport:
             for violation in collector.collect():
                 if violation.kind == "core_to_modules":
                     report.core_to_modules.append(violation)
+                elif violation.kind == "core_to_app":
+                    report.core_to_app.append(violation)
                 elif violation.kind == "modules_to_plugins":
                     report.modules_to_plugins.append(violation)
                 elif violation.kind == "plugins_to_modules":
@@ -265,6 +284,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Root: {args.root}")
     print(f"Total violations: {summary['total']}")
     print(f"  core -> modules runtime imports: {summary['core_to_modules']}")
+    print(f"  core -> app runtime imports: {summary['core_to_app']}")
     print(f"  modules -> plugins runtime imports: {summary['modules_to_plugins']}")
     print(f"  plugins -> modules runtime imports: {summary['plugins_to_modules']}")
     print(
@@ -272,6 +292,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     _print_section("core -> modules", report.core_to_modules)
+    _print_section("core -> app", report.core_to_app)
     _print_section("modules -> plugins", report.modules_to_plugins)
     _print_section("plugins -> modules", report.plugins_to_modules)
     _print_section("modules -> legacy core domain", report.modules_to_legacy_core)

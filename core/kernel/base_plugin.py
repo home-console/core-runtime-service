@@ -12,13 +12,12 @@ from __future__ import annotations
 import os
 from abc import abstractmethod
 from dataclasses import dataclass, field
-from types import SimpleNamespace
 from typing import Any, Awaitable, Callable, Literal, Optional, Protocol, cast, runtime_checkable
 
 from sdk.metadata import PluginMetadata as SDKPluginMetadata
 from sdk.plugin import BasePlugin as SDKBasePlugin
 
-from core.runtime.runtime_context import RuntimeContext
+from core.runtime.runtime_context import RuntimeContext, resolve_runtime_context_for_host
 from core.service._acl import PreloadResourceFunc
 from core.service.models import ServiceAuthConfig
 import logging
@@ -157,52 +156,19 @@ class BasePlugin(SDKBasePlugin):
             self.context = runtime_or_context
             return
 
-        # Backward compatibility for lightweight tests/dummy plugins.
-        if runtime_or_context is None:
-            self.context = SimpleNamespace(
-                storage=None,
-                services=None,
-                http=None,
-                capabilities=None,
-                operations=None,
-                vault=None,
-                state=None,
-            )
-            return
-
         self.runtime = cast(Any, runtime_or_context)
-        create_context = getattr(runtime_or_context, "create_context", None)
-        if callable(create_context):
-            self.context = create_context()
-            return
-
-        # Backward compatibility for lightweight tests/mocks without create_context().
-        self.context = RuntimeContext(
-            storage=getattr(runtime_or_context, "storage", None),
-            vault=getattr(runtime_or_context, "vault", None),
-            services=cast(Any, getattr(runtime_or_context, "service_registry", None)),
-            http=cast(Any, getattr(runtime_or_context, "http", None)),
-            capabilities=cast(
-                Any,
-                getattr(
-                    runtime_or_context,
-                    "capability_registry",
-                    getattr(runtime_or_context, "capabilities", None),
-                ),
-            ),
-            operations=cast(Any, getattr(runtime_or_context, "operations", None)),
-            state=getattr(
-                runtime_or_context,
-                "state_engine",
-                getattr(runtime_or_context, "state", None),
-            ),
+        self.context = resolve_runtime_context_for_host(
+            runtime_or_context, owner=self.__class__.__name__
         )
 
     def _runtime_api(self) -> Any:
         runtime_obj = self.runtime
         if runtime_obj is None:
             raise RuntimeError("Plugin runtime API not available")
-        return getattr(runtime_obj, "api", None) or runtime_obj
+        runtime_api = getattr(runtime_obj, "api", None)
+        if runtime_api is None:
+            raise RuntimeError("Plugin runtime API (.api) not available")
+        return runtime_api
 
     async def register_service(
         self,

@@ -15,7 +15,7 @@ from datetime import datetime, timedelta, UTC
 from contextlib import asynccontextmanager
 import hashlib
 
-from cryptography.hazmat.primitives.kdf.argon2 import Argon2id
+from argon2.low_level import Type, hash_secret_raw
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.backends import default_backend
@@ -115,23 +115,20 @@ class VaultSession:
             if not passphrase:
                 raise ValueError("passphrase cannot be empty")
             
-            # Derive master key using Argon2id
-            #
-            # cryptography's Argon2id KDF uses:
-            # - iterations (time cost)
-            # - lanes (parallelism)
-            # - memory_cost (KiB)
-            kdf = Argon2id(
-                length=32,
-                salt=self._derivation_salt,
-                iterations=self._argon2_time,
-                lanes=self._argon2_parallel,
+            # Argon2id via argon2-cffi (same stack as modules.security.crypto).
+            # hash_secret_raw expects bytes/str for the secret buffer, not bytearray.
+            passphrase_bytes = passphrase.encode("utf-8")
+            master_key_bytes = hash_secret_raw(
+                passphrase_bytes,
+                self._derivation_salt,
+                time_cost=self._argon2_time,
                 memory_cost=self._argon2_memory,
+                parallelism=self._argon2_parallel,
+                hash_len=32,
+                type=Type.ID,
             )
-            
-            master_key_bytes = kdf.derive(
-                passphrase.encode('utf-8')
-            )
+            passphrase_bytes = b"\x00" * len(passphrase_bytes)
+            del passphrase_bytes
             
             # Store in secure buffer (mlock + zeroize)
             self._master_key = SecureBuffer(master_key_bytes)

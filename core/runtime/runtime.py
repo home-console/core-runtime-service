@@ -23,11 +23,6 @@ from core.runtime.app_config import AppExtensionConfig
 from core.runtime.monitor import RuntimeMonitor
 from core.runtime.runtime_context import RuntimeContext
 from core.runtime.services import CoreServices
-from app.orchestration import NullOrchestrationBackend, OrchestrationService
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from app.orchestration import OrchestrationService
 
 
 class CoreRuntime(RuntimeLifecycleMixin):
@@ -55,7 +50,7 @@ class CoreRuntime(RuntimeLifecycleMixin):
         capability_namespace_permission_checker: Optional[Any] = None,
         trust_level_to_privilege_mapper: Optional[Any] = None,
         critical_state_prefixes: Optional[list[str]] = None,
-        orchestration_service: Optional[OrchestrationService] = None,
+        orchestration_service: Optional[Any] = None,
     ):
         """
         Инициализация Core Runtime.
@@ -170,13 +165,9 @@ class CoreRuntime(RuntimeLifecycleMixin):
             metrics_collector_delegate=None,  # Выставляется из app при необходимости
         )
 
-        # Orchestration service — создаётся в app-layer, ядро только хранит ссылку.
-        # Если None, используется NullOrchestrationBackend (отключенная оркестрация).
-        self.orchestration_service: Optional["OrchestrationService"] = orchestration_service
-        if self.orchestration_service is None:
-            backend_mode = str(getattr(config, "orchestration_backend", "none")).lower()
-            if backend_mode == "none":
-                self.orchestration_service = OrchestrationService(NullOrchestrationBackend())
+        # Orchestration service — собирается в app/bootstrap.
+        # Core не выбирает backend и не импортирует app-слой.
+        self.orchestration_service: Optional[Any] = orchestration_service
 
         # Backward-compatible runtime worker task handle (used in tests and lifecycle helpers).
         self._worker_task: Optional[asyncio.Task[Any]] = None

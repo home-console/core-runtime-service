@@ -29,6 +29,7 @@ from modules.credentials import (
     CredentialMetadata,
     CredentialWithSecretResponse,
 )
+from core.runtime.runtime_context import RuntimeContext
 
 
 class MockRuntime:
@@ -44,6 +45,17 @@ class MockRuntime:
         self.vault = None
         self.state_engine = MagicMock()
         self._services = {}
+
+    def create_context(self) -> RuntimeContext:
+        return RuntimeContext(
+            storage=self.storage,
+            services=self.service_registry,
+            http=self.http,
+            capabilities=self.capability_registry,
+            operations=self.operations,
+            vault=self.vault,
+            state=self.state_engine,
+        )
 
     async def register_service(self, name, func, **kwargs):
         """Register a service."""

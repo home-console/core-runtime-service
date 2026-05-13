@@ -1,8 +1,8 @@
 from unittest.mock import AsyncMock
+from types import SimpleNamespace
 
 import pytest
 from core.runtime.config import Config
-from app.orchestration import NullOrchestrationBackend, OrchestrationService
 from core.runtime import CoreRuntime
 from core.runtime.runtime import CoreRuntime
 from core.runtime.runtime_module import RuntimeModule
@@ -115,12 +115,20 @@ async def test_get_metrics(memory_adapter, monkeypatch):
 async def test_runtime_uses_configured_null_orchestration_backend(
     memory_adapter, monkeypatch
 ):
-    """Runtime должен уметь отключать orchestration через config."""
+    """Runtime не должен сам собирать orchestration backend (делает app/bootstrap)."""
     monkeypatch.setenv("TEST_MODE", "1")
     config = Config(orchestration_backend="none")
     runtime = CoreRuntime(memory_adapter, config=config)
 
-    assert isinstance(runtime.orchestration_service._backend, NullOrchestrationBackend)
+    assert runtime.orchestration_service is None
+
+
+@pytest.mark.asyncio
+async def test_runtime_accepts_injected_orchestration_service(memory_adapter, monkeypatch):
+    monkeypatch.setenv("TEST_MODE", "1")
+    orch = SimpleNamespace(kind="test_orchestration")
+    runtime = CoreRuntime(memory_adapter, orchestration_service=orch)
+    assert runtime.orchestration_service is orch
 
 
 @pytest.mark.asyncio

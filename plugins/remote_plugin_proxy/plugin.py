@@ -146,7 +146,9 @@ class RemotePluginProxy(BasePlugin):
                 )
             except Exception:
                 pass
-            return
+            raise RuntimeError(
+                f"RemotePluginProxy load failed: metadata fetch error: {exc}"
+            ) from exc
 
         try:
             await self._http_call("/plugin/load", method="POST")
@@ -159,6 +161,9 @@ class RemotePluginProxy(BasePlugin):
                 )
             except Exception:
                 pass
+            raise RuntimeError(
+                f"RemotePluginProxy load failed: remote /plugin/load error: {exc}"
+            ) from exc
 
         services = (
             self._metadata.get("services", []) if isinstance(self._metadata, dict) else []
@@ -238,4 +243,3 @@ class RemotePluginProxy(BasePlugin):
 
 
 __all__ = ["RemotePluginProxy"]
-

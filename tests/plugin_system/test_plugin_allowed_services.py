@@ -4,6 +4,7 @@ from core.exceptions import ForbiddenError
 from core.kernel.base_plugin import BasePlugin
 from core.kernel.plugin_contract import PluginContext, PluginManifest
 from core.kernel.plugin_sandbox import PluginSandbox
+from core.runtime.runtime_context import RuntimeContext
 from modules.plugins.isolation import ServiceProxy, StorageProxy
 
 from unittest.mock import AsyncMock, Mock
@@ -30,12 +31,24 @@ async def test_plugin_services_proxy_uses_manifest_allowed_services():
     mock_runtime.plugin_storage_proxy_cls = StorageProxy
     mock_runtime.plugin_service_proxy_cls = ServiceProxy
     mock_runtime.plugin_default_allowed_services = ["logger.log"]
+    mock_runtime.http = Mock()
+    mock_runtime.operations = Mock()
+    mock_runtime.capability_registry = Mock()
+    mock_runtime.create_context = Mock(
+        return_value=RuntimeContext(
+            storage=mock_storage,
+            services=mock_service_registry,
+            http=mock_runtime.http,
+            capabilities=mock_runtime.capability_registry,
+            operations=mock_runtime.operations,
+        )
+    )
 
     # ServiceProxy will call: service_registry.call(service_name, **kwargs)
     mock_service_registry.call = AsyncMock(return_value={"ok": True})
     mock_service_registry.has = AsyncMock(return_value=True)
 
-    plugin = PluginForAllowedServices(None)
+    plugin = PluginForAllowedServices(mock_runtime)
     manifest = PluginManifest.from_dict(
         {
             "name": "test_plugin",
@@ -68,4 +81,3 @@ async def test_plugin_services_proxy_uses_manifest_allowed_services():
     assert plugin.context is not None
     with pytest.raises(ForbiddenError):
         await plugin.context.services.call("disallowed.service", x=1)  # type: ignore[union-attr]
-

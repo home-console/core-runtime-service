@@ -3,6 +3,20 @@ import pytest
 from core.kernel.base_plugin import BasePlugin, PluginMetadata
 from core.kernel.plugin_manager import PluginManager
 from core.kernel.plugin_registry import PluginState
+from core.runtime.runtime_context import RuntimeContext
+
+
+def _test_context() -> RuntimeContext:
+    class _Dummy:
+        pass
+
+    return RuntimeContext(
+        storage=_Dummy(),
+        services=_Dummy(),
+        http=_Dummy(),
+        capabilities=_Dummy(),
+        operations=_Dummy(),
+    )
 
 
 class DummyPlugin(BasePlugin):
@@ -42,7 +56,7 @@ class BadStartPlugin(DummyPlugin):
 @pytest.mark.asyncio
 async def test_load_start_stop_unload():
     pm = PluginManager()
-    dp = DummyPlugin(None, name='p1')
+    dp = DummyPlugin(_test_context(), name='p1')
     await pm.load_plugin(dp)
     assert await pm.get_plugin_state('p1') == PluginState.LOADED
 
@@ -59,8 +73,8 @@ async def test_load_start_stop_unload():
 @pytest.mark.asyncio
 async def test_dependency_check():
     pm = PluginManager()
-    p_a = DummyPlugin(None, name='a')
-    p_b = DummyPlugin(None, name='b', deps=['a'])
+    p_a = DummyPlugin(_test_context(), name='a')
+    p_b = DummyPlugin(_test_context(), name='b', deps=['a'])
 
     # loading b before a should fail
     with pytest.raises(ValueError):
@@ -74,7 +88,7 @@ async def test_dependency_check():
 @pytest.mark.asyncio
 async def test_load_error_sets_state():
     pm = PluginManager()
-    bad = BadLoadPlugin(None, name='bad')
+    bad = BadLoadPlugin(_test_context(), name='bad')
     with pytest.raises(RuntimeError):
         await pm.load_plugin(bad)
     assert await pm.get_plugin_state('bad') == PluginState.ERROR
@@ -84,8 +98,8 @@ async def test_load_error_sets_state():
 async def test_start_plugin_autostarts_dependency():
     pm = PluginManager()
 
-    dep = DummyPlugin(None, name='dep')
-    child = DummyPlugin(None, name='child', deps=['dep'])
+    dep = DummyPlugin(_test_context(), name='dep')
+    child = DummyPlugin(_test_context(), name='child', deps=['dep'])
 
     await pm.load_plugin(dep)
     await pm.load_plugin(child)
@@ -103,8 +117,8 @@ async def test_start_plugin_autostarts_dependency():
 async def test_start_plugin_blocked_when_dependency_not_ready():
     pm = PluginManager()
 
-    dep = BadStartPlugin(None, name='dep')
-    child = DummyPlugin(None, name='child', deps=['dep'])
+    dep = BadStartPlugin(_test_context(), name='dep')
+    child = DummyPlugin(_test_context(), name='child', deps=['dep'])
 
     await pm.load_plugin(dep)
     await pm.load_plugin(child)
@@ -117,5 +131,4 @@ async def test_start_plugin_blocked_when_dependency_not_ready():
     assert isinstance(reason, dict)
     assert 'dependency_not_ready' in reason
     assert reason['dependency_not_ready'][0]['dependency'] == 'dep'
-
 

@@ -56,7 +56,9 @@ class LoggerModule(RuntimeModule):
         # - json — структурированный (для production / ELK / Loki)
         cfg = getattr(self.runtime, "_config", None)
         cfg_fmt = getattr(cfg, "log_format", None) if cfg is not None else None
-        env_fmt = os.getenv("RUNTIME_LOG_FORMAT") or os.getenv("LOG_FORMAT")
+        # Для unit-тестовых runtime без Config не читаем глобальные env-переменные,
+        # чтобы формат логов оставался детерминированным.
+        env_fmt = None if cfg is None else (os.getenv("RUNTIME_LOG_FORMAT") or os.getenv("LOG_FORMAT"))
         self._log_format = (cfg_fmt or env_fmt or "text").lower()
         if self._log_format not in ("text", "json"):
             self._log_format = "text"
