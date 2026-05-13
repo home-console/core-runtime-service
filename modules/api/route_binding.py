@@ -113,21 +113,13 @@ def _normalize_api_error(
 _LEGACY_PREFIX = "/api/v1"
 
 
-def _resolve_prefixes(runtime: Any) -> tuple[str, str]:
-    """Возвращает (api_prefix, ws_prefix) из конфига рантайма."""
+def _resolve_api_prefix(runtime: Any) -> str:
+    """Префикс HTTP API (и WebSocket на том же дереве путей, что и REST)."""
     cfg = getattr(runtime, "_config", None)
     raw_api = getattr(cfg, "api_url_prefix", _LEGACY_PREFIX) if cfg is not None else _LEGACY_PREFIX
     if isinstance(raw_api, str) and raw_api.strip():
-        api_prefix = raw_api.rstrip("/")
-    else:
-        api_prefix = _LEGACY_PREFIX
-
-    _ws_raw = getattr(cfg, "ws_url_prefix", "") if cfg is not None else ""
-    if isinstance(_ws_raw, str) and _ws_raw.strip():
-        ws_prefix = _ws_raw.rstrip("/")
-    else:
-        ws_prefix = api_prefix
-    return api_prefix, ws_prefix
+        return raw_api.rstrip("/")
+    return _LEGACY_PREFIX
 
 
 def _repath(path: str, prefix: str) -> str:
@@ -146,7 +138,7 @@ def bind_routes(runtime: Any, app: Any) -> None:
     Phase 3: syncs HttpEndpoint.auth_config → ServiceAuthConfig (Variant B).
     """
     endpoints = runtime.http.list()
-    api_prefix, ws_prefix = _resolve_prefixes(runtime)
+    api_prefix = _resolve_api_prefix(runtime)
 
     # Phase 3 (Variant B): sync HttpEndpoint.auth_config → ServiceAuthConfig.
     # This ensures WS endpoints and any service-level auth lookups see the
@@ -198,7 +190,9 @@ def bind_routes(runtime: Any, app: Any) -> None:
 
     for ep in ws_endpoints:
         handler = _make_ws_handler(runtime, ep)
-        mounted_path = _repath(ep.path, ws_prefix)
+        # WS маршруты маунтятся с тем же api_url_prefix, что и HTTP: иначе клиенты,
+        # открывающие ws по пути из реестра (/api/v1/.../ws), попадают в 404.
+        mounted_path = _repath(ep.path, api_prefix)
         route_name = f"ws_{mounted_path.replace('/', '_').lstrip('_')}"
         # Извлекаем path параметры из пути для передачи в handler
         path_params = re.findall(r"\{(\w+)\}", ep.path)

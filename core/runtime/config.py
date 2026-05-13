@@ -103,12 +103,13 @@ class Config:
     # RUNTIME_MODULE_PATH_PREFIX: префикс для discovery модулей (default "modules")
     module_path_prefix: str = "modules"
     
-    # URL-префиксы.
-    # Все HTTP-роуты при маунте получат этот префикс вместо захардкоженного /api/v1.
-    # Пример: RUNTIME_API_PREFIX=/api/v2 → /api/v2/admin/..., /api/v2/auth/...
-    # WS-роуты берут тот же префикс, если RUNTIME_WS_PREFIX не задан отдельно.
+    # URL-префикс HTTP API (и WebSocket на том же дереве путей).
+    # В HttpEndpoint пути задаются с литералом /api/v1/...; при маунте /api/v1
+    # заменяется на api_url_prefix (см. modules.api.route_binding._repath).
     api_url_prefix: str = "/api/v1"
-    ws_url_prefix: str = ""  # пусто = совпадает с api_url_prefix
+    # Устарело для маунта маршрутов: WebSocket вешается на api_url_prefix (как REST).
+    # Поле оставлено для совместимости .env; значение не участвует в bind_routes.
+    ws_url_prefix: str = ""
 
     # Marketplace
     # Default registry index URL (e.g. "https://marketplace.homeconsole.dev/registry/index.json")
