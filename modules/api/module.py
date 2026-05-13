@@ -222,14 +222,15 @@ class ApiModule(RuntimeModule):
         self._build_app(runtime)
         await self._log(runtime, "info", "API: app built")
 
-        from modules.api.route_binding import bind_routes
+        from modules.api.route_binding import bind_routes, endpoint_mounted_path
+
         bind_routes(runtime, self.app)
         await self._log(runtime, "info", "API: routes bound")
 
         # Log registered WebSocket endpoints for easy debugging
         ws_eps = [ep for ep in runtime.http.list() if ep.websocket]
         if ws_eps:
-            ws_paths = ", ".join(ep.path for ep in ws_eps)
+            ws_paths = ", ".join(endpoint_mounted_path(runtime, ep) for ep in ws_eps)
             await self._log(runtime, "info", f"[API] WebSocket endpoints: {ws_paths}")
 
         api_host = os.getenv("API_HOST", "0.0.0.0")

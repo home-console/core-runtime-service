@@ -113,13 +113,33 @@ def _normalize_api_error(
 _LEGACY_PREFIX = "/api/v1"
 
 
-def _resolve_api_prefix(runtime: Any) -> str:
-    """Префикс HTTP API (и WebSocket на том же дереве путей, что и REST)."""
+def resolve_route_prefixes(runtime: Any) -> tuple[str, str]:
+    """
+    Префиксы маунта: (HTTP API, WebSocket).
+
+    HTTP: литерал /api/v1 в HttpEndpoint заменяется на api_url_prefix.
+    WebSocket: тот же литерал заменяется на ws_url_prefix (отдельное дерево,
+    по умолчанию /ws). Пути без префикса /api/v1 не переписываются.
+    """
     cfg = getattr(runtime, "_config", None)
     raw_api = getattr(cfg, "api_url_prefix", _LEGACY_PREFIX) if cfg is not None else _LEGACY_PREFIX
     if isinstance(raw_api, str) and raw_api.strip():
-        return raw_api.rstrip("/")
-    return _LEGACY_PREFIX
+        api_prefix = raw_api.rstrip("/")
+    else:
+        api_prefix = _LEGACY_PREFIX
+
+    raw_ws = getattr(cfg, "ws_url_prefix", "/ws") if cfg is not None else "/ws"
+    if isinstance(raw_ws, str) and raw_ws.strip():
+        ws_prefix = raw_ws.rstrip("/")
+    else:
+        ws_prefix = "/ws"
+    return api_prefix, ws_prefix
+
+
+def endpoint_mounted_path(runtime: Any, ep: HttpEndpoint) -> str:
+    """Фактический path FastAPI после bind (учёт api_url_prefix / ws_url_prefix)."""
+    api_prefix, ws_prefix = resolve_route_prefixes(runtime)
+    return _repath(ep.path, ws_prefix if ep.websocket else api_prefix)
 
 
 def _repath(path: str, prefix: str) -> str:
@@ -138,7 +158,7 @@ def bind_routes(runtime: Any, app: Any) -> None:
     Phase 3: syncs HttpEndpoint.auth_config → ServiceAuthConfig (Variant B).
     """
     endpoints = runtime.http.list()
-    api_prefix = _resolve_api_prefix(runtime)
+    api_prefix, ws_prefix = resolve_route_prefixes(runtime)
 
     # Phase 3 (Variant B): sync HttpEndpoint.auth_config → ServiceAuthConfig.
     # This ensures WS endpoints and any service-level auth lookups see the
@@ -190,9 +210,8 @@ def bind_routes(runtime: Any, app: Any) -> None:
 
     for ep in ws_endpoints:
         handler = _make_ws_handler(runtime, ep)
-        # WS маршруты маунтятся с тем же api_url_prefix, что и HTTP: иначе клиенты,
-        # открывающие ws по пути из реестра (/api/v1/.../ws), попадают в 404.
-        mounted_path = _repath(ep.path, api_prefix)
+        # WS — отдельное дерево путей (ws_url_prefix, по умолчанию /ws).
+        mounted_path = _repath(ep.path, ws_prefix)
         route_name = f"ws_{mounted_path.replace('/', '_').lstrip('_')}"
         # Извлекаем path параметры из пути для передачи в handler
         path_params = re.findall(r"\{(\w+)\}", ep.path)
@@ -264,7 +283,7 @@ def bind_routes(runtime: Any, app: Any) -> None:
         else:
             app.websocket(mounted_path, name=route_name)(handler)
 
-    _install_openapi_schema(app, ws_endpoints)
+    _install_openapi_schema(app, ws_endpoints, ws_prefix)
 
 
 def _make_api_handler(runtime: Any, endpoint: Any):
@@ -798,7 +817,9 @@ async def _resolve_ws_context(runtime: Any, websocket: WebSocket) -> Optional[An
     return None
 
 
-def _install_openapi_schema(app: Any, ws_endpoints: list | None = None) -> None:
+def _install_openapi_schema(
+    app: Any, ws_endpoints: list | None, ws_prefix: str
+) -> None:
     _ws_endpoints = list(ws_endpoints or [])
 
     def custom_openapi():
@@ -830,7 +851,7 @@ def _install_openapi_schema(app: Any, ws_endpoints: list | None = None) -> None:
         if "paths" not in openapi_schema:
             openapi_schema["paths"] = {}
         for ep in _ws_endpoints:
-            ws_path = ep.path
+            ws_path = _repath(ep.path, ws_prefix)
             description = ep.description or ""
             tags = ep.tags or ["websocket"]
             if "websocket" not in tags:

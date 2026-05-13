@@ -21,6 +21,7 @@ from modules.plugins import PluginState
 from core.adapters.storage_errors import STORAGE_BOUNDARY_ERRORS
 from core.observability.logger_helper import debug
 from core.kernel.plugin_loader import PluginManifestLoader
+from modules.api.route_binding import endpoint_mounted_path
 logger = logging.getLogger(__name__)
 
 
@@ -256,6 +257,7 @@ async def list_http_endpoints(runtime: Any) -> List[Dict[str, Any]]:
     return [
         {
             "path": ep.path,
+            "mounted_path": endpoint_mounted_path(runtime, ep),
             "method": ep.method,
             "websocket": ep.websocket,
             "service": ep.service,
@@ -272,6 +274,7 @@ async def list_ws_endpoints(runtime: Any) -> List[Dict[str, Any]]:
     return [
         {
             "path": ep.path,
+            "mounted_path": endpoint_mounted_path(runtime, ep),
             "service": ep.service,
             "description": ep.description,
             "tags": ep.tags or [],

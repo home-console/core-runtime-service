@@ -161,6 +161,9 @@ class TestFailClosedWithAuthConfig:
         # Не должно бросать
         bind_routes(runtime, app)
 
+        routes = [r.path for r in app.routes]
+        assert "/ws/admin/ssh/ws/{session_id}" in routes
+
     def test_mixed_http_and_ws_all_with_auth_binds(self):
         """Тест: mix HTTP + WS, все с auth_config → успешно."""
         eps = [
@@ -189,24 +192,32 @@ class TestFailClosedWithAuthConfig:
         assert "/api/v1/create" in routes
 
 
-class TestWebSocketSharesApiPrefix:
-    """WS маунтится под тем же api_url_prefix, что и HTTP (не под отдельным ws_url_prefix)."""
+class TestWebSocketSeparateMountPrefix:
+    """WebSocket маунтится под ws_url_prefix, HTTP — под api_url_prefix."""
 
-    def test_ws_path_follows_runtime_api_prefix_not_ws_prefix(self):
-        ep = HttpEndpoint(
+    def test_ws_uses_ws_prefix_independent_of_api_prefix(self):
+        http_ep = HttpEndpoint(
+            method="GET",
+            path="/api/v1/status",
+            service="test.status",
+            description="",
+            auth_config=EndpointAuthConfig(public=True),
+        )
+        ws_ep = HttpEndpoint(
             path="/api/v1/admin/ssh/ws/{session_id}",
             service="admin.v1.ssh.ws",
             websocket=True,
             description="SSH WS",
             auth_config=EndpointAuthConfig(required_scopes=["admin.write"]),
         )
-        runtime = _make_mock_runtime(ep)
+        runtime = _make_mock_runtime(http_ep, ws_ep)
         runtime._config = SimpleNamespace(
             api_url_prefix="/api/v2",
-            ws_url_prefix="/ws",
+            ws_url_prefix="/live-ws",
         )
         app = FastAPI()
         bind_routes(runtime, app)
         paths = [getattr(r, "path", "") for r in app.routes]
-        assert "/api/v2/admin/ssh/ws/{session_id}" in paths
-        assert not any(p.startswith("/ws/") for p in paths if p)
+        assert "/api/v2/status" in paths
+        assert "/live-ws/admin/ssh/ws/{session_id}" in paths
+        assert "/api/v2/admin/ssh/ws/{session_id}" not in paths

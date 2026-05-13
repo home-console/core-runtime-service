@@ -166,12 +166,14 @@ async def test_websocket_inspector_visibility(memory_adapter):
     assert len(http_eps) == 1
     assert http_eps[0]["websocket"] is False
     assert http_eps[0]["method"] == "POST"
-    
+    assert http_eps[0]["mounted_path"] == "/api/test"
+
     # Проверяем WebSocket endpoint
     ws_eps = [ep for ep in endpoints if ep["path"] == "/ws/test"]
     assert len(ws_eps) == 1
     assert ws_eps[0]["websocket"] is True
     assert ws_eps[0]["method"] is None
+    assert ws_eps[0]["mounted_path"] == "/ws/test"
     assert "websocket" in ws_eps[0]["tags"]
 
 

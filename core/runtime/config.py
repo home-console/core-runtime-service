@@ -103,13 +103,11 @@ class Config:
     # RUNTIME_MODULE_PATH_PREFIX: префикс для discovery модулей (default "modules")
     module_path_prefix: str = "modules"
     
-    # URL-префикс HTTP API (и WebSocket на том же дереве путей).
-    # В HttpEndpoint пути задаются с литералом /api/v1/...; при маунте /api/v1
-    # заменяется на api_url_prefix (см. modules.api.route_binding._repath).
+    # URL-префикс HTTP API: литерал /api/v1 в HttpEndpoint заменяется на api_url_prefix.
     api_url_prefix: str = "/api/v1"
-    # Устарело для маунта маршрутов: WebSocket вешается на api_url_prefix (как REST).
-    # Поле оставлено для совместимости .env; значение не участвует в bind_routes.
-    ws_url_prefix: str = ""
+    # Префикс дерева WebSocket (отдельно от REST). Литерал /api/v1 в путях WS
+    # заменяется на ws_url_prefix (см. modules.api.route_binding).
+    ws_url_prefix: str = "/ws"
 
     # Marketplace
     # Default registry index URL (e.g. "https://marketplace.homeconsole.dev/registry/index.json")
@@ -307,7 +305,9 @@ class Config:
             marketplace_registry_url=str(env.get("MARKETPLACE_REGISTRY_URL", "")).strip(),
             runtime_version=str(env.get("RUNTIME_VERSION", "0.1.0")).strip() or "0.1.0",
             api_url_prefix=str(env.get("RUNTIME_API_PREFIX", "/api/v1")).strip() or "/api/v1",
-            ws_url_prefix=str(env.get("RUNTIME_WS_PREFIX", "")).strip(),
+            ws_url_prefix=(
+                str(env.get("RUNTIME_WS_PREFIX", "/ws")).strip() or "/ws"
+            ),
         )
         config.validate()
         return config
