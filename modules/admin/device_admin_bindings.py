@@ -4,6 +4,15 @@ import logging
 from typing import Any
 
 from core.http.models import EndpointAuthConfig, HttpEndpoint
+from modules.api.schemas import (
+    ApiResponse,
+    DeviceDto,
+    DeviceMappingDto,
+    ExternalDeviceDto,
+    OkErrorResponse,
+    SetDeviceStateRequest,
+)
+from typing import List
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +31,8 @@ async def register_device_admin_bindings(context: Any) -> list[str]:
                 service="admin.v1.devices.list",
                 description="List internal devices",
                 auth_config=_admin_read,
+                tags=["Devices"],
+                response_model=ApiResponse[List[DeviceDto]],
             ),
             HttpEndpoint(
                 method="GET",
@@ -29,6 +40,8 @@ async def register_device_admin_bindings(context: Any) -> list[str]:
                 service="admin.v1.devices.get",
                 description="Get device by id",
                 auth_config=_admin_read,
+                tags=["Devices"],
+                response_model=ApiResponse[DeviceDto],
             ),
             HttpEndpoint(
                 method="GET",
@@ -36,6 +49,8 @@ async def register_device_admin_bindings(context: Any) -> list[str]:
                 service="admin.v1.devices.list_external",
                 description="List external devices by provider",
                 auth_config=_admin_read,
+                tags=["Devices"],
+                response_model=ApiResponse[List[ExternalDeviceDto]],
             ),
             HttpEndpoint(
                 method="GET",
@@ -43,6 +58,8 @@ async def register_device_admin_bindings(context: Any) -> list[str]:
                 service="admin.v1.devices.list_external",
                 description="List all external devices (optional ?provider=<provider> to filter)",
                 auth_config=_admin_read,
+                tags=["Devices"],
+                response_model=ApiResponse[List[ExternalDeviceDto]],
             ),
             HttpEndpoint(
                 method="GET",
@@ -50,6 +67,8 @@ async def register_device_admin_bindings(context: Any) -> list[str]:
                 service="admin.v1.devices.list_mappings",
                 description="List device mappings",
                 auth_config=_admin_read,
+                tags=["Devices"],
+                response_model=ApiResponse[List[DeviceMappingDto]],
             ),
             HttpEndpoint(
                 method="GET",
@@ -57,6 +76,8 @@ async def register_device_admin_bindings(context: Any) -> list[str]:
                 service="admin.v1.devices.get_external_for_device",
                 description="Get external device payload for an internal device",
                 auth_config=_admin_read,
+                tags=["Devices"],
+                response_model=ApiResponse[ExternalDeviceDto],
             ),
         ]:
             context.http.register(endpoint)
@@ -95,6 +116,9 @@ async def register_device_admin_bindings(context: Any) -> list[str]:
                 service="admin.v1.devices.set_state",
                 description="Set device desired state (proxy to devices.set_state)",
                 auth_config=_admin_write,
+                tags=["Devices"],
+                response_model=OkErrorResponse,
+                request_model=SetDeviceStateRequest,
             )
         )
     except Exception as e:

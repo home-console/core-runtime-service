@@ -5,8 +5,29 @@ import logging
 import os
 from typing import Any
 
+from typing import Any, List
+
 from core.http.models import EndpointAuthConfig, HttpEndpoint
 from core.runtime.runtime_module import RuntimeModule
+from modules.api.schemas import (
+    AgentDto,
+    AgentHealthCheckDto,
+    AgentHeartbeatDto,
+    AgentLogsDto,
+    AgentStatusDto,
+    ApiResponse,
+    BootstrapTokenRequest,
+    ChecksumDto,
+    CreateEnrollmentTokenRequest,
+    DeployAgentRequest,
+    DeploymentMetricsDto,
+    DeploymentStatusDto,
+    EnrollAgentRequest,
+    EnrollmentTokenDto,
+    HeartbeatRequest,
+    OkErrorResponse,
+    SubmitLogsRequest,
+)
 
 try:
     from modules.security import SecretStore
@@ -226,206 +247,184 @@ class AgentControlPlaneModule(RuntimeModule):
         _admin_read = EndpointAuthConfig(required_scopes=["admin.read"])
         _admin_write = EndpointAuthConfig(required_scopes=["admin.write"])
 
-        # Enrollment endpoints
-        self.context.http.register(
-            HttpEndpoint(
-                method="POST",
-                path="/api/v1/admin/agents/enrollment-token",
-                service="admin.agent.create_enrollment_token",
-                description="Create enrollment token for new agent",
-                auth_config=_admin_write,
-            )
-        )
-
-        # Bootstrap token for installer / manual agent installation (HMAC-signed, TTL 10m)
-        self.context.http.register(
-            HttpEndpoint(
-                method="POST",
-                path="/api/v1/admin/agents/bootstrap-token",
-                service="admin.agent.generate_bootstrap_token",
-                description="Generate one-time bootstrap enrollment token for installer",
-                auth_config=_admin_write,
-            )
-        )
-
-        self.context.http.register(
-            HttpEndpoint(
-                method="POST",
-                path="/api/v1/admin/agents/enroll",
-                service="admin.agent.enroll_agent",
-                description="Enroll agent with enrollment token",
-                auth_config=_admin_write,
-            )
-        )
-
-        # Agent registry endpoints
-        self.context.http.register(
-            HttpEndpoint(
-                method="GET",
-                path="/api/v1/admin/agents",
-                service="admin.agent.list_agents",
-                description="List all registered agents",
-                auth_config=_admin_read,
-            )
-        )
-
-        self.context.http.register(
-            HttpEndpoint(
-                method="GET",
-                path="/api/v1/admin/agents/{agent_id}",
-                service="admin.agent.get_agent",
-                description="Get agent details",
-                auth_config=_admin_read,
-            )
-        )
-
-        self.context.http.register(
-            HttpEndpoint(
-                method="POST",
-                path="/api/v1/admin/agents/{agent_id}/deregister",
-                service="admin.agent.deregister_agent",
-                description="Deregister agent",
-                auth_config=_admin_write,
-            )
-        )
-
-        # ==== Deployment Endpoints (TASK 1.1) ====
-        self.context.http.register(
-            HttpEndpoint(
-                method="POST",
-                path="/api/v1/admin/agents/deploy",
-                service="admin.agent.deploy",
-                description="Deploy agent to remote host via SSH",
-                auth_config=_admin_write,
-            )
-        )
-
-        self.context.http.register(
-            HttpEndpoint(
-                method="GET",
-                path="/api/v1/admin/deployments/{deployment_id}",
-                service="admin.agent.get_deployment_status",
-                description="Get agent deployment status",
-                auth_config=_admin_read,
-            )
-        )
-
-        self.context.http.register(
-            HttpEndpoint(
-                method="GET",
-                path="/api/v1/admin/deployments",
-                service="admin.agent.get_deployment_metrics",
-                description="Get deployment metrics and statistics",
-                auth_config=_admin_read,
-            )
-        )
-
-        self.context.http.register(
-            HttpEndpoint(
-                method="POST",
-                path="/api/v1/admin/agents/{agent_id}/heartbeat",
-                service="admin.agent.heartbeat",
-                description="Receive heartbeat from agent",
-                auth_config=_admin_write,
-            )
-        )
-
-        self.context.http.register(
-            HttpEndpoint(
-                method="GET",
-                path="/api/v1/admin/agents/{agent_id}/heartbeat",
-                service="admin.agent.get_heartbeat_status",
-                description="Get heartbeat status for specific agent",
-                auth_config=_admin_read,
-            )
-        )
-
-        self.context.http.register(
-            HttpEndpoint(
-                method="GET",
-                path="/api/v1/admin/agents/health/check",
-                service="admin.agent.check_agents_health",
-                description="Check health of all agents",
-                auth_config=EndpointAuthConfig(public=True),
-            )
-        )
-
-        self.context.http.register(
-            HttpEndpoint(
-                method="GET",
-                path="/api/v1/admin/agents/online",
-                service="admin.agent.list_online_agents",
-                description="List all currently online agents",
-                auth_config=_admin_read,
-            )
-        )
-
-        # Download endpoints (TASK 2.2)
-        # Public: installer runs unauthenticated; admin_access_middleware already
-        # restricts these paths to private-network clients only.
         _public = EndpointAuthConfig(public=True)
-        self.context.http.register(
-            HttpEndpoint(
-                method="GET",
-                path="/api/v1/media/checksum",
-                service="admin.agent.download_checksum",
-                description="Get SHA256 checksum of agent binary",
-                auth_config=_public,
-            )
-        )
 
-        self.context.http.register(
-            HttpEndpoint(
-                method="GET",
-                path="/api/v1/media/download/binary",
-                service="admin.agent.download_binary",
-                description="Stream agent binary to installer",
-                auth_config=_public,
-            )
-        )
-
-        # Capability routing endpoints
-        self.context.http.register(
-            HttpEndpoint(
-                method="GET",
-                path="/api/v1/admin/agents/capabilities/{capability_id}",
-                service="admin.agent.list_agents_providing_capability",
-                description="List agents providing capability",
-                auth_config=_admin_read,
-            )
-        )
-
-        # TASK 3.1: Agent Logs API
-        self.context.http.register(
-            HttpEndpoint(
-                method="POST",
-                path="/api/v1/admin/agents/{agent_id}/logs",
-                service="admin.agent.submit_logs",
-                description="Agent pushes log entries to Core",
-                auth_config=_admin_write,
-            )
-        )
-
-        self.context.http.register(
-            HttpEndpoint(
-                method="GET",
-                path="/api/v1/admin/agents/{agent_id}/logs",
-                service="admin.agent.get_logs",
-                description="Get stored logs for agent",
-                auth_config=_admin_read,
-            )
-        )
-
-        # TASK 3.2: Agent Status endpoint
-        self.context.http.register(
-            HttpEndpoint(
-                method="GET",
-                path="/api/v1/admin/agents/{agent_id}/status",
-                service="admin.agent.get_status",
-                description="Get real-time status of agent",
-                auth_config=_admin_read,
-            )
-        )
+        self.context.http.register(HttpEndpoint(
+            method="POST",
+            path="/api/v1/admin/agents/enrollment-token",
+            service="admin.agent.create_enrollment_token",
+            description="Create enrollment token for new agent",
+            auth_config=_admin_write,
+            tags=["Agents"],
+            response_model=EnrollmentTokenDto,
+            request_model=CreateEnrollmentTokenRequest,
+        ))
+        self.context.http.register(HttpEndpoint(
+            method="POST",
+            path="/api/v1/admin/agents/bootstrap-token",
+            service="admin.agent.generate_bootstrap_token",
+            description="Generate one-time bootstrap enrollment token for installer",
+            auth_config=_admin_write,
+            tags=["Agents"],
+            response_model=EnrollmentTokenDto,
+            request_model=BootstrapTokenRequest,
+        ))
+        self.context.http.register(HttpEndpoint(
+            method="POST",
+            path="/api/v1/admin/agents/enroll",
+            service="admin.agent.enroll_agent",
+            description="Enroll agent with enrollment token",
+            auth_config=_admin_write,
+            tags=["Agents"],
+            response_model=ApiResponse[AgentDto],
+            request_model=EnrollAgentRequest,
+        ))
+        self.context.http.register(HttpEndpoint(
+            method="GET",
+            path="/api/v1/admin/agents",
+            service="admin.agent.list_agents",
+            description="List all registered agents",
+            auth_config=_admin_read,
+            tags=["Agents"],
+            response_model=ApiResponse[List[AgentDto]],
+        ))
+        self.context.http.register(HttpEndpoint(
+            method="GET",
+            path="/api/v1/admin/agents/{agent_id}",
+            service="admin.agent.get_agent",
+            description="Get agent details",
+            auth_config=_admin_read,
+            tags=["Agents"],
+            response_model=ApiResponse[AgentDto],
+        ))
+        self.context.http.register(HttpEndpoint(
+            method="POST",
+            path="/api/v1/admin/agents/{agent_id}/deregister",
+            service="admin.agent.deregister_agent",
+            description="Deregister agent",
+            auth_config=_admin_write,
+            tags=["Agents"],
+            response_model=OkErrorResponse,
+        ))
+        self.context.http.register(HttpEndpoint(
+            method="POST",
+            path="/api/v1/admin/agents/deploy",
+            service="admin.agent.deploy",
+            description="Deploy agent to remote host via SSH",
+            auth_config=_admin_write,
+            tags=["Agents"],
+            response_model=DeploymentStatusDto,
+            request_model=DeployAgentRequest,
+        ))
+        self.context.http.register(HttpEndpoint(
+            method="GET",
+            path="/api/v1/admin/deployments/{deployment_id}",
+            service="admin.agent.get_deployment_status",
+            description="Get agent deployment status",
+            auth_config=_admin_read,
+            tags=["Agents"],
+            response_model=DeploymentStatusDto,
+        ))
+        self.context.http.register(HttpEndpoint(
+            method="GET",
+            path="/api/v1/admin/deployments",
+            service="admin.agent.get_deployment_metrics",
+            description="Get deployment metrics and statistics",
+            auth_config=_admin_read,
+            tags=["Agents"],
+            response_model=DeploymentMetricsDto,
+        ))
+        self.context.http.register(HttpEndpoint(
+            method="POST",
+            path="/api/v1/admin/agents/{agent_id}/heartbeat",
+            service="admin.agent.heartbeat",
+            description="Receive heartbeat from agent",
+            auth_config=_admin_write,
+            tags=["Agents"],
+            response_model=AgentHeartbeatDto,
+            request_model=HeartbeatRequest,
+        ))
+        self.context.http.register(HttpEndpoint(
+            method="GET",
+            path="/api/v1/admin/agents/{agent_id}/heartbeat",
+            service="admin.agent.get_heartbeat_status",
+            description="Get heartbeat status for specific agent",
+            auth_config=_admin_read,
+            tags=["Agents"],
+            response_model=AgentHeartbeatDto,
+        ))
+        self.context.http.register(HttpEndpoint(
+            method="GET",
+            path="/api/v1/admin/agents/health/check",
+            service="admin.agent.check_agents_health",
+            description="Check health of all agents",
+            auth_config=_public,
+            tags=["Agents"],
+            response_model=AgentHealthCheckDto,
+        ))
+        self.context.http.register(HttpEndpoint(
+            method="GET",
+            path="/api/v1/admin/agents/online",
+            service="admin.agent.list_online_agents",
+            description="List all currently online agents",
+            auth_config=_admin_read,
+            tags=["Agents"],
+            response_model=ApiResponse[List[AgentDto]],
+        ))
+        self.context.http.register(HttpEndpoint(
+            method="GET",
+            path="/api/v1/media/checksum",
+            service="admin.agent.download_checksum",
+            description="Get SHA256 checksum of agent binary",
+            auth_config=_public,
+            tags=["Media"],
+            response_model=ChecksumDto,
+        ))
+        self.context.http.register(HttpEndpoint(
+            method="GET",
+            path="/api/v1/media/download/binary",
+            service="admin.agent.download_binary",
+            description="Stream agent binary to installer",
+            auth_config=_public,
+            tags=["Media"],
+        ))
+        self.context.http.register(HttpEndpoint(
+            method="GET",
+            path="/api/v1/admin/agents/capabilities/{capability_id}",
+            service="admin.agent.list_agents_providing_capability",
+            description="List agents providing capability",
+            auth_config=_admin_read,
+            tags=["Agents"],
+            response_model=ApiResponse[List[AgentDto]],
+        ))
+        self.context.http.register(HttpEndpoint(
+            method="POST",
+            path="/api/v1/admin/agents/{agent_id}/logs",
+            service="admin.agent.submit_logs",
+            description="Agent pushes log entries to Core",
+            auth_config=_admin_write,
+            tags=["Agents"],
+            response_model=OkErrorResponse,
+            request_model=SubmitLogsRequest,
+        ))
+        self.context.http.register(HttpEndpoint(
+            method="GET",
+            path="/api/v1/admin/agents/{agent_id}/logs",
+            service="admin.agent.get_logs",
+            description="Get stored logs for agent",
+            auth_config=_admin_read,
+            tags=["Agents"],
+            response_model=AgentLogsDto,
+        ))
+        self.context.http.register(HttpEndpoint(
+            method="GET",
+            path="/api/v1/admin/agents/{agent_id}/status",
+            service="admin.agent.get_status",
+            description="Get real-time status of agent",
+            auth_config=_admin_read,
+            tags=["Agents"],
+            response_model=AgentStatusDto,
+        ))
 
     async def start(self) -> None:
         """Start Agent Control Plane module."""

@@ -5,88 +5,135 @@ HTTP endpoint registrations for AdminModule.
 модуля регистрации.
 """
 
-from typing import Any
+from typing import Any, List
 
 from core.http.models import EndpointAuthConfig, HttpEndpoint
+from modules.api.schemas import (
+    ApiResponse,
+    CredentialDto,
+    DashboardSummaryDto,
+    DeletedResponse,
+    ExecutionAttemptDto,
+    ExecutionDto,
+    ExecutionScheduleDto,
+    HttpEndpointInfoDto,
+    InventorySnapshotDto,
+    MarketplaceCatalogEntryDto,
+    OkErrorResponse,
+    OkResponse,
+    OperationTypeDto,
+    PluginDetailsDto,
+    PluginDto,
+    PluginsDiscoverDto,
+    RuntimeEventDto,
+    RuntimeInfoDto,
+    ServiceDto,
+    SshSessionDto,
+    StorageNamespaceContentsDto,
+    StorageNamespaceDto,
+    SystemHealthDto,
+    TerminalSessionStartDto,
+    WsEndpointInfoDto,
+    CreateCredentialRequest,
+    UpdateCredentialRequest,
+    StartTerminalRequest,
+    IntegrationFlowDto,
+)
 
 
 def register_admin_core_http_endpoints(http_registry: Any) -> None:
     """Register read-only inspector and credentials/admin endpoints."""
     _admin_read = EndpointAuthConfig(required_scopes=["admin.read"])
     _admin_write = EndpointAuthConfig(required_scopes=["admin.write"])
-    inspector_endpoints = [
+
+    # Inspector endpoints — fixed response models per endpoint
+    inspector_typed = [
         (
             "/api/v1/admin/inspector/dashboard",
             "admin.v1.inspector.dashboard",
             "Inspector: dashboard summary",
+            ApiResponse[DashboardSummaryDto],
         ),
         (
             "/api/v1/admin/inspector/runtime",
             "admin.v1.runtime",
             "Inspector: runtime info",
+            ApiResponse[RuntimeInfoDto],
         ),
         (
             "/api/v1/admin/inspector/plugins",
             "admin.v1.plugins",
             "Inspector: list plugins",
+            ApiResponse[List[PluginDto]],
         ),
         (
             "/api/v1/admin/inspector/services",
             "admin.v1.services",
             "Inspector: list services",
+            ApiResponse[List[ServiceDto]],
         ),
         (
             "/api/v1/admin/inspector/http",
             "admin.v1.http",
             "Inspector: list HTTP endpoints",
+            ApiResponse[List[HttpEndpointInfoDto]],
         ),
         (
             "/api/v1/admin/inspector/ws",
             "admin.v1.ws",
             "Inspector: list WebSocket endpoints",
+            ApiResponse[List[WsEndpointInfoDto]],
         ),
         (
             "/api/v1/admin/inspector/events",
             "admin.v1.events",
             "Inspector: list event subscriptions",
+            ApiResponse[List[RuntimeEventDto]],
         ),
         (
             "/api/v1/admin/inspector/storage",
             "admin.v1.storage",
             "Inspector: list storage namespaces",
+            ApiResponse[List[StorageNamespaceDto]],
         ),
         (
             "/api/v1/admin/inspector/operations",
             "admin.v1.inspector.operations",
             "Inspector: available operation types",
+            ApiResponse[List[OperationTypeDto]],
         ),
         (
             "/api/v1/admin/inspector/executions",
             "admin.v1.inspector.executions",
             "Inspector: list execution traces",
+            ApiResponse[List[ExecutionDto]],
         ),
         (
             "/api/v1/admin/inspector/auth",
             "admin.v1.inspector.auth",
             "Inspector: auth flows (OAuth/device auth, etc.)",
+            ApiResponse[List[IntegrationFlowDto]],
         ),
         (
             "/api/v1/admin/inspector/integrations",
             "admin.v1.inspector.integrations",
             "Inspector: integrations (connect/disconnect state, actions)",
+            ApiResponse[List[IntegrationFlowDto]],
         ),
         (
             "/api/v1/admin/inspector/inventory",
             "admin.v1.inspector.inventory",
             "Inspector: devices inventory (items, mappings, external by provider)",
+            ApiResponse[InventorySnapshotDto],
         ),
         (
             "/api/v1/admin/inspector/system_health",
             "admin.v1.inspector.system_health",
             "Inspector: system health (metrics, resource usage)",
+            ApiResponse[SystemHealthDto],
         ),
     ]
-    for path, service, description in inspector_endpoints:
+    for path, service, description, response_model in inspector_typed:
         http_registry.register(
             HttpEndpoint(
                 method="GET",
@@ -94,6 +141,8 @@ def register_admin_core_http_endpoints(http_registry: Any) -> None:
                 service=service,
                 description=description,
                 auth_config=_admin_read,
+                tags=["Inspector"],
+                response_model=response_model,
             )
         )
 
@@ -104,6 +153,8 @@ def register_admin_core_http_endpoints(http_registry: Any) -> None:
             service="admin.v1.inspector.plugins.discover",
             description="Inspector: discover plugins on disk (manifests, load_order)",
             auth_config=_admin_read,
+            tags=["Inspector"],
+            response_model=ApiResponse[PluginsDiscoverDto],
         ),
         HttpEndpoint(
             method="GET",
@@ -111,13 +162,17 @@ def register_admin_core_http_endpoints(http_registry: Any) -> None:
             service="admin.v1.inspector.plugins.get",
             description="Inspector: get single plugin details (loaded + manifest)",
             auth_config=_admin_read,
+            tags=["Inspector"],
+            response_model=ApiResponse[PluginDetailsDto],
         ),
         HttpEndpoint(
             method="GET",
             path="/api/v1/admin/marketplace/catalog",
             service="admin.v1.marketplace.catalog",
-            description="Marketplace: список интеграций (из manifest’ов плагинов)",
+            description="Marketplace: список интеграций (из manifest'ов плагинов)",
             auth_config=_admin_read,
+            tags=["Marketplace"],
+            response_model=ApiResponse[List[MarketplaceCatalogEntryDto]],
         ),
         HttpEndpoint(
             method="GET",
@@ -125,6 +180,8 @@ def register_admin_core_http_endpoints(http_registry: Any) -> None:
             service="admin.v1.storage.get",
             description="Inspector: get storage namespace contents (keys + values)",
             auth_config=_admin_read,
+            tags=["Inspector"],
+            response_model=ApiResponse[StorageNamespaceContentsDto],
         ),
         HttpEndpoint(
             method="GET",
@@ -132,6 +189,8 @@ def register_admin_core_http_endpoints(http_registry: Any) -> None:
             service="admin.v1.credentials.list",
             description="Admin: list credentials",
             auth_config=_admin_read,
+            tags=["Credentials"],
+            response_model=ApiResponse[List[CredentialDto]],
         ),
         HttpEndpoint(
             method="POST",
@@ -139,6 +198,9 @@ def register_admin_core_http_endpoints(http_registry: Any) -> None:
             service="admin.v1.credentials.create",
             description="Admin: create credential",
             auth_config=_admin_write,
+            tags=["Credentials"],
+            response_model=ApiResponse[CredentialDto],
+            request_model=CreateCredentialRequest,
         ),
         HttpEndpoint(
             method="GET",
@@ -146,6 +208,8 @@ def register_admin_core_http_endpoints(http_registry: Any) -> None:
             service="admin.v1.credentials.get",
             description="Admin: get credential by id",
             auth_config=_admin_read,
+            tags=["Credentials"],
+            response_model=ApiResponse[CredentialDto],
         ),
         HttpEndpoint(
             method="GET",
@@ -153,6 +217,8 @@ def register_admin_core_http_endpoints(http_registry: Any) -> None:
             service="admin.v1.credentials.get_secret",
             description="Admin: get credential secret (for export)",
             auth_config=_admin_read,
+            tags=["Credentials"],
+            response_model=ApiResponse[dict],
         ),
         HttpEndpoint(
             method="PUT",
@@ -160,6 +226,9 @@ def register_admin_core_http_endpoints(http_registry: Any) -> None:
             service="admin.v1.credentials.update",
             description="Admin: update credential",
             auth_config=_admin_write,
+            tags=["Credentials"],
+            response_model=ApiResponse[CredentialDto],
+            request_model=UpdateCredentialRequest,
         ),
         HttpEndpoint(
             method="DELETE",
@@ -167,6 +236,8 @@ def register_admin_core_http_endpoints(http_registry: Any) -> None:
             service="admin.v1.credentials.delete",
             description="Admin: delete credential",
             auth_config=_admin_write,
+            tags=["Credentials"],
+            response_model=DeletedResponse,
         ),
         HttpEndpoint(
             method="POST",
@@ -174,6 +245,8 @@ def register_admin_core_http_endpoints(http_registry: Any) -> None:
             service="admin.v1.credentials.connect",
             description="Admin: подключиться к хосту по креду из БД (SSH)",
             auth_config=_admin_write,
+            tags=["Credentials"],
+            response_model=OkErrorResponse,
         ),
         HttpEndpoint(
             method="GET",
@@ -181,6 +254,8 @@ def register_admin_core_http_endpoints(http_registry: Any) -> None:
             service="admin.v1.credentials.terminal_sessions",
             description="Admin: список активных SSH терминальных сессий",
             auth_config=_admin_read,
+            tags=["SSH"],
+            response_model=ApiResponse[List[SshSessionDto]],
         ),
         HttpEndpoint(
             method="DELETE",
@@ -188,6 +263,8 @@ def register_admin_core_http_endpoints(http_registry: Any) -> None:
             service="admin.v1.credentials.terminal_session_close",
             description="Admin: закрыть SSH терминальную сессию по id",
             auth_config=_admin_write,
+            tags=["SSH"],
+            response_model=DeletedResponse,
         ),
         HttpEndpoint(
             path="/api/v1/admin/credentials/terminal",
@@ -195,6 +272,7 @@ def register_admin_core_http_endpoints(http_registry: Any) -> None:
             websocket=True,
             description="Admin: WebSocket терминал по креду (?credential_id=...)",
             auth_config=_admin_write,
+            tags=["SSH"],
         ),
         HttpEndpoint(
             method="POST",
@@ -202,6 +280,9 @@ def register_admin_core_http_endpoints(http_registry: Any) -> None:
             service="admin.v1.agents.terminal.start",
             description="Admin: запустить терминальную сессию на агенте",
             auth_config=_admin_write,
+            tags=["Agents"],
+            response_model=TerminalSessionStartDto,
+            request_model=StartTerminalRequest,
         ),
         HttpEndpoint(
             path="/api/v1/admin/agents/terminal/ws/{session_id}",
@@ -209,6 +290,7 @@ def register_admin_core_http_endpoints(http_registry: Any) -> None:
             websocket=True,
             description="Admin: WebSocket attach к терминальной сессии агента",
             auth_config=_admin_write,
+            tags=["Agents"],
         ),
         HttpEndpoint(
             method="GET",
@@ -216,6 +298,8 @@ def register_admin_core_http_endpoints(http_registry: Any) -> None:
             service="admin.v1.inspector.executions.get",
             description="Inspector: get execution trace by id",
             auth_config=_admin_read,
+            tags=["Inspector"],
+            response_model=ApiResponse[ExecutionDto],
         ),
         HttpEndpoint(
             method="GET",
@@ -223,6 +307,8 @@ def register_admin_core_http_endpoints(http_registry: Any) -> None:
             service="admin.v1.inspector.operations.executions",
             description="Inspector: list executions for operation",
             auth_config=_admin_read,
+            tags=["Inspector"],
+            response_model=ApiResponse[List[ExecutionDto]],
         ),
         HttpEndpoint(
             method="GET",
@@ -230,6 +316,8 @@ def register_admin_core_http_endpoints(http_registry: Any) -> None:
             service="admin.v1.inspector.executions.retries",
             description="Inspector: list retries for execution",
             auth_config=_admin_read,
+            tags=["Inspector"],
+            response_model=ApiResponse[List[ExecutionDto]],
         ),
         HttpEndpoint(
             method="GET",
@@ -237,6 +325,8 @@ def register_admin_core_http_endpoints(http_registry: Any) -> None:
             service="admin.v1.inspector.executions.tree",
             description="Inspector: execution retry tree",
             auth_config=_admin_read,
+            tags=["Inspector"],
+            response_model=ApiResponse[ExecutionAttemptDto],
         ),
         HttpEndpoint(
             method="GET",
@@ -244,6 +334,8 @@ def register_admin_core_http_endpoints(http_registry: Any) -> None:
             service="admin.v1.inspector.schedules",
             description="Inspector: list execution schedules",
             auth_config=_admin_read,
+            tags=["Inspector"],
+            response_model=ApiResponse[List[ExecutionScheduleDto]],
         ),
         HttpEndpoint(
             method="GET",
@@ -251,6 +343,8 @@ def register_admin_core_http_endpoints(http_registry: Any) -> None:
             service="admin.v1.inspector.schedules.get",
             description="Inspector: get execution schedule by id",
             auth_config=_admin_read,
+            tags=["Inspector"],
+            response_model=ApiResponse[ExecutionScheduleDto],
         ),
         HttpEndpoint(
             method="GET",
@@ -258,6 +352,8 @@ def register_admin_core_http_endpoints(http_registry: Any) -> None:
             service="admin.v1.inspector.operations.schedules",
             description="Inspector: list schedules for operation",
             auth_config=_admin_read,
+            tags=["Inspector"],
+            response_model=ApiResponse[List[ExecutionScheduleDto]],
         ),
     ]
 

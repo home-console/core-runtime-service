@@ -9,6 +9,7 @@ from typing import Optional
 
 from core.runtime.runtime_module import RuntimeModule
 from core.http.models import HttpEndpoint, EndpointAuthConfig
+from modules.api.schemas import OkResponse
 from core.events_schemas import PresenceEnteredPayload, PresenceLeftPayload
 import logging
 logger = logging.getLogger(__name__)
@@ -56,6 +57,8 @@ class PresenceModule(RuntimeModule):
                     path="/api/v1/presence/enter",
                     service="presence.enter",
                     auth_config=_presence_write,
+                    tags=["Presence"],
+                    response_model=OkResponse,
                 )
             )
             self.context.http.register(
@@ -64,6 +67,8 @@ class PresenceModule(RuntimeModule):
                     path="/api/v1/presence/leave",
                     service="presence.leave",
                     auth_config=_presence_write,
+                    tags=["Presence"],
+                    response_model=OkResponse,
                 )
             )
         except Exception:

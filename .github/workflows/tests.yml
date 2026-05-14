@@ -6,7 +6,7 @@ on:
   pull_request: {}
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 jobs:
@@ -52,6 +52,26 @@ jobs:
           files: coverage.xml
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Export OpenAPI schema
+        run: python scripts/export_openapi.py --out openapi.json
+
+      - name: Validate openapi.json is committed and up to date
+        run: |
+          if git diff --quiet openapi.json; then
+            echo "openapi.json is up to date"
+          else
+            echo "ERROR: openapi.json is out of date. Run 'python scripts/export_openapi.py --out openapi.json' and commit the result."
+            git diff openapi.json
+            exit 1
+          fi
+
+      - name: Upload openapi.json as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: openapi-schema
+          path: openapi.json
+          retention-days: 30
 
   build_image:
     name: Build & Push Docker image (GHCR)

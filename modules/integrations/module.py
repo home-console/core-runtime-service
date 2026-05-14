@@ -5,8 +5,11 @@ IntegrationModule — модуль для HTTP endpoints интеграций.
 AdminModule не знает про integrations; список интеграций предоставляет этот модуль.
 """
 
+from typing import List
+
 from core.runtime.runtime_module import RuntimeModule
 from core.http.models import HttpEndpoint, EndpointAuthConfig
+from modules.api.schemas import ApiResponse, IntegrationFlowDto
 
 
 class IntegrationsModule(RuntimeModule):
@@ -41,22 +44,23 @@ class IntegrationsModule(RuntimeModule):
         except ValueError:
             pass
         
-        # Admin endpoint with full information
         self.context.http.register(HttpEndpoint(
             method="GET",
             path="/api/v1/admin/integrations",
             service="admin.v1.integrations",
             description="List registered integrations (admin only)",
             auth_config=EndpointAuthConfig(required_scopes=["admin.read"]),
+            tags=["Integrations"],
+            response_model=ApiResponse[List[IntegrationFlowDto]],
         ))
-
-        # User endpoint
         self.context.http.register(HttpEndpoint(
             method="GET",
             path="/api/v1/user/integrations",
             service="user.v1.integrations",
             description="List user integrations",
             auth_config=EndpointAuthConfig(required_scopes=["integrations.read"]),
+            tags=["Integrations"],
+            response_model=ApiResponse[List[IntegrationFlowDto]],
         ))
 
     async def start(self) -> None:

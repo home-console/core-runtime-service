@@ -191,7 +191,16 @@ def bind_routes(runtime: Any, app: Any) -> None:
         handler = _make_api_handler(runtime, ep)
         mounted_path = _repath(ep.path, api_prefix)
         route_name = f"{ep.method}_{mounted_path}"
-        app.add_api_route(mounted_path, handler, methods=[ep.method], name=route_name)
+        app.add_api_route(
+            mounted_path,
+            handler,
+            methods=[ep.method],
+            name=route_name,
+            response_model=ep.response_model,
+            tags=ep.tags or [],
+            description=ep.description or "",
+            deprecated=ep.deprecated,
+        )
 
     for ep in webhook_endpoints:
         # Проверяем, что method не None (для безопасности)
@@ -444,6 +453,12 @@ def _make_api_handler(runtime: Any, endpoint: Any):
         query_params_dict = {k: v for k, v in request.query_params.multi_items()}
         call_params: Dict[str, Any] = {}
 
+        # Pydantic model instance (из request_model) → dict для передачи в сервис
+        if body is not None and hasattr(body, "model_dump"):
+            body = body.model_dump(exclude_none=True)
+        elif body is not None and hasattr(body, "dict"):
+            body = body.dict(exclude_none=True)
+
         # Если body не передан, пытаемся прочитать из request
         if body is None and endpoint.method in ["POST", "PUT", "PATCH"]:
             try:
@@ -616,14 +631,24 @@ def _make_api_handler(runtime: Any, endpoint: Any):
         ),
     ]
     if endpoint.method in ["POST", "PUT", "PATCH"]:
-        params_sig.append(
-            inspect.Parameter(
-                "body",
-                kind=inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                annotation=Any,
-                default=Body(None, description="Request body (JSON)"),
+        if endpoint.request_model is not None:
+            params_sig.append(
+                inspect.Parameter(
+                    "body",
+                    kind=inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                    annotation=endpoint.request_model,
+                    default=Body(...),
+                )
             )
-        )
+        else:
+            params_sig.append(
+                inspect.Parameter(
+                    "body",
+                    kind=inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                    annotation=Any,
+                    default=Body(None, description="Request body (JSON)"),
+                )
+            )
     for param_name in path_params:
         params_sig.append(
             inspect.Parameter(

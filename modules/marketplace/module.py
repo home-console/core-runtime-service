@@ -17,6 +17,20 @@ import logging
 from datetime import datetime, timezone
 from core.runtime.runtime_module import RuntimeModule
 from core.http.models import EndpointAuthConfig, HttpEndpoint
+from modules.api.schemas import (
+    ApiResponse,
+    BuildGitCatalogRequest,
+    GitCatalogEntryDto,
+    GitSourcesDto,
+    InstallFromArchiveRequest,
+    InstallFromGitRequest,
+    InstallFromRegistryRequest,
+    InstalledPluginDto,
+    MarketplaceResultDto,
+    RemovePluginRequest,
+    SetGitSourcesRequest,
+    UpdatePluginRequest,
+)
 from modules.marketplace.services import MarketplaceService
 from modules.marketplace.registry_client import RegistryClient
 from modules.marketplace.admin_services import (
@@ -190,123 +204,130 @@ class MarketplaceModule(RuntimeModule):
             await self.register_runtime_service("admin.v1.marketplace.updates", admin_marketplace_updates)
 
             # Register HTTP endpoints → service mapping.
-            http_registry.register(
-                HttpEndpoint(
-                    method="POST",
-                    path="/api/v1/admin/marketplace/install",
-                    service="admin.v1.marketplace.install",
-                    description="Marketplace: install plugin from archive",
-                    auth_config=_admin_write,
-                )
-            )
-            http_registry.register(
-                HttpEndpoint(
-                    method="POST",
-                    path="/api/v1/admin/marketplace/install-upload",
-                    service="admin.v1.marketplace.install_upload",
-                    description="Marketplace: install plugin from uploaded archive (multipart: file)",
-                    auth_config=_admin_write,
-                )
-            )
-            http_registry.register(
-                HttpEndpoint(
-                    method="POST",
-                    path="/api/v1/admin/marketplace/install-from-registry",
-                    service="admin.v1.marketplace.install_from_registry",
-                    description="Marketplace: install plugin from registry",
-                    auth_config=_admin_write,
-                )
-            )
-            http_registry.register(
-                HttpEndpoint(
-                    method="POST",
-                    path="/api/v1/admin/marketplace/install-from-git",
-                    service="admin.v1.marketplace.install_from_git",
-                    description="Marketplace: install plugin from git repo (tarball HTTPS)",
-                    auth_config=_admin_write,
-                )
-            )
-            http_registry.register(
-                HttpEndpoint(
-                    method="GET",
-                    path="/api/v1/admin/marketplace/git-sources",
-                    service="admin.v1.marketplace.git_sources.get",
-                    description="Marketplace: get git sources list (persisted)",
-                    auth_config=_admin_read,
-                )
-            )
-            http_registry.register(
-                HttpEndpoint(
-                    method="POST",
-                    path="/api/v1/admin/marketplace/git-sources",
-                    service="admin.v1.marketplace.git_sources.set",
-                    description="Marketplace: set git sources list (persisted)",
-                    auth_config=_admin_write,
-                )
-            )
-            http_registry.register(
-                HttpEndpoint(
-                    method="POST",
-                    path="/api/v1/admin/marketplace/git-catalog",
-                    service="admin.v1.marketplace.git_catalog",
-                    description="Marketplace: build catalog from git sources (no install)",
-                    auth_config=_admin_read,
-                )
-            )
-            http_registry.register(
-                HttpEndpoint(
-                    method="POST",
-                    path="/api/v1/admin/marketplace/remove",
-                    service="admin.v1.marketplace.remove",
-                    description="Marketplace: remove plugin",
-                    auth_config=_admin_write,
-                )
-            )
-            http_registry.register(
-                HttpEndpoint(
-                    method="POST",
-                    path="/api/v1/admin/marketplace/update",
-                    service="admin.v1.marketplace.update",
-                    description="Marketplace: update plugin",
-                    auth_config=_admin_write,
-                )
-            )
-            http_registry.register(
-                HttpEndpoint(
-                    method="POST",
-                    path="/api/v1/admin/marketplace/enable/{plugin_name}",
-                    service="admin.v1.marketplace.enable",
-                    description="Marketplace: enable plugin",
-                    auth_config=_admin_write,
-                )
-            )
-            http_registry.register(
-                HttpEndpoint(
-                    method="POST",
-                    path="/api/v1/admin/marketplace/disable/{plugin_name}",
-                    service="admin.v1.marketplace.disable",
-                    description="Marketplace: disable plugin",
-                    auth_config=_admin_write,
-                )
-            )
-            http_registry.register(
-                HttpEndpoint(
-                    method="GET",
-                    path="/api/v1/admin/marketplace/installed",
-                    service="admin.v1.marketplace.installed",
-                    description="Marketplace: list installed plugins",
-                    auth_config=_admin_read,
-                )
-            )
-            http_registry.register(
-                HttpEndpoint(
-                    method="GET",
-                    path="/api/v1/admin/marketplace/updates",
-                    service="admin.v1.marketplace.updates",
-                    description="Marketplace: check updates for installed plugins",
-                    auth_config=_admin_read,
-                )
-            )
+            http_registry.register(HttpEndpoint(
+                method="POST",
+                path="/api/v1/admin/marketplace/install",
+                service="admin.v1.marketplace.install",
+                description="Marketplace: install plugin from archive",
+                auth_config=_admin_write,
+                tags=["Marketplace"],
+                response_model=MarketplaceResultDto,
+                request_model=InstallFromArchiveRequest,
+            ))
+            http_registry.register(HttpEndpoint(
+                method="POST",
+                path="/api/v1/admin/marketplace/install-upload",
+                service="admin.v1.marketplace.install_upload",
+                description="Marketplace: install plugin from uploaded archive (multipart: file)",
+                auth_config=_admin_write,
+                tags=["Marketplace"],
+                response_model=MarketplaceResultDto,
+            ))
+            http_registry.register(HttpEndpoint(
+                method="POST",
+                path="/api/v1/admin/marketplace/install-from-registry",
+                service="admin.v1.marketplace.install_from_registry",
+                description="Marketplace: install plugin from registry",
+                auth_config=_admin_write,
+                tags=["Marketplace"],
+                response_model=MarketplaceResultDto,
+                request_model=InstallFromRegistryRequest,
+            ))
+            http_registry.register(HttpEndpoint(
+                method="POST",
+                path="/api/v1/admin/marketplace/install-from-git",
+                service="admin.v1.marketplace.install_from_git",
+                description="Marketplace: install plugin from git repo (tarball HTTPS)",
+                auth_config=_admin_write,
+                tags=["Marketplace"],
+                response_model=MarketplaceResultDto,
+                request_model=InstallFromGitRequest,
+            ))
+            http_registry.register(HttpEndpoint(
+                method="GET",
+                path="/api/v1/admin/marketplace/git-sources",
+                service="admin.v1.marketplace.git_sources.get",
+                description="Marketplace: get git sources list (persisted)",
+                auth_config=_admin_read,
+                tags=["Marketplace"],
+                response_model=ApiResponse[GitSourcesDto],
+            ))
+            http_registry.register(HttpEndpoint(
+                method="POST",
+                path="/api/v1/admin/marketplace/git-sources",
+                service="admin.v1.marketplace.git_sources.set",
+                description="Marketplace: set git sources list (persisted)",
+                auth_config=_admin_write,
+                tags=["Marketplace"],
+                response_model=ApiResponse[GitSourcesDto],
+                request_model=SetGitSourcesRequest,
+            ))
+            http_registry.register(HttpEndpoint(
+                method="POST",
+                path="/api/v1/admin/marketplace/git-catalog",
+                service="admin.v1.marketplace.git_catalog",
+                description="Marketplace: build catalog from git sources (no install)",
+                auth_config=_admin_read,
+                tags=["Marketplace"],
+                response_model=ApiResponse[List[GitCatalogEntryDto]],
+                request_model=BuildGitCatalogRequest,
+            ))
+            http_registry.register(HttpEndpoint(
+                method="POST",
+                path="/api/v1/admin/marketplace/remove",
+                service="admin.v1.marketplace.remove",
+                description="Marketplace: remove plugin",
+                auth_config=_admin_write,
+                tags=["Marketplace"],
+                response_model=MarketplaceResultDto,
+                request_model=RemovePluginRequest,
+            ))
+            http_registry.register(HttpEndpoint(
+                method="POST",
+                path="/api/v1/admin/marketplace/update",
+                service="admin.v1.marketplace.update",
+                description="Marketplace: update plugin",
+                auth_config=_admin_write,
+                tags=["Marketplace"],
+                response_model=MarketplaceResultDto,
+                request_model=UpdatePluginRequest,
+            ))
+            http_registry.register(HttpEndpoint(
+                method="POST",
+                path="/api/v1/admin/marketplace/enable/{plugin_name}",
+                service="admin.v1.marketplace.enable",
+                description="Marketplace: enable plugin",
+                auth_config=_admin_write,
+                tags=["Marketplace"],
+                response_model=MarketplaceResultDto,
+            ))
+            http_registry.register(HttpEndpoint(
+                method="POST",
+                path="/api/v1/admin/marketplace/disable/{plugin_name}",
+                service="admin.v1.marketplace.disable",
+                description="Marketplace: disable plugin",
+                auth_config=_admin_write,
+                tags=["Marketplace"],
+                response_model=MarketplaceResultDto,
+            ))
+            http_registry.register(HttpEndpoint(
+                method="GET",
+                path="/api/v1/admin/marketplace/installed",
+                service="admin.v1.marketplace.installed",
+                description="Marketplace: list installed plugins",
+                auth_config=_admin_read,
+                tags=["Marketplace"],
+                response_model=ApiResponse[List[InstalledPluginDto]],
+            ))
+            http_registry.register(HttpEndpoint(
+                method="GET",
+                path="/api/v1/admin/marketplace/updates",
+                service="admin.v1.marketplace.updates",
+                description="Marketplace: check updates for installed plugins",
+                auth_config=_admin_read,
+                tags=["Marketplace"],
+                response_model=ApiResponse[List[InstalledPluginDto]],
+            ))
     
     async def start(self) -> None:
         """Start marketplace module."""

@@ -86,6 +86,11 @@ class HttpEndpoint:
     # Декларативная authz и param_mapping
     auth_config: Optional[EndpointAuthConfig] = None
     param_mapping: Optional[EndpointParamMapping] = None
+    # DTO typing: используется bind_routes для генерации OpenAPI schema.
+    # Оба поля — Type[BaseModel] из pydantic, но объявлены как Any чтобы
+    # core/ не импортировал pydantic напрямую.
+    response_model: Optional[Any] = None  # Type[BaseModel] — схема ответа
+    request_model: Optional[Any] = None   # Type[BaseModel] — схема тела запроса
 
     def __post_init__(self) -> None:
         """Валидация endpoint после инициализации."""

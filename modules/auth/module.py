@@ -16,9 +16,30 @@ This separation ensures identity can evolve independently:
 Identity is not mixed with Control Plane (admin UI).
 """
 
-from typing import Any
+from typing import Any, List
+
 from core.runtime.runtime_module import RuntimeModule
 from core.http.models import HttpEndpoint, EndpointAuthConfig
+from modules.api.schemas import (
+    ApiKeyDto,
+    ApiResponse,
+    AuthTokenDto,
+    BootstrapStatusDto,
+    ChangePasswordRequest,
+    CreateApiKeyRequest,
+    CreateUserRequest,
+    DevCredentialsDto,
+    InitializeRequest,
+    LoginRequest,
+    OkErrorResponse,
+    OkResponse,
+    RevokeApiKeyRequest,
+    RevokeSessionRequest,
+    RotateApiKeyRequest,
+    SessionDto,
+    SetPasswordRequest,
+    UserDto,
+)
 from .handlers import (
     auth_create_api_key,
     auth_list_api_keys,
@@ -111,139 +132,179 @@ class AuthModule(RuntimeModule):
         
         # --- Register HTTP Endpoints ---
         # Bootstrap endpoint (check if system initialized)
+        _public = EndpointAuthConfig(public=True)
+        _admin_all = EndpointAuthConfig(required_scopes=["admin.*"])
+
         self.context.http.register(HttpEndpoint(
             method="GET",
             path="/api/v1/auth/bootstrap",
             service="auth.bootstrap",
             description="Check if system is initialized (bootstrap status)",
-            auth_config=EndpointAuthConfig(public=True)
+            auth_config=_public,
+            tags=["Auth"],
+            response_model=BootstrapStatusDto,
         ))
         self.context.http.register(HttpEndpoint(
             method="GET",
             path="/api/v1/auth/dev-credentials",
             service="auth.dev_credentials",
             description="Dev-only: api_base_url and optional api_key for web (when DEV_CREDENTIALS=1)",
-            auth_config=EndpointAuthConfig(public=True)
+            auth_config=_public,
+            tags=["Auth"],
+            response_model=DevCredentialsDto,
         ))
-        
-        # Auth initialization & login endpoints
         self.context.http.register(HttpEndpoint(
             method="POST",
             path="/api/v1/auth/initialize",
             service="auth.initialize",
             description="Initialize auth system (first-time setup)",
-            auth_config=EndpointAuthConfig(public=True)
+            auth_config=_public,
+            tags=["Auth"],
+            response_model=OkErrorResponse,
+            request_model=InitializeRequest,
         ))
         self.context.http.register(HttpEndpoint(
             method="POST",
             path="/api/v1/auth/login",
             service="auth.login",
             description="Login with credentials",
-            auth_config=EndpointAuthConfig(public=True)
+            auth_config=_public,
+            tags=["Auth"],
+            response_model=AuthTokenDto,
+            request_model=LoginRequest,
         ))
         self.context.http.register(HttpEndpoint(
             method="POST",
             path="/api/v1/auth/refresh",
             service="auth.refresh",
             description="Refresh access token",
-            auth_config=EndpointAuthConfig(public=True)
+            auth_config=_public,
+            tags=["Auth"],
+            response_model=AuthTokenDto,
         ))
         self.context.http.register(HttpEndpoint(
             method="POST",
             path="/api/v1/auth/logout",
             service="auth.logout",
             description="Logout and clear session",
-            auth_config=EndpointAuthConfig(public=True)
+            auth_config=_public,
+            tags=["Auth"],
+            response_model=OkResponse,
         ))
         self.context.http.register(HttpEndpoint(
             method="GET",
             path="/api/v1/auth/me",
             service="auth.me",
             description="Get current user info",
-            auth_config=EndpointAuthConfig(public=True)
+            auth_config=_public,
+            tags=["Auth"],
+            response_model=UserDto,
         ))
         self.context.http.register(HttpEndpoint(
             method="POST",
             path="/api/v1/admin/auth/password/set",
             service="admin.auth.set_password",
             description="Set user password (admin only)",
-            auth_config=EndpointAuthConfig(required_scopes=["admin.*"]),
+            auth_config=_admin_all,
+            tags=["Auth"],
+            response_model=OkErrorResponse,
+            request_model=SetPasswordRequest,
         ))
         self.context.http.register(HttpEndpoint(
             method="POST",
             path="/api/v1/admin/auth/password/change",
             service="admin.auth.change_password",
             description="Change own password",
-            auth_config=EndpointAuthConfig(required_scopes=["admin.*"]),
+            auth_config=_admin_all,
+            tags=["Auth"],
+            response_model=OkErrorResponse,
+            request_model=ChangePasswordRequest,
         ))
-        
-        # Session management endpoints
         self.context.http.register(HttpEndpoint(
             method="GET",
             path="/api/v1/admin/auth/sessions",
             service="admin.auth.list_sessions",
             description="List user sessions",
-            auth_config=EndpointAuthConfig(required_scopes=["admin.*"]),
+            auth_config=_admin_all,
+            tags=["Auth"],
+            response_model=ApiResponse[List[SessionDto]],
         ))
         self.context.http.register(HttpEndpoint(
             method="POST",
             path="/api/v1/admin/auth/sessions/revoke",
             service="admin.auth.revoke_session",
             description="Revoke a session",
-            auth_config=EndpointAuthConfig(required_scopes=["admin.*"]),
+            auth_config=_admin_all,
+            tags=["Auth"],
+            response_model=OkErrorResponse,
+            request_model=RevokeSessionRequest,
         ))
         self.context.http.register(HttpEndpoint(
             method="POST",
             path="/api/v1/admin/auth/sessions/revoke-all",
             service="admin.auth.revoke_all_sessions",
             description="Revoke all user sessions",
-            auth_config=EndpointAuthConfig(required_scopes=["admin.*"]),
+            auth_config=_admin_all,
+            tags=["Auth"],
+            response_model=OkResponse,
         ))
-        
-        # API key management endpoints
         self.context.http.register(HttpEndpoint(
             method="POST",
             path="/api/v1/admin/auth/api-keys",
             service="admin.auth.create_api_key",
             description="Create API key",
-            auth_config=EndpointAuthConfig(required_scopes=["admin.*"]),
+            auth_config=_admin_all,
+            tags=["Auth"],
+            response_model=ApiResponse[ApiKeyDto],
+            request_model=CreateApiKeyRequest,
         ))
         self.context.http.register(HttpEndpoint(
             method="GET",
             path="/api/v1/admin/auth/api-keys",
             service="admin.auth.list_api_keys",
             description="List API keys",
-            auth_config=EndpointAuthConfig(required_scopes=["admin.*"]),
+            auth_config=_admin_all,
+            tags=["Auth"],
+            response_model=ApiResponse[List[ApiKeyDto]],
         ))
         self.context.http.register(HttpEndpoint(
             method="POST",
             path="/api/v1/admin/auth/api-keys/revoke",
             service="admin.auth.revoke_api_key",
             description="Revoke API key",
-            auth_config=EndpointAuthConfig(required_scopes=["admin.*"]),
+            auth_config=_admin_all,
+            tags=["Auth"],
+            response_model=OkErrorResponse,
+            request_model=RevokeApiKeyRequest,
         ))
         self.context.http.register(HttpEndpoint(
             method="POST",
             path="/api/v1/admin/auth/api-keys/rotate",
             service="admin.auth.rotate_api_key",
             description="Rotate API key",
-            auth_config=EndpointAuthConfig(required_scopes=["admin.*"]),
+            auth_config=_admin_all,
+            tags=["Auth"],
+            response_model=ApiResponse[ApiKeyDto],
+            request_model=RotateApiKeyRequest,
         ))
-        
-        # User management endpoints
         self.context.http.register(HttpEndpoint(
             method="POST",
             path="/api/v1/admin/auth/users",
             service="admin.auth.create_user",
             description="Create user",
-            auth_config=EndpointAuthConfig(required_scopes=["admin.*"]),
+            auth_config=_admin_all,
+            tags=["Auth"],
+            response_model=ApiResponse[UserDto],
+            request_model=CreateUserRequest,
         ))
         self.context.http.register(HttpEndpoint(
             method="GET",
             path="/api/v1/admin/auth/users",
             service="admin.auth.list_users",
             description="List users",
-            auth_config=EndpointAuthConfig(required_scopes=["admin.*"]),
+            auth_config=_admin_all,
+            tags=["Auth"],
+            response_model=ApiResponse[List[UserDto]],
         ))
 
     async def start(self) -> None:

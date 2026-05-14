@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, List
 
 from core.http.models import EndpointAuthConfig, HttpEndpoint
+from modules.api.schemas import (
+    ApiResponse,
+    CreateSshSessionRequest,
+    DeletedResponse,
+    SshSessionDto,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +55,9 @@ async def register_ssh_bindings(runtime: Any, context: Any) -> list[str]:
                 service="admin.v1.ssh.sessions.create",
                 description="Create SSH PTY session",
                 auth_config=_admin_write,
+                tags=["SSH"],
+                response_model=ApiResponse[SshSessionDto],
+                request_model=CreateSshSessionRequest,
             ),
             HttpEndpoint(
                 method="GET",
@@ -56,6 +65,8 @@ async def register_ssh_bindings(runtime: Any, context: Any) -> list[str]:
                 service="admin.v1.ssh.sessions.list",
                 description="List SSH PTY sessions",
                 auth_config=_admin_read,
+                tags=["SSH"],
+                response_model=ApiResponse[List[SshSessionDto]],
             ),
             HttpEndpoint(
                 method="DELETE",
@@ -63,6 +74,8 @@ async def register_ssh_bindings(runtime: Any, context: Any) -> list[str]:
                 service="admin.v1.ssh.sessions.close",
                 description="Close SSH PTY session",
                 auth_config=_admin_write,
+                tags=["SSH"],
+                response_model=DeletedResponse,
             ),
             HttpEndpoint(
                 path="/api/v1/admin/ssh/ws/{session_id}",
@@ -70,6 +83,7 @@ async def register_ssh_bindings(runtime: Any, context: Any) -> list[str]:
                 websocket=True,
                 description="Attach WebSocket to SSH PTY session",
                 auth_config=_admin_write,
+                tags=["SSH"],
             ),
         ]:
             context.http.register(endpoint)

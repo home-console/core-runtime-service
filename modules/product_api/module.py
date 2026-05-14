@@ -16,6 +16,18 @@ from typing import Any
 
 from core.runtime.runtime_module import RuntimeModule
 from core.http.models import HttpEndpoint, EndpointAuthConfig
+from modules.api.schemas import (
+    ApiResponse,
+    CreateCredentialRequest,
+    CredentialDto,
+    DeletedResponse,
+    DeviceDto,
+    ExternalDeviceDto,
+    OkErrorResponse,
+    SetDeviceStateRequest,
+    UpdateCredentialRequest,
+)
+from typing import List
 logger = logging.getLogger(__name__)
 
 
@@ -74,42 +86,43 @@ class ProductApiModule(RuntimeModule):
             "product_api.v1.devices.get_external", _devices_get_external
         )
 
-        self.context.http.register(
-            HttpEndpoint(
-                method="GET",
-                path="/api/v1/devices",
-                service="product_api.v1.devices.list",
-                description="Product API: list devices (BFF → devices.list)",
-                auth_config=EndpointAuthConfig(required_scopes=["devices.read"]),
-            )
-        )
-        self.context.http.register(
-            HttpEndpoint(
-                method="GET",
-                path="/api/v1/devices/{id}",
-                service="product_api.v1.devices.get",
-                description="Product API: get device by id (BFF → devices.get)",
-                auth_config=EndpointAuthConfig(required_scopes=["devices.read"]),
-            )
-        )
-        self.context.http.register(
-            HttpEndpoint(
-                method="POST",
-                path="/api/v1/devices/{id}/state",
-                service="product_api.v1.devices.set_state",
-                description="Product API: set device state (BFF → devices.set_state)",
-                auth_config=EndpointAuthConfig(required_scopes=["devices.write"]),
-            )
-        )
-        self.context.http.register(
-            HttpEndpoint(
-                method="GET",
-                path="/api/v1/devices/{id}/external",
-                service="product_api.v1.devices.get_external",
-                description="Product API: get external device payload for an internal device (BFF → devices.get_external_for_device)",
-                auth_config=EndpointAuthConfig(required_scopes=["devices.read"]),
-            )
-        )
+        self.context.http.register(HttpEndpoint(
+            method="GET",
+            path="/api/v1/devices",
+            service="product_api.v1.devices.list",
+            description="Product API: list devices",
+            auth_config=EndpointAuthConfig(required_scopes=["devices.read"]),
+            tags=["Devices"],
+            response_model=ApiResponse[List[DeviceDto]],
+        ))
+        self.context.http.register(HttpEndpoint(
+            method="GET",
+            path="/api/v1/devices/{id}",
+            service="product_api.v1.devices.get",
+            description="Product API: get device by id",
+            auth_config=EndpointAuthConfig(required_scopes=["devices.read"]),
+            tags=["Devices"],
+            response_model=ApiResponse[DeviceDto],
+        ))
+        self.context.http.register(HttpEndpoint(
+            method="POST",
+            path="/api/v1/devices/{id}/state",
+            service="product_api.v1.devices.set_state",
+            description="Product API: set device state",
+            auth_config=EndpointAuthConfig(required_scopes=["devices.write"]),
+            tags=["Devices"],
+            response_model=OkErrorResponse,
+            request_model=SetDeviceStateRequest,
+        ))
+        self.context.http.register(HttpEndpoint(
+            method="GET",
+            path="/api/v1/devices/{id}/external",
+            service="product_api.v1.devices.get_external",
+            description="Product API: get external device payload",
+            auth_config=EndpointAuthConfig(required_scopes=["devices.read"]),
+            tags=["Devices"],
+            response_model=ApiResponse[ExternalDeviceDto],
+        ))
 
         # User credentials (свои креды у каждого пользователя)
         services = self.context.services
@@ -265,59 +278,33 @@ class ProductApiModule(RuntimeModule):
         await services.register("user.v1.credentials.delete", user_credentials_delete)
         await services.register("user.v1.credentials.connect", user_credentials_connect)
 
-        for method, path, svc, desc in [
-            (
-                "GET",
-                "/api/v1/user/credentials",
-                "user.v1.credentials.list",
-                "User: list my credentials",
-            ),
-            (
-                "POST",
-                "/api/v1/user/credentials",
-                "user.v1.credentials.create",
-                "User: create credential",
-            ),
-            (
-                "GET",
-                "/api/v1/user/credentials/{credential_id}",
-                "user.v1.credentials.get",
-                "User: get credential",
-            ),
-            (
-                "GET",
-                "/api/v1/user/credentials/{credential_id}/secret",
-                "user.v1.credentials.get_secret",
-                "User: get credential secret",
-            ),
-            (
-                "PUT",
-                "/api/v1/user/credentials/{credential_id}",
-                "user.v1.credentials.update",
-                "User: update credential",
-            ),
-            (
-                "DELETE",
-                "/api/v1/user/credentials/{credential_id}",
-                "user.v1.credentials.delete",
-                "User: delete credential",
-            ),
-            (
-                "POST",
-                "/api/v1/user/credentials/{credential_id}/connect",
-                "user.v1.credentials.connect",
-                "User: SSH connect by credential",
-            ),
-        ]:
-            self.context.http.register(
-                HttpEndpoint(
-                    method=method,
-                    path=path,
-                    service=svc,
-                    description=desc,
-                    auth_config=auth_user_creds,
-                )
-            )
+        _cred_endpoints = [
+            ("GET", "/api/v1/user/credentials", "user.v1.credentials.list",
+             "User: list my credentials", ApiResponse[List[CredentialDto]], None),
+            ("POST", "/api/v1/user/credentials", "user.v1.credentials.create",
+             "User: create credential", ApiResponse[CredentialDto], CreateCredentialRequest),
+            ("GET", "/api/v1/user/credentials/{credential_id}", "user.v1.credentials.get",
+             "User: get credential", ApiResponse[CredentialDto], None),
+            ("GET", "/api/v1/user/credentials/{credential_id}/secret", "user.v1.credentials.get_secret",
+             "User: get credential secret", ApiResponse[dict], None),
+            ("PUT", "/api/v1/user/credentials/{credential_id}", "user.v1.credentials.update",
+             "User: update credential", ApiResponse[CredentialDto], UpdateCredentialRequest),
+            ("DELETE", "/api/v1/user/credentials/{credential_id}", "user.v1.credentials.delete",
+             "User: delete credential", DeletedResponse, None),
+            ("POST", "/api/v1/user/credentials/{credential_id}/connect", "user.v1.credentials.connect",
+             "User: SSH connect by credential", OkErrorResponse, None),
+        ]
+        for method, path, svc, desc, resp_model, req_model in _cred_endpoints:
+            self.context.http.register(HttpEndpoint(
+                method=method,
+                path=path,
+                service=svc,
+                description=desc,
+                auth_config=auth_user_creds,
+                tags=["Credentials"],
+                response_model=resp_model,
+                request_model=req_model,
+            ))
 
     async def start(self) -> None:
         pass

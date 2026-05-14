@@ -7,6 +7,12 @@ from typing import Any, Optional
 
 from app.orchestration import OrchestrationService
 from core.http.models import EndpointAuthConfig, HttpEndpoint
+from modules.api.schemas import (
+    AutoLoadRequest,
+    EnsureContainerRequest,
+    LoadPluginRequest,
+    OkErrorResponse,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -277,6 +283,8 @@ async def register_plugin_control_bindings(
                 service="admin.v1.plugins.unload",
                 description="Unload plugin by name (admin only)",
                 auth_config=_admin_write,
+                tags=["Plugins"],
+                response_model=OkErrorResponse,
             ),
             HttpEndpoint(
                 method="POST",
@@ -284,6 +292,8 @@ async def register_plugin_control_bindings(
                 service="admin.v1.plugins.reload",
                 description="Reload plugin by name (admin only)",
                 auth_config=_admin_write,
+                tags=["Plugins"],
+                response_model=OkErrorResponse,
             ),
             HttpEndpoint(
                 method="POST",
@@ -291,6 +301,9 @@ async def register_plugin_control_bindings(
                 service="admin.v1.plugins.restart_container",
                 description="Restart plugin container by name (admin only)",
                 auth_config=_admin_write,
+                tags=["Plugins"],
+                response_model=OkErrorResponse,
+                request_model=EnsureContainerRequest,
             ),
             HttpEndpoint(
                 method="POST",
@@ -298,6 +311,9 @@ async def register_plugin_control_bindings(
                 service="admin.v1.plugins.ensure_container",
                 description="Ensure plugin container exists (build and create if needed, admin only)",
                 auth_config=_admin_write,
+                tags=["Plugins"],
+                response_model=OkErrorResponse,
+                request_model=EnsureContainerRequest,
             ),
             HttpEndpoint(
                 method="POST",
@@ -305,6 +321,8 @@ async def register_plugin_control_bindings(
                 service="admin.v1.plugins.start",
                 description="Start plugin by name (kernel: plugin_manager.start_plugin)",
                 auth_config=_admin_write,
+                tags=["Plugins"],
+                response_model=OkErrorResponse,
             ),
             HttpEndpoint(
                 method="POST",
@@ -312,13 +330,18 @@ async def register_plugin_control_bindings(
                 service="admin.v1.plugins.stop",
                 description="Stop plugin by name (kernel: plugin_manager.stop_plugin)",
                 auth_config=_admin_write,
+                tags=["Plugins"],
+                response_model=OkErrorResponse,
             ),
             HttpEndpoint(
                 method="POST",
                 path="/api/v1/admin/plugins/load",
                 service="admin.v1.plugins.load_by_name",
-                description="Load one plugin by name from plugins dir (kernel: load_plugin_by_name). Body: { name?, plugins_dir? }",
+                description="Load one plugin by name from plugins dir (kernel: load_plugin_by_name)",
                 auth_config=_admin_write,
+                tags=["Plugins"],
+                response_model=OkErrorResponse,
+                request_model=LoadPluginRequest,
             ),
             HttpEndpoint(
                 method="POST",
@@ -326,13 +349,19 @@ async def register_plugin_control_bindings(
                 service="admin.v1.plugins.load_by_name",
                 description="Load one plugin by name from path (kernel: load_plugin_by_name)",
                 auth_config=_admin_write,
+                tags=["Plugins"],
+                response_model=OkErrorResponse,
+                request_model=LoadPluginRequest,
             ),
             HttpEndpoint(
                 method="POST",
                 path="/api/v1/admin/plugins/auto-load",
                 service="admin.v1.plugins.auto_load",
-                description="Rescan plugins dir and load from manifests (kernel: auto_load_plugins). Body: { plugins_dir? }",
+                description="Rescan plugins dir and load from manifests (kernel: auto_load_plugins)",
                 auth_config=_admin_write,
+                tags=["Plugins"],
+                response_model=OkErrorResponse,
+                request_model=AutoLoadRequest,
             ),
         ]:
             context.http.register(endpoint)

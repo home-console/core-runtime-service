@@ -89,6 +89,8 @@ class HttpRegistry:
             tags=endpoint.tags or [],
             auth_config=endpoint.auth_config,
             param_mapping=endpoint.param_mapping,
+            response_model=endpoint.response_model,
+            request_model=endpoint.request_model,
         )
         self._endpoints.append(ep)
         self._index.add(key)

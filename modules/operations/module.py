@@ -6,8 +6,18 @@ Services (admin.operations.*) остаются в AdminModule.
 Это разделение: HTTP ownership vs Service ownership.
 """
 
+from typing import List
+
 from core.runtime.runtime_module import RuntimeModule
 from core.http.models import HttpEndpoint, EndpointAuthConfig
+from modules.api.schemas import (
+    ApiResponse,
+    CancelRetryResponse,
+    CreateOperationRequest,
+    CreateOperationResponse,
+    ExecutionDto,
+    OperationDto,
+)
 
 
 class OperationsModule(RuntimeModule):
@@ -39,6 +49,9 @@ class OperationsModule(RuntimeModule):
             service="admin.operations.create",
             description="Create and execute an operation",
             auth_config=_admin_write,
+            tags=["Operations"],
+            response_model=CreateOperationResponse,
+            request_model=CreateOperationRequest,
         ))
         self.context.http.register(HttpEndpoint(
             method="GET",
@@ -46,6 +59,8 @@ class OperationsModule(RuntimeModule):
             service="admin.operations.list",
             description="List operations with pagination",
             auth_config=_admin_read,
+            tags=["Operations"],
+            response_model=ApiResponse[List[OperationDto]],
         ))
         self.context.http.register(HttpEndpoint(
             method="GET",
@@ -53,6 +68,8 @@ class OperationsModule(RuntimeModule):
             service="admin.operations.get",
             description="Get operation details by ID",
             auth_config=_admin_read,
+            tags=["Operations"],
+            response_model=ApiResponse[OperationDto],
         ))
         self.context.http.register(HttpEndpoint(
             method="POST",
@@ -60,6 +77,8 @@ class OperationsModule(RuntimeModule):
             service="admin.operations.cancel",
             description="Cancel a pending or running operation",
             auth_config=_admin_write,
+            tags=["Operations"],
+            response_model=CancelRetryResponse,
         ))
         self.context.http.register(HttpEndpoint(
             method="POST",
@@ -67,6 +86,8 @@ class OperationsModule(RuntimeModule):
             service="admin.operations.retry",
             description="Retry a failed operation",
             auth_config=_admin_write,
+            tags=["Operations"],
+            response_model=CancelRetryResponse,
         ))
 
     async def start(self) -> None:
