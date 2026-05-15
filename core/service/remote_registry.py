@@ -104,18 +104,23 @@ class RemoteServiceRegistry:
         services = body.get("services", [])
         return list(services) if isinstance(services, list) else []
 
-    # Stub-методы для совместимости с IServiceRegistry Protocol
+    # Stub-методы для совместимости с IServiceRegistry Protocol.
+    # Регистрация сервисов происходит в процессе Core Runtime, не через RemoteServiceRegistry.
     async def register(self, *args: Any, **kwargs: Any) -> None:
-        raise NotImplementedError(
-            "RemoteServiceRegistry: register() not available. "
-            "Services are registered in Core Runtime process."
+        logger.warning(
+            "RemoteServiceRegistry.register() ignored — services must be registered in Core Runtime process"
         )
 
     async def register_with_acl(self, *args: Any, **kwargs: Any) -> None:
-        raise NotImplementedError("RemoteServiceRegistry: register_with_acl() not available.")
+        logger.warning(
+            "RemoteServiceRegistry.register_with_acl() ignored — services must be registered in Core Runtime process"
+        )
 
     async def unregister(self, service_name: str) -> None:
-        raise NotImplementedError("RemoteServiceRegistry: unregister() not available.")
+        logger.warning(
+            "RemoteServiceRegistry.unregister(%r) ignored — services must be unregistered in Core Runtime process",
+            service_name,
+        )
 
     async def add_middleware(self, middleware: Any) -> None:
         return

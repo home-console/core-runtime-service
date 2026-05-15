@@ -5,6 +5,7 @@
 #
 # Usage:
 #   CORE_RUNTIME_IMAGE=ghcr.io/<org>/<repo>/core-runtime:TAG \
+#   PLATFORM_IMAGE=ghcr.io/home-console/platform-home-console:TAG \
 #   docker compose -f deploy/dev/docker-compose.image.yml up -d
 
 services:
@@ -50,7 +51,21 @@ services:
       timeout: 5s
       retries: 3
 
-  caddy:
+  platform-web:
+    image: ${PLATFORM_IMAGE:-ghcr.io/home-console/platform-home-console:latest}
+    restart: unless-stopped
+    ports:
+      - "${PLATFORM_PORT:-3000}:80"
+    environment:
+      # Core Runtime API URL (docker-compose service name in internal network)
+      CORE_RUNTIME_URL: ${CORE_RUNTIME_URL:-http://core-runtime:8000}
+      # For local HTTP runs, keep cookies working. In production behind HTTPS set SECURE_COOKIES=true.
+      SECURE_COOKIES: ${SECURE_COOKIES:-false}
+    depends_on:
+      core-runtime:
+        condition: service_healthy
+
+  edge:
     image: caddy:2-alpine
     restart: unless-stopped
     volumes:
@@ -64,6 +79,8 @@ services:
     depends_on:
       core-runtime:
         condition: service_healthy
+      platform-web:
+        condition: service_started
 
 volumes:
   core-data:

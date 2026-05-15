@@ -51,6 +51,28 @@ services:
       retries: 5
     networks: [app]
 
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    profiles: ["postgres"]
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-homeconsole}
+      POSTGRES_USER: ${POSTGRES_USER:-homeconsole}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-homeconsole}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    ports:
+      - "${PG_PORT:-5432}:5432"
+    healthcheck:
+      # -h 127.0.0.1 forces TCP check (without -h pg_isready uses UNIX socket
+      # which becomes ready before TCP is bound — causing false-healthy)
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U homeconsole"]
+      interval: 3s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    networks: [app]
+
   core-runtime:
     build:
       context: ../..
@@ -84,6 +106,9 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
+        required: false
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/monitor/health"]
       interval: 10s
@@ -100,6 +125,9 @@ services:
     volumes:
       # Монтируем исходники platform-home-console из монорепы
       - ../../../platform-home-console:/workspace:cached
+    environment:
+      # CI=true prevents pnpm from prompting "remove node_modules?" when no TTY
+      CI: "true"
     command: >-
       sh -c "corepack enable && pnpm install --frozen-lockfile && pnpm dev --host 0.0.0.0 --port 5173"
     ports:
@@ -129,6 +157,7 @@ volumes:
   core-data:
   caddy-data:
   caddy-config:
+  pg-data:
 
 networks:
   app:

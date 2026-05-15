@@ -113,6 +113,11 @@ class PluginTestRuntime:
     def register_operation_handler(self, op_type: str, handler: Any) -> None:
         self.registered_operation_handlers[op_type] = handler
 
+    @property
+    def api(self) -> "PluginTestRuntime":
+        """Expose self as the plugin runtime API (used by BasePlugin._runtime_api())."""
+        return self
+
 
 def make_test_context() -> RuntimeContext:
     """Утилита: минимальный валидный RuntimeContext для unit-тестов."""
