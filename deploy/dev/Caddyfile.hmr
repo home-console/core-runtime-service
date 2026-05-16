@@ -7,7 +7,7 @@
 # API + WebSocket ядра → core-runtime:8000
 # Vite слушает 5173 внутри контейнера; с хоста: docker мапит на DEV_VITE_HOST_PORT (по умолчанию 15173).
 
-{$DOMAIN:localhost} {
+http://{$DOMAIN:localhost} {
     # API и WebSocket ядра
     @api path /api/v1/* /ws/*
     handle @api {

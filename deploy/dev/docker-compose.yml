@@ -2,7 +2,7 @@
 #
 # Параллельно с prod (deploy/prod): порты по умолчанию НЕ конфликтуют с 80/443/6379.
 #   DEV_HTTP_PORT=18080   DEV_HTTPS_PORT=18443   DEV_REDIS_PORT=6380   DEV_CORE_PORT=18000
-# Без фиксированных container_name — стек живёт в своём compose-проекте рядом с prod.
+# Имена контейнеров: dev-hc-redis, dev-hc-postgres, dev-hc-core-runtime, dev-hc-caddy.
 #
 # Usage:
 #   1. Build frontend:   cd platform-home-console && pnpm build:web
@@ -15,6 +15,7 @@
 
 services:
   redis:
+    container_name: dev-hc-redis
     image: redis:7-alpine
     restart: unless-stopped
     ports:
@@ -27,6 +28,7 @@ services:
       retries: 5
 
   postgres:
+    container_name: dev-hc-postgres
     image: postgres:16-alpine
     restart: unless-stopped
     profiles: ["postgres"]
@@ -48,6 +50,7 @@ services:
       start_period: 5s
 
   core-runtime:
+    container_name: dev-hc-core-runtime
     build:
       context: ../..
       dockerfile: Dockerfile
@@ -85,6 +88,7 @@ services:
       retries: 3
 
   caddy:
+    container_name: dev-hc-caddy
     image: caddy:latest
     restart: unless-stopped
     volumes:

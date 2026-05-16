@@ -20,6 +20,7 @@
 
 services:
   redis:
+    container_name: prod-hc-redis
     image: redis:7-alpine
     restart: unless-stopped
     command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
@@ -31,6 +32,7 @@ services:
     networks: [app]
 
   core-runtime:
+    container_name: prod-hc-core-runtime
     image: ${CORE_RUNTIME_IMAGE:-ghcr.io/home-console/core-runtime}
     restart: unless-stopped
     env_file:
@@ -66,6 +68,7 @@ services:
     networks: [app]
 
   platform-web:
+    container_name: prod-hc-platform-web
     image: ${PLATFORM_IMAGE:-ghcr.io/home-console/platform-home-console:latest}
     restart: unless-stopped
     environment:
@@ -80,6 +83,7 @@ services:
     networks: [app]
 
   edge:
+    container_name: prod-hc-edge
     image: caddy:latest
     restart: unless-stopped
     environment:

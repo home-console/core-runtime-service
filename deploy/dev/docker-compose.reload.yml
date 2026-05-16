@@ -39,6 +39,7 @@
 
 services:
   redis:
+    container_name: dev-hc-redis
     image: redis:7-alpine
     restart: unless-stopped
     ports:
@@ -52,6 +53,7 @@ services:
     networks: [app]
 
   postgres:
+    container_name: dev-hc-postgres
     image: postgres:16-alpine
     restart: unless-stopped
     profiles: ["postgres"]
@@ -74,6 +76,7 @@ services:
     networks: [app]
 
   core-runtime:
+    container_name: dev-hc-core-runtime
     build:
       context: ../..
       dockerfile: Dockerfile
@@ -120,6 +123,7 @@ services:
   # Запускает Vite dev server из platform-home-console с HMR.
   # Требует: platform-home-console рядом с core-runtime-service в монорепе.
   frontend-vite:
+    container_name: dev-hc-frontend-vite
     image: node:22-alpine
     working_dir: /workspace
     volumes:
@@ -136,6 +140,7 @@ services:
     networks: [app]
 
   caddy:
+    container_name: dev-hc-caddy
     image: caddy:latest
     restart: unless-stopped
     volumes:
