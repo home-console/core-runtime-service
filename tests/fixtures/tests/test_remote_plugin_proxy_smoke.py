@@ -6,7 +6,7 @@ from sdk.testing import PluginTestRuntime
 
 
 def test_metadata_default_smoke() -> None:
-    from plugins.remote_plugin_proxy import RemotePluginProxy
+    from tests.fixtures import RemotePluginProxy
 
     runtime = PluginTestRuntime()
     plugin = RemotePluginProxy(runtime, remote_url="http://example.com")
@@ -17,7 +17,7 @@ def test_metadata_default_smoke() -> None:
 
 @pytest.mark.asyncio
 async def test_on_load_registers_services_and_on_unload_unregisters() -> None:
-    from plugins.remote_plugin_proxy import RemotePluginProxy
+    from tests.fixtures import RemotePluginProxy
 
     runtime = PluginTestRuntime()
     plugin = RemotePluginProxy(runtime, remote_url="http://example.com")

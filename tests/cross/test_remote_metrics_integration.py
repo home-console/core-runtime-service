@@ -9,7 +9,7 @@ import pytest
 from core.runtime.runtime import CoreRuntime
 from core.runtime.state_engine import StateEngine
 from modules.storage.port import CoreStoragePort
-from plugins.remote_plugin_proxy import RemotePluginProxy
+from tests.fixtures import RemotePluginProxy
 from tests.conftest import InMemoryStorageAdapter
 
 

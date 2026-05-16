@@ -1,7 +1,7 @@
 import pytest
 
 from core.runtime.runtime import CoreRuntime
-from plugins.test import SystemLoggerPlugin
+from tests.test_plugins import SystemLoggerPlugin
 from app.bootstrap import APP_MODULES
 
 

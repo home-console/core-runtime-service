@@ -51,6 +51,11 @@ def _iter_text_files(root: Path) -> list[Path]:
 def scan(root: Path) -> list[Violation]:
     violations: list[Violation] = []
     plugins_dir = root / "plugins"
+    # Plugin stubs and fixtures that live in tests/ are allowed to use vendor namespaces.
+    allowed_test_dirs = (
+        root / "tests" / "test_plugins",
+        root / "tests" / "fixtures",
+    )
 
     scan_roots = [
         root / "core",
@@ -64,9 +69,11 @@ def scan(root: Path) -> list[Violation]:
         if not base.exists():
             continue
         for path in _iter_text_files(base):
-            # Allow vendor namespaces inside plugins only.
+            # Allow vendor namespaces inside plugins and test plugin stubs.
             try:
                 if plugins_dir in path.parents:
+                    continue
+                if any(d in path.parents for d in allowed_test_dirs):
                     continue
             except Exception:
                 pass

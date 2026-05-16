@@ -56,3 +56,6 @@ deploy/dev/docker-compose.recovery.yml
 
 # hc plugin sync (local staging)
 .hc-plugin-staging/
+
+# Plugins (loaded at runtime, not committed — live in HomeConsole/plugins/)
+plugins/

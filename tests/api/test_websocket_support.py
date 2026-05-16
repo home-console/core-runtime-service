@@ -180,7 +180,7 @@ async def test_websocket_inspector_visibility(memory_adapter):
 @pytest.mark.asyncio
 async def test_websocket_plugin_registration(memory_adapter):
     """Тест: WebSocketTestPlugin регистрирует endpoint и сервис."""
-    from plugins.test import WebSocketTestPlugin
+    from tests.test_plugins import WebSocketTestPlugin
     
     runtime = CoreRuntime(memory_adapter)
     
