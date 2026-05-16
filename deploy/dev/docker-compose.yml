@@ -85,7 +85,7 @@ services:
       retries: 3
 
   caddy:
-    image: caddy:2-alpine
+    image: caddy:latest
     restart: unless-stopped
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro

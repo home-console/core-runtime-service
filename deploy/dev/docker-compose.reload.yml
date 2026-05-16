@@ -136,7 +136,7 @@ services:
     networks: [app]
 
   caddy:
-    image: caddy:2-alpine
+    image: caddy:latest
     restart: unless-stopped
     volumes:
       # По умолчанию: статика из ./frontend (как dev).

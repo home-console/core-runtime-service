@@ -80,7 +80,7 @@ services:
     networks: [app]
 
   edge:
-    image: caddy:2-alpine
+    image: caddy:latest
     restart: unless-stopped
     environment:
       DOMAIN: ${DOMAIN:-localhost}
