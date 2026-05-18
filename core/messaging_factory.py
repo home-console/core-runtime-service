@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from core.messaging import resolve_max_concurrent_handlers
 from core.ports import IEventBus
 
 
@@ -20,17 +21,23 @@ def create_event_bus(config: Any = None, storage: Any = None) -> IEventBus:
     Переменные окружения:
         EVENT_BUS_BACKEND=memory|redis (default: memory)
         REDIS_URL=redis://localhost:6379
+        EVENT_BUS_MAX_CONCURRENT_HANDLERS=100
     """
     backend = os.getenv("EVENT_BUS_BACKEND", "memory").lower().strip()
+    max_handlers = resolve_max_concurrent_handlers()
 
     if backend == "redis":
         redis_url = os.getenv("REDIS_URL", "redis://localhost:6379").strip()
         from core.messaging_redis import RedisStreamsEventBus
 
-        return RedisStreamsEventBus(redis_url=redis_url, storage=storage)
+        return RedisStreamsEventBus(
+            redis_url=redis_url,
+            storage=storage,
+            max_concurrent_handlers=max_handlers,
+        )
 
     # default: in-memory
     from core.messaging import InMemoryEventBus
 
-    return InMemoryEventBus(storage=storage)
+    return InMemoryEventBus(storage=storage, max_concurrent_handlers=max_handlers)
 

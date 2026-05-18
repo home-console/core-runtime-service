@@ -29,6 +29,8 @@
 - Регистрировать handlers операций: `self.register_operation_handler(op_type, handler)`
 - Объявлять capabilities в metadata: `capabilities_provided`, `capabilities_required`
 - Подписываться на события: `await self.subscribe_event(name, handler)` / публиковать `await self.publish_event(...)`
+  - Подписка: по умолчанию `{plugin_name}.*`, `internal.*`, `external.*`; иначе укажите `subscribes_events` в `plugin.json`
+  - Публикация: только `{plugin_name}.*` + `provides_events` из манифеста
 - Читать/писать storage: `await self.storage_get/set/delete/list_keys(...)`
 - Регистрировать HTTP endpoints: **только** через `self.register_http_endpoint(HttpEndpoint(...))` (facade + ACL/policy)
 - Вызывать сервисы: `await self.call_service(name, *args, **kwargs)`

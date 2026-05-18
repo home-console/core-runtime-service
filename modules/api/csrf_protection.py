@@ -11,10 +11,12 @@ class CSRFProtection:
     CSRF token generation and validation.
 
     Token format: HMAC-SHA256(secret, session_id)
+    During rotation grace period, tokens signed with the previous secret are accepted.
     """
 
-    def __init__(self, secret: bytes):
+    def __init__(self, secret: bytes, previous_secret: bytes | None = None):
         self._secret = secret
+        self._previous_secret = previous_secret
 
     @classmethod
     def from_env(cls) -> "CSRFProtection":
@@ -24,16 +26,26 @@ class CSRFProtection:
                 "CSRF_SECRET environment variable not set. "
                 "Generate one with: python -c 'import secrets; print(secrets.token_hex(32))'"
             )
-        return cls(secret.encode("utf-8"))
+        previous = (os.environ.get("CSRF_SECRET_PREVIOUS") or "").strip()
+        prev_bytes = previous.encode("utf-8") if previous else None
+        return cls(secret.encode("utf-8"), prev_bytes)
+
+    def _token_for_secret(self, secret: bytes, session_id: str) -> str:
+        mac = hmac.new(secret, session_id.encode("utf-8"), hashlib.sha256)
+        return mac.hexdigest()
 
     def generate_token(self, session_id: str) -> str:
-        mac = hmac.new(self._secret, session_id.encode("utf-8"), hashlib.sha256)
-        return mac.hexdigest()
+        return self._token_for_secret(self._secret, session_id)
 
     def validate_token(self, token: str, session_id: str) -> None:
         expected = self.generate_token(session_id)
-        if not hmac.compare_digest(token, expected):
-            raise ValueError("Invalid CSRF token")
+        if hmac.compare_digest(token, expected):
+            return
+        if self._previous_secret is not None:
+            prev_expected = self._token_for_secret(self._previous_secret, session_id)
+            if hmac.compare_digest(token, prev_expected):
+                return
+        raise ValueError("Invalid CSRF token")
 
 
 class RateLimiter:

@@ -388,6 +388,41 @@ class SecretStore:
             
             self._initialized = False
     
+    async def rotate_csrf_secret(
+        self,
+        *,
+        generator: Optional[Any] = None,
+        policy: Optional[Any] = None,
+    ) -> Dict[str, Any]:
+        """
+        Rotate runtime CSRF HMAC secret (current → previous + new current).
+
+        See modules.security.csrf_secret for key names and grace-period policy.
+        """
+        from modules.security.csrf_secret import rotate_csrf_secret as _rotate
+
+        return await _rotate(self, generator=generator, policy=policy)
+
+    async def maybe_auto_rotate_csrf_secret(
+        self,
+        *,
+        policy: Optional[Any] = None,
+        readonly: bool = False,
+        generator: Optional[Any] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Auto-rotate CSRF secret when older than RUNTIME_CSRF_ROTATION_DAYS."""
+        from modules.security.csrf_secret import maybe_auto_rotate_csrf_secret as _maybe
+
+        return await _maybe(
+            self, policy=policy, readonly=readonly, generator=generator
+        )
+
+    async def sync_csrf_secrets_to_env(self) -> None:
+        """Expose current (+ grace previous) CSRF secrets to os.environ."""
+        from modules.security.csrf_secret import sync_csrf_secrets_to_env as _sync
+
+        await _sync(self)
+
     async def get_metadata(self, key: str) -> Optional[Dict[str, Any]]:
         """
         Get metadata for a secret without decrypting it.

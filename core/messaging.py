@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import os
 import time
 import uuid
 from collections import defaultdict
@@ -13,6 +14,27 @@ from core.messaging_claim_manager import EventBusClaimManager
 from core.messaging_storage import EventBusStorageManager
 
 logger = logging.getLogger(__name__)
+
+_DEFAULT_MAX_CONCURRENT_HANDLERS = 100
+
+
+def resolve_max_concurrent_handlers(explicit: int | None = None) -> int:
+    """Лимит параллельных handler'ов EventBus (env: EVENT_BUS_MAX_CONCURRENT_HANDLERS)."""
+    if explicit is not None:
+        return max(1, int(explicit))
+    raw = os.getenv(
+        "EVENT_BUS_MAX_CONCURRENT_HANDLERS",
+        str(_DEFAULT_MAX_CONCURRENT_HANDLERS),
+    ).strip()
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        logger.warning(
+            "Invalid EVENT_BUS_MAX_CONCURRENT_HANDLERS=%r, using %s",
+            raw,
+            _DEFAULT_MAX_CONCURRENT_HANDLERS,
+        )
+        return _DEFAULT_MAX_CONCURRENT_HANDLERS
 
 
 @dataclass
@@ -118,14 +140,15 @@ class InMemoryEventBus:
     def __init__(
         self,
         storage: Any | None = None,
-        max_concurrent_handlers: int = 100,
+        max_concurrent_handlers: int | None = None,
     ) -> None:
         # Делегирование специализированным компонентам (SRP)
         self._storage_manager = EventBusStorageManager(storage)
         self._claim_manager = EventBusClaimManager(storage)
 
         # Per-instance backpressure semaphore (не глобальный синглтон)
-        self._handler_semaphore = asyncio.Semaphore(max_concurrent_handlers)
+        limit = resolve_max_concurrent_handlers(max_concurrent_handlers)
+        self._handler_semaphore = asyncio.Semaphore(limit)
 
         # Pub/Sub компоненты
         self._handlers: dict[str, list[TypedEventHandler]] = defaultdict(list)

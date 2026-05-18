@@ -203,6 +203,8 @@ class PluginManager:
             missing_deps = [dep for dep in dependencies if dep not in loaded_plugins]
 
             if missing_deps:
+                msg = f"missing dependencies: {missing_deps}"
+                self._record_load_error(plugin_name, msg)
                 await actual_logger_func(
                     self._runtime,
                     f"Пропущен плагин '{plugin_name}': отсутствуют зависимости {missing_deps}",
@@ -225,7 +227,31 @@ class PluginManager:
                     component="plugin_manager",
                 )
 
-            await self._load_plugin_from_manifest(manifest, plugin_dir, actual_logger_func)
+            try:
+                loaded = await self._load_plugin_from_manifest(
+                    manifest, plugin_dir, actual_logger_func
+                )
+                if not loaded:
+                    self._record_load_error(plugin_name, "manifest load returned false")
+            except BEST_EFFORT_BACKGROUND_ERRORS:
+                raise
+            except Exception as exc:
+                self._record_load_error(plugin_name, str(exc))
+                await actual_logger_func(
+                    self._runtime,
+                    f"Ошибка auto-load плагина '{plugin_name}': {exc}",
+                    component="plugin_manager",
+                )
+
+    def _record_load_error(self, plugin_name: str, message: str) -> None:
+        runtime = self._runtime
+        if runtime is None:
+            return
+        errors = getattr(runtime, "plugin_load_errors", None)
+        if errors is None:
+            runtime.plugin_load_errors = {}
+            errors = runtime.plugin_load_errors
+        errors[plugin_name] = message
 
     async def _load_plugin_from_manifest(
         self,

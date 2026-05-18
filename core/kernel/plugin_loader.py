@@ -397,12 +397,18 @@ class PluginManifestLoader:
                 dynamic_svc = manifest_obj_early.dynamic_service_registration
                 allowed_provided_services = list(manifest_obj_early.provides_services or [])
                 allowed_events = list(manifest_obj_early.provides_events or [])
+                subscribed_events = list(manifest_obj_early.subscribes_events or [])
                 allowed_operations = list(manifest_obj_early.provides_operations or [])
                 allowed_storage_namespaces = list(manifest_obj_early.storage_namespaces or [])
                 manifest_provides = manifest_obj_early.extra.get("provides", {})
                 if isinstance(manifest_provides, dict):
                     allowed_provided_services.extend(manifest_provides.get("services", []) or [])
                     allowed_events.extend(manifest_provides.get("events", []) or [])
+                    subscribed_events.extend(
+                        manifest_provides.get("subscribes", [])
+                        or manifest_provides.get("subscribes_events", [])
+                        or []
+                    )
                     allowed_operations.extend(manifest_provides.get("operations", []) or [])
 
                 raw_event_bus = getattr(runtime, "event_bus", None) if runtime is not None else None
@@ -413,6 +419,7 @@ class PluginManifestLoader:
                         plugin_name,
                         namespace=plugin_namespace,
                         allowed_events=allowed_events,
+                        subscribed_events=subscribed_events,
                         allowed_system_events=[OPERATION_READY_EVENT_TYPE],
                     )
                     if raw_event_bus is not None

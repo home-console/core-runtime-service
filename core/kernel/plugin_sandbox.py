@@ -90,11 +90,17 @@ class PluginSandbox:
         manifest_provides = manifest_extra.get("provides", {}) if isinstance(manifest_extra, dict) else {}
         allowed_provided_services = list(getattr(_manifest, "provides_services", []) or [])
         allowed_events = list(getattr(_manifest, "provides_events", []) or [])
+        subscribed_events = list(getattr(_manifest, "subscribes_events", []) or [])
         allowed_operations = list(getattr(_manifest, "provides_operations", []) or [])
         allowed_storage_namespaces = list(getattr(_manifest, "storage_namespaces", []) or [])
         if isinstance(manifest_provides, dict):
             allowed_provided_services.extend(manifest_provides.get("services", []) or [])
             allowed_events.extend(manifest_provides.get("events", []) or [])
+            subscribed_events.extend(
+                manifest_provides.get("subscribes", [])
+                or manifest_provides.get("subscribes_events", [])
+                or []
+            )
             allowed_operations.extend(manifest_provides.get("operations", []) or [])
         # Metadata-level fallback (e.g. RemotePluginProxy sets dynamic_service_registration=True)
         if not dynamic_svc:
@@ -132,6 +138,7 @@ class PluginSandbox:
                 plugin_name,
                 namespace=plugin_namespace,
                 allowed_events=allowed_events,
+                subscribed_events=subscribed_events,
                 allowed_system_events=[OPERATION_READY_EVENT_TYPE],
             )
             if raw_event_bus is not None

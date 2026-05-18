@@ -31,6 +31,9 @@ class PluginManifest:
             что плагин имеет право регистрировать.
         provides_events: список типов событий, которые плагин может ПУБЛИКОВАТЬ
             (из manifest "provides.events"). Вместе с "{name}.*" namespace.
+        subscribes_events: список типов событий, на которые плагин может ПОДПИСАТЬСЯ
+            (из manifest "subscribes_events" / "provides.subscribes"). Плюс дефолты
+            internal.* / external.* и собственный namespace.
         dynamic_service_registration: плагин-прокси с динамической регистрацией сервисов
             (например remote_plugin_proxy). Пропускает проверку namespace при register.
         is_integration: флаг интеграции
@@ -49,6 +52,7 @@ class PluginManifest:
     namespace: str = ""
     provides_services: List[str] = field(default_factory=list)
     provides_events: List[str] = field(default_factory=list)
+    subscribes_events: List[str] = field(default_factory=list)
     provides_operations: List[str] = field(default_factory=list)
     storage_namespaces: List[str] = field(default_factory=list)
     dynamic_service_registration: bool = False
@@ -61,7 +65,8 @@ class PluginManifest:
         """Создать PluginManifest из словаря."""
         _known = {
             "name", "version", "class_path", "dependencies", "allowed_services",
-            "namespace", "provides_services", "provides_events", "provides_operations",
+            "namespace", "provides_services", "provides_events", "subscribes_events",
+            "provides_operations",
             "storage_namespaces", "dynamic_service_registration", "is_integration",
             "container_config",
         }
@@ -74,6 +79,7 @@ class PluginManifest:
             namespace=str(data.get("namespace") or ""),
             provides_services=data.get("provides_services", []) or [],
             provides_events=data.get("provides_events", []) or [],
+            subscribes_events=data.get("subscribes_events", []) or [],
             provides_operations=data.get("provides_operations", []) or [],
             storage_namespaces=data.get("storage_namespaces", []) or [],
             dynamic_service_registration=bool(data.get("dynamic_service_registration", False)),

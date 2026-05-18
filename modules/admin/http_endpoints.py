@@ -132,6 +132,12 @@ def register_admin_core_http_endpoints(http_registry: Any) -> None:
             "Inspector: system health (metrics, resource usage)",
             ApiResponse[SystemHealthDto],
         ),
+        (
+            "/api/v1/admin/inspector/capabilities",
+            "admin.v1.inspector.capabilities",
+            "Inspector: registered capability providers",
+            ApiResponse[List[dict]],
+        ),
     ]
     for path, service, description, response_model in inspector_typed:
         http_registry.register(

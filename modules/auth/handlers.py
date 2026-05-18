@@ -41,111 +41,12 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-# --- Bootstrap State Helpers ---
-BOOTSTRAP_STATE_KEY = "initialized"
-AUTH_STATE_NAMESPACE = "auth"
-
-
-async def _check_initialized(runtime: Any) -> bool:
-    """
-    Check if system is initialized (cached in state).
-
-    Returns True if:
-    1. State has auth.initialized = True, OR
-    2. At least one user with is_admin=True exists
-    """
-    state_key = f"{AUTH_STATE_NAMESPACE}.{BOOTSTRAP_STATE_KEY}"
-    try:
-        # Check state cache first
-        cached = await runtime.state.get(state_key)
-        if cached is not None:
-            return bool(cached.get("value", False))
-    except STORAGE_BOUNDARY_ERRORS as e:
-        logger.warning(
-            "_check_initialized: storage boundary reading state cache: %s", e, exc_info=True
-        )
-    except Exception as e:
-        logger.warning("Failed to read auth state cache: %s", e, exc_info=True)
-
-    # Fast path: persistent flag in storage (survives restarts)
-    try:
-        stored = await runtime.storage.get("auth_config", BOOTSTRAP_STATE_KEY)
-        if isinstance(stored, dict):
-            return bool(stored.get("value", False))
-    except STORAGE_BOUNDARY_ERRORS as e:
-        logger.warning(
-            "_check_initialized: storage boundary reading persistent flag: %s", e, exc_info=True
-        )
-    except Exception as e:
-        logger.warning("Failed to read persistent auth initialized flag: %s", e, exc_info=True)
-
-    # Fall back: scan for admin user
-    try:
-        user_ids = await runtime.storage.list_keys(AUTH_USERS_NAMESPACE)
-        for uid in user_ids:
-            try:
-                user_data = await runtime.storage.get(AUTH_USERS_NAMESPACE, uid)
-                if isinstance(user_data, dict) and user_data.get("is_admin", False):
-                    # Cache the result
-                    try:
-                        await runtime.state.set(state_key, {"value": True})
-                    except STORAGE_BOUNDARY_ERRORS as e:
-                        logger.warning(
-                            "_check_initialized: storage boundary caching initialized: %s",
-                            e,
-                            exc_info=True,
-                        )
-                    except Exception as e:
-                        logger.warning(
-                            "Failed to cache auth initialized state: %s", e, exc_info=True
-                        )
-                    return True
-            except STORAGE_BOUNDARY_ERRORS as e:
-                logger.warning(
-                    "_check_initialized: storage boundary reading user %s: %s",
-                    uid,
-                    e,
-                    exc_info=True,
-                )
-            except Exception as e:
-                logger.warning(
-                    "Failed to read user %s during admin scan: %s", uid, e, exc_info=True
-                )
-        return False
-    except STORAGE_BOUNDARY_ERRORS as e:
-        logger.warning(
-            "_check_initialized: storage boundary (list_keys): %s", e, exc_info=True
-        )
-        return False
-    except Exception as e:
-        logger.warning("Failed to scan users for admin check: %s", e, exc_info=True)
-        return False
-
-
-async def _mark_initialized(runtime: Any) -> None:
-    """
-    Mark system as initialized in state.
-    Called after successfully creating first admin.
-    """
-    state_key = f"{AUTH_STATE_NAMESPACE}.{BOOTSTRAP_STATE_KEY}"
-    try:
-        await runtime.state.set(state_key, {"value": True})
-    except STORAGE_BOUNDARY_ERRORS as e:
-        logger.warning(
-            "_mark_initialized: storage boundary: %s", e, exc_info=True
-        )
-    except Exception as e:
-        logger.warning("Failed to mark system as initialized: %s", e, exc_info=True)
-
-    # Also persist the flag so bootstrap remains correct after restart.
-    try:
-        await runtime.storage.set("auth_config", BOOTSTRAP_STATE_KEY, {"value": True})
-    except STORAGE_BOUNDARY_ERRORS as e:
-        logger.warning(
-            "_mark_initialized: storage boundary persisting flag: %s", e, exc_info=True
-        )
-    except Exception as e:
-        logger.warning("Failed to persist auth initialized flag: %s", e, exc_info=True)
+from modules.auth.bootstrap_state import (
+    check_initialized,
+    mark_initialized,
+    release_bootstrap_lock,
+    try_claim_bootstrap_lock,
+)
 
 
 async def auth_bootstrap(runtime: Any) -> Dict[str, Any]:
@@ -159,7 +60,7 @@ async def auth_bootstrap(runtime: Any) -> Dict[str, Any]:
         {"initialized": true|false}
     """
     try:
-        initialized = await _check_initialized(runtime)
+        initialized = await check_initialized(runtime)
         return {"initialized": initialized}
     except Exception as e:
         logger.warning("Bootstrap check error: %s", e, exc_info=True)
@@ -338,9 +239,7 @@ async def auth_initialize(runtime: Any, body: Any = None) -> Dict[str, Any]:
     Returns:
         {"ok": true, "user_id": "admin"} or {"ok": false, "error": "..."}
     """
-    # Check if already initialized
-    initialized = await _check_initialized(runtime)
-    if initialized:
+    if await check_initialized(runtime):
         raise ForbiddenError("System already initialized")
 
     if not isinstance(body, dict):
@@ -353,28 +252,35 @@ async def auth_initialize(runtime: Any, body: Any = None) -> Dict[str, Any]:
     if not password:
         raise BadRequestError("password required")
 
+    claimed = await try_claim_bootstrap_lock(runtime)
+    if not claimed:
+        raise ForbiddenError("System already initialized or bootstrap in progress")
+
     try:
+        if await check_initialized(runtime):
+            raise ForbiddenError("System already initialized")
+
         await create_user(
             runtime,
             user_id,
             ["admin.*"],
             is_admin=True,
             username=username,
-            password=password
+            password=password,
         )
-
-        # Mark system as initialized
-        await _mark_initialized(runtime)
-
+        await mark_initialized(runtime)
         return {"ok": True, "user_id": user_id, "message": "System initialized successfully"}
+    except ForbiddenError:
+        raise
     except ValueError as e:
+        await release_bootstrap_lock(runtime)
         raise BadRequestError(str(e))
     except STORAGE_BOUNDARY_ERRORS as e:
-        logger.error(
-            "auth_initialize: storage boundary: %s", e, exc_info=True
-        )
+        await release_bootstrap_lock(runtime)
+        logger.error("auth_initialize: storage boundary: %s", e, exc_info=True)
         raise BadRequestError(f"Initialization failed: {str(e)}")
     except Exception as e:
+        await release_bootstrap_lock(runtime)
         logger.error("System initialization failed: %s", e, exc_info=True)
         raise BadRequestError(f"Initialization failed: {str(e)}")
 

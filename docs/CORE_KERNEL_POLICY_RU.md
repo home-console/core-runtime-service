@@ -50,6 +50,7 @@ fail-closed запрещать:
 - `namespace`: дополнительный namespace префикс, помимо `{plugin_name}.*`
 - `provides_services`: какие сервисы плагин может **регистрировать** вне `{plugin_name}.*`
 - `provides_events`: какие события плагин может **публиковать** вне `{plugin_name}.*`
+- `subscribes_events`: какие события плагин может **слушать** вне дефолтов (`internal.*`, `external.*`, `{plugin_name}.*`)
 - `provides_operations`: какие operation types плагин может **регистрировать** вне `{plugin_name}.*`
 - `storage_namespaces`: какие storage namespaces плагин может **использовать** кроме своего `{plugin_name}`
 

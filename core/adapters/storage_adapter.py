@@ -27,6 +27,25 @@ class StorageAdapter(ABC):
         """
         pass
 
+    async def set_if_absent(
+        self, namespace: str, key: str, value: dict[str, Any]
+    ) -> bool:
+        """
+        Set value only if the key does not exist yet (compare-and-set).
+
+        Returns:
+            True if the value was written, False if the key already existed.
+        """
+        existing = await self.get(namespace, key)
+        if existing is not None:
+            return False
+        async with self.transaction():
+            existing = await self.get(namespace, key)
+            if existing is not None:
+                return False
+            await self.set(namespace, key, value)
+            return True
+
     @abstractmethod
     async def set(self, namespace: str, key: str, value: dict[str, Any]) -> None:
         """

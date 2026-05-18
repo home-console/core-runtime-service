@@ -169,6 +169,29 @@ class PostgreSQLAdapter(StorageAdapter):
                     f"JSON parsing error for {namespace}.{key}: {e}"
                 )
 
+    async def set_if_absent(
+        self, namespace: str, key: str, value: dict[str, Any]
+    ) -> bool:
+        """Atomic insert — returns False if (namespace, key) already exists."""
+        pool = await self._get_pool()
+        payload: Any = value
+        if isinstance(payload, (dict, list)):
+            payload = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        async with pool.acquire() as conn:
+            result = await conn.execute(
+                """
+                INSERT INTO storage (namespace, key, value)
+                VALUES ($1, $2, $3::jsonb)
+                ON CONFLICT (namespace, key) DO NOTHING
+                """,
+                namespace,
+                key,
+                payload,
+            )
+            # asyncpg status: "INSERT 0 1" when inserted, "INSERT 0 0" on conflict
+            parts = result.split()
+            return len(parts) >= 3 and parts[-1] == "1"
+
     async def set(self, namespace: str, key: str, value: dict[str, Any]) -> None:
         """Сохранить значение в storage.
 

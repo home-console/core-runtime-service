@@ -204,10 +204,24 @@ async def bootstrap_runtime_secrets(
     for spec in _SECRET_SPECS:
         await _resolve(*spec)
 
+    csrf_rotated: list[str] = []
+    if source_mode in {"store", "store+env"}:
+        from modules.security.csrf_secret import maybe_auto_rotate_csrf_secret, sync_csrf_secrets_to_env
+
+        rotation = await maybe_auto_rotate_csrf_secret(
+            secret_store,  # type: ignore[arg-type]
+            readonly=readonly,
+        )
+        if rotation is not None:
+            csrf_rotated.append("CSRF_SECRET")
+        else:
+            await sync_csrf_secrets_to_env(secret_store)  # type: ignore[arg-type]
+
     return {
         "imported_from_env": imported_from_env,
         "generated": generated,
         "missing_required": missing_required,
+        "csrf_rotated": csrf_rotated,
     }
 
 

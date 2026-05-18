@@ -20,7 +20,7 @@ from app.env_bootstrap import (
     probe_storage_read,
     secrets_source_mode,
 )
-from app.bootstrap import auto_load_plugins_if_enabled, build_runtime
+from app.bootstrap import auto_load_plugins_if_enabled, build_runtime, record_plugin_load_error
 from app.bootstrap import resolve_module_specs_for_profile
 from core.runtime.config import Config
 from core.runtime.state_engine import StateEngine
@@ -85,7 +85,12 @@ async def main() -> None:
     try:
         await auto_load_plugins_if_enabled(runtime, config)
     except Exception as e:
-        print(f"[Runtime] Plugin auto-load skipped: {e}")
+        record_plugin_load_error(runtime, "__auto_load__", str(e))
+        print(f"[Runtime] Plugin auto-load failed: {e}", file=sys.stderr)
+    else:
+        load_errors = getattr(runtime, "plugin_load_errors", {}) or {}
+        for name, err in load_errors.items():
+            print(f"[Runtime] Plugin load error ({name}): {err}", file=sys.stderr)
 
     await runtime.run()
     await _teardown(runtime, storage_stack)

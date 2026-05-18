@@ -221,6 +221,26 @@ class SQLiteAdapter(StorageAdapter):
 
         return await asyncio.to_thread(_get_sync, namespace, key)
 
+    async def set_if_absent(
+        self, namespace: str, key: str, value: dict[str, Any]
+    ) -> bool:
+        """Atomic insert — returns False if (namespace, key) already exists."""
+
+        def _set_if_absent_sync(ns: str, k: str, val: dict[str, Any]) -> bool:
+            conn = self._get_connection(readonly=False)
+            json_value = json.dumps(val, ensure_ascii=False)
+            cursor = conn.execute(
+                "INSERT OR IGNORE INTO storage (namespace, key, value) VALUES (?, ?, ?)",
+                (ns, k, json_value),
+            )
+            if not self._get_in_transaction():
+                conn.commit()
+            return cursor.rowcount > 0
+
+        return await asyncio.to_thread(
+            _set_if_absent_sync, namespace, key, value
+        )
+
     async def set(self, namespace: str, key: str, value: dict[str, Any]) -> None:
         """Сохранить значение в storage (выполняется в threadpool)."""
 

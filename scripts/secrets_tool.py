@@ -12,6 +12,7 @@
   set <key>                     — записать секрет (значение из stdin)
   delete <key>                  — удалить секрет
   init                          — bootstrap: залить секреты из env в store
+  rotate-csrf                   — ротация CSRF HMAC secret (grace period для старых токенов)
 
 Все ответы — JSON в stdout. Ошибки — JSON { "ok": false, "error": "..." }.
 """
@@ -118,6 +119,14 @@ async def cmd_delete(key: str) -> None:
     _out({"ok": True, "key": key, "deleted": deleted})
 
 
+async def cmd_rotate_csrf() -> None:
+    """Ручная ротация runtime.csrf_secret (текущий → previous + новый)."""
+    store, stack = await _open_stack_and_store()
+    report = await store.rotate_csrf_secret()
+    await _close(stack)
+    _out({"ok": True, "action": "rotate_csrf", **report})
+
+
 async def cmd_init() -> None:
     """
     Bootstrap секреты: загружает из env в SecretStore (source_mode=store+env).
@@ -154,6 +163,7 @@ Commands:
   set <key>          Write a secret (value from stdin)
   delete <key>       Delete a secret
   init               Bootstrap secrets from env into store
+  rotate-csrf        Rotate CSRF HMAC secret (previous valid for grace period)
 """
 
 if __name__ == "__main__":
@@ -182,6 +192,8 @@ if __name__ == "__main__":
             asyncio.run(cmd_delete(args[1]))
         elif action == "init":
             asyncio.run(cmd_init())
+        elif action == "rotate-csrf":
+            asyncio.run(cmd_rotate_csrf())
         else:
             _err(f"unknown command: {action!r}. Run without args to see usage.")
     except SystemExit:

@@ -10,7 +10,6 @@ RedisStreamsEventBus — реализация IEventBus через Redis Streams
   локальным подписчикам без дополнительного round-trip
 
 Не обеспечивает:
-- Персистентность middleware pipeline (упрощено для v1)
 - Совместимость с EventBusClaimManager (Redis Streams — своя семантика)
 
 Зависимости: redis[asyncio] (redis-py async client)
@@ -25,7 +24,7 @@ import logging
 import uuid
 from typing import Any
 
-from core.messaging import AnyEventHandler
+from core.messaging import AnyEventHandler, resolve_max_concurrent_handlers
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +53,7 @@ class RedisStreamsEventBus:
         block_ms: int = 1_000,
         batch_size: int = 10,
         storage: Any = None,  # совместимость с InMemoryEventBus signature
+        max_concurrent_handlers: int | None = None,
     ) -> None:
         self._redis_url = redis_url
         self._consumer_name = consumer_name or (
@@ -63,6 +63,8 @@ class RedisStreamsEventBus:
         self._block_ms = int(block_ms)
         self._batch_size = int(batch_size)
         self._storage = storage  # не используется, для совместимости
+        limit = resolve_max_concurrent_handlers(max_concurrent_handlers)
+        self._handler_semaphore = asyncio.Semaphore(limit)
 
         self._redis: Any = None  # redis.asyncio.Redis
         self._subscribers: dict[str, list[AnyEventHandler]] = {}
@@ -124,12 +126,6 @@ class RedisStreamsEventBus:
 
         event_id = str(uuid.uuid4())
         stream_key = f"{STREAM_PREFIX}{event_type}"
-
-        # middleware before_publish
-        for mw in list(self._middleware):
-            before = getattr(mw, "before_publish", None)
-            if callable(before):
-                await before(event_type, payload)
 
         data = {
             "event_id": event_id,
@@ -217,6 +213,16 @@ class RedisStreamsEventBus:
 
     # ─── Internal ───────────────────────────────────────────────────
 
+    async def _invoke_handler(
+        self, handler: AnyEventHandler, event_type: str, payload: dict[str, Any]
+    ) -> None:
+        if inspect.iscoroutinefunction(handler):
+            await handler(event_type, payload)
+            return
+        out = handler(event_type, payload)
+        if inspect.isawaitable(out):
+            await out
+
     async def _dispatch_local(
         self,
         event_type: str,
@@ -227,23 +233,43 @@ class RedisStreamsEventBus:
             self._subscribers.get("*", [])
         )
 
-        for handler in handlers:
-            try:
-                if inspect.iscoroutinefunction(handler):
-                    await handler(event_type, payload)
-                else:
-                    out = handler(event_type, payload)
-                    if inspect.isawaitable(out):
-                        await out
-            except Exception as exc:
-                logger.error("[RedisEventBus] Handler error for '%s': %s", event_type, exc)
-                for mw in list(self._middleware):
-                    on_err = getattr(mw, "on_handler_error", None)
-                    if callable(on_err):
-                        try:
-                            await on_err(event_type, payload, exc)
-                        except Exception:
-                            pass
+        async with self._lock:
+            middleware = list(self._middleware)
+
+        for mw in middleware:
+            before = getattr(mw, "before_publish", None)
+            if callable(before):
+                await before(event_type, payload)
+
+        if handlers:
+
+            async def run_with_backpressure(handler: AnyEventHandler) -> None:
+                async with self._handler_semaphore:
+                    await self._invoke_handler(handler, event_type, payload)
+
+            results = await asyncio.gather(
+                *[run_with_backpressure(handler) for handler in handlers],
+                return_exceptions=True,
+            )
+            for result in results:
+                if isinstance(result, Exception):
+                    logger.error(
+                        "[RedisEventBus] Handler error for '%s': %s",
+                        event_type,
+                        result,
+                    )
+                    for mw in middleware:
+                        on_err = getattr(mw, "on_handler_error", None)
+                        if callable(on_err):
+                            try:
+                                await on_err(event_type, payload, result)
+                            except Exception:
+                                pass
+
+        for mw in middleware:
+            after = getattr(mw, "after_publish", None)
+            if callable(after):
+                await after(event_type, payload, len(handlers))
 
         await self.mark_event_processed(event_id)
 

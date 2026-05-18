@@ -142,11 +142,21 @@ async def build_runtime(
     return runtime
 
 
+def record_plugin_load_error(runtime: CoreRuntime, plugin_name: str, message: str) -> None:
+    """Record a plugin auto-load failure for health/degraded reporting."""
+    errors = getattr(runtime, "plugin_load_errors", None)
+    if errors is None:
+        runtime.plugin_load_errors = {}
+        errors = runtime.plugin_load_errors
+    errors[plugin_name] = message
+
+
 async def auto_load_plugins_if_enabled(runtime: CoreRuntime, config: Config) -> None:
     """
     App-level policy for plugin auto-discovery.
 
     Core runtime does not decide plugin discovery strategy.
+    Failures are recorded in runtime.plugin_load_errors (see /api/v1/monitor/health).
     """
     should_auto_load_plugins = bool(
         getattr(config, "auto_load_plugins", config is not None)
@@ -162,7 +172,11 @@ async def auto_load_plugins_if_enabled(runtime: CoreRuntime, config: Config) -> 
 
     plugins_dir_str = getattr(config, "plugins_dir", None)
     plugins_dir = Path(plugins_dir_str).expanduser() if plugins_dir_str else None
-    await runtime.plugin_manager.auto_load_plugins(plugins_dir=plugins_dir)
+    try:
+        await runtime.plugin_manager.auto_load_plugins(plugins_dir=plugins_dir)
+    except Exception as exc:
+        record_plugin_load_error(runtime, "__auto_load__", str(exc))
+        raise
 
 
 def resolve_module_specs_for_profile(

@@ -36,6 +36,8 @@ async def collect_runtime_health(runtime: Any) -> Dict[str, Any]:
         checks["modules"] = HealthStatus.UNHEALTHY.value
         checks["modules_error"] = str(exc)
 
+    load_errors: dict[str, str] = dict(getattr(runtime, "plugin_load_errors", {}) or {})
+
     try:
         plugins = await runtime.plugin_manager.list_plugins()
         error_plugins: list[str] = []
@@ -46,11 +48,18 @@ async def collect_runtime_health(runtime: Any) -> Dict[str, Any]:
         if error_plugins:
             checks["plugins"] = HealthStatus.DEGRADED.value
             checks["plugins_error"] = f"Plugins in error state: {error_plugins}"
+        elif load_errors:
+            checks["plugins"] = HealthStatus.DEGRADED.value
+            checks["plugins_error"] = "Plugin auto-load reported failures"
         else:
             checks["plugins"] = HealthStatus.HEALTHY.value
     except Exception as exc:
         checks["plugins"] = HealthStatus.UNHEALTHY.value
         checks["plugins_error"] = str(exc)
+
+    if load_errors:
+        checks["plugin_auto_load"] = HealthStatus.DEGRADED.value
+        checks["plugin_load_errors"] = load_errors
 
     overall = HealthStatus.HEALTHY
     if any(value == HealthStatus.UNHEALTHY.value for value in checks.values()):

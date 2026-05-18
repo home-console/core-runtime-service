@@ -28,6 +28,13 @@ class InMemoryStorageAdapter(StorageAdapter):
     async def set(self, namespace: str, key: str, value: dict):
         self._data.setdefault(namespace, {})[key] = value
 
+    async def set_if_absent(self, namespace: str, key: str, value: dict) -> bool:
+        ns = self._data.setdefault(namespace, {})
+        if key in ns:
+            return False
+        ns[key] = value
+        return True
+
     async def delete(self, namespace: str, key: str) -> bool:
         ns = self._data.get(namespace, {})
         if key in ns:

@@ -12,6 +12,7 @@ from core.kernel.plugin_isolation import (
     NamespacedStorageProxy,
     OperationRegistryProxy,
     ServiceRegistryProxy,
+    assert_plugin_namespace_allowed,
 )
 
 
@@ -50,9 +51,16 @@ class _Storage:
 class _EventBus:
     def __init__(self) -> None:
         self.published: list[str] = []
+        self.subscribed: list[str] = []
 
     async def publish(self, event_type: str, payload: dict[str, Any]) -> None:
         self.published.append(event_type)
+
+    async def subscribe(self, event_type: str, handler: Any) -> None:
+        self.subscribed.append(event_type)
+
+    async def unsubscribe(self, event_type: str, handler: Any) -> None:
+        pass
 
 
 class _Operations:
@@ -98,6 +106,24 @@ async def test_service_registry_proxy_blocks_registration_outside_declared_names
         await proxy.unregister("other.service")
 
 
+@pytest.mark.parametrize(
+    "namespace",
+    ["runtime", "runtime.backup", "hc.internal", "system.auth", "core.kernel"],
+)
+def test_reserved_namespace_rejected(namespace: str) -> None:
+    with pytest.raises(ValueError, match="Reserved"):
+        assert_plugin_namespace_allowed(namespace)
+
+
+def test_namespaced_storage_proxy_rejects_reserved_allowed_namespace() -> None:
+    with pytest.raises(ValueError, match="Reserved"):
+        NamespacedStorageProxy(
+            _Storage(),
+            namespace="my_plugin",
+            allowed_namespaces=["runtime.evil"],
+        )
+
+
 @pytest.mark.asyncio
 async def test_namespaced_storage_proxy_blocks_undeclared_storage_namespace() -> None:
     proxy = NamespacedStorageProxy(
@@ -110,6 +136,30 @@ async def test_namespaced_storage_proxy_blocks_undeclared_storage_namespace() ->
     assert await proxy.get("shared", "key") == ("shared", "key")
     with pytest.raises(ForbiddenError):
         await proxy.get("other", "key")
+
+
+@pytest.mark.asyncio
+async def test_event_bus_proxy_blocks_subscribe_to_reserved_events() -> None:
+    bus = _EventBus()
+    proxy = EventBusProxy(bus, "owner")
+
+    await proxy.subscribe("internal.device_ready", lambda _e, _p: None)
+    with pytest.raises(ForbiddenError):
+        await proxy.subscribe("runtime.admin.secret", lambda _e, _p: None)
+
+
+@pytest.mark.asyncio
+async def test_event_bus_proxy_requires_declared_subscribe_pattern() -> None:
+    bus = _EventBus()
+    proxy = EventBusProxy(
+        bus,
+        "owner",
+        subscribed_events=["automation.triggered"],
+    )
+
+    await proxy.subscribe("automation.triggered", lambda _e, _p: None)
+    with pytest.raises(ForbiddenError):
+        await proxy.subscribe("automation.other", lambda _e, _p: None)
 
 
 @pytest.mark.asyncio

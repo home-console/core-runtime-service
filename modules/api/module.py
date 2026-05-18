@@ -9,6 +9,7 @@ ApiModule — HTTP API Gateway (FastAPI + uvicorn).
 Маршруты привязываются в run_http() — после старта модулей и плагинов.
 """
 
+from pathlib import Path
 from typing import Any, Dict
 import os
 import sys
@@ -16,7 +17,7 @@ import asyncio
 import signal
 from contextlib import nullcontext
 
-from fastapi import FastAPI
+from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
@@ -165,6 +166,17 @@ class ApiModule(RuntimeModule):
         cfg = getattr(runtime, "_config", None)
         _api_pfx = (getattr(cfg, "api_url_prefix", "/api/v1") or "/api/v1").rstrip("/")
         self.app.include_router(MonitoringModule(runtime=runtime).router, prefix=f"{_api_pfx}/monitor", tags=["monitoring"])
+
+        runtime_version = (
+            str(getattr(cfg, "runtime_version", "0.1.0")).strip() if cfg is not None else "0.1.0"
+        ) or "0.1.0"
+        version_router = APIRouter()
+
+        @version_router.get("/version")
+        async def version_endpoint() -> dict[str, str]:
+            return {"version": runtime_version, "api": "v1"}
+
+        self.app.include_router(version_router, prefix=_api_pfx, tags=["system"])
         # Internal API (service proxy) — not included in OpenAPI schema.
         try:
             from modules.api.internal_routes import create_internal_router
@@ -236,13 +248,33 @@ class ApiModule(RuntimeModule):
         api_host = os.getenv("API_HOST", "0.0.0.0")
         api_port = int(os.getenv("API_PORT", "8000"))
         uvicorn_log_level = os.getenv("UVICORN_LOG_LEVEL", "warning")
-        config = uvicorn.Config(
-            self.app,
-            host=api_host,
-            port=api_port,
-            log_level=uvicorn_log_level,
-            access_log=False,
-        )
+        uds_path = os.getenv("RUNTIME_SOCKET_PATH", "").strip() or None
+
+        if uds_path:
+            socket_file = Path(uds_path)
+            socket_file.parent.mkdir(parents=True, exist_ok=True)
+            if socket_file.exists():
+                socket_file.unlink()
+            config = uvicorn.Config(
+                self.app,
+                uds=uds_path,
+                log_level=uvicorn_log_level,
+                access_log=False,
+            )
+            # Доступен только владельцу процесса: rwx------
+            # Устанавливается после bind внутри uvicorn (хук startup)
+            async def _fix_socket_perms() -> None:
+                if socket_file.exists():
+                    socket_file.chmod(0o600)
+            self.app.add_event_handler("startup", _fix_socket_perms)
+        else:
+            config = uvicorn.Config(
+                self.app,
+                host=api_host,
+                port=api_port,
+                log_level=uvicorn_log_level,
+                access_log=False,
+            )
         await self._log(runtime, "info", "API: uvicorn config created")
         server = uvicorn.Server(config)
         server.capture_signals = lambda: nullcontext()  # type: ignore[method-assign]
@@ -268,7 +300,11 @@ class ApiModule(RuntimeModule):
         except (OSError, ValueError):
             signal.signal(signal.SIGINT, lambda s, f: loop.call_soon_threadsafe(_on_sigint))
 
-        await self._log(runtime, "info", f"[API] HTTP на http://{api_host}:{api_port}")
+        if uds_path:
+            await self._log(runtime, "info", f"[API] Unix socket: {uds_path}")
+            print(f"[Runtime] API: unix://{uds_path}  (HTTP также на http://{api_host}:{api_port} если настроен)")
+        else:
+            await self._log(runtime, "info", f"[API] HTTP на http://{api_host}:{api_port}")
         # Креды в терминал: URL и опционально dev API key для подключения веба
         display_host = "127.0.0.1" if api_host == "0.0.0.0" else api_host
         api_base_url = f"http://{display_host}:{api_port}"

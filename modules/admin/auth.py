@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 import time
 
 from core.adapters.storage_errors import STORAGE_BOUNDARY_ERRORS
+from modules.auth.bootstrap_state import check_initialized, try_claim_bootstrap_lock, mark_initialized, release_bootstrap_lock
 from modules.api.auth import (
     create_api_key,
     create_user,
@@ -181,31 +182,15 @@ async def admin_auth_initialize(runtime: Any, body: Any = None) -> Dict[str, Any
     if not password:
         return {"ok": False, "error": "password required"}
 
-    try:
-        user_ids = await runtime.storage.list_keys(AUTH_USERS_NAMESPACE)
-        has_admin = False
-        for uid in user_ids:
-            try:
-                user_data = await runtime.storage.get(AUTH_USERS_NAMESPACE, uid)
-                if isinstance(user_data, dict) and user_data.get("is_admin", False):
-                    has_admin = True
-                    break
-            except STORAGE_BOUNDARY_ERRORS as e:
-                logger.warning(
-                    "admin_auth_initialize: storage boundary reading user %s: %s",
-                    uid,
-                    e,
-                    exc_info=True,
-                )
-            except Exception as e:
-                logger.warning(
-                    "admin_auth_initialize: unexpected error reading user %s: %s",
-                    uid,
-                    e,
-                    exc_info=True,
-                )
+    if await check_initialized(runtime):
+        return {"ok": False, "error": "System already initialized. Admin user exists."}
 
-        if has_admin:
+    claimed = await try_claim_bootstrap_lock(runtime)
+    if not claimed:
+        return {"ok": False, "error": "System already initialized or bootstrap in progress"}
+
+    try:
+        if await check_initialized(runtime):
             return {"ok": False, "error": "System already initialized. Admin user exists."}
 
         await create_user(
@@ -214,18 +199,21 @@ async def admin_auth_initialize(runtime: Any, body: Any = None) -> Dict[str, Any
             ["admin.*"],
             is_admin=True,
             username=username,
-            password=password
+            password=password,
         )
-
+        await mark_initialized(runtime)
         return {"ok": True, "user_id": user_id, "message": "System initialized successfully"}
     except ValueError as e:
+        await release_bootstrap_lock(runtime)
         return {"ok": False, "error": str(e)}
     except STORAGE_BOUNDARY_ERRORS as e:
+        await release_bootstrap_lock(runtime)
         logger.error(
             "System initialization failed (storage boundary): %s", e, exc_info=True
         )
         return {"ok": False, "error": f"Initialization failed: {str(e)}"}
     except Exception as e:
+        await release_bootstrap_lock(runtime)
         logger.error("System initialization failed: %s", e, exc_info=True)
         return {"ok": False, "error": f"Initialization failed: {str(e)}"}
 
@@ -545,38 +533,8 @@ async def admin_auth_me(runtime: Any, request: Any = None) -> Dict[str, Any]:
     if request is None:
         return {"ok": False, "error": "request not available"}
 
-    try:
-        user_ids = await runtime.storage.list_keys(AUTH_USERS_NAMESPACE)
-        has_admin = False
-        for user_id in user_ids:
-            try:
-                user_data = await runtime.storage.get(AUTH_USERS_NAMESPACE, user_id)
-                if isinstance(user_data, dict) and user_data.get("is_admin", False):
-                    has_admin = True
-                    break
-            except STORAGE_BOUNDARY_ERRORS as e:
-                logger.warning(
-                    "admin_auth_me: storage boundary reading user %s: %s",
-                    user_id,
-                    e,
-                    exc_info=True,
-                )
-            except Exception as e:
-                logger.warning(
-                    "admin_auth_me: unexpected error reading user %s: %s",
-                    user_id,
-                    e,
-                    exc_info=True,
-                )
-
-        if not has_admin:
-            return {"ok": False, "needs_initialization": True, "error": "System not initialized"}
-    except STORAGE_BOUNDARY_ERRORS as e:
-        logger.warning(
-            "admin_auth_me: storage boundary (admin scan): %s", e, exc_info=True
-        )
-    except Exception as e:
-        logger.warning("Failed to check admin status: %s", e, exc_info=True)
+    if not await check_initialized(runtime):
+        return {"ok": False, "needs_initialization": True, "error": "System not initialized"}
 
     from modules.api.auth.middleware import get_request_context
     context = await get_request_context(request)

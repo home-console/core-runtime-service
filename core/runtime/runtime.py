@@ -172,6 +172,9 @@ class CoreRuntime(RuntimeLifecycleMixin):
         # Backward-compatible runtime worker task handle (used in tests and lifecycle helpers).
         self._worker_task: Optional[asyncio.Task[Any]] = None
 
+        # Auto-load / manifest failures surfaced via /api/v1/monitor/health (A7).
+        self.plugin_load_errors: dict[str, str] = {}
+
     def create_context(self) -> RuntimeContext:
         """
         Создать RuntimeContext для модулей и плагинов.

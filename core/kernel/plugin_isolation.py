@@ -27,6 +27,52 @@ DEFAULT_ALLOWED_SERVICES = [
     "logger.debug",
 ]
 
+# Prefixes reserved for core runtime — plugins must not squat these namespaces.
+RESERVED_NAMESPACE_PREFIXES: tuple[str, ...] = (
+    "runtime.",
+    "hc.",
+    "system.",
+    "core.",
+)
+RESERVED_NAMESPACE_EXACT: frozenset[str] = frozenset(
+    prefix.rstrip(".") for prefix in RESERVED_NAMESPACE_PREFIXES
+)
+
+# Integration plugins may subscribe to cross-plugin buses without listing every type.
+DEFAULT_SUBSCRIBE_PREFIXES: tuple[str, ...] = ("internal.", "external.")
+
+
+def is_reserved_event_type(event_type: str) -> bool:
+    """True if event_type uses a core-reserved prefix (runtime.*, hc.*, …)."""
+    normalized = str(event_type or "").strip().lower()
+    if not normalized:
+        return True
+    if normalized in RESERVED_NAMESPACE_EXACT:
+        return True
+    return any(normalized.startswith(prefix) for prefix in RESERVED_NAMESPACE_PREFIXES)
+
+
+def assert_plugin_namespace_allowed(namespace: str, *, context: str = "namespace") -> None:
+    """
+    Reject plugin namespaces that overlap core/runtime reserved prefixes.
+
+    Blocks exact names (runtime, hc, system, core) and dotted prefixes (runtime.*, …).
+    """
+    if not namespace or ":" in namespace:
+        raise ValueError(f"Invalid {context}: {namespace!r}")
+
+    normalized = namespace.strip().lower()
+    if normalized in RESERVED_NAMESPACE_EXACT:
+        raise ValueError(
+            f"Reserved {context} {namespace!r}: "
+            f"cannot use {', '.join(sorted(RESERVED_NAMESPACE_EXACT))}"
+        )
+    for prefix in RESERVED_NAMESPACE_PREFIXES:
+        if normalized.startswith(prefix):
+            raise ValueError(
+                f"Reserved {context} {namespace!r}: prefix {prefix!r} is reserved for core"
+            )
+
 
 def _as_patterns(values: Optional[Iterable[str]]) -> list[str]:
     if values is None:
@@ -53,8 +99,7 @@ class StorageProxy:
     """
 
     def __init__(self, storage: Any, namespace: str):
-        if not namespace or ":" in namespace:
-            raise ValueError(f"Invalid namespace: {namespace}")
+        assert_plugin_namespace_allowed(namespace, context="storage namespace")
 
         self._storage = storage
         self._namespace = namespace
@@ -118,11 +163,13 @@ class NamespacedStorageProxy:
         *,
         allowed_namespaces: Optional[Iterable[str]] = None,
     ):
-        if not namespace or ":" in namespace:
-            raise ValueError(f"Invalid namespace: {namespace}")
+        assert_plugin_namespace_allowed(namespace, context="storage namespace")
         self._storage = storage
         self._namespace = namespace
-        self._allowed_namespaces = {namespace, *_as_patterns(allowed_namespaces)}
+        allowed = [namespace, *_as_patterns(allowed_namespaces)]
+        for ns in allowed:
+            assert_plugin_namespace_allowed(ns, context="allowed storage namespace")
+        self._allowed_namespaces = set(allowed)
 
     def _require_ns(self, namespace: str) -> None:
         if namespace not in self._allowed_namespaces:
@@ -272,8 +319,8 @@ class EventBusProxy:
     ({plugin_name}.*) или под объявленным namespace из манифеста ({namespace}.*).
     Eavesdropping через publish опаснее squatting в services, поэтому тут hard block.
 
-    subscribe — не ограничивается (плагины подписываются на внешние события по дизайну),
-    но все подписки логируются для аудита.
+    subscribe — allowlist: собственный namespace, internal.* / external.*, declared
+    subscribes_events, system events. Reserved prefixes (runtime.*, …) запрещены.
     """
 
     def __init__(
@@ -283,13 +330,33 @@ class EventBusProxy:
         *,
         namespace: str = "",
         allowed_events: Optional[Iterable[str]] = None,
+        subscribed_events: Optional[Iterable[str]] = None,
         allowed_system_events: Optional[Iterable[str]] = None,
     ):
+        if namespace:
+            assert_plugin_namespace_allowed(namespace, context="event namespace")
+        assert_plugin_namespace_allowed(plugin_name, context="plugin name")
         self._event_bus = event_bus
         self._plugin_name = plugin_name
         self._namespace = namespace
         self._allowed_events = _as_patterns(allowed_events)
+        self._subscribed_events = _as_patterns(subscribed_events)
         self._allowed_system_events = _as_patterns(allowed_system_events)
+
+    def _can_subscribe(self, event_type: str) -> bool:
+        if is_reserved_event_type(event_type):
+            return False
+        if event_type.startswith(f"{self._plugin_name}."):
+            return True
+        if self._namespace and event_type.startswith(f"{self._namespace}."):
+            return True
+        if any(event_type.startswith(prefix) for prefix in DEFAULT_SUBSCRIBE_PREFIXES):
+            return True
+        if _matches_patterns(event_type, self._subscribed_events):
+            return True
+        if event_type in self._allowed_system_events:
+            return True
+        return False
 
     def _can_publish(self, event_type: str) -> bool:
         if event_type.startswith(f"{self._plugin_name}."):
@@ -303,6 +370,12 @@ class EventBusProxy:
         return False
 
     async def subscribe(self, event_type: str, handler: Any) -> None:
+        if not self._can_subscribe(event_type):
+            raise ForbiddenError(
+                f"Plugin '{self._plugin_name}' cannot subscribe to '{event_type}'. "
+                f"Declare it in manifest 'subscribes_events' or use "
+                f"'{self._plugin_name}.*', 'internal.*', or 'external.*'."
+            )
         _log.debug("plugin '%s' subscribing to '%s'", self._plugin_name, event_type)
         await self._event_bus.subscribe(event_type, handler)
 

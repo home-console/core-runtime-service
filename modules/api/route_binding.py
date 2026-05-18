@@ -293,6 +293,184 @@ def bind_routes(runtime: Any, app: Any) -> None:
             app.websocket(mounted_path, name=route_name)(handler)
 
     _install_openapi_schema(app, ws_endpoints, ws_prefix)
+    _bind_event_stream(runtime, app, api_prefix)
+    _bind_service_call(runtime, app, api_prefix)
+    _bind_event_emit(runtime, app, api_prefix)
+
+
+def _bind_event_stream(runtime: Any, app: Any, api_prefix: str) -> None:
+    """Добавить SSE endpoint GET /api/v1/admin/inspector/events/stream.
+
+    Стримит live события event_bus как text/event-stream.
+    Требует admin.read scope. Фильтр по типу: ?filter=device*
+    """
+    import fnmatch
+    import json
+    from starlette.responses import StreamingResponse
+
+    mounted = _repath("/admin/inspector/events/stream", api_prefix)
+
+    async def _event_stream(request: Request):
+        # Auth: требуем is_admin
+        try:
+            ctx = await get_request_context(request, runtime)
+        except Exception:
+            ctx = None
+        if ctx is None or not getattr(ctx, "is_admin", False):
+            from fastapi.responses import JSONResponse
+            return JSONResponse({"ok": False, "error": "admin required"}, status_code=403)
+
+        event_filter: str = request.query_params.get("filter", "*")
+        queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=500)
+
+        async def _enqueue(event_type: str, data: dict) -> None:
+            if not fnmatch.fnmatch(event_type, event_filter):
+                return
+            try:
+                queue.put_nowait({"type": event_type, "data": data})
+            except asyncio.QueueFull:
+                pass  # дроп если клиент не успевает
+
+        event_bus = getattr(runtime, "event_bus", None)
+        if event_bus is None:
+            from fastapi.responses import JSONResponse
+            return JSONResponse({"ok": False, "error": "event_bus not available"}, status_code=503)
+
+        event_bus.subscribe("*", _enqueue)
+
+        async def _generate():
+            try:
+                yield "retry: 1000\n\n"
+                while True:
+                    if await request.is_disconnected():
+                        break
+                    try:
+                        event = await asyncio.wait_for(queue.get(), timeout=15.0)
+                        payload = json.dumps(event, ensure_ascii=False, default=str)
+                        yield f"data: {payload}\n\n"
+                    except asyncio.TimeoutError:
+                        yield ": keepalive\n\n"
+                    except Exception:
+                        break
+            finally:
+                event_bus.unsubscribe("*", _enqueue)
+
+        return StreamingResponse(
+            _generate(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    app.add_api_route(
+        mounted,
+        _event_stream,
+        methods=["GET"],
+        name="admin_inspector_events_stream",
+        include_in_schema=False,
+    )
+
+
+def _bind_service_call(runtime: Any, app: Any, api_prefix: str) -> None:
+    """POST /api/v1/admin/services/{name}/call — вызвать сервис из CLI/API.
+
+    Body: {"kwargs": {...}}  (опционально)
+    Требует is_admin. Таймаут 30с.
+    """
+    import json as _json
+
+    mounted = _repath("/admin/services/{service_name}/call", api_prefix)
+
+    async def _call_service(service_name: str, request: Request):
+        try:
+            ctx = await get_request_context(request, runtime)
+        except Exception:
+            ctx = None
+        if ctx is None or not getattr(ctx, "is_admin", False):
+            from fastapi.responses import JSONResponse
+            return JSONResponse({"ok": False, "error": "admin required"}, status_code=403)
+
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+
+        kwargs = body.get("kwargs", {}) if isinstance(body, dict) else {}
+
+        try:
+            result = await runtime.service_registry.call(service_name, **kwargs)
+            if hasattr(result, "model_dump"):
+                result = result.model_dump()
+            elif hasattr(result, "__dict__") and not isinstance(result, dict):
+                result = vars(result)
+            return {"ok": True, "result": result}
+        except ValueError as e:
+            from fastapi.responses import JSONResponse
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=404)
+        except Exception as e:
+            from fastapi.responses import JSONResponse
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+    app.add_api_route(
+        mounted,
+        _call_service,
+        methods=["POST"],
+        name="admin_service_call",
+        include_in_schema=False,
+    )
+
+
+def _bind_event_emit(runtime: Any, app: Any, api_prefix: str) -> None:
+    """POST /api/v1/admin/events/emit — послать событие в event bus.
+
+    Body: {"event_type": "...", "data": {...}}
+    Требует is_admin.
+    """
+    mounted = _repath("/admin/events/emit", api_prefix)
+
+    async def _emit_event(request: Request):
+        try:
+            ctx = await get_request_context(request, runtime)
+        except Exception:
+            ctx = None
+        if ctx is None or not getattr(ctx, "is_admin", False):
+            from fastapi.responses import JSONResponse
+            return JSONResponse({"ok": False, "error": "admin required"}, status_code=403)
+
+        try:
+            body = await request.json()
+        except Exception:
+            from fastapi.responses import JSONResponse
+            return JSONResponse({"ok": False, "error": "invalid JSON body"}, status_code=400)
+
+        event_type = body.get("event_type", "") if isinstance(body, dict) else ""
+        data = body.get("data", {}) if isinstance(body, dict) else {}
+
+        if not event_type:
+            from fastapi.responses import JSONResponse
+            return JSONResponse({"ok": False, "error": "event_type required"}, status_code=400)
+
+        event_bus = getattr(runtime, "event_bus", None)
+        if event_bus is None:
+            from fastapi.responses import JSONResponse
+            return JSONResponse({"ok": False, "error": "event_bus not available"}, status_code=503)
+
+        try:
+            await event_bus.publish(event_type, data)
+            return {"ok": True, "event_type": event_type}
+        except Exception as e:
+            from fastapi.responses import JSONResponse
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+    app.add_api_route(
+        mounted,
+        _emit_event,
+        methods=["POST"],
+        name="admin_event_emit",
+        include_in_schema=False,
+    )
 
 
 def _make_api_handler(runtime: Any, endpoint: Any):
