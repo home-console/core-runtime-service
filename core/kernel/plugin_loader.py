@@ -11,13 +11,15 @@ PluginLoader - загрузка манифестов плагинов и discove
 """
 
 import asyncio
+import importlib
+import importlib.metadata
+import importlib.util
 import json
 import logging
+import re
 import sys
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Callable, Awaitable
-import importlib
-import importlib.util
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from core.observability.logger_helper import warning, info
 from sdk.plugin import BasePlugin as SDKBasePlugin
@@ -43,6 +45,34 @@ from core.kernel.plugin_manifest_schema import ValidationError as SchemaValidati
 from core.kernel.plugin_manifest_schema import validate_plugin_json
 
 logger = logging.getLogger(__name__)
+
+_REQ_LINE = re.compile(r"^\s*([A-Za-z0-9_\-]+)")
+
+
+def check_plugin_requirements(plugin_dir: Path) -> list[str]:
+    """
+    Читает requirements.txt из директории плагина и возвращает список
+    пакетов которые НЕ установлены в текущем интерпретаторе.
+    Пустой список → всё в порядке.
+    """
+    req_file = plugin_dir / "requirements.txt"
+    if not req_file.exists():
+        return []
+
+    missing: list[str] = []
+    for raw in req_file.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        m = _REQ_LINE.match(line)
+        if not m:
+            continue
+        pkg = m.group(1).lower().replace("-", "_")
+        try:
+            importlib.metadata.version(pkg)
+        except importlib.metadata.PackageNotFoundError:
+            missing.append(line.strip())
+    return missing
 
 
 class PluginManifestLoader:
@@ -298,6 +328,18 @@ class PluginManifestLoader:
                     e,
                     exc_info=True,
                 )
+
+            # Проверяем pip-зависимости из requirements.txt до импорта
+            missing_deps = check_plugin_requirements(plugin_dir)
+            if missing_deps:
+                await logger_func(
+                    runtime,
+                    f"Плагин '{plugin_name}' требует pip-пакеты не установленные в интерпретаторе: "
+                    f"{', '.join(missing_deps)}. "
+                    f"Установите их в core-runtime-service и перезапустите.",
+                    component="plugin_loader",
+                )
+                return False
 
             # Импортируем класс плагина
             module_path, class_name = class_path.rsplit(".", 1)
