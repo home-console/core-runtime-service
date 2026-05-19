@@ -384,6 +384,33 @@
         ]
       }
     },
+    "/api/v1/admin/inspector/capabilities": {
+      "get": {
+        "tags": [
+          "Inspector"
+        ],
+        "summary": "Get /Api/V1/Admin/Inspector/Capabilities",
+        "description": "Inspector: registered capability providers",
+        "operationId": "GET__api_v1_admin_inspector_capabilities_api_v1_admin_inspector_capabilities_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_List_dict__"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/inspector/plugins/discover": {
       "get": {
         "tags": [
@@ -6527,6 +6554,32 @@
         "type": "object",
         "title": "ApiResponse[List[WsEndpointInfoDto]]"
       },
+      "ApiResponse_List_dict__": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok",
+            "default": true
+          },
+          "result": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          }
+        },
+        "type": "object",
+        "title": "ApiResponse[List[dict]]"
+      },
       "ApiResponse_OperationDto_": {
         "properties": {
           "ok": {
@@ -10306,6 +10359,13 @@
           "type": {
             "type": "string",
             "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
           }
         },
         "type": "object",
