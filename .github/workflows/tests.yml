@@ -36,6 +36,10 @@ jobs:
           # TODO(security): remove this ignore after upstream publishes a fixed Paramiko release for CVE-2026-44405.
           # Ref: https://nvd.nist.gov/vuln/detail/CVE-2026-44405
           if [ -f requirements.lock ]; then pip-audit -r requirements.lock --ignore-vuln CVE-2026-44405; else pip-audit -r requirements.txt --ignore-vuln CVE-2026-44405; fi
+      - name: Install pyright
+        run: pip install pyright
+      - name: Pyright type check
+        run: pyright
       - name: Architecture dependency report
         run: python scripts/validate_architecture_rules.py --enforce
       - name: Plugin SDK imports guard

@@ -1,11 +1,11 @@
 {
-    "typeCheckingMode": "basic",
-    "reportOptionalMemberAccess": false,
-    "reportMissingImports": true,
-    "exclude": [
-        ".venv",
-        "**/plugins/**",
-        "**/tests/**",
-        "**/test_*.py"
-    ]
+  "pythonVersion": "3.13",
+  "typeCheckingMode": "standard",
+  "include": ["core", "sdk", "modules", "app"],
+  "exclude": ["tests", "integration_smokes", "plugins"],
+  "reportMissingImports": true,
+  "reportMissingTypeStubs": false,
+  "reportUnknownMemberType": false,
+  "reportUnknownVariableType": false,
+  "reportUnknownArgumentType": false
 }
