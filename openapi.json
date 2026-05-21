@@ -411,6 +411,33 @@
         ]
       }
     },
+    "/api/v1/admin/inspector/dashboard-cards": {
+      "get": {
+        "tags": [
+          "Inspector"
+        ],
+        "summary": "Get /Api/V1/Admin/Inspector/Dashboard-Cards",
+        "description": "Inspector: aggregate server-driven dashboard cards from plugin manifests",
+        "operationId": "GET__api_v1_admin_inspector_dashboard_cards_api_v1_admin_inspector_dashboard_cards_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_DashboardCardsListDto_"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/inspector/plugins/discover": {
       "get": {
         "tags": [
@@ -466,6 +493,224 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiResponse_PluginDetailsDto_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/inspector/plugins/{name}/ui": {
+      "get": {
+        "tags": [
+          "Inspector"
+        ],
+        "summary": "Get /Api/V1/Admin/Inspector/Plugins/{Name}/Ui",
+        "description": "Inspector: server-driven UI contributions from plugin.json",
+        "operationId": "GET__api_v1_admin_inspector_plugins__name__ui_api_v1_admin_inspector_plugins__name__ui_get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Path parameter: name",
+              "title": "Name"
+            },
+            "description": "Path parameter: name"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_PluginUiContributionsDto_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/inspector/plugins/{name}/config": {
+      "get": {
+        "tags": [
+          "Inspector"
+        ],
+        "summary": "Get /Api/V1/Admin/Inspector/Plugins/{Name}/Config",
+        "description": "Inspector: server-driven plugin ui_config storage",
+        "operationId": "GET__api_v1_admin_inspector_plugins__name__config_api_v1_admin_inspector_plugins__name__config_get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Path parameter: name",
+              "title": "Name"
+            },
+            "description": "Path parameter: name"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_PluginConfigDto_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "Inspector"
+        ],
+        "summary": "Put /Api/V1/Admin/Inspector/Plugins/{Name}/Config",
+        "description": "Inspector: update plugin ui_config storage",
+        "operationId": "PUT__api_v1_admin_inspector_plugins__name__config_api_v1_admin_inspector_plugins__name__config_put",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Path parameter: name",
+              "title": "Name"
+            },
+            "description": "Path parameter: name"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "Request body (JSON)",
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_PluginConfigDto_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/inspector/plugins/{name}/invoke": {
+      "post": {
+        "tags": [
+          "Inspector"
+        ],
+        "summary": "Post /Api/V1/Admin/Inspector/Plugins/{Name}/Invoke",
+        "description": "Inspector: invoke allowlisted plugin service (UI metrics)",
+        "operationId": "POST__api_v1_admin_inspector_plugins__name__invoke_api_v1_admin_inspector_plugins__name__invoke_post",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Path parameter: name",
+              "title": "Name"
+            },
+            "description": "Path parameter: name"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "Request body (JSON)",
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_PluginServiceInvokeResult_"
                 }
               }
             }
@@ -4657,6 +4902,140 @@
         ]
       }
     },
+    "/api/v1/skills": {
+      "get": {
+        "tags": [
+          "Skills"
+        ],
+        "summary": "Get /Api/V1/Skills",
+        "operationId": "GET__api_v1_skills_api_v1_skills_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_SkillListDto_"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/skills/{skill_id}": {
+      "get": {
+        "tags": [
+          "Skills"
+        ],
+        "summary": "Get /Api/V1/Skills/{Skill Id}",
+        "operationId": "GET__api_v1_skills__skill_id__api_v1_skills__skill_id__get",
+        "parameters": [
+          {
+            "name": "skill_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Path parameter: skill_id",
+              "title": "Skill Id"
+            },
+            "description": "Path parameter: skill_id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_SkillDto_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/skills/{skill_id}/invoke": {
+      "post": {
+        "tags": [
+          "Skills"
+        ],
+        "summary": "Post /Api/V1/Skills/{Skill Id}/Invoke",
+        "operationId": "POST__api_v1_skills__skill_id__invoke_api_v1_skills__skill_id__invoke_post",
+        "parameters": [
+          {
+            "name": "skill_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Path parameter: skill_id",
+              "title": "Skill Id"
+            },
+            "description": "Path parameter: skill_id"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "Request body (JSON)",
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_SkillInvokeResult_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/integrations": {
       "get": {
         "tags": [
@@ -5811,6 +6190,27 @@
         "type": "object",
         "title": "ApiResponse[CredentialDto]"
       },
+      "ApiResponse_DashboardCardsListDto_": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok",
+            "default": true
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DashboardCardsListDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "ApiResponse[DashboardCardsListDto]"
+      },
       "ApiResponse_DashboardSummaryDto_": {
         "properties": {
           "ok": {
@@ -6601,6 +7001,27 @@
         "type": "object",
         "title": "ApiResponse[OperationDto]"
       },
+      "ApiResponse_PluginConfigDto_": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok",
+            "default": true
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PluginConfigDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "ApiResponse[PluginConfigDto]"
+      },
       "ApiResponse_PluginDetailsDto_": {
         "properties": {
           "ok": {
@@ -6621,6 +7042,48 @@
         },
         "type": "object",
         "title": "ApiResponse[PluginDetailsDto]"
+      },
+      "ApiResponse_PluginServiceInvokeResult_": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok",
+            "default": true
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PluginServiceInvokeResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "ApiResponse[PluginServiceInvokeResult]"
+      },
+      "ApiResponse_PluginUiContributionsDto_": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok",
+            "default": true
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PluginUiContributionsDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "ApiResponse[PluginUiContributionsDto]"
       },
       "ApiResponse_PluginsDiscoverDto_": {
         "properties": {
@@ -6663,6 +7126,69 @@
         },
         "type": "object",
         "title": "ApiResponse[RuntimeInfoDto]"
+      },
+      "ApiResponse_SkillDto_": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok",
+            "default": true
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SkillDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "ApiResponse[SkillDto]"
+      },
+      "ApiResponse_SkillInvokeResult_": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok",
+            "default": true
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SkillInvokeResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "ApiResponse[SkillInvokeResult]"
+      },
+      "ApiResponse_SkillListDto_": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok",
+            "default": true
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SkillListDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "ApiResponse[SkillListDto]"
       },
       "ApiResponse_SshSessionDto_": {
         "properties": {
@@ -7353,6 +7879,122 @@
           "fingerprint"
         ],
         "title": "CredentialDto"
+      },
+      "DashboardCardDto": {
+        "properties": {
+          "plugin_name": {
+            "type": "string",
+            "title": "Plugin Name"
+          },
+          "plugin_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plugin Version"
+          },
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type"
+          },
+          "module": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Module"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "service": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service"
+          },
+          "config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config"
+          },
+          "config_schema": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config Schema"
+          }
+        },
+        "type": "object",
+        "required": [
+          "plugin_name",
+          "id"
+        ],
+        "title": "DashboardCardDto",
+        "description": "Flattened dashboard card from a plugin manifest (server-driven only)."
+      },
+      "DashboardCardsListDto": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DashboardCardDto"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "DashboardCardsListDto"
       },
       "DashboardSummaryDto": {
         "properties": {
@@ -9314,6 +9956,24 @@
         ],
         "title": "OperationTypeDto"
       },
+      "PluginConfigDto": {
+        "properties": {
+          "plugin_name": {
+            "type": "string",
+            "title": "Plugin Name"
+          },
+          "config": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Config"
+          }
+        },
+        "type": "object",
+        "required": [
+          "plugin_name"
+        ],
+        "title": "PluginConfigDto"
+      },
       "PluginDetailsDto": {
         "properties": {
           "name": {
@@ -9465,6 +10125,115 @@
           "started"
         ],
         "title": "PluginDto"
+      },
+      "PluginServiceInvokeResult": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "plugin_name": {
+            "type": "string",
+            "title": "Plugin Name"
+          },
+          "service": {
+            "type": "string",
+            "title": "Service"
+          },
+          "result": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "plugin_name",
+          "service"
+        ],
+        "title": "PluginServiceInvokeResult"
+      },
+      "PluginUiContributionsDto": {
+        "properties": {
+          "plugin_name": {
+            "type": "string",
+            "title": "Plugin Name"
+          },
+          "plugin_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plugin Version"
+          },
+          "on_disk": {
+            "type": "boolean",
+            "title": "On Disk",
+            "default": false
+          },
+          "loaded": {
+            "type": "boolean",
+            "title": "Loaded",
+            "default": false
+          },
+          "pages": {
+            "items": {
+              "$ref": "#/components/schemas/UiPageContributionDto"
+            },
+            "type": "array",
+            "title": "Pages"
+          },
+          "widgets": {
+            "items": {
+              "$ref": "#/components/schemas/UiWidgetContributionDto"
+            },
+            "type": "array",
+            "title": "Widgets"
+          },
+          "dashboard_cards": {
+            "items": {
+              "$ref": "#/components/schemas/UiWidgetContributionDto"
+            },
+            "type": "array",
+            "title": "Dashboard Cards"
+          }
+        },
+        "type": "object",
+        "required": [
+          "plugin_name"
+        ],
+        "title": "PluginUiContributionsDto"
       },
       "PluginsDiscoverDto": {
         "properties": {
@@ -9867,6 +10636,142 @@
         ],
         "title": "SetPasswordRequest"
       },
+      "SkillDto": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "plugin_name": {
+            "type": "string",
+            "title": "Plugin Name"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "intent": {
+            "type": "string",
+            "title": "Intent"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "plugin_version": {
+            "type": "string",
+            "title": "Plugin Version"
+          },
+          "service": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "plugin_name",
+          "name",
+          "intent",
+          "plugin_version"
+        ],
+        "title": "SkillDto"
+      },
+      "SkillInvokeResult": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "skill_id": {
+            "type": "string",
+            "title": "Skill Id"
+          },
+          "service": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service"
+          },
+          "result": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "skill_id"
+        ],
+        "title": "SkillInvokeResult"
+      },
+      "SkillListDto": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SkillDto"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "SkillListDto"
+      },
       "SshSessionDto": {
         "properties": {
           "session_id": {
@@ -10217,6 +11122,168 @@
         "type": "object",
         "title": "TerminalSessionStartDto"
       },
+      "UiPageContributionDto": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type"
+          },
+          "module": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Module"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "service": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service"
+          },
+          "config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config"
+          },
+          "config_schema": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config Schema"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "title": "UiPageContributionDto"
+      },
+      "UiWidgetContributionDto": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type"
+          },
+          "module": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Module"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "service": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service"
+          },
+          "config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config"
+          },
+          "config_schema": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config Schema"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "title": "UiWidgetContributionDto"
+      },
       "UpdateCredentialRequest": {
         "properties": {
           "credential": {
@@ -10359,13 +11426,6 @@
           "type": {
             "type": "string",
             "title": "Error Type"
-          },
-          "input": {
-            "title": "Input"
-          },
-          "ctx": {
-            "type": "object",
-            "title": "Context"
           }
         },
         "type": "object",

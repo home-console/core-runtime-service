@@ -60,6 +60,11 @@ from .introspection import (
     list_capabilities,
     discover_manifests_for_inspector,
     get_plugin_details,
+    get_plugin_ui_contributions,
+    get_plugin_ui_config,
+    set_plugin_ui_config,
+    invoke_plugin_service,
+    list_dashboard_cards,
 )
 from .operations import (
     admin_operations_create,
@@ -114,6 +119,36 @@ def build_admin_registrations(
         get_plugin_details,
         runtime=runtime,
         required=[(0, ("name",))],
+    )
+    plugin_ui = make_runtime_handler_positional(
+        get_plugin_ui_contributions,
+        runtime=runtime,
+        required=[(0, ("name",))],
+    )
+    plugin_config_get = make_runtime_handler_positional(
+        get_plugin_ui_config,
+        runtime=runtime,
+        required=[(0, ("name",))],
+    )
+    plugin_config_set = make_runtime_handler(
+        set_plugin_ui_config,
+        runtime=runtime,
+        params=[
+            ("plugin_name", 0, ("name", "plugin_name"), None),
+            ("body", 0, ("body",), None),
+        ],
+    )
+    plugin_invoke = make_runtime_handler(
+        invoke_plugin_service,
+        runtime=runtime,
+        params=[
+            ("plugin_name", 0, ("name", "plugin_name"), None),
+            ("body", 0, ("body",), None),
+        ],
+    )
+    dashboard_cards_list = make_runtime_handler(
+        list_dashboard_cards,
+        runtime=runtime,
     )
     storage_namespace_get = make_runtime_handler_positional(
         get_storage_namespace_contents,
@@ -207,6 +242,11 @@ def build_admin_registrations(
             make_runtime_handler(discover_manifests_for_inspector, runtime=runtime),
         ),
         ("admin.v1.inspector.plugins.get", plugin_get),
+        ("admin.v1.inspector.plugins.ui", plugin_ui),
+        ("admin.v1.inspector.plugins.config.get", plugin_config_get),
+        ("admin.v1.inspector.plugins.config.set", plugin_config_set),
+        ("admin.v1.inspector.plugins.invoke", plugin_invoke),
+        ("admin.v1.inspector.dashboard_cards", dashboard_cards_list),
         ("admin.v1.services", make_runtime_handler(list_services, runtime=runtime)),
         ("admin.v1.http", make_runtime_handler(list_http_endpoints, runtime=runtime)),
         ("admin.v1.ws", make_runtime_handler(list_ws_endpoints, runtime=runtime)),
