@@ -2,6 +2,8 @@
 
 Дата фиксации: 28 марта 2026
 
+Плагины без UI (API-only): [`PLUGIN_API_ONLY_RU.md`](PLUGIN_API_ONLY_RU.md). Политика UI: [`../../claude-analytics.md`](../../claude-analytics.md) §1.4, §7.3.
+
 ## 1. Инвариант ядра
 `core` — тупой и детерминированный execution kernel.
 

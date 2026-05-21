@@ -2,5 +2,6 @@
   "class_path": "examples.example_plugin.plugin.ExamplePlugin",
   "name": "example_plugin",
   "version": "1.0.0",
-  "description": "Reference plugin (SDK v0). Registers one service and one operation."
+  "description": "Reference plugin (SDK v0). Registers one service and one operation.",
+  "author": "Home Console"
 }

@@ -1,0 +1,49 @@
+{
+  "name": "ui_demo",
+  "version": "1.0.0",
+  "description": "Server-driven UI demo (settings + metric)",
+  "author": "Home Console",
+  "class_path": "plugins.ui_demo.plugin.UiDemoPlugin",
+  "provides_services": [
+    "ui_demo.get_metric",
+    "ui_demo.config.get",
+    "ui_demo.config.set"
+  ],
+  "ui": {
+    "pages": [
+      {
+        "path": "/admin/plugins/ui_demo",
+        "type": "settings",
+        "title": "Settings",
+        "config_schema": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean", "title": "Enabled" },
+            "label": { "type": "string", "title": "Label" }
+          }
+        }
+      },
+      {
+        "path": "/admin/plugins/ui_demo/metric",
+        "type": "metric",
+        "title": "Live value",
+        "service": "ui_demo.get_metric"
+      }
+    ],
+    "dashboard_cards": [
+      {
+        "id": "ui-demo-metric",
+        "type": "metric",
+        "title": "UI Demo",
+        "service": "ui_demo.get_metric"
+      }
+    ]
+  },
+  "skills": [
+    {
+      "name": "ping",
+      "intent": "Demo ping",
+      "service": "ui_demo.get_metric"
+    }
+  ]
+}
