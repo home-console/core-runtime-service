@@ -177,107 +177,18 @@ def validate_version(version: str) -> None:
 
 def validate_plugin_json(data: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Validate plugin.json content.
+    Validate plugin.json (delegates to core.kernel.plugin_manifest_schema).
 
-    Required fields: name, version, description, author, class_path
-    All other fields are optional with sensible defaults.
-
-    Args:
-        data: Parsed plugin.json dictionary
-
-    Returns:
-        Validated data with defaults applied
-
-    Raises:
-        ValidationError: if validation fails
+    Raises modules.plugins.schema.ValidationError on failure.
     """
-    if not isinstance(data, dict):
-        raise ValidationError("plugin.json must be a JSON object")
+    from core.kernel.plugin_manifest_schema import (
+        ValidationError as KernelValidationError,
+    )
+    from core.kernel.plugin_manifest_schema import (
+        validate_plugin_json as _validate_kernel,
+    )
 
-    # --- Check required fields ---
-    required_fields = ["name", "version", "description", "author", "class_path"]
-    for field in required_fields:
-        if field not in data:
-            raise ValidationError(f"Missing required field: {field}")
-
-    # --- Validate name ---
-    name = data.get("name")
-    if not isinstance(name, str) or not name:
-        raise ValidationError("Field 'name' must be non-empty string")
-    validate_plugin_name(name)
-
-    # --- Validate version ---
-    version = data.get("version")
-    if not isinstance(version, str) or not version:
-        raise ValidationError("Field 'version' must be non-empty string")
-    validate_version(version)
-
-    # --- Validate string fields ---
-    for field in ["description", "author"]:
-        value = data.get(field)
-        if not isinstance(value, str) or not value:
-            raise ValidationError(f"Field '{field}' must be non-empty string")
-
-    # --- Validate class_path (dotted Python path) ---
-    class_path = data.get("class_path")
-    if not isinstance(class_path, str) or not class_path:
-        raise ValidationError("class_path must be non-empty string")
-    if "." not in class_path:
-        raise ValidationError(f"class_path '{class_path}' must be a dotted path (e.g. 'plugins.my_plugin.plugin.MyPlugin')")
-
-    # --- Optional fields with defaults ---
-    data.setdefault("dependencies", [])
-    data.setdefault("requires", [])
-    data.setdefault("is_integration", False)
-    data.setdefault("integration_name", None)
-    data.setdefault("integration_flags", [])
-    data.setdefault("type", "integration")
-    data.setdefault("role", None)
-    data.setdefault("capability", None)
-    data.setdefault("user_facing", True)
-    data.setdefault("execution_mode", "in_process")
-    data.setdefault("license", None)
-    data.setdefault("config", {})
-    data.setdefault("documentation", {})
-    data.setdefault("provides", {})
-    data.setdefault("beta", False)
-    data.setdefault("experimental", False)
-    data.setdefault("_disabled", False)
-
-    # --- Validate dependencies ---
-    deps = data.get("dependencies", [])
-    if not isinstance(deps, list):
-        raise ValidationError("Field 'dependencies' must be array")
-    for dep in deps:
-        if not isinstance(dep, str):
-            raise ValidationError("Dependency must be string")
-
-    # --- Validate requires (alias for dependencies) ---
-    requires = data.get("requires", [])
-    if not isinstance(requires, list):
-        raise ValidationError("Field 'requires' must be array")
-    for req in requires:
-        if not isinstance(req, str):
-            raise ValidationError("Requirement must be string")
-
-    # --- Validate integration flags ---
-    if not isinstance(data["is_integration"], bool):
-        raise ValidationError("Field 'is_integration' must be boolean")
-
-    flags = data.get("integration_flags", [])
-    if not isinstance(flags, list):
-        raise ValidationError("Field 'integration_flags' must be array")
-    for flag in flags:
-        if not isinstance(flag, str):
-            raise ValidationError("Integration flag must be string")
-
-    # --- Validate execution_mode ---
-    valid_modes = ["in_process", "subprocess", "container"]
-    if data["execution_mode"] not in valid_modes:
-        raise ValidationError(f"execution_mode must be one of {valid_modes}")
-
-    # --- Validate user_facing ---
-    if not isinstance(data["user_facing"], bool):
-        raise ValidationError("Field 'user_facing' must be boolean")
-
-    return data
+    try:
+        return _validate_kernel(data)
+    except KernelValidationError as e:
+        raise ValidationError(str(e)) from e
