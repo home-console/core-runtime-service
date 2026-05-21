@@ -19,6 +19,13 @@ from modules.skills.ingest import (
     rehydrate_registry_from_disk,
     skills_from_manifest,
 )
+from modules.skills.persist import (
+    delete_plugin_skills,
+    hydrate_registry_from_storage,
+    persist_plugin_skills,
+    reconcile_registry_with_disk,
+    snapshot_registry_to_storage,
+)
 from modules.skills.registry import SkillRegistry
 
 logger = logging.getLogger(__name__)
@@ -67,6 +74,7 @@ class SkillsModule(RuntimeModule):
                 manifest = load_manifest_for_plugin(self.runtime, plugin_name)
                 skills = skills_from_manifest(manifest)
             self.registry.register_plugin_skills(plugin_name, version, skills)
+            await persist_plugin_skills(self.runtime, plugin_name, version, skills)
             logger.debug("skills: registered %s for plugin %s", len(skills), plugin_name)
 
         async def _on_unloaded(payload: Dict[str, Any]) -> None:
@@ -74,6 +82,7 @@ class SkillsModule(RuntimeModule):
             if not plugin_name:
                 return
             removed = self.registry.unregister_plugin(plugin_name)
+            await delete_plugin_skills(self.runtime, plugin_name)
             logger.debug("skills: unregistered %s skills for plugin %s", removed, plugin_name)
 
         self._loaded_handler = _on_loaded
@@ -123,9 +132,15 @@ class SkillsModule(RuntimeModule):
 
     async def start(self) -> None:
         try:
-            await rehydrate_registry_from_disk(self.registry, self.runtime)
+            from_storage = await hydrate_registry_from_storage(self.registry, self.runtime)
+            if from_storage == 0:
+                disk_count = await rehydrate_registry_from_disk(self.registry, self.runtime)
+                if disk_count > 0:
+                    await snapshot_registry_to_storage(self.registry, self.runtime)
+            else:
+                await reconcile_registry_with_disk(self.registry, self.runtime)
         except Exception:
-            logger.warning("skills.start: disk rehydrate failed", exc_info=True)
+            logger.warning("skills.start: registry bootstrap failed", exc_info=True)
 
     async def stop(self) -> None:
         bus = getattr(self.runtime, "event_bus", None)

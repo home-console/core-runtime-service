@@ -16,7 +16,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from modules.skills.ingest import rehydrate_registry_from_disk
 from modules.skills.module import SkillsModule
 
 
@@ -99,22 +98,46 @@ async def test_skills_pipeline_disk_rehydrate_and_load(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_rehydrate_after_simulated_core_restart(tmp_path: Path) -> None:
+    """SK5 full: first boot writes storage; second boot hydrates without disk scan."""
+    from modules.skills.persist import hydrate_registry_from_storage
+    from modules.skills.registry import SkillRegistry
+    from tests.conftest import InMemoryStorageAdapter
+
     plugins_dir = tmp_path / "plugins"
     plugins_dir.mkdir()
     _write_installed_plugin(plugins_dir)
 
-    runtime = SimpleNamespace(_config=SimpleNamespace(plugins_dir=str(plugins_dir)))
-    from modules.skills.registry import SkillRegistry
+    adapter = InMemoryStorageAdapter()
+    runtime = SimpleNamespace(
+        storage=adapter,
+        _config=SimpleNamespace(plugins_dir=str(plugins_dir)),
+        event_bus=None,
+    )
 
-    reg = SkillRegistry()
-    n = await rehydrate_registry_from_disk(reg, runtime)
-    assert n == 1
-    assert reg.get("e2e_skills_plugin.ping") is not None
+    mod = SkillsModule(runtime)
+    mod.context = SimpleNamespace(
+        services=SimpleNamespace(register=AsyncMock(), unregister=AsyncMock()),
+        http=MagicMock(),
+    )
+    await mod.register()
+    await mod.start()
+    assert mod.registry.get("e2e_skills_plugin.ping") is not None
+    await mod.stop()
 
     reg2 = SkillRegistry()
-    n2 = await rehydrate_registry_from_disk(reg2, runtime)
+    n2 = await hydrate_registry_from_storage(reg2, runtime)
     assert n2 == 1
-    assert len(reg2.list_skills()) == 1
+    assert reg2.get("e2e_skills_plugin.ping") is not None
+
+    empty_dir = tmp_path / "empty_plugins"
+    empty_dir.mkdir()
+    runtime_no_disk = SimpleNamespace(
+        storage=adapter,
+        _config=SimpleNamespace(plugins_dir=str(empty_dir)),
+    )
+    reg3 = SkillRegistry()
+    assert await hydrate_registry_from_storage(reg3, runtime_no_disk) == 1
+    assert reg3.get("e2e_skills_plugin.ping") is not None
 
 
 def test_marketplace_zip_with_skills_validates(tmp_path: Path) -> None:

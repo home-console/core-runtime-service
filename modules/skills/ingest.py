@@ -46,10 +46,10 @@ def load_manifest_for_plugin(runtime: Any, plugin_name: str) -> Optional[Dict[st
 
 async def rehydrate_registry_from_disk(registry: Any, runtime: Any) -> int:
     """
-    SK5-lite: fill SkillRegistry from plugin.json on disk at module start.
+    SK5-lite fallback: fill SkillRegistry from plugin.json on disk.
 
-    Does not require plugins to be loaded/started. Later ``internal.plugin.loaded``
-    may refresh entries for running plugins.
+    Used when storage is empty (first boot). SK5 full persists to runtime storage
+    on load/unload; see ``modules.skills.persist.hydrate_registry_from_storage``.
     Returns number of plugins that contributed at least one skill.
     """
     plugins_dir = plugins_dir_for_runtime(runtime)

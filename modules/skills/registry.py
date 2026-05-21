@@ -99,3 +99,6 @@ class SkillRegistry:
             (self._by_id[sid] for sid in ids if sid in self._by_id),
             key=lambda r: r.id,
         )
+
+    def list_plugin_names(self) -> List[str]:
+        return sorted(self._ids_by_plugin.keys())
