@@ -204,6 +204,229 @@ async def discover_manifests_for_inspector(runtime: Any) -> Dict[str, Any]:
     }
 
 
+async def _load_plugin_manifest(runtime: Any, plugin_name: str) -> tuple[Optional[Dict[str, Any]], bool]:
+    from core.kernel.plugin_loader import PluginManifestLoader
+
+    name = str(plugin_name or "").strip()
+    plugins_dir = _get_plugins_dir(runtime)
+    if plugins_dir is None or not name:
+        return None, False
+    plugin_dir = PluginManifestLoader.find_plugin_directory(plugins_dir, name)
+    if plugin_dir is None or not plugin_dir.exists():
+        return None, False
+    manifest = PluginManifestLoader.load_manifest(plugin_dir, strict=False)
+    return manifest, manifest is not None
+
+
+async def get_plugin_ui_config(runtime: Any, plugin_name: str) -> Optional[Dict[str, Any]]:
+    """Inspector: read ``ui_config`` blob from plugin storage namespace."""
+    from core.kernel.plugin_ui_config import PLUGIN_UI_CONFIG_KEY
+
+    name = str(plugin_name or "").strip()
+    if not name:
+        return None
+    manifest, on_disk = await _load_plugin_manifest(runtime, name)
+    loaded = False
+    if hasattr(runtime, "plugin_manager"):
+        loaded = await runtime.plugin_manager.get_plugin(name) is not None
+    if manifest is None and not loaded:
+        return None
+
+    config: Dict[str, Any] = {}
+    if hasattr(runtime, "storage") and runtime.storage is not None:
+        try:
+            raw = await runtime.storage.get(name, PLUGIN_UI_CONFIG_KEY)
+            if isinstance(raw, dict):
+                config = raw
+        except Exception:
+            logger.debug("get_plugin_ui_config: storage read failed", exc_info=True)
+
+    return {"plugin_name": name, "config": config}
+
+
+async def set_plugin_ui_config(
+    runtime: Any,
+    plugin_name: str,
+    config: Optional[Dict[str, Any]] = None,
+    body: Any = None,
+    **_: Any,
+) -> Dict[str, Any]:
+    """Inspector: write ``ui_config`` blob (admin)."""
+    from core.kernel.plugin_ui_config import PLUGIN_UI_CONFIG_KEY
+
+    name = str(plugin_name or "").strip()
+    if not name:
+        raise ValueError("plugin name required")
+
+    payload: Dict[str, Any] = dict(config or {})
+    if not payload and body is not None:
+        if hasattr(body, "model_dump"):
+            dumped = body.model_dump()
+            if isinstance(dumped.get("config"), dict):
+                payload = dict(dumped["config"])
+        elif isinstance(body, dict):
+            if isinstance(body.get("config"), dict):
+                payload = dict(body["config"])
+            else:
+                payload = dict(body)
+
+    if not hasattr(runtime, "storage") or runtime.storage is None:
+        raise ValueError("storage not available")
+
+    await runtime.storage.set(name, PLUGIN_UI_CONFIG_KEY, payload)
+    return {"plugin_name": name, "config": payload}
+
+
+async def invoke_plugin_service(
+    runtime: Any,
+    plugin_name: str,
+    service: Optional[str] = None,
+    kwargs: Optional[Dict[str, Any]] = None,
+    body: Any = None,
+    **__: Any,
+) -> Dict[str, Any]:
+    """Inspector: invoke allowlisted service for plugin UI (metric/table)."""
+    from core.kernel.plugin_admin_invoke import service_allowed_for_plugin_invoke
+
+    name = str(plugin_name or "").strip()
+    svc = str(service or "").strip()
+    call_kwargs: Dict[str, Any] = dict(kwargs or {})
+
+    if not svc and body is not None:
+        if hasattr(body, "model_dump"):
+            dumped = body.model_dump()
+            svc = str(dumped.get("service") or "").strip()
+            if isinstance(dumped.get("kwargs"), dict):
+                call_kwargs = dict(dumped["kwargs"])
+        elif isinstance(body, dict):
+            svc = str(body.get("service") or "").strip()
+            if isinstance(body.get("kwargs"), dict):
+                call_kwargs = dict(body["kwargs"])
+
+    if not name or not svc:
+        return {
+            "ok": False,
+            "plugin_name": name,
+            "service": svc,
+            "error": "plugin name and service required",
+            "code": "invalid_request",
+        }
+
+    manifest, _ = await _load_plugin_manifest(runtime, name)
+    if not service_allowed_for_plugin_invoke(name, svc, manifest):
+        return {
+            "ok": False,
+            "plugin_name": name,
+            "service": svc,
+            "error": "service not allowed for plugin",
+            "code": "forbidden_service",
+        }
+
+    registry = getattr(runtime, "service_registry", None)
+    if registry is None:
+        return {
+            "ok": False,
+            "plugin_name": name,
+            "service": svc,
+            "error": "service registry unavailable",
+            "code": "invoke_not_configured",
+        }
+
+    has = await registry.has_service(svc)
+    if not has:
+        return {
+            "ok": False,
+            "plugin_name": name,
+            "service": svc,
+            "error": "service not registered",
+            "code": "invoke_not_configured",
+        }
+
+    try:
+        result = await registry.call(svc, **call_kwargs)
+        return {
+            "ok": True,
+            "plugin_name": name,
+            "service": svc,
+            "result": result,
+        }
+    except Exception as exc:
+        logger.warning("invoke_plugin_service failed %s.%s", name, svc, exc_info=True)
+        return {
+            "ok": False,
+            "plugin_name": name,
+            "service": svc,
+            "error": str(exc),
+            "code": "invoke_failed",
+        }
+
+
+async def list_dashboard_cards(runtime: Any) -> Dict[str, Any]:
+    """
+    Inspector: aggregate ``ui.dashboard_cards`` from all manifests on disk.
+
+    Only server-driven cards (``type`` set, no legacy-only ``module``) are returned.
+    """
+    from core.kernel.plugin_loader import PluginManifestLoader
+    from core.kernel.plugin_ui_contributions import _widget_dto
+
+    plugins_dir = _get_plugins_dir(runtime)
+    items: List[Dict[str, Any]] = []
+    if plugins_dir is None:
+        return {"items": items, "total": 0}
+
+    manifests = await PluginManifestLoader.discover_manifests(plugins_dir, runtime)
+    for plugin_name, manifest in manifests.items():
+        if not isinstance(manifest, dict):
+            continue
+        ui = manifest.get("ui")
+        if not isinstance(ui, dict):
+            continue
+        version = str(manifest.get("version") or "") or None
+        for raw in ui.get("dashboard_cards") or []:
+            if not isinstance(raw, dict):
+                continue
+            if raw.get("module") and not raw.get("type"):
+                continue
+            if not raw.get("type"):
+                continue
+            dto = _widget_dto(raw)
+            dto["plugin_name"] = plugin_name
+            dto["plugin_version"] = version
+            items.append(dto)
+
+    return {"items": items, "total": len(items)}
+
+
+async def get_plugin_ui_contributions(runtime: Any, plugin_name: str) -> Optional[Dict[str, Any]]:
+    """
+    Inspector: server-driven UI declarations from plugin.json (§1.4 [1]).
+
+    Includes legacy ``module`` entries for visibility; web must not dynamic-import them.
+    """
+    from core.kernel.plugin_ui_contributions import ui_contributions_from_manifest
+
+    name = str(plugin_name or "").strip()
+    if not name:
+        return None
+
+    manifest, on_disk = await _load_plugin_manifest(runtime, name)
+
+    loaded = False
+    if hasattr(runtime, "plugin_manager"):
+        loaded = await runtime.plugin_manager.get_plugin(name) is not None
+
+    if manifest is None and not loaded:
+        return None
+
+    return ui_contributions_from_manifest(
+        name,
+        manifest,
+        loaded=loaded,
+        on_disk=on_disk,
+    )
+
+
 async def get_plugin_details(runtime: Any, plugin_name: str) -> Optional[Dict[str, Any]]:
     """
     Inspector: детальная информация по одному плагину.

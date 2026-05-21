@@ -36,6 +36,11 @@ from modules.admin.services.introspection import (
     get_system_health,
     discover_manifests_for_inspector,
     get_plugin_details,
+    get_plugin_ui_contributions,
+    get_plugin_ui_config,
+    set_plugin_ui_config,
+    invoke_plugin_service,
+    list_dashboard_cards,
 )
 
 __all__ = [
@@ -67,4 +72,9 @@ __all__ = [
     "get_system_health",
     "discover_manifests_for_inspector",
     "get_plugin_details",
+    "get_plugin_ui_contributions",
+    "get_plugin_ui_config",
+    "set_plugin_ui_config",
+    "invoke_plugin_service",
+    "list_dashboard_cards",
 ]

@@ -39,6 +39,19 @@ from .plugin import (
     PluginDto,
     PluginsDiscoverDto,
 )
+from .plugin_ui import (
+    DashboardCardDto,
+    DashboardCardsListDto,
+    PluginUiContributionsDto,
+    UiPageContributionDto,
+    UiWidgetContributionDto,
+)
+from .plugin_config import (
+    PluginConfigDto,
+    PluginServiceInvokeRequest,
+    PluginServiceInvokeResult,
+    SetPluginConfigRequest,
+)
 from .operations import (
     CancelRetryResponse,
     CreateOperationRequest,
@@ -102,6 +115,7 @@ from .marketplace import (
 )
 from .integrations import IntegrationDto
 from .presence import PresenceStatusDto
+from .skills import SkillDto, SkillInvokeRequest, SkillInvokeResult, SkillListDto
 
 __all__ = [
     # common
@@ -117,6 +131,10 @@ __all__ = [
     "SetDeviceStateRequest",
     # plugins
     "PluginDto", "PluginDetailsDto", "PluginsDiscoverDto",
+    "PluginUiContributionsDto", "UiPageContributionDto", "UiWidgetContributionDto",
+    "DashboardCardDto", "DashboardCardsListDto",
+    "PluginConfigDto", "SetPluginConfigRequest", "PluginServiceInvokeRequest",
+    "PluginServiceInvokeResult",
     "LoadPluginRequest", "EnsureContainerRequest", "AutoLoadRequest",
     # operations
     "OperationDto", "ExecutionDto", "ExecutionAttemptDto", "ExecutionScheduleDto",
@@ -148,4 +166,6 @@ __all__ = [
     "IntegrationDto", "IntegrationFlowDto",
     # presence
     "PresenceStatusDto",
+    # skills
+    "SkillDto", "SkillListDto", "SkillInvokeRequest", "SkillInvokeResult",
 ]
