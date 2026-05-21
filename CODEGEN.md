@@ -136,3 +136,15 @@ modules/api/schemas/
 ├── integrations.py  # IntegrationDto, IntegrationFlowDto
 └── presence.py      # PresenceStatusDto
 ```
+
+## TypeScript HTTP client (orval)
+
+Platform web codegen for typed fetch client:
+
+```bash
+cd ../platform-home-console
+pnpm api:gen:client      # or pnpm api:gen:all
+```
+
+Output: `packages/api-client/src/generated/`. See `platform-home-console/docs/API_CODEGEN.md`.
+
