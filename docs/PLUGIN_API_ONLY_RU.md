@@ -62,7 +62,7 @@
 - CLI: `hc skill list`, `hc skill get my_integration.sync-now`, `hc skill invoke ...`
 - API: `GET /api/v1/skills`, `POST /api/v1/skills/{id}/invoke` (scopes `admin.read` / `admin.write`).
 
-Плагин должен зарегистрировать сервис invoke (явный `service` или конвенция `{plugin}.skill.{name}`).
+Плагин может вызвать skill двумя способами: **зарегистрировать сервис** через `register_service` (явный `service` или конвенция `{plugin}.skill.{name}`), либо **без регистрации (SK7)** — ядро вызовет метод на экземпляре загруженного и **STARTED** плагина по dotted-пути после префикса `{plugin}.` (например `my_integration.skill.sync_now` → `skill.sync_now` на плагине, с fallback `skill_sync_now`). Имя сервиса должно проходить `service_allowed_for_plugin_invoke` (префикс `{plugin}.*` или запись в манифесте).
 
 ## Жизненный цикл
 

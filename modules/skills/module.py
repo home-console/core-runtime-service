@@ -14,6 +14,7 @@ from modules.api.schemas import (
     SkillInvokeResult,
     SkillListDto,
 )
+from modules.skills.invoke_resolver import invoke_skill
 from modules.skills.ingest import (
     load_manifest_for_plugin,
     rehydrate_registry_from_disk,
@@ -206,40 +207,20 @@ class SkillsModule(RuntimeModule):
                     call_params = dict(dumped["params"])
 
         service_name = _resolve_invoke_service(record)
-        registry = getattr(self.runtime, "service_registry", None)
-        if registry is None:
-            return SkillInvokeResult(
-                ok=False,
-                skill_id=sid,
-                service=service_name,
-                error="invoke not configured",
-                code="invoke_not_configured",
-            ).model_dump()
-
-        has = await registry.has_service(service_name)
-        if not has:
-            return SkillInvokeResult(
-                ok=False,
-                skill_id=sid,
-                service=service_name,
-                error="invoke not configured",
-                code="invoke_not_configured",
-            ).model_dump()
-
-        try:
-            result = await registry.call(service_name, **call_params)
+        ok, payload, svc, code = await invoke_skill(
+            self.runtime, record, service_name, call_params
+        )
+        if ok:
             return SkillInvokeResult(
                 ok=True,
                 skill_id=sid,
-                service=service_name,
-                result=result,
+                service=svc,
+                result=payload,
             ).model_dump()
-        except Exception as exc:
-            logger.warning("skills.invoke failed for %s via %s", sid, service_name, exc_info=True)
-            return SkillInvokeResult(
-                ok=False,
-                skill_id=sid,
-                service=service_name,
-                error=str(exc),
-                code="invoke_failed",
-            ).model_dump()
+        return SkillInvokeResult(
+            ok=False,
+            skill_id=sid,
+            service=svc,
+            error=str(payload),
+            code=code or "invoke_not_configured",
+        ).model_dump()
