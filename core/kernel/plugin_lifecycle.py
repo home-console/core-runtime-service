@@ -97,6 +97,43 @@ class PluginLifecycleManager:
             return None
         return Path(plugins_dir_str).expanduser()
 
+    def _manifest_skills_for_plugin(self, plugin_name: str) -> list:
+        plugins_dir = self._resolve_plugins_dir()
+        if plugins_dir is None:
+            return []
+        plugin_path = PluginManifestLoader.find_plugin_directory(plugins_dir, plugin_name)
+        if plugin_path is None:
+            return []
+        data = PluginManifestLoader.load_manifest(plugin_path, strict=False)
+        if not data or not isinstance(data, dict):
+            return []
+        raw = data.get("skills")
+        if not isinstance(raw, list):
+            return []
+        return [s for s in raw if isinstance(s, dict)]
+
+    async def _publish_plugin_loaded(self, plugin_name: str, plugin_version: str) -> None:
+        bus = getattr(self._runtime, "event_bus", None) if self._runtime is not None else None
+        if bus is None:
+            return
+        await bus.publish(
+            "internal.plugin.loaded",
+            {
+                "plugin_name": plugin_name,
+                "plugin_version": plugin_version,
+                "skills": self._manifest_skills_for_plugin(plugin_name),
+            },
+        )
+
+    async def _publish_plugin_unloaded(self, plugin_name: str) -> None:
+        bus = getattr(self._runtime, "event_bus", None) if self._runtime is not None else None
+        if bus is None:
+            return
+        await bus.publish(
+            "internal.plugin.unloaded",
+            {"plugin_name": plugin_name},
+        )
+
     async def load_plugin(self, plugin: BasePlugin) -> None:
         """
         Загрузить плагин.
@@ -152,6 +189,10 @@ class PluginLifecycleManager:
 
             # CapabilityRegistry / инфраструктура: регистрация capabilities вынесена в координатор
             await self._infra.on_plugin_loaded(plugin)
+            await self._publish_plugin_loaded(
+                plugin_name,
+                str(getattr(metadata, "version", None) or "0.0.0"),
+            )
         except asyncio.CancelledError:
             raise
         except BEST_EFFORT_BACKGROUND_ERRORS:
@@ -391,6 +432,8 @@ class PluginLifecycleManager:
 
             metadata = plugin.metadata
             await self._orchestration_manager.remove_plugin_runtime(plugin_name, metadata)
+
+            await self._publish_plugin_unloaded(plugin_name)
 
             # Инфраструктурная очистка (capabilities, handlers, integrations)
             await self._infra.on_plugin_unloaded(plugin)
