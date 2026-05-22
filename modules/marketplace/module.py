@@ -25,6 +25,7 @@ from modules.api.schemas import (
     InstallFromArchiveRequest,
     InstallFromGitRequest,
     InstallFromRegistryRequest,
+    UpdateFromRegistryRequest,
     InstalledPluginDto,
     MarketplaceResultDto,
     RemovePluginRequest,
@@ -40,6 +41,7 @@ from modules.marketplace.admin_services import (
     admin_marketplace_install_upload,
     admin_marketplace_install_from_git,
     admin_marketplace_install_from_registry,
+    admin_marketplace_update_from_registry,
     admin_marketplace_installed,
     admin_marketplace_git_sources_get,
     admin_marketplace_git_sources_set,
@@ -144,6 +146,11 @@ class MarketplaceModule(RuntimeModule):
             "marketplace.install_from_registry",
             self._wrap_handler(self.service.handle_install_from_registry)
         )
+
+        ops_mgr.register_handler(
+            "marketplace.update_from_registry",
+            self._wrap_handler(self.service.handle_update_from_registry)
+        )
         
         ops_mgr.register_handler(
             "marketplace.search",
@@ -186,6 +193,9 @@ class MarketplaceModule(RuntimeModule):
             )
             await self.register_runtime_service(
                 "admin.v1.marketplace.install_from_registry", admin_marketplace_install_from_registry
+            )
+            await self.register_runtime_service(
+                "admin.v1.marketplace.update_from_registry", admin_marketplace_update_from_registry
             )
             await self.register_runtime_service(
                 "admin.v1.marketplace.git_sources.get", admin_marketplace_git_sources_get
@@ -232,6 +242,16 @@ class MarketplaceModule(RuntimeModule):
                 tags=["Marketplace"],
                 response_model=MarketplaceResultDto,
                 request_model=InstallFromRegistryRequest,
+            ))
+            http_registry.register(HttpEndpoint(
+                method="POST",
+                path="/api/v1/admin/marketplace/update-from-registry",
+                service="admin.v1.marketplace.update_from_registry",
+                description="Marketplace: update installed plugin from registry (same version OK)",
+                auth_config=_admin_write,
+                tags=["Marketplace"],
+                response_model=MarketplaceResultDto,
+                request_model=UpdateFromRegistryRequest,
             ))
             http_registry.register(HttpEndpoint(
                 method="POST",
@@ -343,6 +363,7 @@ class MarketplaceModule(RuntimeModule):
                 ("marketplace.disable", "Disable plugin without removing"),
                 ("marketplace.list_installed", "List installed marketplace plugins"),
                 ("marketplace.install_from_registry", "Install from remote registry"),
+                ("marketplace.update_from_registry", "Update installed plugin from registry"),
                 ("marketplace.search", "Search plugins in registry"),
                 ("marketplace.list_available", "List available plugins"),
                 ("marketplace.check_updates", "Check for available updates"),
@@ -372,6 +393,7 @@ class MarketplaceModule(RuntimeModule):
             "marketplace.disable",
             "marketplace.list_installed",
             "marketplace.install_from_registry",
+            "marketplace.update_from_registry",
             "marketplace.search",
             "marketplace.list_available",
             "marketplace.check_updates",
@@ -421,6 +443,10 @@ class MarketplaceModule(RuntimeModule):
             {
                 "name": "marketplace.install_from_registry",
                 "description": "Install plugin from remote registry with version resolution"
+            },
+            {
+                "name": "marketplace.update_from_registry",
+                "description": "Update installed plugin from registry (reinstall same version allowed)"
             },
             {
                 "name": "marketplace.search",
@@ -553,6 +579,7 @@ class MarketplaceModule(RuntimeModule):
                 "marketplace.disable",
                 "marketplace.list_installed",
                 "marketplace.install_from_registry",
+                "marketplace.update_from_registry",
                 "marketplace.search",
                 "marketplace.list_available",
                 "marketplace.check_updates",

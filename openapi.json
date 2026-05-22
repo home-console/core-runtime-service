@@ -3644,6 +3644,53 @@
         ]
       }
     },
+    "/api/v1/admin/marketplace/update-from-registry": {
+      "post": {
+        "tags": [
+          "Marketplace"
+        ],
+        "summary": "Post /Api/V1/Admin/Marketplace/Update-From-Registry",
+        "description": "Marketplace: update installed plugin from registry (same version OK)",
+        "operationId": "POST__api_v1_admin_marketplace_update_from_registry_api_v1_admin_marketplace_update_from_registry_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateFromRegistryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketplaceResultDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/marketplace/install-from-git": {
       "post": {
         "tags": [
@@ -5686,6 +5733,186 @@
                 "schema": {
                   "$ref": "#/components/schemas/OkErrorResponse"
                 }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/request-logs/{request_id}": {
+      "get": {
+        "tags": [
+          "request-logs"
+        ],
+        "summary": "Get Request Logs",
+        "description": "Получить все логи для конкретного запроса.\n\nArgs:\n    request_id: уникальный идентификатор запроса\n    \nReturns:\n    Словарь с информацией о запросе и списком логов",
+        "operationId": "get_request_logs_api_v1_admin_request_logs__request_id__get",
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Request Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/request-logs": {
+      "get": {
+        "tags": [
+          "request-logs"
+        ],
+        "summary": "List Requests",
+        "description": "Получить список запросов.\n\nArgs:\n    limit: максимальное количество запросов\n    offset: смещение для пагинации\n    \nReturns:\n    Словарь со списком запросов и метаданными",
+        "operationId": "list_requests_api_v1_admin_request_logs_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1,
+              "description": "Максимальное количество запросов",
+              "default": 100,
+              "title": "Limit"
+            },
+            "description": "Максимальное количество запросов"
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Смещение для пагинации",
+              "default": 0,
+              "title": "Offset"
+            },
+            "description": "Смещение для пагинации"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "request-logs"
+        ],
+        "summary": "Clear Logs",
+        "description": "Очистить все логи запросов.\n\nReturns:\n    Подтверждение очистки",
+        "operationId": "clear_logs_api_v1_admin_request_logs_delete",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/request-logs/log": {
+      "post": {
+        "tags": [
+          "request-logs"
+        ],
+        "summary": "Log Frontend Request",
+        "description": "Принять лог запроса с фронтенда.\n\nBody (JSON):\n{\n    \"request_id\": \"uuid\",\n    \"level\": \"info\",\n    \"message\": \"сообщение\",\n    \"context\": {...},\n    \"request_metadata\": {...},\n    \"response_metadata\": {...}\n}",
+        "operationId": "log_frontend_request_api_v1_admin_request_logs_log_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "type": "object",
+                "title": "Body"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
               }
             }
           },
@@ -9386,6 +9613,29 @@
             ],
             "title": "Version"
           },
+          "version_constraint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Constraint"
+          },
+          "channel": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Channel",
+            "default": "stable"
+          },
           "registry_url": {
             "anyOf": [
               {
@@ -9396,6 +9646,18 @@
               }
             ],
             "title": "Registry Url"
+          },
+          "force_update": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Force Update",
+            "default": false
           }
         },
         "type": "object",
@@ -11308,6 +11570,64 @@
           "credential"
         ],
         "title": "UpdateCredentialRequest"
+      },
+      "UpdateFromRegistryRequest": {
+        "properties": {
+          "plugin_name": {
+            "type": "string",
+            "title": "Plugin Name"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          },
+          "version_constraint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Constraint"
+          },
+          "channel": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Channel",
+            "default": "stable"
+          },
+          "registry_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Registry Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "plugin_name"
+        ],
+        "title": "UpdateFromRegistryRequest"
       },
       "UpdatePluginRequest": {
         "properties": {

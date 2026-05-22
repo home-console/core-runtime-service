@@ -140,6 +140,7 @@ class MarketplaceInstaller:
         *,
         require_signature: bool = False,
         load_plugin: bool = True,
+        force_update: bool = False,
     ) -> Dict[str, Any]:
         """
         Install plugin from archive file.
@@ -300,14 +301,25 @@ class MarketplaceInstaller:
                         exc_info=True,
                     )
 
-            # Check for conflicts
+            # Check for conflicts (force_update: remove existing install first)
             target_dir = self.plugins_dir / plugin_name
             if target_dir.exists():
-                raise _merr(
-                    "conflict",
-                    f"plugin '{plugin_name}' already installed at {target_dir} "
-                    f"(remove directory or use upgrade flow)",
-                )
+                if not force_update:
+                    raise _merr(
+                        "conflict",
+                        f"plugin '{plugin_name}' already installed at {target_dir} "
+                        f"(remove directory, use update-from-registry, or force_update=true)",
+                    )
+                if runtime:
+                    try:
+                        await runtime.plugin_manager.stop_plugin(plugin_name)
+                        await runtime.plugin_manager.unload_plugin(plugin_name)
+                    except Exception:
+                        logger.debug(
+                            "MarketplaceInstaller: stop/unload before force_update",
+                            exc_info=True,
+                        )
+                shutil.rmtree(target_dir)
 
             # Validate entrypoint exists in archive
             entrypoint_path = Path(temp_dir) / entrypoint_file
@@ -627,9 +639,26 @@ class MarketplaceInstaller:
             # If signature provided, it will be verified during install_from_file
             # Signature validation is a trust-layer responsibility.
 
+            # Verify registry Ed25519 signature over raw SHA256 digest bytes
+            if sha256:
+                digest_bytes = bytes.fromhex(sha256)
+                try:
+                    from modules.security.trust.signature import (
+                        SignatureError,
+                        verify_signature,
+                    )
+
+                    verify_signature(digest_bytes, public_key, signature)
+                except SignatureError as e:
+                    raise _merr("trust", f"registry signature invalid: {e}") from e
+
             # Install from downloaded archive
             return await self.install_from_file(
-                archive_path, sha256=sha256, runtime=runtime, load_plugin=load_plugin
+                archive_path,
+                sha256=sha256,
+                runtime=runtime,
+                load_plugin=load_plugin,
+                force_update=force_update,
             )
 
         finally:

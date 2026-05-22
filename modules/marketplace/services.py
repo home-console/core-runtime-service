@@ -495,6 +495,72 @@ class MarketplaceService:
 
     # ========== Registry-based operations ==========
 
+    @staticmethod
+    def _normalize_registry_params(params: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        out = dict(params or {})
+        if out.get("version_constraint") is None and out.get("version") is not None:
+            out["version_constraint"] = out.get("version")
+        return out
+
+    def _is_plugin_installed(self, plugin_name: str) -> bool:
+        if (self.installer.plugins_dir / plugin_name).exists():
+            return True
+        return False
+
+    async def _apply_release_from_registry(
+        self,
+        *,
+        plugin_name: str,
+        registry_url: str,
+        version_constraint: Optional[str],
+        channel: str,
+        force_update: bool,
+        audit_action: str,
+    ) -> Dict[str, Any]:
+        client = RegistryClient(registry_url)
+        release = await client.resolve(
+            plugin_name, version_constraint=version_constraint, channel=channel
+        )
+
+        result = await self.installer.install_from_url(
+            release.url,
+            sha256=release.sha256,
+            signature=release.signature,
+            public_key=release.public_key,
+            runtime=self.runtime,
+            force_update=force_update,
+        )
+
+        await self._store_installed_plugin(result)
+        await self._store_registry_metadata(
+            plugin_name, release.version, registry_url, channel
+        )
+
+        audit_entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
+            "action": audit_action,
+            "plugin_name": plugin_name,
+            "version": release.version,
+            "version_constraint": version_constraint,
+            "channel": channel,
+            "registry": registry_url,
+            "status": "success",
+            "reason": None,
+            "archive_hash": result.get("hash"),
+            "force_update": force_update,
+        }
+        await self._add_audit_log(audit_entry)
+
+        return {
+            "status": "success",
+            "data": {
+                **result,
+                "registry": registry_url,
+                "channel": channel,
+                "resolved_version": release.version,
+            },
+        }
+
     async def handle_install_from_registry(
         self, operation: Operation
     ) -> Dict[str, Any]:
@@ -513,7 +579,7 @@ class MarketplaceService:
         Returns:
             Dict with status, data, error
         """
-        params = operation.params or {}
+        params = self._normalize_registry_params(operation.params)
         plugin_name = params.get("plugin_name")
         version_constraint = params.get("version_constraint")
         channel = params.get("channel", "stable")
@@ -525,7 +591,7 @@ class MarketplaceService:
                 default_registry_url = cfg.get("marketplace_registry_url")
 
         registry_url = params.get("registry_url") or (str(default_registry_url or "").strip() or None)
-        force_update = params.get("force_update", False)
+        force_update = bool(params.get("force_update", False))
 
         if not plugin_name:
             return {
@@ -535,49 +601,27 @@ class MarketplaceService:
         if not registry_url:
             return {"status": "failure", "error": "registry_url not configured"}
 
-        try:
-            # Resolve version from registry
-            client = RegistryClient(registry_url)
-            release = await client.resolve(
-                plugin_name, version_constraint=version_constraint, channel=channel
-            )
-
-            # Validate SHA256 after download
-            result = await self.installer.install_from_url(
-                release.url,
-                sha256=release.sha256,
-                signature=release.signature,
-                public_key=release.public_key,
-                runtime=self.runtime,
-                force_update=force_update,
-            )
-
-            # Store with registry metadata
-            await self._store_installed_plugin(result)
-            await self._store_registry_metadata(
-                plugin_name, release.version, registry_url, channel
-            )
-
-            # Log to audit trail
-            audit_entry = {
-                "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
-                "action": "install_from_registry",
-                "plugin_name": plugin_name,
-                "version": release.version,
-                "version_constraint": version_constraint,
-                "channel": channel,
-                "registry": registry_url,
-                "status": "success",
-                "reason": None,
-                "archive_hash": result.get("hash"),
-                "registry_downgrade_protection": "enabled",
-            }
-            await self._add_audit_log(audit_entry)
-
+        installed = await self._get_installed_plugins()
+        already = plugin_name in installed or self._is_plugin_installed(plugin_name)
+        if already and not force_update:
             return {
-                "status": "success",
-                "data": {**result, "registry": registry_url, "channel": channel},
+                "status": "failure",
+                "error": (
+                    f"Plugin '{plugin_name}' is already installed. "
+                    "Use marketplace.update_from_registry or force_update=true."
+                ),
+                "error_stage": "conflict",
             }
+
+        try:
+            return await self._apply_release_from_registry(
+                plugin_name=plugin_name,
+                registry_url=registry_url,
+                version_constraint=version_constraint,
+                channel=channel,
+                force_update=force_update or already,
+                audit_action="install_from_registry",
+            )
 
         except InstallerError as e:
             # Log failure
@@ -615,6 +659,99 @@ class MarketplaceService:
 
             logger.warning(
                 "handle_install_from_registry failed for plugin %s: %s", plugin_name, e, exc_info=True
+            )
+            payload = generic_marketplace_failure_payload(str(e))
+            return {"status": "failure", **payload}
+
+    async def handle_update_from_registry(
+        self, operation: Operation
+    ) -> Dict[str, Any]:
+        """
+        Обновить установленный плагин из реестра (в т.ч. та же версия — новый sha256).
+
+        Args:
+            operation.params: {
+                "plugin_name": str,
+                "version_constraint": Optional[str],
+                "version": Optional[str],  # alias for version_constraint
+                "channel": str,
+                "registry_url": str,
+            }
+        """
+        params = self._normalize_registry_params(operation.params)
+        plugin_name = params.get("plugin_name")
+        version_constraint = params.get("version_constraint")
+        channel = params.get("channel", "stable")
+        cfg = getattr(self.runtime, "config", None)
+        default_registry_url = None
+        if cfg is not None:
+            default_registry_url = getattr(cfg, "marketplace_registry_url", None)
+            if default_registry_url is None and isinstance(cfg, dict):
+                default_registry_url = cfg.get("marketplace_registry_url")
+
+        registry_url = params.get("registry_url") or (str(default_registry_url or "").strip() or None)
+
+        if not plugin_name:
+            return {"status": "failure", "error": "plugin_name required"}
+        if not registry_url:
+            return {"status": "failure", "error": "registry_url not configured"}
+
+        installed = await self._get_installed_plugins()
+        if plugin_name not in installed and not self._is_plugin_installed(plugin_name):
+            return {
+                "status": "failure",
+                "error": f"Plugin not installed: {plugin_name}",
+                "error_stage": "not_installed",
+            }
+
+        try:
+            return await self._apply_release_from_registry(
+                plugin_name=plugin_name,
+                registry_url=registry_url,
+                version_constraint=version_constraint,
+                channel=channel,
+                force_update=True,
+                audit_action="update_from_registry",
+            )
+
+        except InstallerError as e:
+            audit_entry = {
+                "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
+                "action": "update_from_registry",
+                "plugin_name": plugin_name,
+                "version_constraint": version_constraint,
+                "channel": channel,
+                "registry": registry_url,
+                "status": "failure",
+                "reason": str(e),
+            }
+            await self._add_audit_log(audit_entry)
+            logger.warning(
+                "handle_update_from_registry failed for plugin %s: %s",
+                plugin_name,
+                e,
+                exc_info=True,
+            )
+            payload = installer_failure_payload(e)
+            return {"status": "failure", **payload}
+
+        except Exception as e:
+            audit_entry = {
+                "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
+                "action": "update_from_registry",
+                "plugin_name": plugin_name,
+                "version_constraint": version_constraint,
+                "channel": channel,
+                "registry": registry_url,
+                "status": "failure",
+                "reason": str(e),
+            }
+            await self._add_audit_log(audit_entry)
+            logger.warning(
+                "handle_update_from_registry failed for plugin %s: %s",
+                plugin_name,
+                e,
+                exc_info=True,
             )
             payload = generic_marketplace_failure_payload(str(e))
             return {"status": "failure", **payload}

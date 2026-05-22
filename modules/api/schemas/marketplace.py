@@ -54,6 +54,17 @@ class InstallFromArchiveRequest(BaseModel):
 class InstallFromRegistryRequest(BaseModel):
     plugin_name: str
     version: Optional[str] = None
+    version_constraint: Optional[str] = None
+    channel: Optional[str] = "stable"
+    registry_url: Optional[str] = None
+    force_update: Optional[bool] = False
+
+
+class UpdateFromRegistryRequest(BaseModel):
+    plugin_name: str
+    version: Optional[str] = None
+    version_constraint: Optional[str] = None
+    channel: Optional[str] = "stable"
     registry_url: Optional[str] = None
 
 

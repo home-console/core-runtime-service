@@ -62,6 +62,13 @@ async def _build_schema(profile_name: str | None = None) -> dict:
     )
     bind_routes(runtime, app)
 
+    try:
+        from modules.request_logger.router import create_request_logger_router
+
+        app.include_router(create_request_logger_router(runtime))
+    except Exception as exc:
+        print(f"WARN: request_logger router not included in OpenAPI export: {exc}", file=sys.stderr)
+
     schema = app.openapi()
     await storage_stack.manager.close()
     return schema

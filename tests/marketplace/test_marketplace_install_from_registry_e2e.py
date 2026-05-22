@@ -15,7 +15,7 @@ import aiohttp.web
 import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.asymmetric import ed25519, rsa
 from cryptography.x509.oid import NameOID
 
 from core.kernel.base_plugin import BasePlugin
@@ -69,6 +69,20 @@ def _sha256_file(path: Path) -> str:
         for chunk in iter(lambda: f.read(1024 * 1024), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def _sign_registry_zip(path: Path) -> tuple[str, str, str]:
+    """Подпись как в marketplace-api: Ed25519 over SHA256 digest bytes."""
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(chunk)
+    digest_bytes = digest.digest()
+    priv = ed25519.Ed25519PrivateKey.generate()
+    pub = priv.public_key()
+    sig_b64 = base64.b64encode(priv.sign(digest_bytes)).decode("ascii")
+    pub_b64 = base64.b64encode(pub.public_bytes_raw()).decode("ascii")
+    return digest.hexdigest(), sig_b64, pub_b64
 
 
 def _build_plugin_zip(out_zip: Path) -> None:
@@ -167,7 +181,7 @@ async def test_install_from_registry_end_to_end_https_localhost(tmp_path: Path, 
 
     zip_path = tmp_path / "e2e_plugin.zip"
     _build_plugin_zip(zip_path)
-    sha = _sha256_file(zip_path)
+    sha, sig_b64, pub_b64 = _sign_registry_zip(zip_path)
 
     ssl_ctx = _make_self_signed_tls_context(tmp_path)
 
@@ -177,6 +191,8 @@ async def test_install_from_registry_end_to_end_https_localhost(tmp_path: Path, 
     SHA256_KEY = aiohttp.web.AppKey("sha256", str)
     app[ZIP_PATH_KEY] = zip_path
     app[SHA256_KEY] = sha
+    app["sig_b64"] = sig_b64
+    app["pub_b64"] = pub_b64
 
     async def registry_index(request: aiohttp.web.Request) -> aiohttp.web.Response:
         base = f"{request.url.scheme}://{request.host}"
@@ -190,8 +206,8 @@ async def test_install_from_registry_end_to_end_https_localhost(tmp_path: Path, 
                             "version": "1.0.0",
                             "url": f"{base}/e2e_plugin.zip",
                             "sha256": request.app[SHA256_KEY],
-                            "signature": base64.b64encode(b"0" * 32).decode("ascii"),
-                            "public_key": base64.b64encode(b"x" * 32).decode("ascii"),
+                                "signature": request.app["sig_b64"],
+                                "public_key": request.app["pub_b64"],
                         }
                     },
                     "versions": {},
@@ -257,5 +273,28 @@ async def test_install_from_registry_end_to_end_https_localhost(tmp_path: Path, 
         assert len(pm.loaded) == 1
         assert isinstance(pm.loaded[0], BasePlugin)
         assert pm.loaded[0].metadata.name == "e2e_plugin"
+
+        # Same version, new archive (dev replace flow)
+        zip_path.unlink(missing_ok=True)
+        _build_plugin_zip(zip_path)
+        sha2, sig2, pub2 = _sign_registry_zip(zip_path)
+        app[SHA256_KEY] = sha2
+        app["sig_b64"] = sig2
+        app["pub_b64"] = pub2
+
+        op_up = Operation(
+            operation_id="op-update",
+            op_type="marketplace.update_from_registry",
+            params={
+                "plugin_name": "e2e_plugin",
+                "version_constraint": "1.0.0",
+                "registry_url": f"https://127.0.0.1:{port}/registry/index.json",
+                "channel": "stable",
+            },
+            initiator=OperationInitiator(kind=OperationInitiatorKind.ADMIN),
+        )
+        up = await svc.handle_update_from_registry(op_up)
+        assert up["status"] == "success", up
+        assert len(pm.loaded) >= 1
     finally:
         await runner.cleanup()

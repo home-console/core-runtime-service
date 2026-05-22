@@ -106,6 +106,7 @@ from .marketplace import (
     InstallFromArchiveRequest,
     InstallFromGitRequest,
     InstallFromRegistryRequest,
+    UpdateFromRegistryRequest,
     InstalledPluginDto,
     MarketplaceCatalogEntryDto,
     MarketplaceResultDto,
@@ -159,7 +160,7 @@ __all__ = [
     # marketplace
     "MarketplaceCatalogEntryDto", "InstalledPluginDto", "MarketplaceResultDto",
     "GitSourcesDto", "GitCatalogEntryDto",
-    "InstallFromArchiveRequest", "InstallFromRegistryRequest", "InstallFromGitRequest",
+    "InstallFromArchiveRequest", "InstallFromRegistryRequest", "UpdateFromRegistryRequest", "InstallFromGitRequest",
     "RemovePluginRequest", "UpdatePluginRequest", "SetGitSourcesRequest",
     "BuildGitCatalogRequest",
     # integrations

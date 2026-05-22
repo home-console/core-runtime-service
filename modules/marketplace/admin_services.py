@@ -136,13 +136,30 @@ async def admin_marketplace_install_upload(runtime: Any, request: Any = None, **
     return await _execute_marketplace_operation(runtime, "marketplace.install", params)
 
 
+def _normalize_registry_body(body: Dict[str, Any]) -> Dict[str, Any]:
+    out = dict(body)
+    if out.get("version_constraint") is None and out.get("version") is not None:
+        out["version_constraint"] = out["version"]
+    return out
+
+
 async def admin_marketplace_install_from_registry(runtime: Any, body: Any = None, **kwargs: Any) -> Dict[str, Any]:
     if body is None:
         body = {}
     if not isinstance(body, dict):
         raise ValueError("Request body must be JSON object")
     return await _execute_marketplace_operation(
-        runtime, "marketplace.install_from_registry", dict(body)
+        runtime, "marketplace.install_from_registry", _normalize_registry_body(dict(body))
+    )
+
+
+async def admin_marketplace_update_from_registry(runtime: Any, body: Any = None, **kwargs: Any) -> Dict[str, Any]:
+    if body is None:
+        body = {}
+    if not isinstance(body, dict):
+        raise ValueError("Request body must be JSON object")
+    return await _execute_marketplace_operation(
+        runtime, "marketplace.update_from_registry", _normalize_registry_body(dict(body))
     )
 
 
