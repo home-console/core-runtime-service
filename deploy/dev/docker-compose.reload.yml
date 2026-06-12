@@ -138,8 +138,28 @@ services:
       CI: "true"
       # Vite proxy /api → core внутри docker-сети (не localhost:18000)
       VITE_CORE_PROXY_TARGET: http://core-runtime:8000
+    # Старт фронт-стека:
+    #   1) corepack enable                — активировать pnpm версии из packageManager
+    #   2) pnpm install --frozen-lockfile — установка зависимостей
+    #   3) pnpm api:gen                   — TypeScript-типы из openapi.json
+    #   4) pnpm -r --filter './packages/**' build
+    #      — обязательная пересборка @platform/* пакетов. Если её пропустить,
+    #        web получает стейл dist/* и в браузере вылезает
+    #        "module ... does not provide an export named X" даже если
+    #        src/ уже содержит этот экспорт.
+    #   5) pnpm -r --filter './packages/**' run --if-present dev > /tmp/...&
+    #      — watch-режим в фоне для @platform/* (tsc -w если объявлен),
+    #        чтобы любая правка в packages/*/src сразу пересобирала dist.
+    #   6) pnpm --filter=web dev          — Vite на 5173
     command: >-
-      sh -c "corepack enable && pnpm install --frozen-lockfile && pnpm api:gen && pnpm --filter=web dev -- --host 0.0.0.0 --port 5173"
+      sh -c "
+        corepack enable &&
+        pnpm install --frozen-lockfile &&
+        pnpm api:gen &&
+        pnpm -r --filter './packages/**' build &&
+        (pnpm -r --parallel --filter './packages/**' run --if-present dev > /tmp/packages-dev.log 2>&1 &) &&
+        pnpm --filter=web dev -- --host 0.0.0.0 --port 5173
+      "
     ports:
       - "${DEV_VITE_HOST_PORT:-15173}:5173"
     profiles: ["frontend"]
