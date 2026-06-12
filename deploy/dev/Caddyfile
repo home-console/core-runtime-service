@@ -1,7 +1,22 @@
 # Caddy config for dev stage
 # Reverse-proxies API → core-runtime:8000, serves frontend static files.
 
+{
+	# Access-log в stdout — видно через `docker logs dev-hc-caddy`.
+	log {
+		output stdout
+		format console
+		level INFO
+	}
+}
+
 :80 {
+	# Health-endpoint для `hc doctor` и docker healthcheck:
+	#   curl -sf http://localhost:18080/_caddy/health
+	handle /_caddy/health {
+		respond "ok" 200
+	}
+
 	# Frontend static files
 	root * /srv
 	file_server

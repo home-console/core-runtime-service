@@ -9,9 +9,25 @@
 
 {
 	auto_https off
+
+	# Access-log в stdout — собирается docker logs/Loki/Promtail.
+	# В prod держим формат console + INFO, чтобы было читаемо «на месте»;
+	# при подключении агрегатора достаточно переключить на `json`.
+	log {
+		output stdout
+		format console
+		level INFO
+	}
 }
 
 :80 {
+	# Health-endpoint самого edge-узла (отдельно от core API).
+	# Полезен LB/uptime-чекером, который не должен зависеть от состояния
+	# upstream-сервисов: «жив сам proxy».
+	handle /_edge/health {
+		respond "ok" 200
+	}
+
 	# API endpoints → core-runtime.
 	#
 	# IMPORTANT:

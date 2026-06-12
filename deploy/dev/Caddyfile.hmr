@@ -7,7 +7,23 @@
 # API + WebSocket ядра → core-runtime:8000
 # Vite слушает 5173 внутри контейнера; с хоста: docker мапит на DEV_VITE_HOST_PORT (по умолчанию 15173).
 
+{
+    # Глобально включаем access-log в stdout (видно через `docker logs dev-hc-caddy`).
+    # Уровень INFO — каждый запрос: метод, путь, статус, размер, длительность.
+    log {
+        output stdout
+        format console
+        level INFO
+    }
+}
+
 :80 {
+    # Health-endpoint самого Caddy. Используется `hc doctor` и docker healthcheck:
+    #   curl -sf http://localhost:18080/_caddy/health
+    handle /_caddy/health {
+        respond "ok" 200
+    }
+
     # API и WebSocket ядра
     @api path /api/v1/* /ws/*
     handle @api {
