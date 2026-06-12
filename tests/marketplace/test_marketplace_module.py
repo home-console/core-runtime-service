@@ -500,7 +500,7 @@ class TestMarketplaceModule:
         module = MarketplaceModule(mock_runtime)
         caps = module.list_capabilities()
         
-        assert len(caps) == 11
+        assert len(caps) == 12
         cap_names = [cap["name"] for cap in caps]
         
         assert "marketplace.install" in cap_names
@@ -586,7 +586,7 @@ class TestMarketplaceModule:
         await module.register()
         
         # Verify operations registered
-        assert mock_runtime.operations.register_handler.call_count == 11
+        assert mock_runtime.operations.register_handler.call_count == 12
     
     @pytest.mark.asyncio
     async def test_health_check(self, mock_runtime):
@@ -603,7 +603,7 @@ class TestMarketplaceModule:
         
         assert health["status"] == "healthy"
         assert health["installed_plugins_count"] == 2
-        assert len(health["operations_available"]) == 11
+        assert len(health["operations_available"]) == 12
 
 
 # ============================================================================

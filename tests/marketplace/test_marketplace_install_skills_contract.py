@@ -13,7 +13,6 @@ skills from the extracted ``plugin.json``.
 
 from __future__ import annotations
 
-import base64
 import json
 import tempfile
 import zipfile
@@ -33,6 +32,7 @@ from tests.marketplace.test_marketplace_install_from_registry_e2e import (
     _RecordingPluginManager,
     _make_self_signed_tls_context,
     _sha256_file,
+    _sign_registry_zip,
 )
 
 import aiohttp.web
@@ -92,14 +92,18 @@ async def test_registry_install_then_skills_rehydrate_from_disk(
 
     zip_path = tmp_path / f"{PLUGIN_NAME}.zip"
     _build_skills_plugin_zip(zip_path)
-    sha = _sha256_file(zip_path)
+    sha, sig_b64, pub_b64 = _sign_registry_zip(zip_path)
 
     ssl_ctx = _make_self_signed_tls_context(tmp_path)
     app = aiohttp.web.Application()
     ZIP_PATH_KEY = aiohttp.web.AppKey("zip_path", Path)
     SHA256_KEY = aiohttp.web.AppKey("sha256", str)
+    SIG_KEY = aiohttp.web.AppKey("sig_b64", str)
+    PUB_KEY = aiohttp.web.AppKey("pub_b64", str)
     app[ZIP_PATH_KEY] = zip_path
     app[SHA256_KEY] = sha
+    app[SIG_KEY] = sig_b64
+    app[PUB_KEY] = pub_b64
 
     async def registry_index(request: aiohttp.web.Request) -> aiohttp.web.Response:
         base = f"{request.url.scheme}://{request.host}"
@@ -113,8 +117,8 @@ async def test_registry_install_then_skills_rehydrate_from_disk(
                             "version": "1.0.0",
                             "url": f"{base}/{PLUGIN_NAME}.zip",
                             "sha256": request.app[SHA256_KEY],
-                            "signature": base64.b64encode(b"0" * 32).decode("ascii"),
-                            "public_key": base64.b64encode(b"x" * 32).decode("ascii"),
+                            "signature": request.app[SIG_KEY],
+                            "public_key": request.app[PUB_KEY],
                         }
                     },
                     "versions": {},

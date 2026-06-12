@@ -523,26 +523,35 @@ class RegistryClient:
             # Resolve version from constraint
             versions = plugin_data.get("versions", {})
             if not versions:
-                raise RegistryError(f"Plugin '{plugin_name}' has no versions")
-            
-            resolver = VersionResolver(
-                list(versions.keys()),
-                include_prerelease=include_prerelease
-            )
-            
-            try:
-                resolved_version = resolver.resolve(version_constraint)
-            except VersionConstraintError as e:
-                raise RegistryError(f"Failed to resolve version: {e}")
-            
-            if resolved_version is None:
-                raise RegistryError(
-                    f"No version matching '{version_constraint}' "
-                    f"for plugin '{plugin_name}'"
+                # No versions dict — fall back to channel-based resolution
+                channels = plugin_data.get("channels", {})
+                if channel not in channels:
+                    raise RegistryError(
+                        f"Plugin '{plugin_name}' has no versions and no '{channel}' release"
+                    )
+                release_data = channels[channel]
+                version = release_data.get("version")
+                if not version:
+                    raise RegistryError(f"Channel '{channel}' missing version")
+            else:
+                resolver = VersionResolver(
+                    list(versions.keys()),
+                    include_prerelease=include_prerelease
                 )
-            
-            version = str(resolved_version)
-            release_data = versions[version]
+
+                try:
+                    resolved_version = resolver.resolve(version_constraint)
+                except VersionConstraintError as e:
+                    raise RegistryError(f"Failed to resolve version: {e}")
+
+                if resolved_version is None:
+                    raise RegistryError(
+                        f"No version matching '{version_constraint}' "
+                        f"for plugin '{plugin_name}'"
+                    )
+
+                version = str(resolved_version)
+                release_data = versions[version]
         
         # Build release metadata
         return PluginRelease(

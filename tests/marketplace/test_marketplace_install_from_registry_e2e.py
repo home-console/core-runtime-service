@@ -186,13 +186,12 @@ async def test_install_from_registry_end_to_end_https_localhost(tmp_path: Path, 
     ssl_ctx = _make_self_signed_tls_context(tmp_path)
 
     app = aiohttp.web.Application()
-    # aiohttp recommends using AppKey instead of bare strings.
     ZIP_PATH_KEY = aiohttp.web.AppKey("zip_path", Path)
-    SHA256_KEY = aiohttp.web.AppKey("sha256", str)
     app[ZIP_PATH_KEY] = zip_path
-    app[SHA256_KEY] = sha
-    app["sig_b64"] = sig_b64
-    app["pub_b64"] = pub_b64
+
+    # Mutable release state referenced by closure so handlers see updates
+    # without mutating the started app (avoids DeprecationWarning).
+    release_state: Dict[str, Any] = {"sha256": sha, "sig_b64": sig_b64, "pub_b64": pub_b64}
 
     async def registry_index(request: aiohttp.web.Request) -> aiohttp.web.Response:
         base = f"{request.url.scheme}://{request.host}"
@@ -205,9 +204,9 @@ async def test_install_from_registry_end_to_end_https_localhost(tmp_path: Path, 
                         "stable": {
                             "version": "1.0.0",
                             "url": f"{base}/e2e_plugin.zip",
-                            "sha256": request.app[SHA256_KEY],
-                                "signature": request.app["sig_b64"],
-                                "public_key": request.app["pub_b64"],
+                            "sha256": release_state["sha256"],
+                            "signature": release_state["sig_b64"],
+                            "public_key": release_state["pub_b64"],
                         }
                     },
                     "versions": {},
@@ -278,9 +277,9 @@ async def test_install_from_registry_end_to_end_https_localhost(tmp_path: Path, 
         zip_path.unlink(missing_ok=True)
         _build_plugin_zip(zip_path)
         sha2, sig2, pub2 = _sign_registry_zip(zip_path)
-        app[SHA256_KEY] = sha2
-        app["sig_b64"] = sig2
-        app["pub_b64"] = pub2
+        release_state["sha256"] = sha2
+        release_state["sig_b64"] = sig2
+        release_state["pub_b64"] = pub2
 
         op_up = Operation(
             operation_id="op-update",
