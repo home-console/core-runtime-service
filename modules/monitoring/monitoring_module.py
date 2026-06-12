@@ -1,3 +1,4 @@
+import json
 from typing import Any
 import asyncio
 import time
@@ -74,9 +75,9 @@ class MonitoringModule:
         data = generate_latest(self.registry)
         return Response(content=data, media_type=CONTENT_TYPE_LATEST)
 
-    async def health_endpoint(self) -> dict:
+    async def health_endpoint(self) -> Response:
         self.health_requests_total.inc()
-        checks = {"status": "ok", "uptime": time.time() - self._start_time}
+        checks: dict[str, Any] = {"status": "ok", "uptime": time.time() - self._start_time}
         
         # Check storage if runtime available
         if self.runtime:
@@ -105,4 +106,9 @@ class MonitoringModule:
                 checks["storage_error"] = str(e)
                 checks["status"] = "degraded"
         
-        return checks
+        status_code = 200 if checks["status"] == "ok" else 503
+        return Response(
+            content=json.dumps(checks),
+            status_code=status_code,
+            media_type="application/json",
+        )

@@ -221,6 +221,43 @@ class SQLiteAdapter(StorageAdapter):
 
         return await asyncio.to_thread(_get_sync, namespace, key)
 
+    async def get_many(self, namespace: str, keys: list[str]) -> dict[str, Any]:
+        """Batch-get multiple keys in one query (avoids N+1)."""
+
+        def _get_many_sync(ns: str, ks: list[str]) -> dict[str, Any]:
+            conn = self._get_connection(readonly=True)
+            if not ks:
+                return {}
+            placeholders = ",".join("?" for _ in ks)
+            cursor = conn.execute(
+                f"SELECT key, value FROM storage WHERE namespace = ? AND key IN ({placeholders})",
+                (ns, *ks),
+            )
+            result: dict[str, Any] = {}
+            for row in cursor:
+                key, value = row[0], row[1]
+                if value is None:
+                    result[key] = None
+                    continue
+                if not isinstance(value, (str, bytes, bytearray)):
+                    raise StorageCorruptionError(
+                        f"Invalid value type in storage: expected str/bytes/bytearray, "
+                        f"got {type(value).__name__} for {ns}.{key}"
+                    )
+                try:
+                    parsed = json.loads(value)
+                    if not isinstance(parsed, dict):
+                        raise StorageCorruptionError(
+                            f"Invalid JSON structure in storage for {ns}.{key}: "
+                            f"expected dict, got {type(parsed).__name__}"
+                        )
+                    result[key] = parsed
+                except json.JSONDecodeError as e:
+                    raise StorageCorruptionError(f"JSON parsing error for {ns}.{key}: {e}")
+            return result
+
+        return await asyncio.to_thread(_get_many_sync, namespace, keys)
+
     async def set_if_absent(
         self, namespace: str, key: str, value: dict[str, Any]
     ) -> bool:
@@ -340,6 +377,9 @@ class SQLiteAdapter(StorageAdapter):
                 conn.commit()
                 return result
             except BEST_EFFORT_BACKGROUND_ERRORS:
+                conn.rollback()
+                raise
+            except Exception:
                 conn.rollback()
                 raise
 

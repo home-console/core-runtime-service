@@ -229,6 +229,21 @@ class Storage:
 
         await self._adapter.batch_set(namespace, items)
 
+    async def get_many(self, namespace: str, keys: list[str]) -> dict[str, Optional[dict[str, Any]]]:
+        """
+        Batch-get multiple keys from a namespace in one query.
+
+        Returns {key: value_or_None} for each requested key.
+        Much faster than N separate get() calls (avoids N+1).
+        """
+        if not isinstance(namespace, str) or not namespace:
+            raise ValueError(
+                f"namespace must be non-empty string, got {type(namespace).__name__}: {namespace!r}"
+            )
+        if not isinstance(keys, list):
+            raise TypeError(f"keys must be list, got {type(keys).__name__}")
+        return await self._adapter.get_many(namespace, keys)
+
     async def iter_namespace(
         self, namespace: str, batch_size: int = 100
     ) -> AsyncIterator[tuple[str, dict[str, Any]]]:

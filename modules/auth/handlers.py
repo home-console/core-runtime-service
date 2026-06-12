@@ -68,9 +68,8 @@ async def auth_bootstrap(runtime: Any) -> Dict[str, Any]:
         initialized = await check_initialized(runtime)
         return {"initialized": initialized}
     except Exception as e:
-        logger.warning("Bootstrap check error: %s", e, exc_info=True)
-        # On error, assume not initialized (safe default)
-        return {"initialized": False}
+        logger.error("Bootstrap check error: %s", e, exc_info=True)
+        return {"initialized": False, "error": "storage check failed"}
 
 
 async def auth_dev_credentials(runtime: Any) -> Dict[str, Any]:
