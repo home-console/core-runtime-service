@@ -42,14 +42,22 @@ from core.service.models import ServiceAuthConfig
 logger = logging.getLogger(__name__)
 
 
-def _normalize_api_result(result: Any) -> Any:
+def _normalize_api_result(result: Any, *, has_response_model: bool = False) -> Any:
     """
     Normalize successful results.
 
     Policy:
-    - If service explicitly returns an {"ok": ...} envelope, preserve it (backward-compatible).
-    - Otherwise wrap the raw payload into {"ok": True, "result": <payload>} to keep a stable API contract.
+    - If endpoint declares a typed ``response_model``, return the payload
+      verbatim. Wrapping it into ``{"ok": True, "result": ...}`` would break
+      FastAPI response validation (DTO is flat, envelope is not), e.g.
+      ``BootstrapStatusDto(initialized: bool)`` would fail with
+      ``ResponseValidationError: 'initialized' field required``.
+    - If service explicitly returns an {"ok": ...} envelope, preserve it
+      (backward-compatible for untyped legacy endpoints).
+    - Otherwise wrap the raw payload into {"ok": True, "result": <payload>}.
     """
+    if has_response_model:
+        return result
     if isinstance(result, dict) and "ok" in result:
         return result
     return {"ok": True, "result": result}
@@ -795,7 +803,9 @@ def _make_api_handler(runtime: Any, endpoint: Any):
             status = result.get("status")
             if isinstance(status, int) and 100 <= status <= 599:
                 response.status_code = status
-        return _normalize_api_result(result)
+        return _normalize_api_result(
+            result, has_response_model=endpoint.response_model is not None
+        )
 
     # Формируем сигнатуру handler'а для FastAPI
     params_sig = [
