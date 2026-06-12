@@ -110,17 +110,25 @@ class StorageProxy:
         return f"{self._namespace}:{key}"
 
     async def get(self, key: str, default: Any = None) -> Any:
+        self._validate_key(key)
         result = await self._storage.get(self._namespace, key)
         return result if result is not None else default
 
     async def put(self, key: str, value: Any) -> None:
+        self._validate_key(key)
         await self._storage.set(self._namespace, key, value)
 
     async def delete(self, key: str) -> None:
+        self._validate_key(key)
         await self._storage.delete(self._namespace, key)
 
     async def exists(self, key: str) -> bool:
+        self._validate_key(key)
         return await self._storage.get(self._namespace, key) is not None
+
+    def _validate_key(self, key: str) -> None:
+        if ":" in key:
+            raise ForbiddenError(f"Key cannot contain ':' separator: {key}")
 
     async def keys(self, pattern: Optional[str] = None) -> List[str]:
         all_keys = await self._storage.list_keys(self._namespace)

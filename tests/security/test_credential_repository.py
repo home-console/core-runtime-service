@@ -90,6 +90,11 @@ class InMemoryStorageAdapter(StorageAdapter):
             self._data[namespace] = {}
         self._data[namespace].update(items)
 
+    async def get_many(self, namespace: str, keys: list[str]) -> dict[str, Any]:
+        """Batch get values."""
+        ns = self._data.get(namespace, {})
+        return {k: ns.get(k) for k in keys}
+
     async def iter_namespace(
         self, namespace: str, batch_size: int = 100
     ) -> AsyncIterator[tuple[str, dict[str, Any]]]:

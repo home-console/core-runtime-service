@@ -289,6 +289,34 @@ class PostgreSQLAdapter(StorageAdapter):
                 values,
             )
 
+    async def get_many(self, namespace: str, keys: list[str]) -> dict[str, Any]:
+        """Batch-get multiple keys in one query (avoids N+1)."""
+        if not keys:
+            return {}
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"SELECT key, value FROM storage WHERE namespace = $1 AND key = ANY($2)",
+                namespace,
+                keys,
+            )
+            result: dict[str, Any] = {}
+            for row in rows:
+                key = row["key"]
+                value = row["value"]
+                if value is None:
+                    result[key] = None
+                    continue
+                try:
+                    parsed = json.loads(value) if isinstance(value, str) else value
+                    if isinstance(parsed, dict):
+                        result[key] = parsed
+                    else:
+                        result[key] = None
+                except (json.JSONDecodeError, TypeError):
+                    result[key] = None
+            return result
+
     async def iter_namespace(
         self, namespace: str, batch_size: int = 100
     ) -> "AsyncIterator[tuple[str, dict[str, Any]]]":

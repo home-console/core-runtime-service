@@ -112,44 +112,37 @@ async def auth_list_api_keys(runtime: Any) -> List[Dict[str, Any]]:
     """List all API keys (without actual keys, with metadata)."""
     try:
         keys = await runtime.storage.list_keys(AUTH_API_KEYS_NAMESPACE)
+        if not keys:
+            return []
+
+        # Batch-fetch all key data in one query (avoids N+1)
+        all_data = await runtime.storage.get_many(AUTH_API_KEYS_NAMESPACE, keys)
+
         result = []
         current_time = time.time()
 
         for key_id in keys:
-            try:
-                key_data = await runtime.storage.get(AUTH_API_KEYS_NAMESPACE, key_id)
-                if isinstance(key_data, dict):
-                    expires_at = key_data.get("expires_at")
-                    is_expired = expires_at is not None and current_time > expires_at
+            key_data = all_data.get(key_id)
+            if not isinstance(key_data, dict):
+                continue
 
-                    if is_expired:
-                        continue
+            expires_at = key_data.get("expires_at")
+            is_expired = expires_at is not None and current_time > expires_at
 
-                    key_info = {
-                        "id": key_id[:16] + "...",
-                        "subject": key_data.get("subject"),
-                        "scopes": key_data.get("scopes", []),
-                        "is_admin": key_data.get("is_admin", False),
-                        "created_at": key_data.get("created_at"),
-                        "last_used": key_data.get("last_used"),
-                        "expires_at": expires_at,
-                        "is_expired": is_expired,
-                    }
-                    result.append(key_info)
-            except STORAGE_BOUNDARY_ERRORS as e:
-                logger.warning(
-                    "auth_list_api_keys: storage boundary reading key %s: %s",
-                    key_id,
-                    e,
-                    exc_info=True,
-                )
-            except Exception as e:
-                logger.warning(
-                    "auth_list_api_keys: unexpected error reading key %s: %s",
-                    key_id,
-                    e,
-                    exc_info=True,
-                )
+            if is_expired:
+                continue
+
+            key_info = {
+                "id": key_id[:16] + "...",
+                "subject": key_data.get("subject"),
+                "scopes": key_data.get("scopes", []),
+                "is_admin": key_data.get("is_admin", False),
+                "created_at": key_data.get("created_at"),
+                "last_used": key_data.get("last_used"),
+                "expires_at": expires_at,
+                "is_expired": is_expired,
+            }
+            result.append(key_info)
 
         result.sort(key=lambda x: x.get("created_at", 0), reverse=True)
         return result
@@ -189,32 +182,23 @@ async def auth_list_users(runtime: Any) -> List[Dict[str, Any]]:
     """List all users."""
     try:
         user_ids = await runtime.storage.list_keys(AUTH_USERS_NAMESPACE)
+        if not user_ids:
+            return []
+
+        # Batch-fetch all user data in one query (avoids N+1)
+        all_data = await runtime.storage.get_many(AUTH_USERS_NAMESPACE, user_ids)
+
         result = []
         for user_id in user_ids:
-            try:
-                user_data = await runtime.storage.get(AUTH_USERS_NAMESPACE, user_id)
-                if isinstance(user_data, dict):
-                    result.append({
-                        "user_id": user_id,
-                        "username": user_data.get("username"),
-                        "scopes": user_data.get("scopes", []),
-                        "is_admin": user_data.get("is_admin", False),
-                        "created_at": user_data.get("created_at"),
-                    })
-            except STORAGE_BOUNDARY_ERRORS as e:
-                logger.warning(
-                    "auth_list_users: storage boundary reading user %s: %s",
-                    user_id,
-                    e,
-                    exc_info=True,
-                )
-            except Exception as e:
-                logger.warning(
-                    "auth_list_users: unexpected error reading user %s: %s",
-                    user_id,
-                    e,
-                    exc_info=True,
-                )
+            user_data = all_data.get(user_id)
+            if isinstance(user_data, dict):
+                result.append({
+                    "user_id": user_id,
+                    "username": user_data.get("username"),
+                    "scopes": user_data.get("scopes", []),
+                    "is_admin": user_data.get("is_admin", False),
+                    "created_at": user_data.get("created_at"),
+                })
         return result
     except STORAGE_BOUNDARY_ERRORS as e:
         logger.warning(

@@ -167,6 +167,20 @@ class StorageAdapter(ABC):
             })
         """
         pass
+
+    @abstractmethod
+    async def get_many(self, namespace: str, keys: list[str]) -> dict[str, Any]:
+        """
+        Batch-get multiple keys from a namespace in one query.
+
+        Args:
+            namespace: пространство имён
+            keys: список ключей для чтения
+
+        Returns:
+            {key: value_or_None} для каждого запрошенного ключа
+        """
+        pass
     
     @abstractmethod
     async def iter_namespace(self, namespace: str, batch_size: int = 100) -> AsyncIterator[tuple[str, dict[str, Any]]]:

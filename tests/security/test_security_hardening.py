@@ -224,7 +224,7 @@ async def test_plugin_cannot_access_foreign_namespace():
     - Plugin A tries to access "plugin_b:token" key
     - Expected: ForbiddenError
     """
-    mock_storage = Mock()
+    mock_storage = AsyncMock()
     proxy_a = StorageProxy(mock_storage, namespace="plugin_a")
     
     # Try to access foreign namespace with colon in key
@@ -237,7 +237,7 @@ async def test_plugin_cannot_access_foreign_namespace():
 
 @pytest.mark.asyncio
 async def test_storage_proxy_namespaces_keys_correctly():
-    """Test that StorageProxy correctly prefixes keys."""
+    """Test that StorageProxy correctly passes namespace and key to storage."""
     mock_storage = AsyncMock()
     mock_storage.get.return_value = {"value": "test"}
     
@@ -246,12 +246,8 @@ async def test_storage_proxy_namespaces_keys_correctly():
     # Access a key
     result = await proxy.get("tokens")
     
-    # Verify storage was called with namespaced key
-    mock_storage.get.assert_called_once()
-    call_args = mock_storage.get.call_args
-    
-    # The namespaced key should be "oauth_plugin:tokens"
-    assert "oauth_plugin:tokens" in str(call_args) or call_args[0][0] == "oauth_plugin:tokens"
+    # Verify storage was called with (namespace, key) — two-arg API
+    mock_storage.get.assert_called_once_with("oauth_plugin", "tokens")
 
 
 @pytest.mark.asyncio

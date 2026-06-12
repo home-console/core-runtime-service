@@ -63,6 +63,10 @@ class InMemoryStorageAdapter(StorageAdapter):
         for k, v in items.items():
             ns[k] = v
 
+    async def get_many(self, namespace: str, keys: list[str]) -> dict:
+        ns = self._data.get(namespace, {})
+        return {k: ns.get(k) for k in keys}
+
     from contextlib import asynccontextmanager
 
     @asynccontextmanager
