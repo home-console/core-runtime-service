@@ -23,28 +23,32 @@
 
 ## Быстрый старт
 
-### 1. Собрать фронт
-
-```bash
-cd ../platform-home-console
-pnpm install
-pnpm build:web
-cp -r apps/web/dist ../../core-runtime-service/deploy/dev/frontend/
-```
-
-### 2. Запустить
+### 1. Запустить demo-скрипт
 
 ```bash
 ./deploy/dev/start.sh
 ```
 
-Открой **http://localhost** — фронт и API на одном origin, cookies работают из коробки.
+Скрипт сам:
+
+- создаст `.env`, если его ещё нет
+- соберёт `platform-home-console` через `pnpm build:web`
+- синхронизирует `apps/web/dist` в `deploy/dev/frontend`
+- поднимет Docker Compose
+
+Открой **http://localhost:18080** — фронт и API на одном origin, cookies работают из коробки.
 
 ### Только бэкенд (без фронта)
 
 ```bash
 ./deploy/dev/start.sh --no-ui
-# → http://localhost:8000
+# → http://localhost:18000
+```
+
+### Если фронт уже собран
+
+```bash
+./deploy/dev/start.sh --skip-build
 ```
 
 ### Остановить
