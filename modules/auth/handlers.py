@@ -16,7 +16,12 @@ import os
 import time
 
 from core.adapters.storage_errors import STORAGE_BOUNDARY_ERRORS
-from core.exceptions import BadRequestError, ForbiddenError, UnauthorizedError
+from core.exceptions import (
+    BadRequestError,
+    CoreError,
+    ForbiddenError,
+    UnauthorizedError,
+)
 from modules.api.auth import (
     create_api_key,
     create_user,
@@ -656,7 +661,7 @@ async def auth_me(runtime: Any) -> Dict[str, Any]:
         if not isinstance(user_data, dict):
             raise UnauthorizedError("user_not_found")
 
-        # Return response matching frontend AuthUser interface
+        # Return response matching frontend AuthUser interface (AuthMeResponse DTO).
         return {
             "id": context.user_id,
             "email": user_data.get("username", context.user_id),  # Use username as email
@@ -671,6 +676,12 @@ async def auth_me(runtime: Any) -> Dict[str, Any]:
             exc_info=True,
         )
         raise BadRequestError(str(e))
+    except CoreError:
+        # Типизированные ошибки (UnauthorizedError/BadRequestError/...) уже
+        # имеют правильный HTTP-код в route_binding — пропускаем как есть.
+        # Без этой ветки except Exception ниже глотал UnauthorizedError и
+        # перевыбрасывал его как 400, ломая семантику «нужна авторизация».
+        raise
     except Exception as e:
         logger.warning(
             "auth_me failed for user_id=%s: %s", context.user_id, e, exc_info=True

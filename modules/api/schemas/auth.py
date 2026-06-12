@@ -7,6 +7,11 @@ from pydantic import BaseModel, Field
 
 
 class UserDto(BaseModel):
+    """Admin-side user DTO. Используется в /api/v1/admin/auth/users и
+    смежных endpoint'ах, где нужна полная карточка пользователя со scopes/
+    created_at. НЕ путать с :class:`AuthMeResponse` — у /auth/me другой
+    контракт под frontend AuthUser interface."""
+
     user_id: str
     username: Optional[str] = None
     scopes: List[str] = []
@@ -14,6 +19,22 @@ class UserDto(BaseModel):
     created_at: Optional[float] = None
     source: Optional[str] = None
     needs_initialization: Optional[bool] = None
+
+
+class AuthMeResponse(BaseModel):
+    """Контракт GET /api/v1/auth/me — матчит frontend AuthUser interface
+    (`platform-home-console/packages/auth-core/src/types.ts`):
+
+        interface AuthUser { id: string; email: string; role?: string; name?: string }
+
+    Намеренно отдельный DTO от UserDto: для фронта нужен компактный профиль
+    текущего юзера (id/email/name/role), а admin endpoints отдают полную
+    карточку (user_id/scopes/is_admin/created_at)."""
+
+    id: str
+    email: str
+    role: Optional[str] = None
+    name: Optional[str] = None
 
 
 class SessionDto(BaseModel):

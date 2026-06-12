@@ -32,6 +32,7 @@ from modules.api.schemas import (
     InitializeRequest,
     LoginRequest,
     OkErrorResponse,
+    AuthMeResponse,
     OkResponse,
     RevokeApiKeyRequest,
     RevokeSessionRequest,
@@ -198,7 +199,7 @@ class AuthModule(RuntimeModule):
             description="Get current user info",
             auth_config=_public,
             tags=["Auth"],
-            response_model=UserDto,
+            response_model=AuthMeResponse,
         ))
         self.context.http.register(HttpEndpoint(
             method="POST",

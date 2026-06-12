@@ -2795,7 +2795,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UserDto"
+                  "$ref": "#/components/schemas/AuthMeResponse"
                 }
               }
             }
@@ -7524,6 +7524,47 @@
         "type": "object",
         "title": "ApiResponse[dict]"
       },
+      "AuthMeResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "email": {
+            "type": "string",
+            "title": "Email"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "email"
+        ],
+        "title": "AuthMeResponse",
+        "description": "Контракт GET /api/v1/auth/me — матчит frontend AuthUser interface\n(`platform-home-console/packages/auth-core/src/types.ts`):\n\n    interface AuthUser { id: string; email: string; role?: string; name?: string }\n\nНамеренно отдельный DTO от UserDto: для фронта нужен компактный профиль\nтекущего юзера (id/email/name/role), а admin endpoints отдают полную\nкарточку (user_id/scopes/is_admin/created_at)."
+      },
       "AuthTokenDto": {
         "properties": {
           "ok": {
@@ -11721,7 +11762,8 @@
         "required": [
           "user_id"
         ],
-        "title": "UserDto"
+        "title": "UserDto",
+        "description": "Admin-side user DTO. Используется в /api/v1/admin/auth/users и\nсмежных endpoint'ах, где нужна полная карточка пользователя со scopes/\ncreated_at. НЕ путать с :class:`AuthMeResponse` — у /auth/me другой\nконтракт под frontend AuthUser interface."
       },
       "ValidationError": {
         "properties": {

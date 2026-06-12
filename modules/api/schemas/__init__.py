@@ -12,6 +12,7 @@ from .auth import (
     AuthTokenDto,
     BootstrapStatusDto,
     ChangePasswordRequest,
+    AuthMeResponse,
     CreateApiKeyRequest,
     CreateUserRequest,
     DevCredentialsDto,
@@ -122,7 +123,8 @@ __all__ = [
     # common
     "ApiResponse", "OkResponse", "OkErrorResponse", "DeletedResponse",
     # auth
-    "UserDto", "SessionDto", "ApiKeyDto", "AuthTokenDto", "BootstrapStatusDto",
+    "UserDto", "AuthMeResponse",
+    "SessionDto", "ApiKeyDto", "AuthTokenDto", "BootstrapStatusDto",
     "DevCredentialsDto",
     "LoginRequest", "InitializeRequest", "SetPasswordRequest", "ChangePasswordRequest",
     "RevokeSessionRequest", "RevokeApiKeyRequest", "RotateApiKeyRequest",
