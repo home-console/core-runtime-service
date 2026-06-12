@@ -235,6 +235,10 @@ async def test_install_from_registry_end_to_end_https_localhost(tmp_path: Path, 
     monkeypatch.setattr(installer_mod, "aiohttp", aiohttp, raising=False)
     monkeypatch.setattr(aiohttp, "ClientSession", _insecure_client_session)
 
+    # Disable registry index caching so second call with updated release_state
+    # actually re-fetches the index instead of returning stale cached data.
+    monkeypatch.setattr(registry_client_mod.RegistryClient, "_is_cache_fresh", lambda self: False)
+
     runner = aiohttp.web.AppRunner(app)
     await runner.setup()
     site = aiohttp.web.TCPSite(runner, host="127.0.0.1", port=0, ssl_context=ssl_ctx)
