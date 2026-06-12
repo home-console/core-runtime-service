@@ -78,10 +78,10 @@ class MarketplaceService:
         # New storage API
         try:
             value = await storage.get(self._storage_namespace, key)
-            if value is not None:
-                return value
         except TypeError:
             pass
+        else:
+            return value if value is not None else default
 
         # Legacy KV storage API (sync or async)
         legacy_key = f"{self._storage_namespace}.{key}"

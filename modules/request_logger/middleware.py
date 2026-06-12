@@ -148,7 +148,8 @@ async def request_logger_middleware(request: Request, call_next: Callable) -> Re
     _operation_id_var.set(operation_id)
     
     # Пропускаем логирование для endpoint логирования (чтобы избежать рекурсии и шума)
-    if request.url.path == "/admin/v1/request-logs/log":
+    # и для health-чеков (слишком частые, зашумляют консоль)
+    if request.url.path in ("/admin/v1/request-logs/log", "/api/v1/monitor/health"):
         # Просто выполняем запрос без логирования
         response = await call_next(request)
         response.headers["X-Request-ID"] = request_id
@@ -246,42 +247,38 @@ async def request_logger_middleware(request: Request, call_next: Callable) -> Re
         # SECURITY: Sanitize sensitive response headers
         sanitized_response_headers = sanitize_for_logging(response_headers)
         
-        # SECURITY: Capture response body ONLY in DEBUG mode
+        # SECURITY: Capture response body for logging (always, sanitized)
         response_body = None
-        if debug_mode:
-            try:
-                # Проверяем, есть ли body в response (для JSONResponse)
-                if hasattr(response, "body"):
-                    body_bytes = response.body
-                    if body_bytes:
+        try:
+            if hasattr(response, "body"):
+                body_bytes = response.body
+                if body_bytes:
+                    try:
+                        import json
+                        response_body = json.loads(body_bytes.decode("utf-8"))
+                        response_body = sanitize_for_logging(response_body)
+                    except (json.JSONDecodeError, UnicodeDecodeError, AttributeError):
                         try:
-                            import json
-                            response_body = json.loads(body_bytes.decode("utf-8"))
-                            # SECURITY: Sanitize body even in debug mode
-                            response_body = sanitize_for_logging(response_body)
-                        except (json.JSONDecodeError, UnicodeDecodeError, AttributeError):
-                            # Если не JSON, сохраняем как строку (ограничиваем размер)
-                            try:
-                                response_body = sanitize_for_logging(
-                                    body_bytes.decode("utf-8", errors="replace")[:10000]
-                                )
-                            except (AttributeError, TypeError):
-                                response_body = (
-                                    sanitize_for_logging(str(body_bytes)[:10000])
-                                    if body_bytes
-                                    else None
-                                )
-            except Exception:
-                logger.debug(
-                    "request_logger middleware: response body capture failed",
-                    exc_info=True,
-                )
+                            response_body = sanitize_for_logging(
+                                body_bytes.decode("utf-8", errors="replace")[:10000]
+                            )
+                        except (AttributeError, TypeError):
+                            response_body = (
+                                sanitize_for_logging(str(body_bytes)[:10000])
+                                if body_bytes
+                                else None
+                            )
+        except Exception:
+            logger.debug(
+                "request_logger middleware: response body capture failed",
+                exc_info=True,
+            )
         
         # Сохраняем метаданные ответа
         response_metadata = {
             "status_code": response.status_code,
             "headers": sanitized_response_headers,
-            "body": response_body if debug_mode else None,  # Only in DEBUG mode
+            "body": response_body,
             "duration_ms": duration * 1000,
         }
         

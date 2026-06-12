@@ -12,6 +12,7 @@ from typing import Callable, Iterable
 
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
+from starlette.requests import ClientDisconnect
 
 
 CSL_DEFAULT_MAX_BYTES = 10 * 1024 * 1024  # 10 MiB
@@ -74,7 +75,11 @@ async def content_size_limit_middleware(request: Request, call_next: Callable) -
 
     # Fallback: read body and enforce size. Starlette caches request.body() so downstream
     # handlers will still be able to read it.
-    body = await request.body()
+    try:
+        body = await request.body()
+    except ClientDisconnect:
+        # Client gave up before sending the body; nothing left to enforce or respond to.
+        return Response(status_code=499)
     if body and len(body) > max_bytes:
         return JSONResponse(
             status_code=413,
