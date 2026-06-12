@@ -42,7 +42,7 @@ async def validate_api_key(runtime: Any, api_key: str) -> Optional[RequestContex
         
         # Timing attack protection
         if key_data is None:
-            _ = secrets.compare_digest(api_key, api_key)
+            secrets.compare_digest(api_key[:8].encode(), api_key[:8].encode())
             return None
         
         # Проверяем структуру данных

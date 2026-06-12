@@ -110,31 +110,25 @@ class StorageProxy:
         return f"{self._namespace}:{key}"
 
     async def get(self, key: str, default: Any = None) -> Any:
-        namespaced_key = self._make_key(key)
-        return await self._storage.get(namespaced_key, default)
+        result = await self._storage.get(self._namespace, key)
+        return result if result is not None else default
 
     async def put(self, key: str, value: Any) -> None:
-        namespaced_key = self._make_key(key)
-        await self._storage.put(namespaced_key, value)
+        await self._storage.set(self._namespace, key, value)
 
     async def delete(self, key: str) -> None:
-        namespaced_key = self._make_key(key)
-        await self._storage.delete(namespaced_key)
+        await self._storage.delete(self._namespace, key)
 
     async def exists(self, key: str) -> bool:
-        namespaced_key = self._make_key(key)
-        return await self._storage.exists(namespaced_key)
+        return await self._storage.get(self._namespace, key) is not None
 
     async def keys(self, pattern: Optional[str] = None) -> List[str]:
-        namespace_pattern = f"{self._namespace}:*"
-        all_keys = await self._storage.keys(namespace_pattern)
-        prefix_len = len(self._namespace) + 1
-        result = [key[prefix_len:] for key in all_keys]
+        all_keys = await self._storage.list_keys(self._namespace)
         if pattern:
             import fnmatch
 
-            result = [key for key in result if fnmatch.fnmatch(key, pattern)]
-        return result
+            all_keys = [k for k in all_keys if fnmatch.fnmatch(k, pattern)]
+        return all_keys
 
     async def clear(self) -> None:
         keys = await self.keys()

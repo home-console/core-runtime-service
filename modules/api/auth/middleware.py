@@ -97,15 +97,9 @@ async def require_auth_middleware(request: Request, call_next):
         if hasattr(runtime, "_config") and runtime._config:
             rate_limiting_enabled = getattr(runtime._config, "rate_limiting_enabled", True)
         
-        # DEBUG MODE: allow disabling rate limiting for local development.
-        # We support both DEBUG_MODE and DEBUG (legacy) flags.
-        import os
-        debug_mode = (
-            os.getenv("DEBUG_MODE", "").lower() in ("1", "true", "yes", "on")
-            or os.getenv("DEBUG", "").lower() in ("1", "true", "yes", "on")
-        )
-        if debug_mode:
-            rate_limiting_enabled = False
+        # Rate limiting is always enabled regardless of DEBUG mode.
+        # DEBUG_MODE / DEBUG flags no longer disable auth rate limiting
+        # (security: brute-force protection must never be disabled in production).
         
         if rate_limiting_enabled:
             # Используем IP для rate limiting auth endpoints (защита от brute force)

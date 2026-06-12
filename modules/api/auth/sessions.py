@@ -64,8 +64,7 @@ async def validate_session(runtime: Any, session_id: str) -> Optional[RequestCon
         # Timing attack protection - всегда выполняем проверку,
         # даже если сессия не найдена (константное время)
         if session_data is None:
-            # Имитируем работу для константного времени
-            _ = secrets.compare_digest(session_id, session_id)
+            secrets.compare_digest(session_id[:8].encode(), session_id[:8].encode())
             return None
         
         # Проверяем структуру данных

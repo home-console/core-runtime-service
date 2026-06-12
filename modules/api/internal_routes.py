@@ -9,6 +9,7 @@ Internal API — эндпоинты только для межсервисной
 from __future__ import annotations
 
 import os
+import secrets
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException
@@ -24,7 +25,7 @@ async def verify_internal_key(authorization: str = Header(...)) -> None:
     if not INTERNAL_API_KEY:
         raise HTTPException(503, "Internal API not configured")
     token = authorization.removeprefix("Bearer ").strip()
-    if token != INTERNAL_API_KEY:
+    if not secrets.compare_digest(token, INTERNAL_API_KEY):
         raise HTTPException(401, "Invalid internal API key")
 
 
