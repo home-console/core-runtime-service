@@ -6,8 +6,8 @@
 
 - **Health ядра**: `http://<host>:<port>/api/v1/monitor/health`  
   Внутри контейнера: `http://localhost:8000/api/v1/monitor/health`
-- **Prod edge (HTTP/HTTPS по умолчанию)**: порты из `HTTP_PORT` / `HTTPS_PORT` в `deploy/prod/docker-compose.image.yml` (часто **80** / **443**).
-- **Dev Caddy** (параллельно с прод): по умолчанию **18080** / **18443**, Redis на хосту **6380**, прямое ядро **18000** (`DEV_HTTP_PORT`, …).
+- **Prod edge**: `HTTP_PORT` / `HTTPS_PORT` в `deploy/prod/docker-compose.image.yml` — по умолчанию **8080** / **8443** (без root, не конфликтуют с системным nginx). За публичным reverse-proxy ставь `HTTP_PORT=80 HTTPS_PORT=443`.
+- **Dev Caddy** (параллельно с прод): по умолчанию **18080** / **18443**, Vite HMR **15173**, прямое ядро **18000**, Postgres **15432**, Redis **16379**. Все DEV-порты с префиксом «1» к стандарту, чтобы не конфликтовать с prod на той же машине.
 - **Плагины**:
   - **volume (dev)**: `plugins/` → `/app/plugins`, `RUNTIME_PLUGINS_DIR=/app/plugins`
   - **baked-in (image)**: `plugins/` внутри образа (`Dockerfile` `COPY`)

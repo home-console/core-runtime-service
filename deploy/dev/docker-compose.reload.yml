@@ -21,9 +21,13 @@
 #
 # ─── Использование ───────────────────────────────────────────────────────────
 #
-# Параллельно с prod: по умолчанию HTTP не :80 —
-#   UI: http://localhost:18080
-# Также: DEV_REDIS_PORT (6380), DEV_CORE_PORT (18000), DEV_VITE_HOST_PORT (15173).
+# Параллельно с prod: dev порты с префиксом «1» чтобы не конфликтовать
+# со стандартными prod-портами на той же машине.
+#   UI:        http://localhost:18080   (DEV_HTTP_PORT)
+#   Core API:  http://localhost:18000   (DEV_CORE_PORT)
+#   Vite HMR:  http://localhost:15173   (DEV_VITE_HOST_PORT)
+#   Postgres:  localhost:15432          (DEV_PG_PORT)
+#   Redis:     localhost:16379          (DEV_REDIS_PORT)
 #
 # Backend hot-reload (только Python ядро):
 #   docker compose -f deploy/dev/docker-compose.reload.yml up -d
@@ -43,7 +47,7 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
     ports:
-      - "${DEV_REDIS_PORT:-6380}:6379"
+      - "${DEV_REDIS_PORT:-16379}:6379"
     command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -64,7 +68,7 @@ services:
     volumes:
       - pg-data:/var/lib/postgresql/data
     ports:
-      - "${PG_PORT:-5432}:5432"
+      - "${DEV_PG_PORT:-15432}:5432"
     healthcheck:
       # -h 127.0.0.1 forces TCP check (without -h pg_isready uses UNIX socket
       # which becomes ready before TCP is bound — causing false-healthy)
@@ -132,8 +136,10 @@ services:
     environment:
       # CI=true prevents pnpm from prompting "remove node_modules?" when no TTY
       CI: "true"
+      # Vite proxy /api → core внутри docker-сети (не localhost:18000)
+      VITE_CORE_PROXY_TARGET: http://core-runtime:8000
     command: >-
-      sh -c "corepack enable && pnpm install --frozen-lockfile && pnpm dev --host 0.0.0.0 --port 5173"
+      sh -c "corepack enable && pnpm install --frozen-lockfile && pnpm api:gen && pnpm --filter=web dev -- --host 0.0.0.0 --port 5173"
     ports:
       - "${DEV_VITE_HOST_PORT:-15173}:5173"
     profiles: ["frontend"]

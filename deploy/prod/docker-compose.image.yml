@@ -1,6 +1,9 @@
 # Production-ish stack: Core Runtime + Platform UI (image-only).
-# Edge слушает HTTP_PORT / HTTPS_PORT (по умолчанию 80 и 443).
-# Параллельный локальный DEV-стек: deploy/dev/* — там UI на ${DEV_HTTP_PORT:-18080}, не занимает :80.
+# Edge слушает HTTP_PORT / HTTPS_PORT (по умолчанию 8080 и 8443).
+# Параллельный локальный DEV-стек: deploy/dev/* — там UI на ${DEV_HTTP_PORT:-18080}.
+# Дефолты прод-портов осознанно НЕ 80/443: чтобы запускать без root и не
+# конфликтовать с другими сервисами; для публичного хоста положи их за
+# reverse proxy / ingress, либо переопредели HTTP_PORT=80 HTTPS_PORT=443.
 
 # Usage (local):
 #   CORE_RUNTIME_IMAGE=ghcr.io/<org>/<repo>:sha123 \
@@ -59,7 +62,7 @@ services:
       - "8000"
     # Optional: expose core directly for debugging.
     # ports:
-    #   - "${CORE_PORT:-18000}:8000"
+    #   - "${CORE_PORT:-8000}:8000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/monitor/health"]
       interval: 10s
@@ -93,8 +96,8 @@ services:
       - caddy-data:/data
       - caddy-config:/config
     ports:
-      - "${HTTP_PORT:-80}:80"
-      - "${HTTPS_PORT:-443}:443"
+      - "${HTTP_PORT:-8080}:80"
+      - "${HTTPS_PORT:-8443}:443"
     depends_on:
       core-runtime:
         condition: service_healthy

@@ -1,14 +1,14 @@
 # Dev stage docker-compose (builds from local source)
 #
 # Параллельно с prod (deploy/prod): порты по умолчанию НЕ конфликтуют с 80/443/6379.
-#   DEV_HTTP_PORT=18080   DEV_HTTPS_PORT=18443   DEV_REDIS_PORT=6380   DEV_CORE_PORT=18000
+#   DEV_HTTP_PORT=18080   DEV_HTTPS_PORT=18443   DEV_REDIS_PORT=16379   DEV_CORE_PORT=18000   DEV_PG_PORT=15432
 # Имена контейнеров: dev-hc-redis, dev-hc-postgres, dev-hc-core-runtime, dev-hc-caddy.
 #
 # Usage:
 #   1. Build frontend:   cd platform-home-console && pnpm build:web
 #   2. Copy dist:        cp -r platform-home-console/apps/web/dist ./deploy/dev/frontend/
 #   3. Run:              docker compose -f deploy/dev/docker-compose.yml up -d
-#   4. Open UI:          http://localhost:${DEV_HTTP_PORT:-18080}   (не :80 — его занимает prod edge)
+#   4. Open UI:          http://localhost:${DEV_HTTP_PORT:-18080}   (не :8080 — его занимает prod edge)
 #
 # For "prod-like" (image-only) runs, see:
 #   deploy/dev/docker-compose.image.yml
@@ -19,7 +19,7 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
     ports:
-      - "${DEV_REDIS_PORT:-6380}:6379"
+      - "${DEV_REDIS_PORT:-16379}:6379"
     command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -39,7 +39,7 @@ services:
     volumes:
       - pg-data:/var/lib/postgresql/data
     ports:
-      - "${PG_PORT:-5432}:5432"
+      - "${DEV_PG_PORT:-15432}:5432"
     healthcheck:
       # -h 127.0.0.1 forces TCP check (without -h pg_isready uses UNIX socket
       # which becomes ready before TCP is bound — causing false-healthy)

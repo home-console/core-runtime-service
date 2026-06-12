@@ -1,7 +1,7 @@
 # Dev-image: готовый образ ядра + dev-Caddy + те же порты, что docker-compose.yml
 # (совместимо с параллельным prod stack на 80/443).
 #
-#   DEV_HTTP_PORT=18080  DEV_HTTPS_PORT=18443  DEV_REDIS_PORT=6380  DEV_CORE_PORT=18000
+#   DEV_HTTP_PORT=18080  DEV_HTTPS_PORT=18443  DEV_REDIS_PORT=16379  DEV_CORE_PORT=18000
 #
 # Usage:
 #   CORE_RUNTIME_IMAGE=ghcr.io/<org>/<repo>/core-runtime:TAG \
@@ -14,7 +14,7 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
     ports:
-      - "${DEV_REDIS_PORT:-6380}:6379"
+      - "${DEV_REDIS_PORT:-16379}:6379"
     command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
