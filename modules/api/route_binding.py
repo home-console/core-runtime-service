@@ -47,17 +47,20 @@ def _normalize_api_result(result: Any, *, has_response_model: bool = False) -> A
     Normalize successful results.
 
     Policy:
-    - If endpoint declares a typed ``response_model``, return the payload
-      verbatim. Wrapping it into ``{"ok": True, "result": ...}`` would break
-      FastAPI response validation (DTO is flat, envelope is not), e.g.
-      ``BootstrapStatusDto(initialized: bool)`` would fail with
-      ``ResponseValidationError: 'initialized' field required``.
+    - If endpoint declares a typed ``response_model`` that is a flat DTO
+      (result is already a dict matching the model), return verbatim.
+    - If endpoint declares a response model but the result is a raw list /
+      primitive (doesn't look like the model), wrap into
+      ``{"ok": True, "result": <payload>}`` so that ``ApiResponse`` envelope
+      models validate correctly.
     - If service explicitly returns an {"ok": ...} envelope, preserve it
       (backward-compatible for untyped legacy endpoints).
     - Otherwise wrap the raw payload into {"ok": True, "result": <payload>}.
     """
     if has_response_model:
-        return result
+        if isinstance(result, dict):
+            return result
+        return {"ok": True, "result": result}
     if isinstance(result, dict) and "ok" in result:
         return result
     return {"ok": True, "result": result}

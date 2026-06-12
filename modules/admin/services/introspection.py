@@ -922,7 +922,8 @@ async def list_integrations(runtime: Any) -> List[Dict[str, Any]]:
         return result
     except Exception:
         logger.warning("list_integrations failed", exc_info=True)
-        return result
+    return result
+
 
 
 async def integrations_inspector_response(runtime: Any) -> Dict[str, Any]:
