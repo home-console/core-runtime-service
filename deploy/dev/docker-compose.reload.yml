@@ -141,7 +141,12 @@ services:
     # Старт фронт-стека:
     #   1) corepack enable                — активировать pnpm версии из packageManager
     #   2) pnpm install --frozen-lockfile — установка зависимостей
-    #   3) pnpm api:gen                   — TypeScript-типы из openapi.json
+    #   3) pnpm api:gen (опционально)     — TypeScript-типы из openapi.json.
+    #        В контейнер монтируется только platform-home-console, поэтому
+    #        ../core-runtime-service/openapi.json недоступен. Если файл есть
+    #        в контейнере — регенерим, иначе используем закоммиченный
+    #        packages/types/src/generated.ts. Для ручной регенерации:
+    #        pnpm api:gen (на хосте).
     #   4) pnpm -r --filter './packages/**' build
     #      — обязательная пересборка @platform/* пакетов. Если её пропустить,
     #        web получает стейл dist/* и в браузере вылезает
@@ -150,15 +155,24 @@ services:
     #   5) pnpm -r --filter './packages/**' run --if-present dev > /tmp/...&
     #      — watch-режим в фоне для @platform/* (tsc -w если объявлен),
     #        чтобы любая правка в packages/*/src сразу пересобирала dist.
-    #   6) pnpm --filter=web dev          — Vite на 5173
+    #   6) pnpm --filter=web exec vite --host 0.0.0.0 --port 5173
+    #      ВАЖНО: используем `exec vite` напрямую вместо `pnpm run dev`,
+    #      т.к. скрипт web@dev сам делает pnpm build пакетов (дублирование шага 4)
+    #      и НЕ пробрасывает --host через `-- args` (Vite запускается на 127.0.0.1
+    #      и снаружи контейнера недоступен).
     command: >-
       sh -c "
+        set -e &&
         corepack enable &&
         pnpm install --frozen-lockfile &&
-        pnpm api:gen &&
+        if [ -f /workspace/../core-runtime-service/openapi.json ]; then
+          pnpm api:gen;
+        else
+          echo '[startup] api:gen skipped (openapi.json не смонтирован в контейнер; использую committed generated.ts)';
+        fi &&
         pnpm -r --filter './packages/**' build &&
         (pnpm -r --parallel --filter './packages/**' run --if-present dev > /tmp/packages-dev.log 2>&1 &) &&
-        pnpm --filter=web dev -- --host 0.0.0.0 --port 5173
+        pnpm --filter=web exec vite --host 0.0.0.0 --port 5173
       "
     ports:
       - "${DEV_VITE_HOST_PORT:-15173}:5173"
