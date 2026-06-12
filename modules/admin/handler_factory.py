@@ -19,11 +19,9 @@ def _pick_kw(kw: dict[str, Any], names: Sequence[str], default: Any = None) -> A
 
 
 def _pick_arg(positional: Sequence[Any], idx: int, default: Any = None) -> Any:
-    try:
-        v = positional[idx]
-    except Exception as e:
-        logger.warning("handler_factory._pick_arg: failed: %s", e, exc_info=True)
+    if idx < 0 or idx >= len(positional):
         return default
+    v = positional[idx]
     return default if v is None else v
 
 
