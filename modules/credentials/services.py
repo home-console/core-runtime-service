@@ -9,8 +9,11 @@ Zero-trust secret access with MFA elevation
 
 from typing import Any, Dict, Optional, List, TYPE_CHECKING
 from datetime import datetime, UTC
+import logging
 
 from modules.domain import CredentialAccessLevel, CredentialPolicy, RiskAction, Role
+
+logger = logging.getLogger(__name__)
 from modules.credentials import (
     Credential,
     CredentialAccessDenied,
@@ -692,7 +695,7 @@ class CredentialService:
             await self.audit_binder.append(event)
         except Exception as e:
             # Log but don't fail the operation if audit fails
-            print(f"[WARNING] Failed to audit {operation}: {e}")
+            logger.warning("Failed to audit %s: %s", operation, e)
 
     async def _audit_failure(
         self,
@@ -737,4 +740,4 @@ class CredentialService:
             await self.audit_binder.append(event)
         except Exception as e:
             # Log but don't fail if audit fails
-            print(f"[WARNING] Failed to audit failure {operation}: {e}")
+            logger.warning("Failed to audit failure %s: %s", operation, e)

@@ -32,6 +32,11 @@ services:
       dockerfile: Dockerfile
     container_name: core-runtime
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+          cpus: "2.0"
     env_file:
       - .env
     environment:
