@@ -13,11 +13,13 @@ services:
     image: redis:7-alpine
     container_name: core-redis
     restart: unless-stopped
-    ports:
-      - "6379:6379"
-    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD:-devonly}
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-devonly}", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5
