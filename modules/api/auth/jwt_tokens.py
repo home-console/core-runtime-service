@@ -3,6 +3,7 @@ JWT Token management — создание, валидация и управле�
 """
 
 from typing import Any, Optional, List, Set, Union, Dict, Tuple
+import asyncio
 import time
 import secrets
 import jwt
@@ -27,8 +28,9 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-# In-memory cache для JWT secret чтобы избежать race condition
+# In-memory cache для JWT secret с lock для thread-safety
 _jwt_secret_cache: Optional[str] = None
+_jwt_secret_lock = asyncio.Lock()
 
 
 def extract_jwt_from_header(request: Request) -> Optional[str]:
@@ -75,6 +77,7 @@ def extract_jwt_from_header(request: Request) -> Optional[str]:
 async def get_or_create_jwt_secret(runtime: Any) -> str:
     """
     Получает или создаёт JWT secret key.
+    Thread-safe via asyncio.Lock to prevent race conditions during generation.
     
     Args:
         runtime: экземпляр CoreRuntime
@@ -84,70 +87,38 @@ async def get_or_create_jwt_secret(runtime: Any) -> str:
     """
     global _jwt_secret_cache
     
-    # Сначала проверяем кеш в памяти
+    # Fast path: check cache without lock
     if _jwt_secret_cache:
         return _jwt_secret_cache
     
-    # Пытаемся загрузить из storage
-    try:
-        data = await runtime.storage.get("auth_config", JWT_SECRET_KEY_STORAGE_KEY)
-        if data and isinstance(data, dict):
-            secret = data.get("value")
-            if secret and isinstance(secret, str):
-                # Убрано избыточное логирование загрузки секрета
-                _jwt_secret_cache = secret
-                return secret
-    except AUTH_STORAGE_BOUNDARY_ERRORS as e:
+    async with _jwt_secret_lock:
+        # Double-check after acquiring lock
+        if _jwt_secret_cache:
+            return _jwt_secret_cache
+        
+        # Пытаемся загрузить из storage
         try:
-            await runtime.service_registry.call(
-                "logger.log",
-                level="warning",
-                message="Failed to load JWT secret from storage",
-                module="auth",
-                error=str(e)
-            )
-        except Exception:
-            logger.warning("logger.log service call failed", exc_info=True)
-    
-    # Генерируем новый secret
-    secret = secrets.token_urlsafe(JWT_SECRET_KEY_LENGTH)
-    try:
-        await runtime.service_registry.call(
-            "logger.log",
-            level="info",
-            message="Generated new JWT secret",
-            module="auth",
-            secret_length=len(secret)
-        )
-    except Exception:
-        logger.warning("logger.log service call failed", exc_info=True)
-    try:
-        # Оборачиваем в dict, так как storage.set требует dict
-        await runtime.storage.set("auth_config", JWT_SECRET_KEY_STORAGE_KEY, {"value": secret})
+            data = await runtime.storage.get("auth_config", JWT_SECRET_KEY_STORAGE_KEY)
+            if data and isinstance(data, dict):
+                secret = data.get("value")
+                if secret and isinstance(secret, str):
+                    _jwt_secret_cache = secret
+                    return secret
+        except AUTH_STORAGE_BOUNDARY_ERRORS as e:
+            logger.warning("Failed to load JWT secret from storage: %s", e)
+        
+        # Генерируем новый secret
+        secret = secrets.token_urlsafe(JWT_SECRET_KEY_LENGTH)
+        logger.info("Generated new JWT secret (length=%d)", len(secret))
+        
         try:
-            await runtime.service_registry.call(
-                "logger.log",
-                level="debug",
-                message="Saved new JWT secret to storage",
-                module="auth"
-            )
-        except Exception:
-            logger.warning("logger.log service call failed", exc_info=True)
-    except AUTH_STORAGE_BOUNDARY_ERRORS as e:
-        try:
-            await runtime.service_registry.call(
-                "logger.log",
-                level="error",
-                message="Failed to save JWT secret to storage",
-                module="auth",
-                error=str(e)
-            )
-        except Exception:
-            logger.warning("logger.log service call failed", exc_info=True)
-    
-    # Кешируем в памяти
-    _jwt_secret_cache = secret
-    return secret
+            await runtime.storage.set("auth_config", JWT_SECRET_KEY_STORAGE_KEY, {"value": secret})
+        except AUTH_STORAGE_BOUNDARY_ERRORS as e:
+            logger.error("Failed to save JWT secret to storage: %s", e)
+        
+        # Кешируем в памяти
+        _jwt_secret_cache = secret
+        return secret
 
 
 def generate_access_token(

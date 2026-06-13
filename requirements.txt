@@ -32,8 +32,8 @@ argon2-cffi>=21.2.0
 
 # JWT tokens
 PyJWT>=2.13.0
-cryptography>=41.0.0  # Для алгоритмов JWT
-prometheus-client
+cryptography>=41.0.0
+prometheus-client>=0.20.0
 
 # Network scanner (для network_scanner plugin)
 netifaces>=0.11.0
@@ -50,4 +50,4 @@ pydantic>=2.0.0
 pydantic_settings>=2.0.0
 
 # Linting
-ruff
+ruff>=0.4.0
