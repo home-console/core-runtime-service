@@ -16,6 +16,8 @@ class AgentDto(BaseModel):
     address: Optional[str] = None
     capabilities: Optional[List[str]] = None
     properties: Optional[Dict[str, Any]] = None
+    client_certificate: Optional[str] = None
+    identity: Optional[Dict[str, Any]] = None
 
 
 class DeploymentStatusDto(BaseModel):
@@ -59,8 +61,14 @@ class DeploymentMetricsDto(BaseModel):
 class AgentHeartbeatDto(BaseModel):
     ok: bool = True
     agent_id: Optional[str] = None
+    agent_name: Optional[str] = None
     status: Optional[str] = None
     last_heartbeat: Optional[str] = None
+    heartbeat_age_seconds: Optional[int] = None
+    threshold_seconds: Optional[int] = None
+    dead_threshold_seconds: Optional[int] = None
+    metrics: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
 
 
 class AgentHealthCheckDto(BaseModel):
@@ -79,15 +87,18 @@ class AgentLogEntryDto(BaseModel):
     timestamp: Optional[str] = None
     level: Optional[str] = None
     message: str
-    context: Optional[Dict[str, Any]] = None
+    source: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
 
 
 class AgentLogsDto(BaseModel):
     ok: bool = True
-    agent_id: str
+    agent_id: Optional[str] = None
     logs: List[AgentLogEntryDto] = []
     total: int = 0
+    returned: Optional[int] = None
     agent_online: Optional[bool] = None
+    error: Optional[str] = None
 
 
 class AgentStatusDto(BaseModel):
@@ -112,6 +123,8 @@ class EnrollmentTokenDto(BaseModel):
     ok: bool = True
     agent_name: Optional[str] = None
     token: Optional[str] = None
+    token_id: Optional[str] = None
+    token_secret: Optional[str] = None
     expires_at: Optional[str] = None
     error: Optional[str] = None
 

@@ -51,7 +51,11 @@ class ApiKeyDto(BaseModel):
     name: Optional[str] = None
     created_at: Optional[float] = None
     last_used_at: Optional[float] = None
+    expires_at: Optional[float] = None
+    is_admin: Optional[bool] = None
+    is_expired: Optional[bool] = None
     scopes: List[str] = []
+    api_key: Optional[str] = None
 
 
 class AuthTokenDto(BaseModel):
@@ -69,7 +73,7 @@ class BootstrapStatusDto(BaseModel):
 
 
 class DevCredentialsDto(BaseModel):
-    api_base_url: str
+    api_base_url: Optional[str] = None
     api_key: Optional[str] = None
 
 

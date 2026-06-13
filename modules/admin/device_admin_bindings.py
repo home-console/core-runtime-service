@@ -9,8 +9,8 @@ from modules.api.schemas import (
     DeviceDto,
     DeviceMappingDto,
     ExternalDeviceDto,
-    OkErrorResponse,
     SetDeviceStateRequest,
+    SetStateResultDto,
 )
 from typing import List
 
@@ -117,7 +117,7 @@ async def register_device_admin_bindings(context: Any) -> list[str]:
                 description="Set device desired state (proxy to devices.set_state)",
                 auth_config=_admin_write,
                 tags=["Devices"],
-                response_model=OkErrorResponse,
+                response_model=SetStateResultDto,
                 request_model=SetDeviceStateRequest,
             )
         )

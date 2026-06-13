@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from core.adapters.storage_errors import STORAGE_BOUNDARY_ERRORS
+from modules.agent.registry import AgentStatus
 
 logger = logging.getLogger(__name__)
 
@@ -41,12 +42,10 @@ async def admin_agent_create_enrollment_token(
 
         return {
             "ok": True,
-            "token": {
-                "token_id": token.token_id,
-                "token_secret": token.token_secret,  # Only shown once!
-                "expires_at": token.expires_at,
-                "agent_name": token.agent_name,
-            },
+            "token_id": token.token_id,
+            "token_secret": token.token_secret,  # Only shown once!
+            "expires_at": token.expires_at,
+            "agent_name": token.agent_name,
         }
     except STORAGE_BOUNDARY_ERRORS as e:
         logger.warning("admin_agent_create_enrollment_token storage error", exc_info=True)
@@ -96,8 +95,9 @@ async def admin_agent_enroll_agent(runtime: Any, body: Any = None) -> Dict[str, 
             client_cert = None
 
         return {
-            "ok": True,
             "agent_id": identity.agent_id,
+            "agent_name": identity.agent_name,
+            "status": AgentStatus.ENROLLED.value,
             "identity": identity.to_dict(),
             "client_certificate": client_cert.decode() if client_cert else None,
         }
@@ -163,7 +163,7 @@ async def admin_agent_generate_bootstrap_token(
         return {"ok": False, "error": str(e)}
 
 
-async def admin_agent_list_agents(runtime: Any) -> Dict[str, Any]:
+async def admin_agent_list_agents(runtime: Any) -> Any:
     """
     List all registered agents.
 
@@ -175,7 +175,7 @@ async def admin_agent_list_agents(runtime: Any) -> Dict[str, Any]:
 
     try:
         agents = await runtime.agent_registry.list_agents()
-        return {"ok": True, "agents": [a.to_dict() for a in agents]}
+        return [a.to_dict() for a in agents]
     except STORAGE_BOUNDARY_ERRORS as e:
         logger.warning("admin_agent_list_agents storage error", exc_info=True)
         return {"ok": False, "error": str(e)}
@@ -184,7 +184,7 @@ async def admin_agent_list_agents(runtime: Any) -> Dict[str, Any]:
         return {"ok": False, "error": str(e)}
 
 
-async def admin_agent_get_agent(runtime: Any, agent_id: str) -> Dict[str, Any]:
+async def admin_agent_get_agent(runtime: Any, agent_id: str) -> Any:
     """
     Get agent details.
 
@@ -206,7 +206,7 @@ async def admin_agent_get_agent(runtime: Any, agent_id: str) -> Dict[str, Any]:
         if not agent:
             return {"ok": False, "error": "agent not found"}
 
-        return {"ok": True, "agent": agent.to_dict()}
+        return agent.to_dict()
     except STORAGE_BOUNDARY_ERRORS as e:
         logger.warning("admin_agent_get_agent storage error", exc_info=True)
         return {"ok": False, "error": str(e)}
@@ -253,7 +253,7 @@ async def admin_agent_deregister_agent(runtime: Any, agent_id: str) -> Dict[str,
 
 async def admin_agent_list_agents_providing_capability(
     runtime: Any, capability_id: str
-) -> Dict[str, Any]:
+) -> Any:
     """
     List agents providing a specific capability.
 
@@ -274,7 +274,7 @@ async def admin_agent_list_agents_providing_capability(
         agents = await runtime.agent_registry.list_agents_providing_capability(
             capability_id
         )
-        return {"ok": True, "agents": [a.to_dict() for a in agents]}
+        return [a.to_dict() for a in agents]
     except STORAGE_BOUNDARY_ERRORS as e:
         logger.warning(
             "admin_agent_list_agents_providing_capability storage error",
@@ -1375,6 +1375,9 @@ async def admin_agent_check_agents_health(runtime: Any) -> Dict[str, Any]:
             "ok": True,
             "timestamp": now_str,
             "total_agents": len(agents),
+            "total": len(agents),
+            "online": stats["online"],
+            "offline": stats["offline"],
             "stats": stats,
             "agents": agent_statuses,
         }
@@ -1387,7 +1390,7 @@ async def admin_agent_check_agents_health(runtime: Any) -> Dict[str, Any]:
         return {"ok": False, "error": str(e)}
 
 
-async def admin_agent_list_online_agents(runtime: Any) -> Dict[str, Any]:
+async def admin_agent_list_online_agents(runtime: Any) -> Any:
     """
     Get list of currently online agents (heartbeat < 30 seconds old).
 
@@ -1435,6 +1438,7 @@ async def admin_agent_list_online_agents(runtime: Any) -> Dict[str, Any]:
                         {
                             "agent_id": getattr(agent, "agent_id", None),
                             "agent_name": getattr(agent, "agent_name", None),
+                            "status": AgentStatus.ONLINE.value,
                             "last_heartbeat": last_heartbeat_str,
                             "age_seconds": age_seconds,
                             "capabilities": getattr(agent, "capabilities", []),
@@ -1448,7 +1452,7 @@ async def admin_agent_list_online_agents(runtime: Any) -> Dict[str, Any]:
             extra={"count": len(online_agents)},
         )
 
-        return {"ok": True, "count": len(online_agents), "agents": online_agents}
+        return online_agents
 
     except STORAGE_BOUNDARY_ERRORS as e:
         logger.warning("[AdminAgentListOnline] storage error", exc_info=True)

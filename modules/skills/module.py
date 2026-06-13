@@ -127,7 +127,7 @@ class SkillsModule(RuntimeModule):
                 service="skills.invoke",
                 auth_config=auth_write,
                 tags=["Skills"],
-                response_model=ApiResponse[SkillInvokeResult],
+                response_model=ApiResponse[Any],
             )
         )
 

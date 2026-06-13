@@ -61,7 +61,17 @@ async def _execute_marketplace_operation(runtime: Any, op_type: str, params: Dic
             "error": op.get("error") or "operation_failed",
             "operation": op,
         }
-    return {"ok": True, "result": op}
+
+    plugin_name = params.get("plugin_name")
+    message = None
+    op_result = op.get("result")
+    if isinstance(op_result, dict):
+        data = op_result.get("data")
+        if isinstance(data, dict):
+            plugin_name = data.get("name") or data.get("plugin_name") or plugin_name
+        message = op_result.get("message")
+
+    return {"ok": True, "operation": op, "plugin_name": plugin_name, "message": message}
 
 
 async def admin_marketplace_install(runtime: Any, body: Any = None, **kwargs: Any) -> Dict[str, Any]:
@@ -219,7 +229,7 @@ async def admin_marketplace_install_from_git(runtime: Any, body: Any = None, **k
     return {"ok": True, "result": result}
 
 
-async def admin_marketplace_git_catalog(runtime: Any, body: Any = None, **kwargs: Any) -> Dict[str, Any]:
+async def admin_marketplace_git_catalog(runtime: Any, body: Any = None, **kwargs: Any) -> list[Dict[str, Any]]:
     """
     Minimal catalog from git sources stored in storage namespace marketplace.git_sources.
 
@@ -269,7 +279,7 @@ async def admin_marketplace_git_catalog(runtime: Any, body: Any = None, **kwargs
         except Exception as e:
             errors.append({"source": {"repo_url": req.repo_url, "ref": req.ref, "subdir": req.subdir}, "error": str(e)})
 
-    return {"ok": True, "items": items, "errors": errors}
+    return items
 
 
 async def admin_marketplace_git_sources_set(runtime: Any, body: Any = None, **kwargs: Any) -> Dict[str, Any]:
@@ -281,7 +291,7 @@ async def admin_marketplace_git_sources_set(runtime: Any, body: Any = None, **kw
         raise ValueError("sources must be a list")
     storage = getattr(runtime, "storage", None)
     await storage.set("marketplace", "git_sources", sources)  # type: ignore[func-returns-value]
-    return {"ok": True, "count": len(sources)}
+    return {"sources": sources, "count": len(sources)}
 
 
 async def admin_marketplace_git_sources_get(runtime: Any, **kwargs: Any) -> Dict[str, Any]:
@@ -293,7 +303,7 @@ async def admin_marketplace_git_sources_get(runtime: Any, **kwargs: Any) -> Dict
         stored = None
     if not isinstance(stored, list):
         stored = []
-    return {"ok": True, "sources": stored, "count": len(stored)}
+    return {"sources": stored, "count": len(stored)}
 
 
 async def admin_marketplace_remove(runtime: Any, body: Any = None, **kwargs: Any) -> Dict[str, Any]:

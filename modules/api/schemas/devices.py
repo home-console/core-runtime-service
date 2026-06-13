@@ -39,6 +39,14 @@ class DeviceMappingDto(BaseModel):
     internal_id: str
 
 
+class SetStateResultDto(BaseModel):
+    ok: bool = True
+    queued: Optional[bool] = None
+    external_id: Optional[str] = None
+    state: Optional[DeviceStateDto] = None
+    error: Optional[str] = None
+
+
 # --- Request models ---
 
 

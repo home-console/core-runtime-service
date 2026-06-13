@@ -25,6 +25,7 @@ from modules.api.schemas import (
     ExternalDeviceDto,
     OkErrorResponse,
     SetDeviceStateRequest,
+    SetStateResultDto,
     UpdateCredentialRequest,
 )
 from typing import List
@@ -111,7 +112,7 @@ class ProductApiModule(RuntimeModule):
             description="Product API: set device state",
             auth_config=EndpointAuthConfig(required_scopes=["devices.write"]),
             tags=["Devices"],
-            response_model=OkErrorResponse,
+            response_model=SetStateResultDto,
             request_model=SetDeviceStateRequest,
         ))
         self.context.http.register(HttpEndpoint(

@@ -504,10 +504,10 @@ async def http_create_session(
         return {"ok": False, "error": str(e), "status": 500}
 
 
-async def http_list_sessions(runtime: Any) -> Dict[str, Any]:
+async def http_list_sessions(runtime: Any) -> List[Dict[str, Any]]:
     """GET /admin/v1/ssh/sessions"""
     gc_dead_sessions()
-    return {"sessions": list_sessions()}
+    return list_sessions()
 
 
 async def http_close_session(runtime: Any, session_id: str) -> Dict[str, Any]:

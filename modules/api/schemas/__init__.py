@@ -31,6 +31,7 @@ from .devices import (
     DeviceStateDto,
     ExternalDeviceDto,
     SetDeviceStateRequest,
+    SetStateResultDto,
 )
 from .plugin import (
     AutoLoadRequest,
@@ -131,7 +132,7 @@ __all__ = [
     "CreateApiKeyRequest", "CreateUserRequest",
     # devices
     "DeviceDto", "DeviceStateDto", "DeviceMappingDto", "ExternalDeviceDto",
-    "SetDeviceStateRequest",
+    "SetDeviceStateRequest", "SetStateResultDto",
     # plugins
     "PluginDto", "PluginDetailsDto", "PluginsDiscoverDto",
     "PluginUiContributionsDto", "UiPageContributionDto", "UiWidgetContributionDto",

@@ -40,10 +40,12 @@ class PresenceModule(RuntimeModule):
         # Публичные HTTP ручки должны быть декларативны.
         # Превращаем legacy "presence.set?home=true" в явные сервисы.
         async def _enter(**kw):
-            return await self._set_service(True)
+            await self._set_service(True)
+            return {"ok": True}
 
         async def _leave(**kw):
-            return await self._set_service(False)
+            await self._set_service(False)
+            return {"ok": True}
 
         await self.context.services.register("presence.enter", _enter)
         await self.context.services.register("presence.leave", _leave)

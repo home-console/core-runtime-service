@@ -6,7 +6,7 @@ No imports from core.* allowed in this layer.
 """
 from __future__ import annotations
 
-from typing import Generic, Optional, TypeVar
+from typing import Generic, List, Optional, TypeVar
 
 from pydantic import BaseModel
 
@@ -44,6 +44,7 @@ class OkErrorResponse(BaseModel):
     ok: bool
     error: Optional[str] = None
     message: Optional[str] = None
+    loaded: Optional[List[str]] = None
 
 
 class DeletedResponse(BaseModel):

@@ -406,9 +406,9 @@ class TestHeartbeatMonitoringFlow:
         )
 
         result = await admin_agent_list_online_agents(rt)
-        assert result["ok"] is True
-        assert result["count"] == 1
-        assert result["agents"][0]["agent_id"] == "alive1"
+        assert isinstance(result, list)
+        assert len(result) == 1
+        assert result[0]["agent_id"] == "alive1"
 
     @pytest.mark.asyncio
     async def test_heartbeat_updates_metrics(self):

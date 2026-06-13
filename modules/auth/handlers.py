@@ -102,7 +102,15 @@ async def auth_create_api_key(runtime: Any, body: Any = None) -> Dict[str, Any]:
 
     try:
         api_key = await create_api_key(runtime, scopes, is_admin, subject, expires_at, user_id)
-        return {"ok": True, "api_key": api_key}
+        return {
+            "ok": True,
+            "key_id": api_key[:16] + "...",
+            "api_key": api_key,
+            "scopes": scopes,
+            "is_admin": is_admin,
+            "expires_at": expires_at,
+            "created_at": time.time(),
+        }
     except Exception as e:
         logger.warning("create_api_key failed: %s", e, exc_info=True)
         raise BadRequestError(str(e))
@@ -133,12 +141,12 @@ async def auth_list_api_keys(runtime: Any) -> List[Dict[str, Any]]:
                 continue
 
             key_info = {
-                "id": key_id[:16] + "...",
-                "subject": key_data.get("subject"),
+                "key_id": key_id[:16] + "...",
+                "name": key_data.get("subject"),
                 "scopes": key_data.get("scopes", []),
                 "is_admin": key_data.get("is_admin", False),
                 "created_at": key_data.get("created_at"),
-                "last_used": key_data.get("last_used"),
+                "last_used_at": key_data.get("last_used"),
                 "expires_at": expires_at,
                 "is_expired": is_expired,
             }
@@ -172,7 +180,14 @@ async def auth_create_user(runtime: Any, body: Any = None) -> Dict[str, Any]:
 
     try:
         await create_user(runtime, user_id, scopes, is_admin, username, password)
-        return {"ok": True, "user_id": user_id}
+        return {
+            "ok": True,
+            "user_id": user_id,
+            "username": username,
+            "scopes": scopes,
+            "is_admin": is_admin,
+            "created_at": time.time(),
+        }
     except Exception as e:
         logger.warning("create_user failed for user_id=%s: %s", user_id, e, exc_info=True)
         raise BadRequestError(str(e))
@@ -608,7 +623,12 @@ async def auth_rotate_api_key(runtime: Any, body: Any = None) -> Dict[str, Any]:
 
     try:
         new_api_key = await rotate_api_key(runtime, old_api_key, expires_at)
-        return {"ok": True, "new_api_key": new_api_key, "old_api_key": old_api_key[:16] + "..."}
+        return {
+            "ok": True,
+            "key_id": new_api_key[:16] + "...",
+            "api_key": new_api_key,
+            "expires_at": expires_at,
+        }
     except Exception as e:
         logger.warning("rotate_api_key failed: %s", e, exc_info=True)
         raise BadRequestError(str(e))

@@ -11,7 +11,7 @@ import io
 import json
 import threading
 import time
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from core.adapters.storage_errors import STORAGE_BOUNDARY_ERRORS
 from core.runtime.auth_contextvars import get_current_auth_context, set_current_auth_context
@@ -542,24 +542,27 @@ _ACTIVE_TERMINAL_SESSIONS: Dict[str, Dict[str, Any]] = {}
 _TERMINAL_HANDLES: Dict[str, Dict[str, Any]] = {}
 
 
-async def admin_credentials_terminal_sessions(runtime: Any) -> Dict[str, Any]:
+async def admin_credentials_terminal_sessions(runtime: Any) -> List[Dict[str, Any]]:
     """
     GET /admin/v1/credentials/terminal/sessions — список активных SSH терминальных сессий.
     """
     now = time.time()
     sessions = []
     for sid, info in list(_ACTIVE_TERMINAL_SESSIONS.items()):
+        created = info.get("created_at")
+        handles = _TERMINAL_HANDLES.get(sid)
+        channel = handles.get("channel") if handles else None
+        alive = channel is not None and not channel.closed
         # Expose only serializable metadata to API
         item = {
             "session_id": sid,
             "credential_id": info.get("credential_id"),
-            "host": info.get("host"),
-            "username": info.get("username"),
-            "created_at": info.get("created_at"),
+            "host": info.get("host") or "",
+            "username": info.get("username") or "",
+            "created_at": created if isinstance(created, (int, float)) else now,
+            "age_sec": now - created if isinstance(created, (int, float)) else 0.0,
+            "alive": alive,
         }
-        created = info.get("created_at")
-        if isinstance(created, (int, float)):
-            item["age_sec"] = now - created
         sessions.append(item)
     return sessions
 

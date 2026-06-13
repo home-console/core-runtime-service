@@ -64,7 +64,7 @@ async def admin_operations_create(runtime: Any, body: Any = None, **kwargs) -> D
         raise RuntimeError(f"Operation creation failed: {str(e)}")
 
 
-async def admin_operations_list(runtime: Any, limit: int = 100, offset: int = 0, status: Optional[str] = None, **kwargs) -> Dict[str, Any]:
+async def admin_operations_list(runtime: Any, limit: int = 100, offset: int = 0, status: Optional[str] = None, **kwargs) -> list[Dict[str, Any]]:
     """List operations with pagination and filtering."""
     try:
         # Query params from HTTP are often strings; ensure int for slice
@@ -86,11 +86,7 @@ async def admin_operations_list(runtime: Any, limit: int = 100, offset: int = 0,
             }.get(str(status), str(status))
             ops = [op for op in ops if op.status.value == normalized_status]
 
-        return {
-            "ok": True,
-            "operations": [op.to_dict() for op in ops],
-            "total": len(ops),
-        }
+        return [op.to_dict() for op in ops]
     except Exception as e:
         raise RuntimeError(f"Failed to list operations: {str(e)}")
 
@@ -126,7 +122,7 @@ async def admin_operations_cancel(runtime: Any, operation_id: str, **kwargs) -> 
 
         return {
             "ok": True,
-            "operation": op.to_dict(),
+            "operation_id": op.operation_id,
         }
     except ValueError as e:
         raise e
@@ -171,10 +167,8 @@ async def admin_operations_retry(runtime: Any, operation_id: str, **kwargs) -> D
 
         return {
             "ok": True,
-            "new_operation_id": result.operation_id,
-            "status": result.status.value,
-            "result": result.result,
-            "error": result.error.to_dict() if result.error else None,
+            "operation_id": result.operation_id,
+            "error": result.error.message if result.error else None,
         }
     except ValueError as e:
         raise e
