@@ -443,7 +443,7 @@ async def http_create_session(
       { "host": ..., "username": ..., "password": ... }  — прямые параметры
     """
     if not body:
-        return {"error": "body required"}
+        return {"ok": False, "error": "body required", "status": 400}
 
     credential_id = body.get("credential_id")
     host = body.get("host")
@@ -457,7 +457,7 @@ async def http_create_session(
         sm = getattr(runtime, "storage_manager", None)
         ss = getattr(runtime, "secret_store", None)
         if sm is None or ss is None:
-            return {"error": "Storage not available"}
+            return {"ok": False, "error": "Storage not available", "status": 503}
         try:
             from modules.credentials import CredentialRepository
 
@@ -469,9 +469,9 @@ async def http_create_session(
             logger.warning(
                 "ssh_terminal.http_create_session: failed: %s", e, exc_info=True
             )
-            return {"error": f"Cannot load credential: {e}"}
+            return {"ok": False, "error": f"Cannot load credential: {e}", "status": 404}
         if pair is None:
-            return {"error": f"Credential {credential_id} not found"}
+            return {"ok": False, "error": f"Credential {credential_id} not found", "status": 404}
         cred, secret_bytes = pair
         host = cred.host
         port = cred.port or 22
@@ -485,7 +485,7 @@ async def http_create_session(
             private_key_pem = secret_str
 
     if not host or not username:
-        return {"error": "host and username required (or credential_id)"}
+        return {"ok": False, "error": "host and username required (or credential_id)", "status": 400}
 
     try:
         session = await create_session(
@@ -501,7 +501,7 @@ async def http_create_session(
         raise
     except Exception as e:
         logger.error(f"[ssh] create_session failed: {e}", exc_info=True)
-        return {"error": str(e)}
+        return {"ok": False, "error": str(e), "status": 500}
 
 
 async def http_list_sessions(runtime: Any) -> Dict[str, Any]:

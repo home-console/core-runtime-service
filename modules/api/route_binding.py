@@ -61,7 +61,15 @@ def _normalize_api_result(result: Any, *, response_model: Any = None) -> Any:
       legacy endpoints).
     - Otherwise wrap the raw payload into {"ok": True, "result": <payload>}.
     """
-    is_envelope = isinstance(response_model, type) and issubclass(response_model, ApiResponse)
+    from typing import get_origin
+
+    model_type = response_model
+    if response_model is not None and not isinstance(response_model, type):
+        origin = get_origin(response_model)
+        if origin is not None:
+            model_type = origin
+
+    is_envelope = isinstance(model_type, type) and issubclass(model_type, ApiResponse)
     if response_model is not None:
         if is_envelope:
             if isinstance(result, dict) and "ok" in result:

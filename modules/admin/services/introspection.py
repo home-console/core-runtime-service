@@ -485,6 +485,7 @@ async def list_http_endpoints(runtime: Any) -> List[Dict[str, Any]]:
             "method": ep.method,
             "websocket": ep.websocket,
             "service": ep.service,
+            "plugin": ep.service.split(".")[0] if "." in ep.service else "core",
             "description": ep.description,
             "tags": ep.tags or [],
         }
@@ -777,9 +778,13 @@ async def list_auth_flows(runtime: Any) -> List[Dict[str, Any]]:
         for item in raw:
             if not isinstance(item, dict):
                 continue
+            flow_id = item.get("id")
+            flow_state = item.get("state")
+            if not isinstance(flow_id, str) or not isinstance(flow_state, str):
+                continue
             flow = {
-                "id": item.get("id"),
-                "state": item.get("state"),
+                "id": flow_id,
+                "state": flow_state,
                 "actions": item.get("actions") if isinstance(item.get("actions"), list) else [],
             }
             if "message" in item and item["message"] is not None:
