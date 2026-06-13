@@ -7,9 +7,12 @@ bootstrap секреты → запустить runtime.
 Вся логика работы с env и секретами — в app/env_bootstrap.py.
 """
 import asyncio
+import logging
 import os
 import sys
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from app.env_bootstrap import (
     bootstrap_runtime_secrets,
@@ -129,17 +132,17 @@ async def _teardown(runtime: object, storage_stack: object) -> None:
             svc = getattr(getattr(runtime, "services", None), svc_name, None)
             if svc and callable(getattr(svc, "stop", None)):
                 await svc.stop()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to stop %s during teardown: %s", svc_name, e)
     await _close_storage(storage_stack)
 
 
 async def _close_storage(storage_stack: object) -> None:
     try:
         await storage_stack.manager.close()
-        print("[Runtime] Storage закрыт")
-    except Exception:
-        pass
+        logger.info("Storage closed")
+    except Exception as e:
+        logger.warning("Failed to close storage: %s", e)
 
 
 if __name__ == "__main__":

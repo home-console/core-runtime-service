@@ -142,8 +142,10 @@ class RedisStreamsEventBus:
                 await self._redis.xgroup_create(
                     stream_key, CONSUMER_GROUP, id="0", mkstream=True
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                # BUSYGROUP is expected if group already exists — suppress
+                if "BUSYGROUP" not in str(e):
+                    logger.debug("xgroup_create for %s: %s", stream_key, e)
 
         # Локальная доставка (in-process подписчики)
         await self._dispatch_local(event_type, event_id, payload)
