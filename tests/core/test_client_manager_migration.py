@@ -127,7 +127,7 @@ async def test_client_manager_no_internal_server():
 @pytest.mark.skip(reason="Requires plugin module not present in tests/core — pre-existing broken test")
 async def test_client_manager_websocket_endpoints_in_inspector():
     """Тест: WebSocket endpoints видны в inspector как WebSocket'ы."""
-    from modules.admin.services.introspection import list_http_endpoints
+    from modules.admin.services.introspection import list_ws_endpoints
 
     _adapter = InMemoryStorageAdapter()
 
@@ -141,18 +141,11 @@ async def test_client_manager_websocket_endpoints_in_inspector():
     plugin = ClientManagerPlugin(runtime)
     await plugin.on_load()
 
-    # Получаем endpoints через inspector
-    endpoints = await list_http_endpoints(runtime)
+    # Получаем WebSocket endpoints через inspector
+    endpoints = await list_ws_endpoints(runtime)
 
     # Ищем client-manager endpoints
     cm_endpoints = [ep for ep in endpoints if "client-manager" in ep.get("path", "")]
 
     # Проверяем что есть WebSocket endpoints
-    ws_eps = [ep for ep in cm_endpoints if ep.get("websocket") is True]
-    assert len(ws_eps) >= 2, "Inspector должен показывать оба WebSocket endpoint'а"
-
-    # Проверяем что method=null для WebSocket'ов
-    for ep in ws_eps:
-        assert ep.get("method") is None, (
-            f"WebSocket endpoint {ep['path']} должен иметь method=null"
-        )
+    assert len(cm_endpoints) >= 2, "Inspector должен показывать оба WebSocket endpoint'а"

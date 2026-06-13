@@ -19,7 +19,9 @@ def test_normalize_api_result_wraps_raw_payload():
 
 def test_normalize_api_error_sets_status_and_payload():
     resp = Response()
-    payload = _normalize_api_error(resp, 403, "Forbidden", code="FORBIDDEN")
+    result = _normalize_api_error(resp, 403, "Forbidden", code="FORBIDDEN")
     assert resp.status_code == 403
-    assert payload == {"ok": False, "error": "Forbidden", "code": "FORBIDDEN"}
+    assert result.status_code == 403
+    import json
+    assert json.loads(result.body) == {"ok": False, "error": "Forbidden", "code": "FORBIDDEN"}
 

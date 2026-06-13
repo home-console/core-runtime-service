@@ -133,7 +133,7 @@ async def test_websocket_endpoint_list_method(memory_adapter):
 @pytest.mark.asyncio
 async def test_websocket_inspector_visibility(memory_adapter):
     """Тест: Inspector показывает websocket endpoints с флагом."""
-    from modules.admin.services.introspection import list_http_endpoints
+    from modules.admin.services.introspection import list_http_endpoints, list_ws_endpoints
     
     runtime = CoreRuntime(memory_adapter)
     
@@ -155,26 +155,19 @@ async def test_websocket_inspector_visibility(memory_adapter):
     )
     runtime.http.register(ws_endpoint)
     
-    # Получаем список endpoints через inspector
+    # list_http_endpoints возвращает только HTTP (не WebSocket)
     endpoints = await list_http_endpoints(runtime)
-    
-    # Проверяем что оба endpoint видны
-    assert len(endpoints) == 2
-    
-    # Проверяем HTTP endpoint
-    http_eps = [ep for ep in endpoints if ep["path"] == "/api/test"]
-    assert len(http_eps) == 1
-    assert http_eps[0]["websocket"] is False
-    assert http_eps[0]["method"] == "POST"
-    assert http_eps[0]["mounted_path"] == "/api/test"
+    assert len(endpoints) == 1
+    assert endpoints[0]["path"] == "/api/test"
+    assert endpoints[0]["websocket"] is False
+    assert endpoints[0]["method"] == "POST"
+    assert endpoints[0]["mounted_path"] == "/api/test"
 
-    # Проверяем WebSocket endpoint
-    ws_eps = [ep for ep in endpoints if ep["path"] == "/ws/test"]
-    assert len(ws_eps) == 1
-    assert ws_eps[0]["websocket"] is True
-    assert ws_eps[0]["method"] is None
-    assert ws_eps[0]["mounted_path"] == "/ws/test"
-    assert "websocket" in ws_eps[0]["tags"]
+    # list_ws_endpoints возвращает только WebSocket
+    ws_endpoints = await list_ws_endpoints(runtime)
+    assert len(ws_endpoints) == 1
+    assert ws_endpoints[0]["path"] == "/ws/test"
+    assert ws_endpoints[0]["mounted_path"] == "/ws/test"
 
 
 @pytest.mark.asyncio

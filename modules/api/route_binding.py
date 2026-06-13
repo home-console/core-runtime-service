@@ -143,6 +143,7 @@ def _normalize_api_error(
     it against that success DTO and raise ResponseValidationError instead of
     surfacing the real error.
     """
+    response.status_code = status_code
     payload: Dict[str, Any] = {"ok": False, "error": error}
     if code:
         payload["code"] = code
