@@ -27,6 +27,7 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from fastapi.openapi.utils import get_openapi
+from fastapi.responses import JSONResponse
 
 from modules.api.auth import get_request_context
 from modules.api.auth.contextvars import set_current_request_context
@@ -121,12 +122,23 @@ def _normalize_api_error(
     error: str,
     *,
     code: Optional[str] = None,
-) -> Dict[str, Any]:
-    response.status_code = status_code
+) -> JSONResponse:
+    """
+    Build the {"ok": False, "error": ..., "code": ...} error payload as a
+    JSONResponse.
+
+    Returning a Response subclass bypasses FastAPI's response_model
+    validation/serialization entirely — required because most endpoints
+    declare a flat success DTO (e.g. AuthMeResponse with required `id`/
+    `email` fields, or AgentStatusDto) that doesn't declare `ok`/`error`/
+    `code`. If we returned a plain dict here, FastAPI would try to validate
+    it against that success DTO and raise ResponseValidationError instead of
+    surfacing the real error.
+    """
     payload: Dict[str, Any] = {"ok": False, "error": error}
     if code:
         payload["code"] = code
-    return payload
+    return JSONResponse(payload, status_code=status_code)
 
 
 _LEGACY_PREFIX = "/api/v1"

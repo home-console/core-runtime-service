@@ -986,14 +986,11 @@ async def dashboard_inspector_response(runtime: Any) -> Dict[str, Any]:
         http_endpoints = await list_http_endpoints(runtime)
     except Exception as e:
         logger.exception("dashboard_inspector_response failed")
-        return {"ok": False, "error": str(e), "summary": None}
+        return {"ok": False, "error": str(e)}
     return {
-        "ok": True,
-        "summary": {
-            "plugins": plugins,
-            "services": services,
-            "http_endpoints": http_endpoints,
-        },
+        "plugins": len(plugins),
+        "services": len(services),
+        "http_endpoints": len(http_endpoints),
     }
 
 
@@ -1331,11 +1328,16 @@ async def get_system_health(runtime: Any) -> Dict[str, Any]:
     try:
         collector = HealthSnapshotCollector(runtime)
         snapshot = collector.collect()
-        return snapshot.to_dict()
+        return {
+            "status": "healthy" if snapshot.is_healthy() else "degraded",
+            "details": snapshot.to_dict(),
+        }
     except Exception as e:
         logger.warning("get_system_health: snapshot collection failed: %s", e, exc_info=True)
         return {
-            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "error": str(e),
-            "is_healthy": False,
+            "status": "unknown",
+            "details": {
+                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "error": str(e),
+            },
         }
