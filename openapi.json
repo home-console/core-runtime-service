@@ -222,6 +222,60 @@
         ]
       }
     },
+    "/api/v1/admin/inspector/state": {
+      "get": {
+        "tags": [
+          "Inspector"
+        ],
+        "summary": "Get /Api/V1/Admin/Inspector/State",
+        "description": "Inspector: in-memory state snapshot",
+        "operationId": "GET__api_v1_admin_inspector_state_api_v1_admin_inspector_state_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_dict_"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/inspector/state/keys": {
+      "get": {
+        "tags": [
+          "Inspector"
+        ],
+        "summary": "Get /Api/V1/Admin/Inspector/State/Keys",
+        "description": "Inspector: in-memory state keys",
+        "operationId": "GET__api_v1_admin_inspector_state_keys_api_v1_admin_inspector_state_keys_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_List_str__"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/inspector/operations": {
       "get": {
         "tags": [
@@ -788,6 +842,56 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiResponse_StorageNamespaceContentsDto_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/inspector/state/{key}": {
+      "get": {
+        "tags": [
+          "Inspector"
+        ],
+        "summary": "Get /Api/V1/Admin/Inspector/State/{Key}",
+        "description": "Inspector: get in-memory state value by key",
+        "operationId": "GET__api_v1_admin_inspector_state__key__api_v1_admin_inspector_state__key__get",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Path parameter: key",
+              "title": "Key"
+            },
+            "description": "Path parameter: key"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_Any_"
                 }
               }
             }
@@ -5215,6 +5319,42 @@
         ],
         "title": "ApiKeyDto"
       },
+      "ApiResponse_Any_": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok",
+            "default": true
+          },
+          "result": {
+            "title": "Result"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          }
+        },
+        "type": "object",
+        "title": "ApiResponse[Any]"
+      },
       "ApiResponse_ApiKeyDto_": {
         "properties": {
           "ok": {
@@ -5231,6 +5371,28 @@
                 "type": "null"
               }
             ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -5252,6 +5414,28 @@
                 "type": "null"
               }
             ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -5273,6 +5457,28 @@
                 "type": "null"
               }
             ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -5294,6 +5500,28 @@
                 "type": "null"
               }
             ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -5315,6 +5543,28 @@
                 "type": "null"
               }
             ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -5336,6 +5586,28 @@
                 "type": "null"
               }
             ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -5357,6 +5629,28 @@
                 "type": "null"
               }
             ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -5378,6 +5672,28 @@
                 "type": "null"
               }
             ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -5399,6 +5715,28 @@
                 "type": "null"
               }
             ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -5420,6 +5758,28 @@
                 "type": "null"
               }
             ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -5441,6 +5801,28 @@
                 "type": "null"
               }
             ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -5466,6 +5848,28 @@
               }
             ],
             "title": "Result"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -5491,6 +5895,28 @@
               }
             ],
             "title": "Result"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -5516,6 +5942,28 @@
               }
             ],
             "title": "Result"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -5541,6 +5989,28 @@
               }
             ],
             "title": "Result"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -5566,6 +6036,28 @@
               }
             ],
             "title": "Result"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -5591,6 +6083,28 @@
               }
             ],
             "title": "Result"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -5616,6 +6130,28 @@
               }
             ],
             "title": "Result"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -5641,6 +6177,28 @@
               }
             ],
             "title": "Result"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -5666,6 +6224,28 @@
               }
             ],
             "title": "Result"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -5691,6 +6271,28 @@
               }
             ],
             "title": "Result"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -5716,6 +6318,28 @@
               }
             ],
             "title": "Result"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -5741,6 +6365,28 @@
               }
             ],
             "title": "Result"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -5766,6 +6412,28 @@
               }
             ],
             "title": "Result"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -5791,6 +6459,28 @@
               }
             ],
             "title": "Result"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -5816,6 +6506,28 @@
               }
             ],
             "title": "Result"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -5841,6 +6553,28 @@
               }
             ],
             "title": "Result"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -5866,6 +6600,28 @@
               }
             ],
             "title": "Result"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -5891,6 +6647,28 @@
               }
             ],
             "title": "Result"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -5916,6 +6694,28 @@
               }
             ],
             "title": "Result"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -5941,6 +6741,28 @@
               }
             ],
             "title": "Result"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -5966,6 +6788,28 @@
               }
             ],
             "title": "Result"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -5991,6 +6835,28 @@
               }
             ],
             "title": "Result"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -6017,10 +6883,79 @@
               }
             ],
             "title": "Result"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
         "title": "ApiResponse[List[dict]]"
+      },
+      "ApiResponse_List_str__": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok",
+            "default": true
+          },
+          "result": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          }
+        },
+        "type": "object",
+        "title": "ApiResponse[List[str]]"
       },
       "ApiResponse_OperationDto_": {
         "properties": {
@@ -6038,6 +6973,28 @@
                 "type": "null"
               }
             ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -6059,6 +7016,28 @@
                 "type": "null"
               }
             ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -6080,6 +7059,28 @@
                 "type": "null"
               }
             ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -6101,6 +7102,28 @@
                 "type": "null"
               }
             ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -6122,6 +7145,28 @@
                 "type": "null"
               }
             ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -6143,6 +7188,28 @@
                 "type": "null"
               }
             ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -6164,6 +7231,28 @@
                 "type": "null"
               }
             ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -6185,6 +7274,28 @@
                 "type": "null"
               }
             ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -6206,6 +7317,28 @@
                 "type": "null"
               }
             ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -6227,6 +7360,28 @@
                 "type": "null"
               }
             ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -6248,6 +7403,28 @@
                 "type": "null"
               }
             ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -6269,6 +7446,28 @@
                 "type": "null"
               }
             ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -6290,6 +7489,28 @@
                 "type": "null"
               }
             ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -6311,6 +7532,28 @@
                 "type": "null"
               }
             ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -6334,6 +7577,28 @@
               }
             ],
             "title": "Result"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
           }
         },
         "type": "object",
@@ -8364,6 +9629,40 @@
               }
             ],
             "title": "Error"
+          },
+          "error_stage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Stage"
+          },
+          "user_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Message"
+          },
+          "operation": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operation"
           }
         },
         "type": "object",

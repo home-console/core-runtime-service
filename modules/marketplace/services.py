@@ -844,11 +844,16 @@ class MarketplaceService:
             installed = await self._get_installed_plugins()
             updates = {}
 
-            # Check each installed plugin
+            # Fetch registry catalog ONCE (not per-plugin) to avoid N API calls
+            try:
+                available = await client.list_available()
+            except Exception as e:
+                logger.warning("Failed to fetch registry catalog: %s", e)
+                return {"status": "failure", "error": f"registry fetch failed: {e}"}
+
+            # Check each installed plugin against the cached catalog
             for plugin_name, plugin_info in installed.items():
                 try:
-                    # Get available versions
-                    available = await client.list_available()
                     versions = available.get(plugin_name, [])
 
                     if not versions:
