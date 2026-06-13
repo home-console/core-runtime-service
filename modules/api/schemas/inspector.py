@@ -85,6 +85,10 @@ class InventorySnapshotDto(BaseModel):
 
 class SystemHealthDto(BaseModel):
     status: str
+    uptime: Optional[float] = None
+    memory_mb: Optional[float] = None
+    cpu_percent: Optional[float] = None
+    storage_ok: Optional[bool] = None
     details: Optional[Dict[str, Any]] = None
 
 
