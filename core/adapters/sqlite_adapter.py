@@ -54,7 +54,7 @@ class SQLiteAdapter(StorageAdapter):
 
         CRASH SAFETY (Part A):
         - PRAGMA journal_mode=WAL: Write-Ahead Logging для аварийной безопасности
-        - PRAGMA synchronous=FULL: fsync после каждого транзакции (дорого, но безопасно)
+        - PRAGMA synchronous=NORMAL: fsync на чекпоинтах WAL (баланс скорости и надежности)
         - PRAGMA cache_size=-64000: 64MB кэш для производительности
         - PRAGMA foreign_keys=ON: включить проверку foreign keys
         - PRAGMA wal_autocheckpoint=1000: checkpoints каждые 1000 страниц
@@ -94,16 +94,13 @@ class SQLiteAdapter(StorageAdapter):
             # Меньше означает более частые checkpoints, но более консервативно
             conn.execute("PRAGMA wal_autocheckpoint=1000")
 
-            # Проверить, что synchronous действительно FULL
+            # Проверить, что synchronous действительно NORMAL (см. комментарий выше)
             cursor = conn.execute("PRAGMA synchronous")
             sync_mode = cursor.fetchone()[0]
             # synchronous: 0=OFF, 1=NORMAL, 2=FULL, 3=EXTRA
-            if sync_mode != 2:
-                # `os` is imported at module level; avoid re-importing here which
-                # would make `os` a local variable and cause UnboundLocalError
+            if sync_mode != 1:
                 logger.warning(
-                    "[SQLiteAdapter] PRAGMA synchronous=%d, expected 2 (FULL). "
-                    "This may result in data loss on crash.",
+                    "[SQLiteAdapter] PRAGMA synchronous=%d, expected 1 (NORMAL).",
                     sync_mode
                 )
 
