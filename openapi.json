@@ -8673,15 +8673,36 @@
       "ExecutionDto": {
         "properties": {
           "execution_id": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Execution Id"
           },
           "operation_id": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Operation Id"
           },
           "operation_type": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Operation Type"
           },
           "backend": {
@@ -8696,7 +8717,14 @@
             "title": "Backend"
           },
           "status": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Status"
           },
           "started_at": {
@@ -8800,12 +8828,6 @@
           }
         },
         "type": "object",
-        "required": [
-          "execution_id",
-          "operation_id",
-          "operation_type",
-          "status"
-        ],
         "title": "ExecutionDto"
       },
       "ExecutionScheduleDto": {
@@ -9022,9 +9044,31 @@
             "type": "string",
             "title": "Path"
           },
+          "mounted_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mounted Path"
+          },
           "service": {
             "type": "string",
             "title": "Service"
+          },
+          "plugin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plugin"
           },
           "description": {
             "anyOf": [
@@ -9037,16 +9081,18 @@
             ],
             "title": "Description"
           },
-          "plugin": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Plugin"
+          "websocket": {
+            "type": "boolean",
+            "title": "Websocket",
+            "default": false
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags",
+            "default": []
           }
         },
         "type": "object",
@@ -9348,6 +9394,10 @@
             "type": "string",
             "title": "Id"
           },
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
           "provider": {
             "anyOf": [
               {
@@ -9359,9 +9409,38 @@
             ],
             "title": "Provider"
           },
-          "state": {
-            "type": "string",
-            "title": "State"
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "plugin_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plugin Name"
+          },
+          "integration_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Integration Type"
           },
           "message": {
             "anyOf": [
@@ -9433,29 +9512,6 @@
             "type": "array",
             "title": "Items",
             "default": []
-          },
-          "mappings": {
-            "items": {
-              "$ref": "#/components/schemas/DeviceMappingDto"
-            },
-            "type": "array",
-            "title": "Mappings",
-            "default": []
-          },
-          "external": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "items": {},
-                  "type": "array"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "External"
           }
         },
         "type": "object",
@@ -10998,50 +11054,6 @@
             "type": "string",
             "title": "Status"
           },
-          "uptime": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Uptime"
-          },
-          "memory_mb": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Memory Mb"
-          },
-          "cpu_percent": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cpu Percent"
-          },
-          "storage_ok": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Storage Ok"
-          },
           "details": {
             "anyOf": [
               {
@@ -11480,6 +11492,17 @@
             "type": "string",
             "title": "Path"
           },
+          "mounted_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mounted Path"
+          },
           "service": {
             "type": "string",
             "title": "Service"
@@ -11494,6 +11517,14 @@
               }
             ],
             "title": "Description"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags",
+            "default": []
           }
         },
         "type": "object",
