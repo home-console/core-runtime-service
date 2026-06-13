@@ -9847,6 +9847,28 @@
             "type": "string",
             "title": "Name"
           },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
           "loaded": {
             "type": "boolean",
             "title": "Loaded"
@@ -9854,6 +9876,17 @@
           "started": {
             "type": "boolean",
             "title": "Started"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
           },
           "services_count": {
             "type": "integer",
@@ -9883,6 +9916,30 @@
               }
             ],
             "title": "Execution Mode"
+          },
+          "capabilities_provided": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Capabilities Provided",
+            "default": []
+          },
+          "capabilities_required": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Capabilities Required",
+            "default": []
+          },
+          "unresolved_capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Unresolved Capabilities",
+            "default": []
           },
           "manifest": {
             "anyOf": [
@@ -9947,6 +10004,28 @@
             "type": "string",
             "title": "Name"
           },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
           "loaded": {
             "type": "boolean",
             "title": "Loaded"
@@ -9954,6 +10033,17 @@
           "started": {
             "type": "boolean",
             "title": "Started"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
           },
           "services_count": {
             "type": "integer",
@@ -9983,6 +10073,30 @@
               }
             ],
             "title": "Execution Mode"
+          },
+          "capabilities_provided": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Capabilities Provided",
+            "default": []
+          },
+          "capabilities_required": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Capabilities Required",
+            "default": []
+          },
+          "unresolved_capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Unresolved Capabilities",
+            "default": []
           }
         },
         "type": "object",
@@ -11337,6 +11451,13 @@
           "type": {
             "type": "string",
             "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
           }
         },
         "type": "object",
