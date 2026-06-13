@@ -199,6 +199,27 @@ class NamespacedStorageProxy:
         raise ForbiddenError("StorageProxy: list_namespaces() is forbidden for plugins")
 
 
+class ReadOnlyStateProxy:
+    """
+    Read-only wrapper around StateEngine for plugins.
+    
+    Plugins can read state but cannot write — prevents corruption of runtime state.
+    """
+
+    def __init__(self, state: Any):
+        self._state = state
+
+    async def get(self, key: str, default: Any = None) -> Any:
+        if self._state is None:
+            return default
+        return await self._state.get(key, default)
+
+    def __getattr__(self, name: str) -> Any:
+        raise ForbiddenError(
+            f"StateEngine.{name}() is forbidden for plugins — state is read-only"
+        )
+
+
 class ServiceProxy:
     """
     Proxy for limiting plugin access to services.

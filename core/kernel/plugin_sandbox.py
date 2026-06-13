@@ -21,6 +21,7 @@ from core.kernel.plugin_isolation import (
     HttpRegistryProxy,
     NamespacedStorageProxy,
     OperationRegistryProxy,
+    ReadOnlyStateProxy,
     ServiceRegistryProxy,
 )
 from core.kernel.plugin_runtime_facade import PluginRuntimeFacade
@@ -244,7 +245,7 @@ class PluginSandbox:
             ),
             http=http_proxy,
             operations=operations_proxy,
-            state=getattr(runtime, "state", None),
+            state=ReadOnlyStateProxy(getattr(runtime, "state", None)),
             event_bus=event_bus_proxy,  # P2.1: use EventBusProxy
             capabilities=capabilities_proxy,
             vault=None,
