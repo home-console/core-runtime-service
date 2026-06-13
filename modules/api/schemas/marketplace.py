@@ -10,7 +10,7 @@ class MarketplaceCatalogEntryDto(BaseModel):
     id: str
     name: str
     description: Optional[str] = None
-    repo_url: str
+    repo_url: Optional[str] = None
     version: Optional[str] = None
     dependencies: Optional[List[str]] = None
 

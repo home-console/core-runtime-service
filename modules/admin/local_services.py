@@ -8,20 +8,20 @@ from typing import Any, Awaitable, Callable
 logger = logging.getLogger(__name__)
 
 
-def create_marketplace_catalog_handler(*, repo_root: Path) -> Callable[..., Awaitable[dict[str, Any]]]:
+def create_marketplace_catalog_handler(*, repo_root: Path) -> Callable[..., Awaitable[list[dict[str, Any]]]]:
     """
     App/admin-facing marketplace catalog builder.
 
     Source of truth: `plugins/*/plugin.json` manifests in the repo checkout.
     """
 
-    async def handler(*_args: Any, **_kw: Any) -> dict[str, Any]:
+    async def handler(*_args: Any, **_kw: Any) -> list[dict[str, Any]]:
         try:
             plugins_dir = repo_root / "plugins"
             catalog: list[dict[str, Any]] = []
 
             if not plugins_dir.exists():
-                return {"catalog": []}
+                return catalog
 
             for entry in sorted(plugins_dir.iterdir(), key=lambda p: p.name):
                 if not entry.is_dir():
@@ -58,10 +58,10 @@ def create_marketplace_catalog_handler(*, repo_root: Path) -> Callable[..., Awai
 
                 catalog.append(catalog_item)
 
-            return {"catalog": catalog}
+            return catalog
         except Exception as e:
             logger.warning("marketplace catalog build failed: %s", e, exc_info=True)
-            return {"catalog": []}
+            return []
 
     return handler
 
