@@ -15,9 +15,11 @@ pytest-xdist>=3.5.0
 
 # HTTP adapter dependencies (для плагина api_gateway)
 fastapi>=0.95.0
+starlette>=1.0.1
 uvicorn[standard]>=0.22.0
-aiohttp>=3.10.0
+aiohttp>=3.14.0
 httpx>=0.27.0
+idna>=3.15
 
 # PostgreSQL adapter (опционально)
 asyncpg>=0.28.0
@@ -29,7 +31,7 @@ bcrypt>=4.0.0
 argon2-cffi>=21.2.0
 
 # JWT tokens
-PyJWT>=2.8.0
+PyJWT>=2.13.0
 cryptography>=41.0.0  # Для алгоритмов JWT
 prometheus-client
 
