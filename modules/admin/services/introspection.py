@@ -992,10 +992,50 @@ async def dashboard_inspector_response(runtime: Any) -> Dict[str, Any]:
     except Exception as e:
         logger.exception("dashboard_inspector_response failed")
         return {"ok": False, "error": str(e)}
+
+    state_keys = 0
+    try:
+        if hasattr(runtime, "state") and runtime.state is not None:
+            keys = await runtime.state.list_keys("default")
+            if isinstance(keys, list):
+                state_keys = len(keys)
+    except Exception:
+        pass
+
+    executions = None
+    try:
+        traces = await list_execution_traces(runtime)
+        if isinstance(traces, list):
+            executions = len(traces)
+    except Exception:
+        pass
+
+    schedules = None
+    try:
+        scheds = await list_schedules(runtime)
+        if isinstance(scheds, list):
+            schedules = len(scheds)
+    except Exception:
+        pass
+
+    devices = None
+    try:
+        svc_reg = getattr(runtime, "service_registry", None) or getattr(runtime, "services", None)
+        if svc_reg is not None and await svc_reg.has_service("devices.list"):
+            result = await svc_reg.call("devices.list")
+            if isinstance(result, list):
+                devices = len(result)
+    except Exception:
+        pass
+
     return {
         "plugins": len(plugins),
         "services": len(services),
         "http_endpoints": len(http_endpoints),
+        "state_keys": state_keys,
+        "executions": executions,
+        "schedules": schedules,
+        "devices": devices,
     }
 
 

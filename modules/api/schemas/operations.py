@@ -18,11 +18,11 @@ class OperationDto(BaseModel):
 
 
 class ExecutionDto(BaseModel):
-    execution_id: str
-    operation_id: str
-    operation_type: str
+    execution_id: Optional[str] = None
+    operation_id: Optional[str] = None
+    operation_type: Optional[str] = None
     backend: Optional[str] = None
-    status: str
+    status: Optional[str] = None
     started_at: Optional[str] = None
     finished_at: Optional[str] = None
     cancelled_at: Optional[str] = None
