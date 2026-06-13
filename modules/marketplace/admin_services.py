@@ -321,7 +321,27 @@ async def admin_marketplace_disable(runtime: Any, plugin_name: str, **kwargs: An
 
 
 async def admin_marketplace_installed(runtime: Any, **kwargs: Any) -> Dict[str, Any]:
-    return await _execute_marketplace_operation(runtime, "marketplace.list_installed", {})
+    op_result = await _execute_marketplace_operation(runtime, "marketplace.list_installed", {})
+    if not op_result.get("ok", True):
+        return op_result
+
+    op = op_result.get("result") or {}
+    data = (op.get("result") or {}).get("data") or {}
+    installed = data.get("installed_plugins") or {}
+
+    plugins = []
+    for plugin_name, info in installed.items():
+        if not isinstance(info, dict):
+            continue
+        plugins.append({
+            "name": info.get("name", plugin_name),
+            "version": info.get("version"),
+            "enabled": info.get("enabled", True),
+            "source": info.get("source"),
+            "description": info.get("description"),
+            "metadata": info.get("metadata"),
+        })
+    return {"ok": True, "result": plugins}
 
 
 async def admin_marketplace_updates(runtime: Any, body: Any = None, **kwargs: Any) -> Dict[str, Any]:
