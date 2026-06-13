@@ -2498,7 +2498,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OkErrorResponse"
+                  "$ref": "#/components/schemas/SetStateResultDto"
                 }
               }
             }
@@ -4340,7 +4340,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiResponse_SkillInvokeResult_"
+                  "$ref": "#/components/schemas/ApiResponse_Any_"
                 }
               }
             }
@@ -4623,7 +4623,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OkErrorResponse"
+                  "$ref": "#/components/schemas/SetStateResultDto"
                 }
               }
             }
@@ -5304,6 +5304,39 @@
             ],
             "title": "Last Used At"
           },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "is_admin": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Admin"
+          },
+          "is_expired": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Expired"
+          },
           "scopes": {
             "items": {
               "type": "string"
@@ -5311,6 +5344,17 @@
             "type": "array",
             "title": "Scopes",
             "default": []
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
           }
         },
         "type": "object",
@@ -7301,49 +7345,6 @@
         "type": "object",
         "title": "ApiResponse[SkillDto]"
       },
-      "ApiResponse_SkillInvokeResult_": {
-        "properties": {
-          "ok": {
-            "type": "boolean",
-            "title": "Ok",
-            "default": true
-          },
-          "result": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/SkillInvokeResult"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error"
-          },
-          "code": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Code"
-          }
-        },
-        "type": "object",
-        "title": "ApiResponse[SkillInvokeResult]"
-      },
       "ApiResponse_SkillListDto_": {
         "properties": {
           "ok": {
@@ -8368,7 +8369,14 @@
       "DevCredentialsDto": {
         "properties": {
           "api_base_url": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Api Base Url"
           },
           "api_key": {
@@ -8384,9 +8392,6 @@
           }
         },
         "type": "object",
-        "required": [
-          "api_base_url"
-        ],
         "title": "DevCredentialsDto"
       },
       "DeviceDto": {
@@ -9757,6 +9762,20 @@
               }
             ],
             "title": "Message"
+          },
+          "loaded": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Loaded"
           }
         },
         "type": "object",
@@ -10679,6 +10698,60 @@
         ],
         "title": "SetPasswordRequest"
       },
+      "SetStateResultDto": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok",
+            "default": true
+          },
+          "queued": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Queued"
+          },
+          "external_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Id"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DeviceStateDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "title": "SetStateResultDto"
+      },
       "SkillDto": {
         "properties": {
           "id": {
@@ -10733,66 +10806,6 @@
           "plugin_version"
         ],
         "title": "SkillDto"
-      },
-      "SkillInvokeResult": {
-        "properties": {
-          "ok": {
-            "type": "boolean",
-            "title": "Ok"
-          },
-          "skill_id": {
-            "type": "string",
-            "title": "Skill Id"
-          },
-          "service": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Service"
-          },
-          "result": {
-            "anyOf": [
-              {},
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Result"
-          },
-          "error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error"
-          },
-          "code": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Code"
-          }
-        },
-        "type": "object",
-        "required": [
-          "ok",
-          "skill_id"
-        ],
-        "title": "SkillInvokeResult"
       },
       "SkillListDto": {
         "properties": {
