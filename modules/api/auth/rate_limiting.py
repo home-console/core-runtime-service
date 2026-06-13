@@ -28,6 +28,7 @@ async def rate_limit_check(
     Проверяет rate limit для идентификатора.
     
     Защита от brute force атак.
+    Uses storage transaction to prevent TOCTOU race conditions.
     
     Args:
         runtime: экземпляр CoreRuntime
@@ -47,62 +48,62 @@ async def rate_limit_check(
     services = getattr(runtime, "service_registry", None)
 
     try:
-        # Проверяем, что identifier не None и является строкой
         if not identifier:
-            return True  # Fail-open: если нет идентификатора, разрешаем запрос
+            return True
         
-        # Нормализуем identifier в строку
         if not isinstance(identifier, str):
             identifier = str(identifier)
         
-        # Проверяем, что limit_type тоже строка
         if not isinstance(limit_type, str):
             limit_type = str(limit_type)
         
-        # Создаём ключ для rate limit (hash для безопасности)
         rate_key = hashlib.sha256(f"{limit_type}:{identifier}".encode()).hexdigest()
-        
-        # Получаем текущий счётчик
-        rate_data = await runtime.storage.get(AUTH_RATE_LIMITS_NAMESPACE, rate_key)
-        
-        current_time = time.time()
-        
-        if rate_data is None or not isinstance(rate_data, dict):
-            # Первая попытка - создаём счётчик
-            rate_data = {
-                "count": 1,
-                "window_start": current_time,
-                "last_attempt": current_time
-            }
-            await runtime.storage.set(AUTH_RATE_LIMITS_NAMESPACE, rate_key, rate_data)
+
+        async def _check_and_increment(storage: Any) -> bool:
+            rate_data = await storage.get(AUTH_RATE_LIMITS_NAMESPACE, rate_key)
+            current_time = time.time()
+            
+            if rate_data is None or not isinstance(rate_data, dict):
+                rate_data = {
+                    "count": 1,
+                    "window_start": current_time,
+                    "last_attempt": current_time
+                }
+                await storage.set(AUTH_RATE_LIMITS_NAMESPACE, rate_key, rate_data)
+                return True
+            
+            window_start = rate_data.get("window_start", current_time)
+            count = rate_data.get("count", 0)
+            
+            if current_time - window_start >= window_seconds:
+                rate_data = {
+                    "count": 1,
+                    "window_start": current_time,
+                    "last_attempt": current_time
+                }
+                await storage.set(AUTH_RATE_LIMITS_NAMESPACE, rate_key, rate_data)
+                return True
+            
+            if count >= limit:
+                return False
+            
+            rate_data["count"] = count + 1
+            rate_data["last_attempt"] = current_time
+            await storage.set(AUTH_RATE_LIMITS_NAMESPACE, rate_key, rate_data)
             return True
-        
-        window_start = rate_data.get("window_start", current_time)
-        count = rate_data.get("count", 0)
-        
-        # Проверяем, не истёк ли window
-        if current_time - window_start >= window_seconds:
-            # Окно истекло - сбрасываем счётчик
-            rate_data = {
-                "count": 1,
-                "window_start": current_time,
-                "last_attempt": current_time
-            }
-            await runtime.storage.set(AUTH_RATE_LIMITS_NAMESPACE, rate_key, rate_data)
-            return True
-        
-        # Проверяем лимит
-        if count >= limit:
-            return False
-        
-        # Увеличиваем счётчик
-        rate_data["count"] = count + 1
-        rate_data["last_attempt"] = current_time
-        await runtime.storage.set(AUTH_RATE_LIMITS_NAMESPACE, rate_key, rate_data)
-        return True
+
+        # Wrap in transaction to prevent TOCTOU race
+        storage = runtime.storage
+        try:
+            if hasattr(storage, 'transaction'):
+                async with storage.transaction():
+                    return await _check_and_increment(storage)
+        except (TypeError, AttributeError):
+            # Mock or storage without proper transaction support — fall through
+            pass
+        return await _check_and_increment(storage)
     
     except Exception as e:
-        # При ошибке разрешаем запрос (fail-open для доступности)
         try:
             if services is not None:
                 await services.call(

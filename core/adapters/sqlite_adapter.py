@@ -78,10 +78,10 @@ class SQLiteAdapter(StorageAdapter):
             # Гарантирует, что читатели не заблокируют писателей
             conn.execute("PRAGMA journal_mode=WAL")
 
-            # FULL synchronous mode
-            # Требует fsync после каждого COMMIT
-            # Это гарантирует, что данные на диске даже при крахе ОС
-            conn.execute("PRAGMA synchronous=FULL")
+            # NORMAL synchronous mode — good durability with much better performance.
+            # FULL mode forces fsync on every commit (extremely slow for write-heavy workloads).
+            # NORMAL ensures data reaches OS buffers (survives process crash, not power loss).
+            conn.execute("PRAGMA synchronous=NORMAL")
 
             # Большой кэш для производительности (64MB)
             # Отрицательное число = кэш в килобайтах
@@ -496,30 +496,35 @@ class SQLiteAdapter(StorageAdapter):
         def _iter_namespace_generator(ns: str, batch: int):
             """Синхронный генератор для итерации.
 
+            Uses cursor-based pagination (key > last_key) instead of OFFSET for O(1) page fetch.
             Гарантирует, что value всегда dict[str, Any], как требует интерфейс StorageAdapter.
             Некорректные JSON‑значения или не‑dict пропускаются.
             """
             conn = self._get_connection(readonly=True)
-            offset = 0
+            last_key: str | None = None
             while True:
-                cursor = conn.execute(
-                    "SELECT key, value FROM storage WHERE namespace = ? LIMIT ? OFFSET ?",
-                    (ns, batch, offset),
-                )
+                if last_key is None:
+                    cursor = conn.execute(
+                        "SELECT key, value FROM storage WHERE namespace = ? ORDER BY key LIMIT ?",
+                        (ns, batch),
+                    )
+                else:
+                    cursor = conn.execute(
+                        "SELECT key, value FROM storage WHERE namespace = ? AND key > ? ORDER BY key LIMIT ?",
+                        (ns, last_key, batch),
+                    )
                 rows = cursor.fetchall()
                 if not rows:
                     break
                 for key, json_value in rows:
+                    last_key = key
                     try:
                         value = json.loads(json_value)
                     except (json.JSONDecodeError, ValueError, TypeError):
-                        # Пропускаем записи с битым JSON
                         continue
-                    # Гарантируем dict[str, Any] как контракт интерфейса
                     if not isinstance(value, dict):
                         continue
                     yield key, value
-                offset += batch
 
         # Запустить генератор в threadpool
         async def _async_iter():
