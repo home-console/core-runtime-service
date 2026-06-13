@@ -43,6 +43,9 @@ from .introspection import (
     list_events,
     list_storage_namespaces,
     get_storage_namespace_contents,
+    get_state_snapshot,
+    get_state_keys,
+    get_state_value,
     list_operations_available,
     integrations_inspector_response,
     auth_inspector_response,
@@ -155,6 +158,11 @@ def build_admin_registrations(
         runtime=runtime,
         required=[(0, ("namespace",))],
     )
+    state_value_get = make_runtime_handler_positional(
+        get_state_value,
+        runtime=runtime,
+        required=[(0, ("key",))],
+    )
 
     credentials_list = make_runtime_handler(admin_credentials_list, runtime=runtime)
     credentials_create = make_runtime_handler(
@@ -253,6 +261,9 @@ def build_admin_registrations(
         ("admin.v1.events", make_runtime_handler(list_events, runtime=runtime)),
         ("admin.v1.storage", make_runtime_handler(list_storage_namespaces, runtime=runtime)),
         ("admin.v1.storage.get", storage_namespace_get),
+        ("admin.v1.inspector.state", make_runtime_handler(get_state_snapshot, runtime=runtime)),
+        ("admin.v1.inspector.state.keys", make_runtime_handler(get_state_keys, runtime=runtime)),
+        ("admin.v1.inspector.state.get", state_value_get),
         ("admin.v1.credentials.list", credentials_list),
         ("admin.v1.credentials.create", credentials_create),
         ("admin.v1.credentials.get", credentials_get),

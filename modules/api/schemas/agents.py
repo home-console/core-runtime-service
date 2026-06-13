@@ -65,6 +65,10 @@ class AgentHeartbeatDto(BaseModel):
 
 class AgentHealthCheckDto(BaseModel):
     ok: bool = True
+    error: Optional[str] = None
+    timestamp: Optional[str] = None
+    total_agents: Optional[int] = None
+    stats: Optional[Dict[str, int]] = None
     total: Optional[int] = None
     online: Optional[int] = None
     offline: Optional[int] = None
@@ -87,8 +91,20 @@ class AgentLogsDto(BaseModel):
 
 
 class AgentStatusDto(BaseModel):
-    agent_id: str
-    status: str
+    ok: bool = True
+    error: Optional[str] = None
+    agent_id: Optional[str] = None
+    name: Optional[str] = None
+    status: Optional[str] = None
+    version: Optional[str] = None
+    address: Optional[str] = None
+    last_heartbeat: Optional[str] = None
+    heartbeat_age_seconds: Optional[int] = None
+    uptime_seconds: Optional[float] = None
+    cpu_percent: Optional[float] = None
+    memory_mb: Optional[float] = None
+    capabilities: Optional[List[str]] = None
+    deployment_id: Optional[str] = None
     details: Optional[Dict[str, Any]] = None
 
 
@@ -101,6 +117,14 @@ class EnrollmentTokenDto(BaseModel):
 
 
 class ChecksumDto(BaseModel):
+    ok: bool = True
+    error: Optional[str] = None
+    message: Optional[str] = None
+    sha256: Optional[str] = None
+    size_bytes: Optional[int] = None
+    filename: Optional[str] = None
+    version: Optional[str] = None
+    cached: Optional[bool] = None
     checksum: Optional[str] = None
     algorithm: Optional[str] = None
 

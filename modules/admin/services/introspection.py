@@ -19,6 +19,7 @@ import time
 
 from modules.plugins import PluginState
 from core.adapters.storage_errors import STORAGE_BOUNDARY_ERRORS
+from core.exceptions import NotFoundError
 from core.observability.logger_helper import debug
 from core.kernel.plugin_loader import PluginManifestLoader
 from modules.api.route_binding import endpoint_mounted_path
@@ -475,7 +476,7 @@ async def list_services(runtime: Any) -> List[Dict[str, str]]:
 
 
 async def list_http_endpoints(runtime: Any) -> List[Dict[str, Any]]:
-    """List all HTTP endpoints including WebSocket."""
+    """List all HTTP endpoints (excluding WebSocket)."""
     endpoints = runtime.http.list()
     return [
         {
@@ -488,6 +489,7 @@ async def list_http_endpoints(runtime: Any) -> List[Dict[str, Any]]:
             "tags": ep.tags or [],
         }
         for ep in endpoints
+        if not ep.websocket
     ]
 
 
@@ -725,6 +727,23 @@ async def get_storage_namespace_contents(runtime: Any, namespace: str) -> Dict[s
         return {"namespace": namespace, "keys": [], "entries": {}, "error": str(e)}
 
 
+async def get_state_snapshot(runtime: Any) -> Dict[str, Any]:
+    """Inspector: полный снимок in-memory state (runtime.state.dump_snapshot())."""
+    return await runtime.state.dump_snapshot()
+
+
+async def get_state_keys(runtime: Any) -> List[str]:
+    """Inspector: список ключей in-memory state."""
+    return await runtime.state.keys()
+
+
+async def get_state_value(runtime: Any, key: str) -> Any:
+    """Inspector: значение по ключу in-memory state."""
+    if not await runtime.state.exists(key):
+        raise NotFoundError(f"state key not found: {key}")
+    return await runtime.state.get(key)
+
+
 async def list_operations_available(runtime: Any) -> List[Dict[str, Any]]:
     """
     Inspector view: list available operation types (read-only).
@@ -926,22 +945,18 @@ async def list_integrations(runtime: Any) -> List[Dict[str, Any]]:
 
 
 
-async def integrations_inspector_response(runtime: Any) -> Dict[str, Any]:
+async def integrations_inspector_response(runtime: Any) -> list:
     """
-    Ответ для GET /admin/v1/inspector/integrations: { "integrations": [...] }.
-    Клиент (Flutter) ожидает именно такой формат.
+    Ответ для GET /admin/v1/inspector/integrations: ApiResponse[List[IntegrationFlowDto]].
     """
-    items = await list_integrations(runtime)
-    return {"integrations": items}
+    return await list_integrations(runtime)
 
 
-async def auth_inspector_response(runtime: Any) -> Dict[str, Any]:
+async def auth_inspector_response(runtime: Any) -> list:
     """
-    Ответ для GET /admin/v1/inspector/auth: { "auth_flows": [...] }.
-    Клиент ожидает ключ auth_flows.
+    Ответ для GET /admin/v1/inspector/auth: ApiResponse[List[IntegrationFlowDto]].
     """
-    items = await list_auth_flows(runtime)
-    return {"auth_flows": items}
+    return await list_auth_flows(runtime)
 
 
 async def inventory_inspector_response(runtime: Any) -> Dict[str, Any]:
@@ -952,7 +967,7 @@ async def inventory_inspector_response(runtime: Any) -> Dict[str, Any]:
     return {"items": []}
 
 
-async def inspector_auth_summary(runtime: Any) -> Dict[str, Any]:
+async def inspector_auth_summary(runtime: Any) -> list:
     """
     Краткая сводка auth для Inspector (тот же формат, что auth_inspector_response).
     Регистрируется вторым handler'ом для admin.v1.inspector.auth — перезаписывает первый.

@@ -46,7 +46,7 @@ def _get_repo(runtime: Any):
         return None
 
 
-async def admin_credentials_list(runtime: Any) -> Dict[str, Any]:
+async def admin_credentials_list(runtime: Any) -> list:
     """GET /admin/v1/credentials — list all credentials."""
     try:
         ctx = create_system_context("admin", "credential.list")
@@ -58,7 +58,7 @@ async def admin_credentials_list(runtime: Any) -> Dict[str, Any]:
                 _user_id=_ADMIN_USER_ID,
                 _user_roles=_ADMIN_ROLES,
             )
-            return out or {"credentials": [], "count": 0}
+            return (out or {}).get("credentials", [])
         finally:
             set_current_auth_context(prev)
     except Exception as e:
@@ -66,32 +66,23 @@ async def admin_credentials_list(runtime: Any) -> Dict[str, Any]:
             raise
         repo = _get_repo(runtime)
         if repo is None:
-            return {
-                "credentials": [],
-                "count": 0,
-                "_message": "Credentials module not loaded; storage_manager or secret_store missing.",
-            }
+            return []
         try:
             from modules.credentials.schemas import CredentialMetadata
 
             creds = await repo.list()
-            return {
-                "credentials": [
-                    CredentialMetadata.from_domain(c).to_dict() for c in creds
-                ],
-                "count": len(creds),
-            }
+            return [CredentialMetadata.from_domain(c).to_dict() for c in creds]
         except STORAGE_BOUNDARY_ERRORS:
             logger.warning(
                 "admin_credentials_list: fallback list failed (storage boundary)",
                 exc_info=True,
             )
-            return {"credentials": [], "count": 0}
+            return []
         except Exception:
             logger.warning(
                 "admin_credentials_list: fallback list failed", exc_info=True
             )
-            return {"credentials": [], "count": 0}
+            return []
 
 
 async def admin_credentials_create(

@@ -3,8 +3,6 @@ Admin introspection services (plugins, services, http, ws, events, storage, oper
 
 Moved from AdminModule for architectural clarity.
 Implementations live in modules/admin/services/introspection.py.
-
-NOTE: legacy state inspector surface was removed (use storage-backed inspector views).
 """
 
 from modules.admin.services.introspection import (
@@ -16,6 +14,9 @@ from modules.admin.services.introspection import (
     list_events,
     list_storage_namespaces,
     get_storage_namespace_contents,
+    get_state_snapshot,
+    get_state_keys,
+    get_state_value,
     list_operations_available,
     list_auth_flows,
     list_integrations,
@@ -52,6 +53,9 @@ __all__ = [
     "list_events",
     "list_storage_namespaces",
     "get_storage_namespace_contents",
+    "get_state_snapshot",
+    "get_state_keys",
+    "get_state_value",
     "list_operations_available",
     "list_auth_flows",
     "list_integrations",

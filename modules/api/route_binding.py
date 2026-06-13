@@ -33,6 +33,7 @@ from modules.api.auth.contextvars import set_current_request_context
 from modules.api.authz import AuthorizationError
 from modules.api.authz import require as authz_require
 from modules.api.domain_adapters import get_domain_adapter
+from modules.api.schemas.common import ApiResponse
 from modules.api.validation_models import validate_body_for_service
 
 from core.adapters.storage_errors import STORAGE_BOUNDARY_ERRORS
@@ -42,22 +43,29 @@ from core.service.models import ServiceAuthConfig
 logger = logging.getLogger(__name__)
 
 
-def _normalize_api_result(result: Any, *, has_response_model: bool = False) -> Any:
+def _normalize_api_result(result: Any, *, response_model: Any = None) -> Any:
     """
     Normalize successful results.
 
     Policy:
-    - If endpoint declares a typed ``response_model`` that is a flat DTO
-      (result is already a dict matching the model), return verbatim.
-    - If endpoint declares a response model but the result is a raw list /
-      primitive (doesn't look like the model), wrap into
-      ``{"ok": True, "result": <payload>}`` so that ``ApiResponse`` envelope
-      models validate correctly.
-    - If service explicitly returns an {"ok": ...} envelope, preserve it
-      (backward-compatible for untyped legacy endpoints).
+    - If endpoint declares ``response_model=ApiResponse[T]`` (the generic
+      envelope), wrap the service's raw payload into
+      ``{"ok": True, "result": <payload>}`` unless it already looks like an
+      envelope (has an "ok" key — backward-compatible for legacy handlers
+      that return the envelope themselves).
+    - If endpoint declares a flat DTO ``response_model`` (not ``ApiResponse``)
+      and the result is already a dict matching the model, return verbatim.
+    - If no response model is declared and the service explicitly returns an
+      {"ok": ...} envelope, preserve it (backward-compatible for untyped
+      legacy endpoints).
     - Otherwise wrap the raw payload into {"ok": True, "result": <payload>}.
     """
-    if has_response_model:
+    is_envelope = isinstance(response_model, type) and issubclass(response_model, ApiResponse)
+    if response_model is not None:
+        if is_envelope:
+            if isinstance(result, dict) and "ok" in result:
+                return result
+            return {"ok": True, "result": result}
         if isinstance(result, dict):
             return result
         return {"ok": True, "result": result}
@@ -806,9 +814,7 @@ def _make_api_handler(runtime: Any, endpoint: Any):
             status = result.get("status")
             if isinstance(status, int) and 100 <= status <= 599:
                 response.status_code = status
-        return _normalize_api_result(
-            result, has_response_model=endpoint.response_model is not None
-        )
+        return _normalize_api_result(result, response_model=endpoint.response_model)
 
     # Формируем сигнатуру handler'а для FastAPI
     params_sig = [

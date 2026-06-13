@@ -29,6 +29,9 @@ class MarketplaceResultDto(BaseModel):
     plugin_name: Optional[str] = None
     message: Optional[str] = None
     error: Optional[str] = None
+    error_stage: Optional[str] = None
+    user_message: Optional[str] = None
+    operation: Optional[Dict[str, Any]] = None
 
 
 class GitSourcesDto(BaseModel):

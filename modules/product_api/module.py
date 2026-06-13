@@ -137,21 +137,18 @@ class ProductApiModule(RuntimeModule):
             from modules.admin.credentials_handlers import _service_not_loaded
 
             try:
-                return await services.call(
+                out = await services.call(
                     "credential.list",
                     **_user_cred_params(kw),
                 )
+                return (out or {}).get("credentials", [])
             except Exception as e:
                 # Если это не «модуль не загружен» — пробрасываем дальше
                 if not _service_not_loaded(e):
                     raise
 
                 # Модуль credentials отсутствует — мягкий fallback
-                return {
-                    "credentials": [],
-                    "count": 0,
-                    "_message": "Credentials module is not loaded on core-runtime-service; user credentials are disabled in this environment.",
-                }
+                return []
 
         async def user_credentials_create(**kw: Any) -> Any:
             from modules.admin.credentials_handlers import _service_not_loaded

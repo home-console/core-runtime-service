@@ -103,6 +103,18 @@ def register_admin_core_http_endpoints(http_registry: Any) -> None:
             ApiResponse[List[StorageNamespaceDto]],
         ),
         (
+            "/api/v1/admin/inspector/state",
+            "admin.v1.inspector.state",
+            "Inspector: in-memory state snapshot",
+            ApiResponse[dict],
+        ),
+        (
+            "/api/v1/admin/inspector/state/keys",
+            "admin.v1.inspector.state.keys",
+            "Inspector: in-memory state keys",
+            ApiResponse[List[str]],
+        ),
+        (
             "/api/v1/admin/inspector/operations",
             "admin.v1.inspector.operations",
             "Inspector: available operation types",
@@ -239,6 +251,15 @@ def register_admin_core_http_endpoints(http_registry: Any) -> None:
             auth_config=_admin_read,
             tags=["Inspector"],
             response_model=ApiResponse[StorageNamespaceContentsDto],
+        ),
+        HttpEndpoint(
+            method="GET",
+            path="/api/v1/admin/inspector/state/{key}",
+            service="admin.v1.inspector.state.get",
+            description="Inspector: get in-memory state value by key",
+            auth_config=_admin_read,
+            tags=["Inspector"],
+            response_model=ApiResponse[Any],
         ),
         HttpEndpoint(
             method="GET",
