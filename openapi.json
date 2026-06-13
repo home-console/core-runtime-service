@@ -9553,7 +9553,14 @@
             "title": "Description"
           },
           "repo_url": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Repo Url"
           },
           "version": {
@@ -9585,8 +9592,7 @@
         "type": "object",
         "required": [
           "id",
-          "name",
-          "repo_url"
+          "name"
         ],
         "title": "MarketplaceCatalogEntryDto"
       },
