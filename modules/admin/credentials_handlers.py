@@ -561,7 +561,7 @@ async def admin_credentials_terminal_sessions(runtime: Any) -> Dict[str, Any]:
         if isinstance(created, (int, float)):
             item["age_sec"] = now - created
         sessions.append(item)
-    return {"sessions": sessions}
+    return sessions
 
 
 async def admin_credentials_terminal_ws(runtime: Any, websocket: Any) -> None:

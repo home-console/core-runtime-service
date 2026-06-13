@@ -13,6 +13,7 @@ event_bus.list_subscriptions(), state, storage, operations.list_handler_types().
 Inspector = memory dump runtime, не API.
 """
 
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 import time
@@ -992,10 +993,50 @@ async def dashboard_inspector_response(runtime: Any) -> Dict[str, Any]:
     except Exception as e:
         logger.exception("dashboard_inspector_response failed")
         return {"ok": False, "error": str(e)}
+
+    state_keys = 0
+    try:
+        if hasattr(runtime, "state") and runtime.state is not None:
+            keys = await runtime.state.list_keys("default")
+            if isinstance(keys, list):
+                state_keys = len(keys)
+    except Exception:
+        pass
+
+    executions = None
+    try:
+        traces = await list_execution_traces(runtime)
+        if isinstance(traces, list):
+            executions = len(traces)
+    except Exception:
+        pass
+
+    schedules = None
+    try:
+        scheds = await list_schedules(runtime)
+        if isinstance(scheds, list):
+            schedules = len(scheds)
+    except Exception:
+        pass
+
+    devices = None
+    try:
+        svc_reg = getattr(runtime, "service_registry", None) or getattr(runtime, "services", None)
+        if svc_reg is not None and await svc_reg.has_service("devices.list"):
+            result = await svc_reg.call("devices.list")
+            if isinstance(result, list):
+                devices = len(result)
+    except Exception:
+        pass
+
     return {
         "plugins": len(plugins),
         "services": len(services),
         "http_endpoints": len(http_endpoints),
+        "state_keys": state_keys,
+        "executions": executions,
+        "schedules": schedules,
+        "devices": devices,
     }
 
 
@@ -1322,6 +1363,61 @@ async def list_capabilities(runtime: Any) -> List[Dict[str, Any]]:
     return result
 
 
+async def _collect_system_uptime() -> Optional[float]:
+    try:
+        with open("/proc/uptime") as f:
+            return float(f.read().split()[0])
+    except Exception:
+        return None
+
+
+async def _collect_memory_mb() -> Optional[float]:
+    try:
+        with open("/proc/meminfo") as f:
+            data = {}
+            for line in f:
+                parts = line.split(":")
+                if len(parts) == 2:
+                    key = parts[0].strip()
+                    val = parts[1].strip().split()[0]
+                    data[key] = int(val)
+        mem_total = data.get("MemTotal", 0)
+        mem_avail = data.get("MemAvailable", 0)
+        if mem_total:
+            used = mem_total - mem_avail
+            return round(used / 1024, 1)
+        return None
+    except Exception:
+        return None
+
+
+async def _collect_cpu_percent() -> Optional[float]:
+    try:
+        with open("/proc/stat") as f:
+            line = f.readline()
+        parts = line.split()
+        if parts[0] == "cpu" and len(parts) > 4:
+            user = int(parts[1])
+            nice = int(parts[2])
+            system = int(parts[3])
+            idle = int(parts[4])
+            total = user + nice + system + idle
+            if total:
+                return round(100 * (total - idle) / total, 1)
+        return None
+    except Exception:
+        return None
+
+
+async def _collect_storage_ok(path: str = "/data") -> Optional[bool]:
+    try:
+        usage = os.statvfs(path)
+        free_gb = (usage.f_bavail * usage.f_frsize) / (1024 ** 3)
+        return free_gb > 0.5
+    except Exception:
+        return None
+
+
 async def get_system_health(runtime: Any) -> Dict[str, Any]:
     """
     Get system health snapshot including metrics and resource status.
@@ -1333,8 +1429,19 @@ async def get_system_health(runtime: Any) -> Dict[str, Any]:
     try:
         collector = HealthSnapshotCollector(runtime)
         snapshot = collector.collect()
+        uptime, memory_mb, cpu_percent, storage_ok = await asyncio.gather(
+            _collect_system_uptime(),
+            _collect_memory_mb(),
+            _collect_cpu_percent(),
+            _collect_storage_ok(),
+            return_exceptions=True,
+        )
         return {
             "status": "healthy" if snapshot.is_healthy() else "degraded",
+            "uptime": uptime if isinstance(uptime, float) else None,
+            "memory_mb": memory_mb if isinstance(memory_mb, float) else None,
+            "cpu_percent": cpu_percent if isinstance(cpu_percent, float) else None,
+            "storage_ok": storage_ok if isinstance(storage_ok, bool) else None,
             "details": snapshot.to_dict(),
         }
     except Exception as e:

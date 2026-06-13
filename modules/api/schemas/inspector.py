@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel
 
-from .devices import DeviceDto, DeviceMappingDto
+from .devices import DeviceDto
 
 
 class RuntimeInfoDto(BaseModel):
@@ -33,15 +33,20 @@ class ServiceDto(BaseModel):
 class HttpEndpointInfoDto(BaseModel):
     method: str
     path: str
+    mounted_path: Optional[str] = None
     service: str
-    description: Optional[str] = None
     plugin: Optional[str] = None
+    description: Optional[str] = None
+    websocket: bool = False
+    tags: List[str] = []
 
 
 class WsEndpointInfoDto(BaseModel):
     path: str
+    mounted_path: Optional[str] = None
     service: str
     description: Optional[str] = None
+    tags: List[str] = []
 
 
 class RuntimeEventSubscriberDto(BaseModel):
@@ -62,8 +67,11 @@ class IntegrationFlowActionDto(BaseModel):
 
 class IntegrationFlowDto(BaseModel):
     id: str
-    provider: Optional[str] = None
     state: str
+    provider: Optional[str] = None
+    name: Optional[str] = None
+    plugin_name: Optional[str] = None
+    integration_type: Optional[str] = None
     message: Optional[str] = None
     actions: List[IntegrationFlowActionDto] = []
     qr_url: Optional[str] = None
@@ -73,8 +81,6 @@ class IntegrationFlowDto(BaseModel):
 
 class InventorySnapshotDto(BaseModel):
     items: List[DeviceDto] = []
-    mappings: List[DeviceMappingDto] = []
-    external: Optional[Dict[str, List[Any]]] = None
 
 
 class SystemHealthDto(BaseModel):
