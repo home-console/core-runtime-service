@@ -58,6 +58,7 @@ class DevicesModule(RuntimeModule):
             ("devices.get_external_for_device", services.get_external_for_device),
             ("devices.delete_mapping", services.delete_mapping),
             ("devices.auto_map_external", services.auto_map_external),
+            ("devices.auto_map_own", services.auto_map_own),
             ("devices.get_hung_pending", services.get_hung_pending_devices),
             ("devices.clear_pending", services.clear_pending_device),
             ("devices.update_device_fields", services.update_device_fields),
@@ -86,6 +87,10 @@ class DevicesModule(RuntimeModule):
             },
             "devices.delete_mapping": {"admin_only": True},
             "devices.auto_map_external": {"admin_only": True},
+            # auto_map_own — НЕ admin_only: self-service для интеграционных плагинов
+            # (доступ ограничивается через allowed_services в манифесте плагина,
+            # provider обязателен — плагин может смаппить только свои устройства).
+            "devices.auto_map_own": {},
             # Diagnostics — admin-only
             "devices.get_hung_pending": {"admin_only": True},
             "devices.clear_pending": {"admin_only": True},

@@ -544,6 +544,23 @@ async def auto_map_external(runtime, provider: Optional[str] = None) -> Dict[str
 
     return {"ok": True, "created": created, "skipped": skipped, "errors": errors}
 
+
+async def auto_map_own(runtime, provider: str) -> Dict[str, Any]:
+    """
+    Версия auto_map_external для self-service вызова интеграционными плагинами.
+
+    В отличие от admin-only devices.auto_map_external, не требует ACL-контекста
+    администратора — но требует обязательный provider и маппит только внешние
+    устройства этого provider'а. Доступ к сервису контролируется через
+    allowed_services в манифесте плагина: только плагины, которым явно разрешён
+    этот сервис, могут авто-смаппить устройства, которые они сами поставляют.
+    """
+    if not provider:
+        return {"ok": False, "error": "provider required"}
+
+    return await auto_map_external(runtime, provider=provider)
+
+
 async def get_hung_pending_devices(runtime) -> Dict[str, Any]:
     """
     Get list of devices with hung pending commands (older than timeout).
