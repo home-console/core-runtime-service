@@ -57,7 +57,7 @@ async def test_yandex_smart_home_can_call_auto_map_own_but_not_auto_map_external
     PluginSandbox.create_isolation_context(plugin, mock_runtime, "yandex_smart_home")
 
     # Self-service auto-mapping for the plugin's own provider — allowed.
-    out = await plugin.services.call("devices.auto_map_own", provider="yandex")
+    out = await plugin.services.call("devices.auto_map_own", provider="acme")
     assert out == {"ok": True}
 
     # Logging stays allowed (was previously covered by the default allowlist).
@@ -68,4 +68,4 @@ async def test_yandex_smart_home_can_call_auto_map_own_but_not_auto_map_external
     from core.exceptions import ForbiddenError
 
     with pytest.raises(ForbiddenError):
-        await plugin.services.call("devices.auto_map_external", provider="yandex")
+        await plugin.services.call("devices.auto_map_external", provider="acme")

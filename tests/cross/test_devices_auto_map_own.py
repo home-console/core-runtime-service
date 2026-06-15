@@ -13,21 +13,21 @@ async def test_auto_map_own_works_without_admin_context(memory_adapter):
     await runtime.start()
 
     # No request/admin context set (ctx is None) — simulates a plugin-internal call.
-    payload = {"external_id": "yandex_dev_1", "provider": "yandex", "name": "Yandex Lamp"}
+    payload = {"external_id": "acme_dev_1", "provider": "acme", "name": "Acme Lamp"}
     await runtime.event_bus.publish("external.device_discovered", payload)
 
     # devices.auto_map_own is not admin_only — must work without admin ctx.
-    result = await runtime.service_registry.call("devices.auto_map_own", provider="yandex")
+    result = await runtime.service_registry.call("devices.auto_map_own", provider="acme")
     assert result["ok"] is True
     assert result["created"] == 1
 
-    mapping = await runtime.storage.get("devices_mappings", "yandex_dev_1")
+    mapping = await runtime.storage.get("devices_mappings", "acme_dev_1")
     assert mapping is not None
-    assert mapping["internal_id"] == "device-yandex_dev_1"
+    assert mapping["internal_id"] == "device-acme_dev_1"
 
-    device = await runtime.storage.get("devices", "device-yandex_dev_1")
+    device = await runtime.storage.get("devices", "device-acme_dev_1")
     assert device is not None
-    assert device["name"] == "Yandex Lamp"
+    assert device["name"] == "Acme Lamp"
 
     await runtime.shutdown()
 
@@ -51,11 +51,11 @@ async def test_auto_map_external_still_requires_admin_context(memory_adapter):
     await runtime.module_manager.register_module_specs(runtime, APP_MODULES)
     await runtime.start()
 
-    payload = {"external_id": "yandex_dev_2", "provider": "yandex", "name": "Yandex Socket"}
+    payload = {"external_id": "acme_dev_2", "provider": "acme", "name": "Acme Socket"}
     await runtime.event_bus.publish("external.device_discovered", payload)
 
     # devices.auto_map_external remains admin_only — ctx=None must be rejected.
     with pytest.raises(ForbiddenError):
-        await runtime.service_registry.call("devices.auto_map_external", provider="yandex")
+        await runtime.service_registry.call("devices.auto_map_external", provider="acme")
 
     await runtime.shutdown()
