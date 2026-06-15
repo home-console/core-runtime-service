@@ -527,7 +527,12 @@ class MarketplaceModule(RuntimeModule):
         extras = self._MARKETPLACE_HANDLER_EXTRA_KEYS
 
         async def wrapped(runtime, operation):
-            result = await handler(operation)
+            if isinstance(runtime, dict) and isinstance(operation, dict):
+                from types import SimpleNamespace
+                params = SimpleNamespace(params=runtime)
+            else:
+                params = operation
+            result = await handler(params)
             out = {
                 "status": result.get("status"),
                 "data": result.get("data"),

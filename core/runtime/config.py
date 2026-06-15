@@ -111,11 +111,15 @@ class Config:
 
     # Marketplace
     # Default registry index URL (e.g. "https://marketplace.homeconsole.dev/registry/index.json")
-    marketplace_registry_url: str = ""
+    marketplace_registry_url: str = "https://marketplace.homeconsole.su/api/registry/index.json"
 
     # Runtime semver advertised by this deployment (used for compatibility checks like plugin min_runtime).
     # NOTE: keep in sync with release tagging / deployment config.
     runtime_version: str = "0.1.0"
+
+    # Plugins: автоматически выполнять `pip install -r requirements.txt` в текущем
+    # интерпретаторе при обнаружении отсутствующих pip-зависимостей плагина.
+    auto_install_plugin_deps: bool = True
 
     def validate(self) -> None:
         """
@@ -302,7 +306,9 @@ class Config:
             plugins_dir=env.get("RUNTIME_PLUGINS_DIR"),
             orchestration_backend=env.get("RUNTIME_ORCHESTRATION_BACKEND", "docker").lower(),
             module_path_prefix=env.get("RUNTIME_MODULE_PATH_PREFIX", "modules"),
-            marketplace_registry_url=str(env.get("MARKETPLACE_REGISTRY_URL", "")).strip(),
+            marketplace_registry_url=str(env.get("MARKETPLACE_REGISTRY_URL", "https://marketplace.homeconsole.su/api/registry/index.json")).strip(),
+            auto_install_plugin_deps=env.get("RUNTIME_AUTO_INSTALL_PLUGIN_DEPS", "true").lower()
+            == "true",
             runtime_version=str(env.get("RUNTIME_VERSION", "0.1.0")).strip() or "0.1.0",
             api_url_prefix=str(env.get("RUNTIME_API_PREFIX", "/api/v1")).strip() or "/api/v1",
             ws_url_prefix=(

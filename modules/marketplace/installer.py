@@ -448,6 +448,15 @@ class MarketplaceInstaller:
         target_dir = self.plugins_dir / plugin_name
 
         if not target_dir.exists():
+            # Каталог плагина может называться иначе, чем его логическое `name`
+            # (например `client-manager-plugin` для `client_manager`).
+            from core.kernel.plugin_loader import PluginManifestLoader
+
+            resolved = PluginManifestLoader.find_plugin_directory(self.plugins_dir, plugin_name)
+            if resolved is not None:
+                target_dir = resolved
+
+        if not target_dir.exists():
             raise _merr("uninstall", f"plugin directory not found: {target_dir}")
 
         # Unload via PluginManager if provided

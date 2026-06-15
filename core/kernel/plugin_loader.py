@@ -17,6 +17,7 @@ import importlib.util
 import json
 import logging
 import re
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional
@@ -73,6 +74,25 @@ def check_plugin_requirements(plugin_dir: Path) -> list[str]:
         except importlib.metadata.PackageNotFoundError:
             missing.append(line.strip())
     return missing
+
+
+def install_plugin_requirements(plugin_dir: Path) -> tuple[bool, str]:
+    """
+    Выполняет `pip install -r requirements.txt` из директории плагина в текущем
+    интерпретаторе. Возвращает (успех, stdout+stderr вывод pip).
+    """
+    req_file = plugin_dir / "requirements.txt"
+    if not req_file.exists():
+        return True, ""
+
+    proc = subprocess.run(
+        [sys.executable, "-m", "pip", "install", "-r", str(req_file)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    output = (proc.stdout or "") + (proc.stderr or "")
+    return proc.returncode == 0, output
 
 
 class PluginManifestLoader:
@@ -332,14 +352,37 @@ class PluginManifestLoader:
             # Проверяем pip-зависимости из requirements.txt до импорта
             missing_deps = check_plugin_requirements(plugin_dir)
             if missing_deps:
-                await logger_func(
-                    runtime,
-                    f"Плагин '{plugin_name}' требует pip-пакеты не установленные в интерпретаторе: "
-                    f"{', '.join(missing_deps)}. "
-                    f"Установите их в core-runtime-service и перезапустите.",
-                    component="plugin_loader",
+                auto_install = bool(
+                    getattr(getattr(runtime, "config", None), "auto_install_plugin_deps", False)
                 )
-                return False
+                if auto_install:
+                    await logger_func(
+                        runtime,
+                        f"Плагин '{plugin_name}': устанавливаю отсутствующие pip-пакеты "
+                        f"({', '.join(missing_deps)})...",
+                        component="plugin_loader",
+                    )
+                    ok, output = await asyncio.to_thread(install_plugin_requirements, plugin_dir)
+                    importlib.invalidate_caches()
+                    if ok:
+                        missing_deps = check_plugin_requirements(plugin_dir)
+                    else:
+                        await logger_func(
+                            runtime,
+                            f"Плагин '{plugin_name}': pip install завершился с ошибкой: "
+                            f"{output[-2000:]}",
+                            component="plugin_loader",
+                        )
+
+                if missing_deps:
+                    await logger_func(
+                        runtime,
+                        f"Плагин '{plugin_name}' требует pip-пакеты не установленные в интерпретаторе: "
+                        f"{', '.join(missing_deps)}. "
+                        f"Установите их в core-runtime-service и перезапустите.",
+                        component="plugin_loader",
+                    )
+                    return False
 
             # Импортируем класс плагина
             module_path, class_name = class_path.rsplit(".", 1)

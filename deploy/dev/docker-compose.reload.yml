@@ -65,8 +65,11 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-homeconsole}
       POSTGRES_USER: ${POSTGRES_USER:-homeconsole}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-homeconsole}
+      # Роль `vault` (схема `vault`, search_path=vault) — см. postgres-initdb/01-init-vault.sh
+      VAULT_PG_PASSWORD: ${VAULT_PG_PASSWORD:-vault}
     volumes:
       - pg-data:/var/lib/postgresql/data
+      - ./postgres-initdb:/docker-entrypoint-initdb.d:ro
     ports:
       - "${DEV_PG_PORT:-15432}:5432"
     healthcheck:
@@ -96,9 +99,12 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-debug}
       - EVENT_BUS_BACKEND=${EVENT_BUS_BACKEND:-memory}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379}
-      - RUNTIME_STORAGE_MODE=${RUNTIME_STORAGE_MODE:-dual}
-      - RUNTIME_VAULT_STORAGE_TYPE=${RUNTIME_VAULT_STORAGE_TYPE:-sqlite}
-      - RUNTIME_VAULT_PG_DSN=${RUNTIME_VAULT_PG_DSN:-}
+      # RUNTIME_STORAGE_MODE / RUNTIME_VAULT_STORAGE_TYPE / RUNTIME_VAULT_PG_DSN
+      # НЕ перечисляем здесь: `environment:` всегда побеждает `env_file`, а
+      # ${VAR:-default} резолвится из shell-env/.env проекта compose (deploy/dev/.env,
+      # которого нет), а не из ../../.env — поэтому такая запись затирала бы
+      # значения из core-runtime-service/.env дефолтами. Эти переменные приходят
+      # только через env_file ниже.
       - RUNTIME_PLUGINS_DIR=${RUNTIME_PLUGINS_DIR:-/app/plugins}
       - RUNTIME_DB_PATH=${RUNTIME_DB_PATH:-/data/runtime.db}
       - RUNTIME_VAULT_DB_PATH=${RUNTIME_VAULT_DB_PATH:-/data/vault.db}

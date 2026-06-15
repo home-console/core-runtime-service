@@ -32,6 +32,20 @@ def validate_plugin_name(name: str) -> None:
         raise ValidationError(f"Plugin name '{name}' must be lowercase identifier (snake_case)")
 
 
+def validate_namespace(value: str) -> None:
+    """Namespace is a dot-separated hierarchy of snake_case identifiers
+    (e.g. "acme.device_auth"), used as a prefix for service/event registration."""
+    if not value:
+        raise ValidationError("Namespace is empty")
+    if ".." in value or "/" in value or "\\" in value:
+        raise ValidationError("Namespace contains path traversal characters")
+    for part in value.split("."):
+        if not part or not part.isidentifier() or not part.islower():
+            raise ValidationError(
+                f"Namespace '{value}' must be dot-separated lowercase identifiers (snake_case)"
+            )
+
+
 def validate_version(version: str) -> None:
     if not _SEMVER.match(version):
         raise ValidationError(f"Invalid version format: {version} (must be semantic: X.Y.Z)")
@@ -375,7 +389,7 @@ def validate_plugin_json(data: Any) -> Dict[str, Any]:
 
     if "namespace" in data and data["namespace"] is not None:
         ns = _require_str(data["namespace"], "namespace")
-        validate_plugin_name(ns)
+        validate_namespace(ns)
         data["namespace"] = ns
 
     for field in (

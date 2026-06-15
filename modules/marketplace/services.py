@@ -213,13 +213,12 @@ class MarketplaceService:
         try:
             # Get plugin info before uninstall
             installed = await self._get_installed_plugins()
-            if plugin_name not in installed:
+            on_disk = self._is_plugin_installed(plugin_name)
+            if plugin_name not in installed and not on_disk:
                 return {
                     "status": "failure",
                     "error": f"Plugin not installed: {plugin_name}",
                 }
-
-            plugin_info = installed[plugin_name]
 
             # Validate that plugin can be removed (no dependencies on it)
             try:
@@ -505,7 +504,11 @@ class MarketplaceService:
     def _is_plugin_installed(self, plugin_name: str) -> bool:
         if (self.installer.plugins_dir / plugin_name).exists():
             return True
-        return False
+        # Каталог плагина может называться иначе, чем его логическое `name`
+        # (например `client-manager-plugin` для `client_manager`).
+        from core.kernel.plugin_loader import PluginManifestLoader
+
+        return PluginManifestLoader.find_plugin_directory(self.installer.plugins_dir, plugin_name) is not None
 
     async def _apply_release_from_registry(
         self,
@@ -602,8 +605,12 @@ class MarketplaceService:
             return {"status": "failure", "error": "registry_url not configured"}
 
         installed = await self._get_installed_plugins()
-        already = plugin_name in installed or self._is_plugin_installed(plugin_name)
-        if already and not force_update:
+        tracked = plugin_name in installed
+        # Каталог "Available on disk" может содержать необработанный
+        # (не учтённый в marketplace.installed) каталог плагина — это
+        # допустимо перезаписать установкой из реестра без force_update.
+        on_disk_untracked = (not tracked) and self._is_plugin_installed(plugin_name)
+        if tracked and not force_update:
             return {
                 "status": "failure",
                 "error": (
@@ -619,7 +626,7 @@ class MarketplaceService:
                 registry_url=registry_url,
                 version_constraint=version_constraint,
                 channel=channel,
-                force_update=force_update or already,
+                force_update=force_update or tracked or on_disk_untracked,
                 audit_action="install_from_registry",
             )
 
