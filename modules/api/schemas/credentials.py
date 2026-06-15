@@ -39,3 +39,31 @@ class CreateCredentialRequest(BaseModel):
 class UpdateCredentialRequest(BaseModel):
     credential: Dict[str, Any]
     secret: Optional[str] = None
+
+
+# --- MFA (TOTP step-up) models ---
+
+
+class MfaStatusDto(BaseModel):
+    enabled: bool
+
+
+class MfaEnrollStartDto(BaseModel):
+    secret: str
+    otpauth_url: str
+
+
+class MfaConfirmRequest(BaseModel):
+    secret: str
+    code: str
+
+
+class MfaCodeRequest(BaseModel):
+    code: str
+
+
+class MfaResultDto(BaseModel):
+    success: bool
+    reason: Optional[str] = None
+    remaining_seconds: Optional[int] = None
+    elevation_level: Optional[str] = None

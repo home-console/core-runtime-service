@@ -11,6 +11,7 @@ Covers:
 - Audit events
 """
 
+import json
 import pytest
 import time
 import asyncio
@@ -177,8 +178,10 @@ class TestTOTPMethod:
         secret_store = AsyncMock()
         method = TOTPMethod()
         
-        # Configured: storage returns data with method=totp
-        secret_store.get.return_value = {"secret": "JBSWY3DPEBLW64TMMQ======", "method": "totp"}
+        # Configured: storage returns JSON-encoded data with method=totp
+        secret_store.get.return_value = json.dumps(
+            {"secret": "JBSWY3DPEBLW64TMMQ======", "method": "totp"}
+        ).encode("utf-8")
         is_cfg = await method.is_configured("user_123", secret_store)
         assert is_cfg
     
@@ -201,8 +204,10 @@ class TestTOTPMethod:
         user_id = "user_123"
         secret = "JBSWY3DPEBLW64TMMQ======"
         
-        # Mock secret retrieval - return proper format
-        secret_store.get.return_value = {"secret": secret, "method": "totp"}
+        # Mock secret retrieval - return JSON-encoded format
+        secret_store.get.return_value = json.dumps(
+            {"secret": secret, "method": "totp"}
+        ).encode("utf-8")
         
         # Generate valid code
         ts = 1111111109
@@ -419,8 +424,10 @@ class TestMFAService:
         code = generate_totp(secret, current_time=ts)
         
         # Mock secret retrieval
-        secret_store.get.return_value = secret
-        
+        secret_store.get.return_value = json.dumps(
+            {"secret": secret, "method": "totp"}
+        ).encode("utf-8")
+
         # Verify and elevate (just validate that it works)
         result = await service.verify_and_elevate(
             user_id,
@@ -446,8 +453,10 @@ class TestMFAService:
             audit_binder=audit_binder,
         )
         
-        secret_store.get.return_value = "JBSWY3DPEBLW64TMMQ======"
-        
+        secret_store.get.return_value = json.dumps(
+            {"secret": "JBSWY3DPEBLW64TMMQ======", "method": "totp"}
+        ).encode("utf-8")
+
         result = await service.verify_and_elevate(
             "user_123",
             "totp",
@@ -505,7 +514,9 @@ class TestMFAService:
             lockout_seconds=1,
         )
         
-        service.secret_store.get.return_value = {"secret": "JBSWY3DPEBLW64TMMQ======", "method": "totp"}
+        service.secret_store.get.return_value = json.dumps(
+            {"secret": "JBSWY3DPEBLW64TMMQ======", "method": "totp"}
+        ).encode("utf-8")
         
         # Make 2 failed attempts
         for i in range(2):
@@ -532,7 +543,9 @@ class TestMFAService:
             max_failed_attempts=5,
         )
         
-        service.secret_store.get.return_value = {"secret": "JBSWY3DPEBLW64TMMQ======", "method": "totp"}
+        service.secret_store.get.return_value = json.dumps(
+            {"secret": "JBSWY3DPEBLW64TMMQ======", "method": "totp"}
+        ).encode("utf-8")
         
         # Make a failed attempt
         result = await service.verify_and_elevate(

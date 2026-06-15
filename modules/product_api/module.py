@@ -23,6 +23,11 @@ from modules.api.schemas import (
     DeletedResponse,
     DeviceDto,
     ExternalDeviceDto,
+    MfaCodeRequest,
+    MfaConfirmRequest,
+    MfaEnrollStartDto,
+    MfaResultDto,
+    MfaStatusDto,
     OkErrorResponse,
     SetDeviceStateRequest,
     SetStateResultDto,
@@ -264,6 +269,43 @@ class ProductApiModule(RuntimeModule):
             c.port = meta.get("port")
             return _ssh_connect_with_credential(c, secret_bytes)
 
+        async def user_mfa_status(**kw: Any) -> Any:
+            return await services.call(
+                "credential.mfa.status",
+                **_user_cred_params(kw),
+            )
+
+        async def user_mfa_enroll_start(**kw: Any) -> Any:
+            return await services.call(
+                "credential.mfa.enroll_start",
+                **_user_cred_params(kw),
+            )
+
+        async def user_mfa_enroll_confirm(**kw: Any) -> Any:
+            body = kw.get("body") or {}
+            return await services.call(
+                "credential.mfa.enroll_confirm",
+                secret=body.get("secret"),
+                code=body.get("code"),
+                **_user_cred_params(kw),
+            )
+
+        async def user_mfa_disable(**kw: Any) -> Any:
+            body = kw.get("body") or {}
+            return await services.call(
+                "credential.mfa.disable",
+                code=body.get("code"),
+                **_user_cred_params(kw),
+            )
+
+        async def user_mfa_elevate(**kw: Any) -> Any:
+            body = kw.get("body") or {}
+            return await services.call(
+                "credential.mfa.elevate",
+                code=body.get("code"),
+                **_user_cred_params(kw),
+            )
+
         auth_user_creds = EndpointAuthConfig(resource_adapter="user_credentials")
 
         await services.register("user.v1.credentials.list", user_credentials_list)
@@ -275,6 +317,11 @@ class ProductApiModule(RuntimeModule):
         await services.register("user.v1.credentials.update", user_credentials_update)
         await services.register("user.v1.credentials.delete", user_credentials_delete)
         await services.register("user.v1.credentials.connect", user_credentials_connect)
+        await services.register("user.v1.mfa.status", user_mfa_status)
+        await services.register("user.v1.mfa.enroll_start", user_mfa_enroll_start)
+        await services.register("user.v1.mfa.enroll_confirm", user_mfa_enroll_confirm)
+        await services.register("user.v1.mfa.disable", user_mfa_disable)
+        await services.register("user.v1.mfa.elevate", user_mfa_elevate)
 
         _cred_endpoints = [
             ("GET", "/api/v1/user/credentials", "user.v1.credentials.list",
@@ -291,6 +338,16 @@ class ProductApiModule(RuntimeModule):
              "User: delete credential", DeletedResponse, None),
             ("POST", "/api/v1/user/credentials/{credential_id}/connect", "user.v1.credentials.connect",
              "User: SSH connect by credential", OkErrorResponse, None),
+            ("GET", "/api/v1/user/mfa/totp/status", "user.v1.mfa.status",
+             "User: TOTP status", ApiResponse[MfaStatusDto], None),
+            ("POST", "/api/v1/user/mfa/totp/enroll", "user.v1.mfa.enroll_start",
+             "User: start TOTP enrollment", ApiResponse[MfaEnrollStartDto], None),
+            ("POST", "/api/v1/user/mfa/totp/confirm", "user.v1.mfa.enroll_confirm",
+             "User: confirm TOTP enrollment", ApiResponse[MfaResultDto], MfaConfirmRequest),
+            ("POST", "/api/v1/user/mfa/totp/disable", "user.v1.mfa.disable",
+             "User: disable TOTP", ApiResponse[MfaResultDto], MfaCodeRequest),
+            ("POST", "/api/v1/user/mfa/elevate", "user.v1.mfa.elevate",
+             "User: TOTP step-up elevation", ApiResponse[MfaResultDto], MfaCodeRequest),
         ]
         for method, path, svc, desc, resp_model, req_model in _cred_endpoints:
             self.context.http.register(HttpEndpoint(
@@ -320,6 +377,11 @@ class ProductApiModule(RuntimeModule):
             "user.v1.credentials.update",
             "user.v1.credentials.delete",
             "user.v1.credentials.connect",
+            "user.v1.mfa.status",
+            "user.v1.mfa.enroll_start",
+            "user.v1.mfa.enroll_confirm",
+            "user.v1.mfa.disable",
+            "user.v1.mfa.elevate",
         ):
             try:
                 await self.context.services.unregister(name)

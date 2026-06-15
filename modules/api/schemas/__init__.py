@@ -96,6 +96,11 @@ from .agents import (
 from .credentials import (
     CreateCredentialRequest,
     CredentialDto,
+    MfaCodeRequest,
+    MfaConfirmRequest,
+    MfaEnrollStartDto,
+    MfaResultDto,
+    MfaStatusDto,
     TerminalSessionStartDto,
     UpdateCredentialRequest,
 )
@@ -156,6 +161,8 @@ __all__ = [
     # credentials
     "CredentialDto", "TerminalSessionStartDto",
     "CreateCredentialRequest", "UpdateCredentialRequest",
+    # credentials: mfa
+    "MfaStatusDto", "MfaEnrollStartDto", "MfaConfirmRequest", "MfaCodeRequest", "MfaResultDto",
     # ssh
     "SshSessionDto", "CreateSshSessionRequest",
     # storage

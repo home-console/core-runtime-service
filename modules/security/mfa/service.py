@@ -12,7 +12,7 @@ Responsibilities:
 from typing import Optional, Protocol, TYPE_CHECKING
 import time
 
-from modules.security.mfa.methods import MFAMethod, TOTPMethod
+from modules.security.mfa.methods import MFAMethod, MFAVerificationResult, TOTPMethod
 from modules.security.mfa.elevation_session import ElevationSessionManager
 from modules.security.mfa.exceptions import (
     MFARequired,
@@ -312,6 +312,14 @@ class MFAService:
         return await self.elevation_session_manager.get_session(
             user_id, "secret_read"
         )
+
+    async def is_totp_configured(self, user_id: str) -> bool:
+        """Check if user has TOTP enrolled."""
+        return await self._methods["totp"].is_configured(user_id, self.secret_store)
+
+    async def verify_totp_code(self, user_id: str, code: str) -> MFAVerificationResult:
+        """Verify a TOTP code without creating an elevation session."""
+        return await self._methods["totp"].verify(user_id, {"code": code}, self.secret_store)
     
     async def stats(self) -> dict:
         """Get MFA service statistics."""

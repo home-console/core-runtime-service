@@ -5034,6 +5034,221 @@
         ]
       }
     },
+    "/api/v1/user/mfa/totp/status": {
+      "get": {
+        "tags": [
+          "Credentials"
+        ],
+        "summary": "Get /Api/V1/User/Mfa/Totp/Status",
+        "description": "User: TOTP status",
+        "operationId": "GET__api_v1_user_mfa_totp_status_api_v1_user_mfa_totp_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_MfaStatusDto_"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/user/mfa/totp/enroll": {
+      "post": {
+        "tags": [
+          "Credentials"
+        ],
+        "summary": "Post /Api/V1/User/Mfa/Totp/Enroll",
+        "description": "User: start TOTP enrollment",
+        "operationId": "POST__api_v1_user_mfa_totp_enroll_api_v1_user_mfa_totp_enroll_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "title": "Body",
+                "description": "Request body (JSON)"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_MfaEnrollStartDto_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/user/mfa/totp/confirm": {
+      "post": {
+        "tags": [
+          "Credentials"
+        ],
+        "summary": "Post /Api/V1/User/Mfa/Totp/Confirm",
+        "description": "User: confirm TOTP enrollment",
+        "operationId": "POST__api_v1_user_mfa_totp_confirm_api_v1_user_mfa_totp_confirm_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MfaConfirmRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_MfaResultDto_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/user/mfa/totp/disable": {
+      "post": {
+        "tags": [
+          "Credentials"
+        ],
+        "summary": "Post /Api/V1/User/Mfa/Totp/Disable",
+        "description": "User: disable TOTP",
+        "operationId": "POST__api_v1_user_mfa_totp_disable_api_v1_user_mfa_totp_disable_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MfaCodeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_MfaResultDto_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/user/mfa/elevate": {
+      "post": {
+        "tags": [
+          "Credentials"
+        ],
+        "summary": "Post /Api/V1/User/Mfa/Elevate",
+        "description": "User: TOTP step-up elevation",
+        "operationId": "POST__api_v1_user_mfa_elevate_api_v1_user_mfa_elevate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MfaCodeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_MfaResultDto_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/request-logs/{request_id}": {
       "get": {
         "tags": [
@@ -7000,6 +7215,135 @@
         },
         "type": "object",
         "title": "ApiResponse[List[str]]"
+      },
+      "ApiResponse_MfaEnrollStartDto_": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok",
+            "default": true
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MfaEnrollStartDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          }
+        },
+        "type": "object",
+        "title": "ApiResponse[MfaEnrollStartDto]"
+      },
+      "ApiResponse_MfaResultDto_": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok",
+            "default": true
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MfaResultDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          }
+        },
+        "type": "object",
+        "title": "ApiResponse[MfaResultDto]"
+      },
+      "ApiResponse_MfaStatusDto_": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok",
+            "default": true
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MfaStatusDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          }
+        },
+        "type": "object",
+        "title": "ApiResponse[MfaStatusDto]"
       },
       "ApiResponse_OperationDto_": {
         "properties": {
@@ -9735,6 +10079,114 @@
         "type": "object",
         "title": "MarketplaceResultDto"
       },
+      "MfaCodeRequest": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "title": "MfaCodeRequest"
+      },
+      "MfaConfirmRequest": {
+        "properties": {
+          "secret": {
+            "type": "string",
+            "title": "Secret"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          }
+        },
+        "type": "object",
+        "required": [
+          "secret",
+          "code"
+        ],
+        "title": "MfaConfirmRequest"
+      },
+      "MfaEnrollStartDto": {
+        "properties": {
+          "secret": {
+            "type": "string",
+            "title": "Secret"
+          },
+          "otpauth_url": {
+            "type": "string",
+            "title": "Otpauth Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "secret",
+          "otpauth_url"
+        ],
+        "title": "MfaEnrollStartDto"
+      },
+      "MfaResultDto": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "remaining_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remaining Seconds"
+          },
+          "elevation_level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Elevation Level"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success"
+        ],
+        "title": "MfaResultDto"
+      },
+      "MfaStatusDto": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          }
+        },
+        "type": "object",
+        "required": [
+          "enabled"
+        ],
+        "title": "MfaStatusDto"
+      },
       "OkErrorResponse": {
         "properties": {
           "ok": {
@@ -11526,13 +11978,6 @@
           "type": {
             "type": "string",
             "title": "Error Type"
-          },
-          "input": {
-            "title": "Input"
-          },
-          "ctx": {
-            "type": "object",
-            "title": "Context"
           }
         },
         "type": "object",

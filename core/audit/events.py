@@ -59,6 +59,12 @@ class SecurityEventType(str, Enum):
     
     CREDENTIAL_ELEVATION_EXPIRED = "credential.elevation.expired"
     """Session TTL exceeded; re-authentication required"""
+
+    CREDENTIAL_MFA_ENROLLED = "credential.mfa.enrolled"
+    """User enrolled a new MFA method (e.g., TOTP)"""
+
+    CREDENTIAL_MFA_DISABLED = "credential.mfa.disabled"
+    """User disabled an MFA method"""
     
     # Self-defending vault (abuse detection)
     CREDENTIAL_ABUSE_DETECTED = "credential.abuse.detected"
@@ -337,6 +343,44 @@ def credential_mfa_elevated_event(
             "mfa_method": mfa_method,
             "elevation_level": elevation_level,
             "ttl_seconds": ttl_seconds,
+            **metadata_kwargs
+        }
+    )
+
+
+def credential_mfa_enrolled_event(
+    user_id: str,
+    mfa_method: str,
+    **metadata_kwargs: Any
+) -> SecurityEvent:
+    """Event: user enrolled a new MFA method."""
+    return SecurityEvent(
+        event_type=SecurityEventType.CREDENTIAL_MFA_ENROLLED,
+        user_id=user_id,
+        credential_id="",
+        fingerprint="",
+        metadata={
+            "operation": "mfa_enrolled",
+            "mfa_method": mfa_method,
+            **metadata_kwargs
+        }
+    )
+
+
+def credential_mfa_disabled_event(
+    user_id: str,
+    mfa_method: str,
+    **metadata_kwargs: Any
+) -> SecurityEvent:
+    """Event: user disabled an MFA method."""
+    return SecurityEvent(
+        event_type=SecurityEventType.CREDENTIAL_MFA_DISABLED,
+        user_id=user_id,
+        credential_id="",
+        fingerprint="",
+        metadata={
+            "operation": "mfa_disabled",
+            "mfa_method": mfa_method,
             **metadata_kwargs
         }
     )

@@ -7,6 +7,7 @@ Architecture:
 - Future: WebAuthnMethod, PasskeyMethod inherit from same base
 """
 
+import json
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional
 from dataclasses import dataclass
@@ -86,16 +87,23 @@ class TOTPMethod(MFAMethod):
     """
     
     NAMESPACE = "mfa.secrets"
-    
+
     @property
     def method_name(self) -> str:
         return "totp"
-    
+
+    def _secret_key(self, user_id: str) -> str:
+        """Build the SecretStore key for this user's TOTP secret."""
+        return f"{self.NAMESPACE}.{user_id}"
+
     async def is_configured(self, user_id: str, secret_store) -> bool:
         """Check if user has TOTP secret configured."""
         try:
-            data = await secret_store.get(self.NAMESPACE, user_id)
-            return data is not None and data.get("method") == "totp"
+            raw = await secret_store.get(self._secret_key(user_id))
+            if raw is None:
+                return False
+            data = json.loads(raw)
+            return data.get("method") == "totp"
         except Exception as e:
             logger.warning("methods.is_configured: failed, returning False: %s", e, exc_info=True)
             return False
@@ -134,15 +142,16 @@ class TOTPMethod(MFAMethod):
         
         # Retrieve TOTP secret from vault
         try:
-            data = await secret_store.get(self.NAMESPACE, user_id)
-            if not data:
+            raw = await secret_store.get(self._secret_key(user_id))
+            if not raw:
                 return MFAVerificationResult(
                     success=False,
                     method_used=self.method_name,
                     user_id=user_id,
                     reason="totp_not_configured",
                 )
-            
+
+            data = json.loads(raw)
             secret = data.get("secret")
             if not secret:
                 return MFAVerificationResult(
@@ -199,7 +208,7 @@ class WebAuthnMethod(MFAMethod):
     async def is_configured(self, user_id: str, secret_store) -> bool:
         # WebAuthn: check credential_id in secret_store (mfa.secrets.webauthn.{user_id})
         try:
-            data = await secret_store.get("mfa.secrets.webauthn", user_id)
+            data = await secret_store.get(f"mfa.secrets.webauthn.{user_id}")
             return data is not None
         except Exception as e:
             logger.warning("methods.is_configured: failed, returning False: %s", e, exc_info=True)
@@ -236,7 +245,7 @@ class PasskeyMethod(MFAMethod):
     async def is_configured(self, user_id: str, secret_store) -> bool:
         # Passkey: check credential in secret_store (mfa.secrets.passkey.{user_id})
         try:
-            data = await secret_store.get("mfa.secrets.passkey", user_id)
+            data = await secret_store.get(f"mfa.secrets.passkey.{user_id}")
             return data is not None
         except Exception as e:
             logger.warning("methods.is_configured: failed, returning False: %s", e, exc_info=True)

@@ -13,7 +13,10 @@ Trust restoration engine
 Unified security decision orchestrator
 """
 
+import base64
+import json
 import logging
+import secrets as secrets_module
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from core.runtime.runtime_module import RuntimeModule
@@ -25,6 +28,8 @@ from modules.security import (
     TrustEngine,
     TrustConfigs,
 )
+from modules.security.mfa.methods import TOTPMethod
+from modules.security.mfa.totp import verify_totp
 from modules.credentials import CredentialRepository
 from modules.credentials.abuse_detection import CredentialAbuseDetector
 from modules.credentials.policy_enforcer import CredentialRBACEnforcer
@@ -213,6 +218,7 @@ class CredentialModule(RuntimeModule):
         await self._register_delete_operation()
         await self._register_exists_operation()
         await self._register_count_operation()
+        await self._register_mfa_operations()
 
     async def _register_create_operation(self) -> None:
         """Register credential.create operation (requires credentials.write)."""
@@ -451,6 +457,107 @@ class CredentialModule(RuntimeModule):
             "credential.count",
             lambda runtime, **kw: count_handler(runtime, **kw),
             resource="credential",
+        )
+
+    async def _register_mfa_operations(self) -> None:
+        """Register credential.mfa.* operations (TOTP enroll/elevate, opt-in step-up)."""
+
+        async def status_handler(runtime, **params) -> Dict[str, Any]:
+            user_id = params.get("_user_id")
+            enabled = await self._mfa_service.is_totp_configured(user_id)
+            return {"enabled": enabled}
+
+        async def enroll_start_handler(runtime, **params) -> Dict[str, Any]:
+            user_id = params.get("_user_id")
+            secret = base64.b32encode(secrets_module.token_bytes(20)).decode("ascii")
+            otpauth_url = (
+                f"otpauth://totp/HomeConsole:{user_id}"
+                f"?secret={secret}&issuer=HomeConsole&digits=6&period=30"
+            )
+            return {"secret": secret, "otpauth_url": otpauth_url}
+
+        async def enroll_confirm_handler(runtime, **params) -> Dict[str, Any]:
+            user_id = params.get("_user_id")
+            secret = params.get("secret")
+            code = params.get("code")
+
+            if not secret or not code:
+                raise ValueError("secret and code required")
+
+            if not verify_totp(secret, code, window=1):
+                return {"success": False, "reason": "invalid_code"}
+
+            payload = json.dumps({"secret": secret, "method": "totp"}).encode("utf-8")
+            await self.runtime.secret_store.put(f"{TOTPMethod.NAMESPACE}.{user_id}", payload)
+
+            if self._audit_binder:
+                from core.audit.events import credential_mfa_enrolled_event
+
+                await self._audit_binder.append(
+                    credential_mfa_enrolled_event(user_id=user_id, mfa_method="totp")
+                )
+
+            return {"success": True}
+
+        async def disable_handler(runtime, **params) -> Dict[str, Any]:
+            user_id = params.get("_user_id")
+            code = params.get("code")
+
+            if not code:
+                raise ValueError("code required")
+
+            if not await self._mfa_service.is_totp_configured(user_id):
+                return {"success": False, "reason": "mfa_not_configured"}
+
+            result = await self._mfa_service.verify_totp_code(user_id, code)
+            if not result.success:
+                return {"success": False, "reason": result.reason}
+
+            await self.runtime.secret_store.delete(f"{TOTPMethod.NAMESPACE}.{user_id}")
+
+            if self._audit_binder:
+                from core.audit.events import credential_mfa_disabled_event
+
+                await self._audit_binder.append(
+                    credential_mfa_disabled_event(user_id=user_id, mfa_method="totp")
+                )
+
+            return {"success": True}
+
+        async def elevate_handler(runtime, **params) -> Dict[str, Any]:
+            user_id = params.get("_user_id")
+            code = params.get("code")
+            credential_id = params.get("credential_id", "")
+
+            if not code:
+                raise ValueError("code required")
+
+            return await self._mfa_service.verify_and_elevate(
+                user_id=user_id,
+                mfa_method="totp",
+                proof={"code": code},
+                credential_id=credential_id,
+            )
+
+        await self.register_service(
+            "credential.mfa.status",
+            lambda runtime, **kw: status_handler(runtime, **kw),
+        )
+        await self.register_service(
+            "credential.mfa.enroll_start",
+            lambda runtime, **kw: enroll_start_handler(runtime, **kw),
+        )
+        await self.register_service(
+            "credential.mfa.enroll_confirm",
+            lambda runtime, **kw: enroll_confirm_handler(runtime, **kw),
+        )
+        await self.register_service(
+            "credential.mfa.disable",
+            lambda runtime, **kw: disable_handler(runtime, **kw),
+        )
+        await self.register_service(
+            "credential.mfa.elevate",
+            lambda runtime, **kw: elevate_handler(runtime, **kw),
         )
 
     async def _start_security_components_or_fail(self) -> None:

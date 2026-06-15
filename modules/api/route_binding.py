@@ -763,6 +763,21 @@ def _make_api_handler(runtime: Any, endpoint: Any):
                 from modules.credentials.errors import CredentialAccessDenied
             except ImportError:
                 CredentialAccessDenied = ()  # type: ignore
+            try:
+                from modules.security.mfa.exceptions import (
+                    MFAException,
+                    RateLimitExceeded,
+                )
+            except ImportError:
+                MFAException = RateLimitExceeded = ()  # type: ignore
+            if RateLimitExceeded and isinstance(e, RateLimitExceeded):
+                return _normalize_api_error(
+                    response, 429, str(e), code="RATE_LIMITED_OR_BLOCKED"
+                )
+            if MFAException and isinstance(e, MFAException):
+                return _normalize_api_error(
+                    response, 400, str(e), code="MFA_FAILED"
+                )
             if BadRequestError and isinstance(e, BadRequestError):
                 return _normalize_api_error(response, 400, str(e), code="BAD_REQUEST")
             if UnauthorizedError and isinstance(e, UnauthorizedError):
@@ -786,6 +801,10 @@ def _make_api_handler(runtime: Any, endpoint: Any):
                 ):
                     return _normalize_api_error(
                         response, 429, detail, code="RATE_LIMITED_OR_BLOCKED"
+                    )
+                if "mfa elevation required" in detail_lower:
+                    return _normalize_api_error(
+                        response, 403, detail, code="MFA_REQUIRED"
                     )
                 return _normalize_api_error(
                     response, 403, detail, code="FORBIDDEN"

@@ -11,6 +11,7 @@ Tests cover:
 - Capability routing
 """
 
+import json
 import pytest
 import asyncio
 from typing import Optional, Any, Dict
@@ -20,6 +21,7 @@ from modules.credentials import (
     Credential,
     CredentialType,
     CredentialRepository,
+    CredentialAccessDenied,
 )
 from modules.credentials import (
     CredentialModule,
@@ -193,6 +195,129 @@ class TestCredentialModuleSecurityStartup:
         trust_engine.start.assert_called_once()
 
 
+class TestCredentialModuleMFAOperations:
+    """Tests for credential.mfa.* operations (TOTP enroll/elevate, opt-in step-up)."""
+
+    @pytest.fixture
+    async def module_with_handlers(self):
+        from modules.security.mfa.methods import MFAVerificationResult
+
+        runtime = MockRuntime()
+        runtime.secret_store = AsyncMock()
+
+        module = CredentialModule(runtime)
+        module._mfa_service = AsyncMock()
+        module._audit_binder = AsyncMock()
+
+        handlers = {}
+
+        async def mock_register_service(name, func, **kwargs):
+            handlers[name] = func
+
+        module.register_service = mock_register_service
+        await module._register_mfa_operations()
+
+        return module, runtime, handlers, MFAVerificationResult
+
+    @pytest.mark.asyncio
+    async def test_status_reflects_is_totp_configured(self, module_with_handlers):
+        module, runtime, handlers, _ = module_with_handlers
+        module._mfa_service.is_totp_configured.return_value = True
+
+        result = await handlers["credential.mfa.status"](None, _user_id="user1")
+
+        assert result == {"enabled": True}
+        module._mfa_service.is_totp_configured.assert_awaited_once_with("user1")
+
+    @pytest.mark.asyncio
+    async def test_enroll_start_returns_secret_and_otpauth_url(self, module_with_handlers):
+        module, runtime, handlers, _ = module_with_handlers
+
+        result = await handlers["credential.mfa.enroll_start"](None, _user_id="user1")
+
+        assert "secret" in result and result["secret"]
+        assert "otpauth_url" in result
+        assert "user1" in result["otpauth_url"]
+        assert result["secret"] in result["otpauth_url"]
+
+    @pytest.mark.asyncio
+    async def test_enroll_confirm_success_persists_secret_and_audits(self, module_with_handlers):
+        from modules.security.mfa.totp import generate_totp
+
+        module, runtime, handlers, _ = module_with_handlers
+        secret = "JBSWY3DPEBLW64TMMQ======"
+        code = generate_totp(secret)
+
+        result = await handlers["credential.mfa.enroll_confirm"](
+            None, _user_id="user1", secret=secret, code=code
+        )
+
+        assert result == {"success": True}
+        runtime.secret_store.put.assert_awaited_once()
+        key, payload = runtime.secret_store.put.call_args[0]
+        assert key == f"mfa.secrets.user1"
+        assert json.loads(payload) == {"secret": secret, "method": "totp"}
+        module._audit_binder.append.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_enroll_confirm_rejects_invalid_code(self, module_with_handlers):
+        module, runtime, handlers, _ = module_with_handlers
+        secret = "JBSWY3DPEBLW64TMMQ======"
+
+        result = await handlers["credential.mfa.enroll_confirm"](
+            None, _user_id="user1", secret=secret, code="000000"
+        )
+
+        assert result["success"] is False
+        runtime.secret_store.put.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_disable_requires_valid_code(self, module_with_handlers):
+        module, runtime, handlers, MFAVerificationResult = module_with_handlers
+        module._mfa_service.is_totp_configured.return_value = True
+        module._mfa_service.verify_totp_code.return_value = MFAVerificationResult(
+            success=False, method_used="totp", user_id="user1", reason="invalid_code"
+        )
+
+        result = await handlers["credential.mfa.disable"](None, _user_id="user1", code="000000")
+
+        assert result["success"] is False
+        runtime.secret_store.delete.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_disable_success_removes_secret_and_audits(self, module_with_handlers):
+        module, runtime, handlers, MFAVerificationResult = module_with_handlers
+        module._mfa_service.is_totp_configured.return_value = True
+        module._mfa_service.verify_totp_code.return_value = MFAVerificationResult(
+            success=True, method_used="totp", user_id="user1"
+        )
+
+        result = await handlers["credential.mfa.disable"](None, _user_id="user1", code="123456")
+
+        assert result == {"success": True}
+        runtime.secret_store.delete.assert_awaited_once_with("mfa.secrets.user1")
+        module._audit_binder.append.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_elevate_delegates_to_mfa_service(self, module_with_handlers):
+        module, runtime, handlers, _ = module_with_handlers
+        module._mfa_service.verify_and_elevate.return_value = {
+            "success": True,
+            "elevation_level": "secret_read",
+            "remaining_seconds": 90,
+        }
+
+        result = await handlers["credential.mfa.elevate"](None, _user_id="user1", code="123456")
+
+        assert result["success"] is True
+        module._mfa_service.verify_and_elevate.assert_awaited_once_with(
+            user_id="user1",
+            mfa_method="totp",
+            proof={"code": "123456"},
+            credential_id="",
+        )
+
+
 class TestCredentialServiceCreate:
     """Tests for create operation."""
 
@@ -323,6 +448,61 @@ class TestCredentialServiceGet:
         assert isinstance(result, CredentialWithSecretResponse)
         assert result.secret == secret
         assert result.metadata.name == "token"
+
+
+class TestCredentialServiceStepUpMFA:
+    """Opt-in hard step-up: users with TOTP enrolled must have an active
+    elevation session for every secret read, regardless of risk score."""
+
+    @pytest.fixture
+    def service_with_mfa(self):
+        repo = AsyncMock(spec=CredentialRepository)
+        mfa_service = AsyncMock()
+        service = CredentialService(repository=repo, mfa_service=mfa_service)
+        return service, repo, mfa_service
+
+    @pytest.fixture
+    def cred(self):
+        return Credential.create(
+            type=CredentialType.API_TOKEN,
+            name="token",
+            secret_ref="vault:api",
+        )
+
+    @pytest.mark.asyncio
+    async def test_get_with_secret_requires_step_up_when_totp_enabled(self, service_with_mfa, cred):
+        service, repo, mfa_service = service_with_mfa
+        repo.get_with_secret.return_value = (cred, b"secret")
+        mfa_service.is_totp_configured.return_value = True
+        mfa_service.validate_elevation.return_value = False
+
+        with pytest.raises(CredentialAccessDenied) as exc_info:
+            await service.get_with_secret(cred.id, user_id="user1")
+
+        assert "step_up_required" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_get_with_secret_allowed_after_elevation(self, service_with_mfa, cred):
+        service, repo, mfa_service = service_with_mfa
+        repo.get_with_secret.return_value = (cred, b"secret")
+        mfa_service.is_totp_configured.return_value = True
+        mfa_service.validate_elevation.return_value = True
+
+        result = await service.get_with_secret(cred.id, user_id="user1")
+
+        assert result.secret == b"secret"
+
+    @pytest.mark.asyncio
+    async def test_get_with_secret_unchanged_without_totp(self, service_with_mfa, cred):
+        """Users who never enrolled TOTP keep current (risk-based-only) behavior."""
+        service, repo, mfa_service = service_with_mfa
+        repo.get_with_secret.return_value = (cred, b"secret")
+        mfa_service.is_totp_configured.return_value = False
+
+        result = await service.get_with_secret(cred.id, user_id="user1")
+
+        assert result.secret == b"secret"
+        mfa_service.validate_elevation.assert_not_called()
 
 
 class TestCredentialServiceUpdate:

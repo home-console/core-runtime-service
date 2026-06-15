@@ -341,6 +341,21 @@ class CredentialService:
                         )
 
         # ════════════════════════════════════════════════════
+        # OPT-IN HARD STEP-UP (TOTP)
+        # Users who enrolled TOTP must present a fresh elevation
+        # session for every secret read, regardless of risk score.
+        # ════════════════════════════════════════════════════
+        if self.mfa_service and user_id:
+            if await self.mfa_service.is_totp_configured(user_id):
+                if not await self.mfa_service.validate_elevation(user_id):
+                    raise CredentialAccessDenied(
+                        user_id=user_id,
+                        credential_id=credential_id,
+                        access_level=CredentialAccessLevel.READ_SECRET.value,
+                        reason="MFA elevation required: step_up_required",
+                    )
+
+        # ════════════════════════════════════════════════════
         # AUTHORIZATION PASSED - RETURN SECRET
         # ════════════════════════════════════════════════════
         credential_tuple = await self.repo.get_with_secret(credential_id)
